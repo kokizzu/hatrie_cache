@@ -34273,3 +34273,41 @@ BenchmarkTU30GoroutineYieldControl-32       48 1238561 ns/op   6622 B/op 261 all
 ```
 
 Reproduce with `make benchmark-tu30`.
+
+## T-U31 Fiber Channels And Conditions
+
+This benchmark compares a reusable, bounded `hatFiber` scheduler performing
+one zero-capacity typed-channel handoff with a control that creates two
+goroutines and an unbuffered Go channel for each handoff. Five 50 ms samples
+used `-benchmem` on Linux/amd64. Scheduler and channel storage are created
+outside the timed fiber loop; the goroutine control includes channel,
+goroutine, and wait-group setup.
+
+| Workload | Median CPU | Median memory | Median allocations | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Reusable `hatFiber.Channel[int]` handoff | 81.32 ns/op | 0 B/op | 0 allocs/op | 1.00x |
+| Two goroutines plus unbuffered Go channel | 949.9 ns/op | 168 B/op | 4 allocs/op | 11.68x slower |
+
+The fiber path measured about 11.68x lower CPU time, with 168 fewer bytes and
+four fewer allocations per handoff in this steady-state workload. It is not a
+drop-in replacement for blocking goroutines: callbacks are non-preemptive, the
+owner is single-threaded, and callers must retry after an explicit park. A
+buffered channel retains up to its configured capacity of values, while all
+waiter queues are bounded by `MaxFibers`.
+
+Raw output (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+BenchmarkTU31FiberChannelHandoff-32         717684   82.42 ns/op   0 B/op   0 allocs/op
+BenchmarkTU31FiberChannelHandoff-32         737660   79.85 ns/op   0 B/op   0 allocs/op
+BenchmarkTU31FiberChannelHandoff-32         744506   81.32 ns/op   0 B/op   0 allocs/op
+BenchmarkTU31FiberChannelHandoff-32         798476   78.01 ns/op   0 B/op   0 allocs/op
+BenchmarkTU31FiberChannelHandoff-32         733332   85.86 ns/op   0 B/op   0 allocs/op
+BenchmarkTU31GoroutineChannelHandoff-32      59892  949.9 ns/op  170 B/op   4 allocs/op
+BenchmarkTU31GoroutineChannelHandoff-32      56710  995.5 ns/op  168 B/op   4 allocs/op
+BenchmarkTU31GoroutineChannelHandoff-32      66807  905.1 ns/op  168 B/op   4 allocs/op
+BenchmarkTU31GoroutineChannelHandoff-32      58858 1039   ns/op  168 B/op   4 allocs/op
+BenchmarkTU31GoroutineChannelHandoff-32      66069  921.3 ns/op  168 B/op   4 allocs/op
+```
+
+Reproduce with `make benchmark-tu31`.

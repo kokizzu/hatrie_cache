@@ -22605,6 +22605,48 @@ commit-tu30:
 	bash scripts/commit-tu30.sh
 push-tu30:
 	bash scripts/push-tu30.sh
+.PHONY: test-tu31
+test-tu31:
+	bash scripts/test-tu31.sh
+
+.PHONY: format-tu31
+format-tu31:
+	bash scripts/format-tu31.sh
+
+.PHONY: race-tu31
+race-tu31:
+	bash scripts/race-tu31.sh
+
+.PHONY: vet-tu31
+vet-tu31:
+	bash scripts/vet-tu31.sh
+
+.PHONY: review-tu31
+review-tu31:
+	bash scripts/review-tu31.sh
+
+
+.PHONY: stage-tu31
+stage-tu31:
+	bash scripts/stage-tu31.sh
+
+.PHONY: commit-tu31
+commit-tu31:
+	bash scripts/commit-tu31.sh
+
+.PHONY: push-tu31
+push-tu31:
+	bash scripts/push-tu31.sh
+
+.PHONY: benchmark-tu31
+benchmark-tu31:
+	bash scripts/benchmark-tu31.sh
+
+
+.PHONY: inspect-tu31
+inspect-tu31:
+	bash scripts/inspect-tu31-files.sh
+
 
 .PHONY: format-chg42-tracker
 format-chg42-tracker:

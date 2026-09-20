@@ -26,6 +26,8 @@ var (
 	ErrMaxStepsInvalid  = errors.New("hatFiber: max steps is invalid")
 	ErrInvalidStep      = errors.New("hatFiber: step function returned an invalid step")
 	ErrFiberNotFound    = errors.New("hatFiber: fiber not found")
+	ErrFiberNotRunning  = errors.New("hatFiber: no fiber is currently running")
+	ErrFiberNotParked   = errors.New("hatFiber: StepWait returned without parking the fiber")
 	ErrFiberFinished    = errors.New("hatFiber: fiber has already finished")
 	ErrFiberNotFinished = errors.New("hatFiber: fiber is not finished")
 )
@@ -40,6 +42,9 @@ type Step uint8
 const (
 	// StepYield puts the fiber at the end of the ready queue.
 	StepYield Step = iota + 1
+	// StepWait parks the current fiber until a synchronization primitive wakes
+	// it. The callback must obtain this value from ParkCurrent or a Wait method.
+	StepWait
 	// StepDone marks the fiber complete and makes it eligible for Reap.
 	StepDone
 )
@@ -56,6 +61,7 @@ type Status uint8
 const (
 	StatusReady Status = iota + 1
 	StatusRunning
+	StatusWaiting
 	StatusDone
 	StatusFailed
 	StatusCancelled
@@ -67,6 +73,8 @@ func (status Status) String() string {
 		return "ready"
 	case StatusRunning:
 		return "running"
+	case StatusWaiting:
+		return "waiting"
 	case StatusDone:
 		return "done"
 	case StatusFailed:
@@ -95,6 +103,7 @@ type RunStats struct {
 	Completed uint64
 	Failed    uint64
 	Cancelled uint64
+	Waited    uint64
 	Remaining int
 }
 
@@ -117,6 +126,7 @@ type Scheduler struct {
 	readyHead  int
 	readyTail  int
 	readyCount int
+	current    FiberID
 	closed     bool
 }
 
@@ -209,7 +219,9 @@ func (scheduler *Scheduler) Run(ctx context.Context, maxSteps int) (RunStats, er
 		}
 
 		slot.status = StatusRunning
+		scheduler.current = identifier
 		step, stepErr := slot.function(ctx)
+		scheduler.current = 0
 		stats.Steps++
 		switch {
 		case stepErr != nil:
@@ -217,6 +229,15 @@ func (scheduler *Scheduler) Run(ctx context.Context, maxSteps int) (RunStats, er
 			slot.err = stepErr
 			slot.function = nil
 			stats.Failed++
+		case step == StepWait:
+			if slot.status != StatusWaiting {
+				slot.status = StatusFailed
+				slot.err = ErrFiberNotParked
+				slot.function = nil
+				stats.Failed++
+			} else {
+				stats.Waited++
+			}
 		case step == StepYield:
 			slot.status = StatusReady
 			scheduler.enqueue(slot)
@@ -244,7 +265,7 @@ func (scheduler *Scheduler) Cancel(identifier FiberID) error {
 		return err
 	}
 	switch slot.status {
-	case StatusReady:
+	case StatusReady, StatusWaiting:
 		slot.status = StatusCancelled
 		slot.err = context.Canceled
 		slot.function = nil
@@ -254,6 +275,56 @@ func (scheduler *Scheduler) Cancel(identifier FiberID) error {
 	default:
 		return ErrFiberFinished
 	}
+}
+
+// Current returns the FiberID executing on the scheduler's owning goroutine,
+// or zero when Run is outside a callback.
+func (scheduler *Scheduler) Current() FiberID {
+	if scheduler == nil {
+		return 0
+	}
+	return scheduler.current
+}
+
+// ParkCurrent parks the callback currently executing on the scheduler. A
+// synchronization primitive normally returns its Step/error pair directly.
+func (scheduler *Scheduler) ParkCurrent() (Step, error) {
+	if scheduler == nil || scheduler.current == 0 {
+		return 0, ErrFiberNotRunning
+	}
+	slot, err := scheduler.lookup(scheduler.current)
+	if err != nil {
+		return 0, err
+	}
+	if slot.status != StatusRunning {
+		return 0, ErrFiberNotRunning
+	}
+	slot.status = StatusWaiting
+	return StepWait, nil
+}
+
+func (scheduler *Scheduler) isWaiting(identifier FiberID) bool {
+	slot, err := scheduler.lookup(identifier)
+	return err == nil && slot.status == StatusWaiting
+}
+
+func (scheduler *Scheduler) resume(identifier FiberID) bool {
+	slot, err := scheduler.lookup(identifier)
+	if err != nil || slot.status != StatusWaiting {
+		return false
+	}
+	slot.status = StatusReady
+	scheduler.enqueue(slot)
+	return true
+}
+
+// Capacity returns the fixed number of fibers and synchronization waiters that
+// this scheduler can retain.
+func (scheduler *Scheduler) Capacity() int {
+	if scheduler == nil {
+		return 0
+	}
+	return len(scheduler.slots)
 }
 
 // Status returns the current lifecycle state for an active or unreaped fiber.
@@ -316,7 +387,7 @@ func (scheduler *Scheduler) Close() {
 	scheduler.closed = true
 	for index := range scheduler.slots {
 		slot := &scheduler.slots[index]
-		if slot.status == StatusReady {
+		if slot.status == StatusReady || slot.status == StatusWaiting {
 			slot.status = StatusCancelled
 			slot.err = context.Canceled
 			slot.function = nil
