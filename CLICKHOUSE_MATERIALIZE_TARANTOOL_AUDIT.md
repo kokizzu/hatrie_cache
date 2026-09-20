@@ -203,6 +203,7 @@ records a separate implementation boundary.
 - [x] M065a Append-only incremental `ROW_NUMBER`, `RANK`, and `DENSE_RANK` maintenance with atomic batch validation; arbitrary updates and retractions remain open. See [INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md).
 - [x] M065l Opt-in mutable bounded `ROWS` frame maintenance with exact `INSERT`/`UPDATE`/`DELETE` differentials and affected-partition rebuilds; peer-aware `RANGE` frames and automatic planner selection remain open. See [INCREMENTAL_MUTABLE_FRAME_WINDOW.md](INCREMENTAL_MUTABLE_FRAME_WINDOW.md).
 - [x] M065v Opt-in mutable `LAG`/`LEAD` maintenance with exact differential updates, an atomic mutation batch, same-position update fast path, and affected-partition rebuilds for structural changes. The append-only default remains unchanged. See [INCREMENTAL_MUTABLE_OFFSET_WINDOW.md](INCREMENTAL_MUTABLE_OFFSET_WINDOW.md).
+- [x] M065w Opt-in mutable numeric `RANGE` maintenance for all existing numeric aggregate kinds, with atomic mutations, affected-partition rebuilds, and delta fast paths for same-position `COUNT`/`SUM` updates. The append-only default remains unchanged. See [INCREMENTAL_MUTABLE_RANGE_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_WINDOW.md).
 - [ ] M090 Independent compute and storage scaling.
 - [ ] T042 Recovery-time parallel replay. A bounded single-key parallel replay
 - [ ] T047 Synchronous replication with an explicit quorum. The public single-command path is now opt-in through `MonitoringOptions.WriteQuorum` / `CacheGRPCOptions.WriteQuorum`; atomic `BATCH` quorum semantics and rollback-free cluster-wide commit remain open.
@@ -293,3 +294,13 @@ same-partition, same-order updates. Structural changes rebuild only affected
 partitions. The existing append-only constructor and default behavior remain
 unchanged. Full planner selection, arbitrary late-data arrangements, and
 distributed frontier coordination remain open.
+
+### M065w: Mutable Numeric RANGE Windows
+
+Adopted as an opt-in `hatSql.MutableIncrementalRangeWindow`. It supports the
+existing numeric RANGE aggregate kinds with exact `INSERT`, `UPDATE`, and
+`DELETE` differentials, atomic validation, affected-partition rebuilds, and
+checked same-position delta updates for `COUNT` and `SUM(int64)`. The existing
+append-only constructor and default behavior remain unchanged. Automatic SQL
+planner selection, arbitrary late-data arrangements, and distributed frontier
+coordination remain open.

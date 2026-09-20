@@ -1,0 +1,195 @@
+package hatSql
+
+import (
+	"errors"
+	"reflect"
+	"testing"
+)
+
+func TestMutableIncrementalRangeWindowAppliesSumChanges(t *testing.T) {
+	window, err := NewMutableIncrementalRangeWindow(IncrementalRangeWindowDefinition{
+		Kind:           IncrementalRangeWindowSumInt64,
+		OutputColumn:   "range_sum",
+		FramePreceding: 2,
+		PartitionKey:   func(row Row) (string, error) { return row["partition"].(string), nil },
+		OrderKey:       func(row Row) (interface{}, error) { return row["order"], nil },
+		RowKey:         func(row Row) (string, error) { return row["id"].(string), nil },
+		ValueKey:       func(row Row) (interface{}, error) { return row["value"], nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inserted, err := window.Apply([]IncrementalRangeWindowMutation{
+		{Operation: IncrementalRangeWindowInsert, Row: mutableRangeRow("a", 1, 10)},
+		{Operation: IncrementalRangeWindowInsert, Row: mutableRangeRow("b", 2, 20)},
+		{Operation: IncrementalRangeWindowInsert, Row: mutableRangeRow("c", 3, 30)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertMutableRangeValue(t, inserted, "a", int64(10))
+	assertMutableRangeValue(t, inserted, "b", int64(30))
+	assertMutableRangeValue(t, inserted, "c", int64(60))
+
+	updated, err := window.Apply([]IncrementalRangeWindowMutation{{
+		Operation: IncrementalRangeWindowUpdate,
+		Key:       "b",
+		Row:       mutableRangeRow("b", 2, 200),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertMutableRangePair(t, updated, "b", int64(30), int64(210))
+	assertMutableRangePair(t, updated, "c", int64(60), int64(240))
+
+	deleted, err := window.Apply([]IncrementalRangeWindowMutation{{
+		Operation: IncrementalRangeWindowDelete,
+		Key:       "b",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertMutableRangePair(t, deleted, "c", int64(240), int64(40))
+	if !hasMutableRangeChange(deleted, "b", -1, int64(210)) {
+		t.Fatalf("delete did not retract b: %#v", deleted)
+	}
+}
+
+func TestMutableIncrementalRangeWindowIsAtomicAndSupportsDescending(t *testing.T) {
+	window, err := NewMutableIncrementalRangeWindow(IncrementalRangeWindowDefinition{
+		Kind:           IncrementalRangeWindowCount,
+		OutputColumn:   "range_count",
+		FramePreceding: 1,
+		Descending:     true,
+		OrderKey:       func(row Row) (interface{}, error) { return row["order"], nil },
+		RowKey:         func(row Row) (string, error) { return row["id"].(string), nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := window.Apply([]IncrementalRangeWindowMutation{
+		{Operation: IncrementalRangeWindowInsert, Row: mutableRangeRow("a", 3, 0)},
+		{Operation: IncrementalRangeWindowInsert, Row: mutableRangeRow("b", 2, 0)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	invalid, err := window.Apply([]IncrementalRangeWindowMutation{
+		{Operation: IncrementalRangeWindowUpdate, Key: "a", Row: mutableRangeRow("a", 3, 0)},
+		{Operation: IncrementalRangeWindowDelete, Key: "missing"},
+	})
+	if !errors.Is(err, ErrMutableIncrementalRangeWindowMissingKey) || invalid != nil {
+		t.Fatalf("invalid batch result = %#v, error = %v", invalid, err)
+	}
+	changes, err := window.Apply([]IncrementalRangeWindowMutation{{
+		Operation: IncrementalRangeWindowInsert,
+		Row:       mutableRangeRow("c", 1, 0),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertMutableRangeValue(t, changes, "c", int64(2))
+}
+
+func TestMutableIncrementalRangeWindowSupportsAllAggregateKinds(t *testing.T) {
+	cases := []struct {
+		name string
+		kind IncrementalRangeWindowKind
+		want interface{}
+	}{
+		{name: "count", kind: IncrementalRangeWindowCount, want: int64(3)},
+		{name: "sum", kind: IncrementalRangeWindowSumInt64, want: int64(8)},
+		{name: "min", kind: IncrementalRangeWindowMinInt64, want: int64(2)},
+		{name: "max", kind: IncrementalRangeWindowMaxInt64, want: int64(4)},
+		{name: "distinct", kind: IncrementalRangeWindowCountDistinctInt64, want: int64(2)},
+		{name: "avg", kind: IncrementalRangeWindowAvgInt64, want: float64(8) / 3},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			definition := IncrementalRangeWindowDefinition{
+				Kind:           testCase.kind,
+				OutputColumn:   "result",
+				FramePreceding: 2,
+				OrderKey:       func(row Row) (interface{}, error) { return row["order"], nil },
+				RowKey:         func(row Row) (string, error) { return row["id"].(string), nil },
+			}
+			if testCase.kind != IncrementalRangeWindowCount {
+				definition.ValueKey = func(row Row) (interface{}, error) { return row["value"], nil }
+			}
+			window, err := NewMutableIncrementalRangeWindow(definition)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rows := []IncrementalRangeWindowMutation{
+				{Operation: IncrementalRangeWindowInsert, Row: Row{"id": "a", "order": int64(1), "value": int64(2)}},
+				{Operation: IncrementalRangeWindowInsert, Row: Row{"id": "b", "order": int64(2), "value": int64(2)}},
+				{Operation: IncrementalRangeWindowInsert, Row: Row{"id": "c", "order": int64(3), "value": int64(4)}},
+			}
+			changes, err := window.Apply(rows)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !hasMutableRangeOutput(changes, "c", 1, "result", testCase.want) {
+				t.Fatalf("initial output = %#v, want c=%v", changes, testCase.want)
+			}
+
+			updated, err := window.Apply([]IncrementalRangeWindowMutation{{
+				Operation: IncrementalRangeWindowUpdate,
+				Key:       "c",
+				Row:       Row{"id": "c", "order": int64(3), "value": int64(6)},
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantUpdated := testCase.want
+			switch testCase.kind {
+			case IncrementalRangeWindowSumInt64:
+				wantUpdated = int64(10)
+			case IncrementalRangeWindowMaxInt64:
+				wantUpdated = int64(6)
+			case IncrementalRangeWindowCountDistinctInt64:
+				wantUpdated = int64(2)
+			case IncrementalRangeWindowAvgInt64:
+				wantUpdated = float64(10) / 3
+			}
+			if !hasMutableRangeOutput(updated, "c", 1, "result", wantUpdated) {
+				t.Fatalf("updated output = %#v, want c=%v", updated, wantUpdated)
+			}
+		})
+	}
+}
+
+func mutableRangeRow(key string, order, value int64) Row {
+	return Row{"id": key, "partition": "p", "order": order, "value": value}
+}
+
+func assertMutableRangeValue(t *testing.T, changes []DifferentialRow, key string, want interface{}) {
+	t.Helper()
+	if !hasMutableRangeChange(changes, key, 1, want) {
+		t.Fatalf("missing positive range value for %q = %v: %#v", key, want, changes)
+	}
+}
+
+func assertMutableRangePair(t *testing.T, changes []DifferentialRow, key string, oldValue, newValue interface{}) {
+	t.Helper()
+	if !hasMutableRangeChange(changes, key, -1, oldValue) || !hasMutableRangeChange(changes, key, 1, newValue) {
+		t.Fatalf("range changes for %q = %#v, want %v -> %v", key, changes, oldValue, newValue)
+	}
+}
+
+func hasMutableRangeChange(changes []DifferentialRow, key string, diff int64, value interface{}) bool {
+	for _, change := range changes {
+		if change.Key == key && change.Diff == diff && (reflect.DeepEqual(change.Row["range_sum"], value) || reflect.DeepEqual(change.Row["range_count"], value)) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasMutableRangeOutput(changes []DifferentialRow, key string, diff int64, column string, value interface{}) bool {
+	for _, change := range changes {
+		if change.Key == key && change.Diff == diff && reflect.DeepEqual(change.Row[column], value) {
+			return true
+		}
+	}
+	return false
+}

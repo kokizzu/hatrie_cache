@@ -795,3 +795,13 @@ affected partitions for structural changes. The existing append-only window
 constructor remains the default. See
 [INCREMENTAL_MUTABLE_OFFSET_WINDOW.md](INCREMENTAL_MUTABLE_OFFSET_WINDOW.md)
 and [BENCHMARK.md](BENCHMARK.md#m065v-mutable-incremental-offset-windows).
+
+## M065w: Mutable Numeric RANGE Windows
+
+Adopted the opt-in `hatSql.MutableIncrementalRangeWindow` for exact mutable
+numeric RANGE differentials across the existing aggregate kinds. It validates
+complete mutation batches, rebuilds only affected partitions, and uses checked
+same-position delta updates for `COUNT` and `SUM(int64)`. The append-only
+constructor remains the default. See
+[INCREMENTAL_MUTABLE_RANGE_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_WINDOW.md)
+and [BENCHMARK.md](BENCHMARK.md#m065w-mutable-numeric-range-windows).

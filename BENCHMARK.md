@@ -33618,3 +33618,39 @@ BenchmarkM065vMutableOffsetWindow-32 241954 ns/op 724165 B/op 39 allocs/op
 
 Reproduce with `make benchmark-m065v-mutable-offset-window`; run correctness
 and race/vet checks with `make verify-m065v-mutable-offset-window`.
+
+## M065w Mutable Numeric RANGE Windows
+
+This benchmark compares one 2,000-row numeric `SUM(int64)` RANGE partition
+after one same-position value update. The control fully scans every row and
+every candidate in the frame. The mutable path retains the partition and uses
+its checked delta fast path. Both use five `-benchmem` samples on Linux/amd64,
+AMD Ryzen 9 5950X. Setup and initial population are outside the timed region.
+
+| Workload | Median CPU | Median transient memory | Median allocations | Improvement vs control |
+| --- | ---: | ---: | ---: | ---: |
+| Full materialized range scan | 55.58 ms/op | 900,837 B/op | 6,917 allocs/op | 1.00x |
+| Mutable same-position SUM update | 196.3 us/op | 196,628 B/op | 1,208 allocs/op | 283x CPU, 4.58x lower bytes, 5.73x fewer allocs |
+
+Mutable mode intentionally retains base rows, partition order, and current
+outputs, so its steady-state retained memory is O(rows) and depends on row
+width and partition count. That retained state is not charged to per-operation
+`B/op`; the append-only constructor remains the default.
+
+Raw samples:
+
+```text
+BenchmarkM065wMutableRangeWindowBaseline-32 53678673 ns/op 896754 B/op 6871 allocs/op
+BenchmarkM065wMutableRangeWindowBaseline-32 56553077 ns/op 905674 B/op 6968 allocs/op
+BenchmarkM065wMutableRangeWindowBaseline-32 55584111 ns/op 900837 B/op 6917 allocs/op
+BenchmarkM065wMutableRangeWindowBaseline-32 55362307 ns/op 900837 B/op 6917 allocs/op
+BenchmarkM065wMutableRangeWindowBaseline-32 57807242 ns/op 896492 B/op 6872 allocs/op
+BenchmarkM065wMutableRangeWindow-32 199203 ns/op 196630 B/op 1208 allocs/op
+BenchmarkM065wMutableRangeWindow-32 196208 ns/op 196630 B/op 1208 allocs/op
+BenchmarkM065wMutableRangeWindow-32 196256 ns/op 196628 B/op 1208 allocs/op
+BenchmarkM065wMutableRangeWindow-32 197535 ns/op 196617 B/op 1207 allocs/op
+BenchmarkM065wMutableRangeWindow-32 195073 ns/op 196616 B/op 1207 allocs/op
+```
+
+Reproduce with `make benchmark-m065w-mutable-range-window`; run correctness
+and race/vet checks with `make verify-m065w-mutable-range-window`.

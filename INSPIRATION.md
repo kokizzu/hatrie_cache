@@ -973,3 +973,9 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   affected-partition rebuilds. The append-only default remains unchanged; see
   [INCREMENTAL_MUTABLE_OFFSET_WINDOW.md](INCREMENTAL_MUTABLE_OFFSET_WINDOW.md)
   and [BENCHMARK.md](BENCHMARK.md#m065v-mutable-incremental-offset-windows).
+- [x] M065w opt-in mutable numeric `RANGE` maintenance for the existing
+  `COUNT`, `SUM`, `MIN`, `MAX`, `COUNT(DISTINCT)`, and `AVG` kinds, with atomic
+  mutations, affected-partition rebuilds, and checked `COUNT`/`SUM` delta
+  fast paths. The append-only default remains unchanged; see
+  [INCREMENTAL_MUTABLE_RANGE_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_WINDOW.md)
+  and [BENCHMARK.md](BENCHMARK.md#m065w-mutable-numeric-range-windows).

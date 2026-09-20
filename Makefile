@@ -22752,3 +22752,34 @@ commit-tu26:
 .PHONY: push-tu26
 push-tu26:
 	bash scripts/push-tu26.sh
+.PHONY: test-m065w-mutable-range-window
+test-m065w-mutable-range-window:
+	bash ./scripts/test-m065w-mutable-range-window.sh
+
+.PHONY: benchmark-m065w-mutable-range-window
+benchmark-m065w-mutable-range-window:
+	bash ./scripts/benchmark-m065w-mutable-range-window.sh
+
+.PHONY: format-m065w-mutable-range-window
+format-m065w-mutable-range-window:
+	bash ./scripts/format-m065w-mutable-range-window.sh
+
+.PHONY: verify-m065w-mutable-range-window
+verify-m065w-mutable-range-window:
+	bash ./scripts/verify-m065w-mutable-range-window.sh
+
+.PHONY: review-m065w-mutable-range-window
+review-m065w-mutable-range-window:
+	bash ./scripts/review-m065w-mutable-range-window.sh
+
+.PHONY: stage-m065w-mutable-range-window
+stage-m065w-mutable-range-window:
+	bash ./scripts/stage-m065w-mutable-range-window.sh
+
+.PHONY: commit-m065w-mutable-range-window
+commit-m065w-mutable-range-window:
+	bash ./scripts/commit-m065w-mutable-range-window.sh
+
+.PHONY: push-m065w-mutable-range-window
+push-m065w-mutable-range-window:
+	bash ./scripts/push-m065w-mutable-range-window.sh
