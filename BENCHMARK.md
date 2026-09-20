@@ -34290,3 +34290,75 @@ Raw key-reuse samples:
 The `WITH TIES` boundary still uses the established semantic tie check after
 sorting. Grouped and computed-order regression tests verify that output rows
 retain their aggregate context and key semantics.
+
+<a id="ch-u14-materialized-runtime-join-filter"></a>
+## CH-U14 Materialized Runtime Join Filter
+
+Command: `make benchmark-chu14-runtime-filter`. The benchmark uses an opt-in direct `INNER JOIN` over two `CACHE`
+sources, a legacy materialized resolver, direct field projections, and five
+`-count=5` samples on Linux `amd64` with an AMD Ryzen 9 5950X. The baseline
+uses the established materialized executor; the after case enables
+`QueryOptions.RuntimeJoinBloomFilter`. The raw samples below are
+`ns/op`, `B/op`, and `allocs/op`.
+
+| Workload | Baseline median | Runtime-filter median | Improvement / tradeoff |
+| --- | ---: | ---: | --- |
+| Selective 100,000 left / 512 right | 34,966,462 ns; 48,935,499 B; 305,694 allocs | 10,792,876 ns; 3,018,841 B; 104,138 allocs | 3.24x faster; 16.21x lower heap; 2.93x fewer allocs |
+| Balanced 1,024 left / 1,024 right | 1,861,212 ns; 2,463,929 B; 14,395 allocs | 1,222,638 ns; 1,268,372 B; 9,261 allocs | 1.52x faster; 1.94x lower heap; 1.55x fewer allocs |
+| Hot key 100,000 left / 1 right | 148,734,026 ns; 195,936,676 B; 1,000,104 allocs | 77,025,922 ns; 94,103,002 B; 800,065 allocs | 1.93x faster; 2.08x lower heap; 1.25x fewer allocs |
+
+Raw baseline samples:
+
+```text
+selective_100k_left_512_right
+34179118 48937279 305697
+34966462 48935659 305694
+35581301 48935347 305694
+35267797 48935357 305694
+32503648 48935499 305693
+
+balanced_1k_left_1k_right
+1892565 2463929 14395
+2007603 2463930 14395
+1806537 2463928 14395
+1861212 2463928 14395
+1823843 2463929 14395
+
+hot_key_100k_left_1_right
+161211161 195936729 1000106
+154775136 195936676 1000104
+147233365 195937438 1000104
+148734026 195936653 1000104
+145591049 195936635 1000103
+```
+
+Raw runtime-filter samples:
+
+```text
+selective_100k_left_512_right
+10512205 3018841 104138
+10792876 3018799 104138
+11051728 3018856 104138
+10632180 3018803 104138
+10892088 3018841 104138
+
+balanced_1k_left_1k_right
+1186062 1268370 9261
+1192577 1268370 9261
+1258534 1268387 9261
+1222638 1268372 9261
+1249390 1268375 9261
+
+hot_key_100k_left_1_right
+75327414 94102997 800065
+75030078 94102998 800065
+78111242 94103007 800065
+77025922 94103002 800065
+86892283 94103058 800067
+```
+
+The fast path remains default-off and restricted to direct inner equality joins.
+The exact hash table decides matches after the Bloom check, so false positives
+cannot change output. Using the existing single-source execution-row form keeps
+the materialized fast path lower in CPU, heap, and allocations for all three
+measured workloads.

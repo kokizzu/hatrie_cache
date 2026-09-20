@@ -957,3 +957,19 @@ wire or storage formats. The matched 100-row benchmark measured `1.20x`
 faster ordinary `LIMIT` sorting and `1.24x` faster `WITH TIES` sorting, with
 the same allocation count and effectively flat allocated bytes. See
 [BENCHMARK.md](BENCHMARK.md#ch-g43-reuse-materialized-order-by-keys).
+
+## ClickHouse CH-U14: Materialized Runtime Join Filter Exchange
+
+Extended the existing opt-in runtime Bloom filter from streaming-only sources
+to legacy materialized resolvers for the same direct two-source inner equality
+join shape. The executor resolves the right source once, builds an exact hash
+table plus a Bloom filter over distinct keys, then probes raw left rows before
+allocating execution-row wrappers. Exact bucket lookup remains authoritative;
+NULL and duplicate-key semantics, source order, cancellation checks, byte
+limits, and default-off behavior are preserved. Indexed and unsupported query
+shapes retain their established paths. The final reproducible target run on the
+selective 100,000-left/512-right workload measured `3.24x` lower CPU time,
+`16.21x` lower heap, and `2.93x` fewer allocations; balanced and hot-key cases
+also reduced all three measures. See
+[CHU14_RUNTIME_JOIN_FILTER.md](CHU14_RUNTIME_JOIN_FILTER.md) and
+[BENCHMARK.md](BENCHMARK.md#ch-u14-materialized-runtime-join-filter).

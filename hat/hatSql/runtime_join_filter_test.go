@@ -171,7 +171,7 @@ func TestRuntimeJoinBloomFilterPreservesDuplicateKeysAndNullSemantics(t *testing
 	}
 }
 
-func TestRuntimeJoinBloomFilterFallsBackWithoutStreamingResolver(t *testing.T) {
+func TestRuntimeJoinBloomFilterMaterializedSingleKeyHasNoBloomStep(t *testing.T) {
 	resolver := &nonStreamingRuntimeJoinFilterResolver{sources: map[string][]hatSql.SQLRow{
 		"left":  {{"id": 1, "k": "found"}, {"id": 2, "k": "missing"}},
 		"right": {{"id": 11, "k": "found"}},
@@ -190,6 +190,83 @@ func TestRuntimeJoinBloomFilterFallsBackWithoutStreamingResolver(t *testing.T) {
 	}
 	if hasRuntimeJoinFilterStep(filtered.Plan) {
 		t.Fatalf("fallback plan = %#v, runtime filter must require streaming", filtered.Plan)
+	}
+}
+
+func TestRuntimeJoinBloomFilterUsesMaterializedResolver(t *testing.T) {
+	resolver := &nonStreamingRuntimeJoinFilterResolver{sources: map[string][]hatSql.SQLRow{
+		"left": {
+			{"id": 1, "k": "found"},
+			{"id": 2, "k": "missing"},
+		},
+		"right": {
+			{"id": 11, "k": "found"},
+			{"id": 12, "k": "other"},
+		},
+	}}
+	query := "FROM CACHE('left') AS l JOIN CACHE('right') AS r ON l.k = r.k SELECT l.id, r.id AS right_id"
+	baseline, err := hatSql.ExecuteSQLQuery(query, resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baselinePlan, err := hatSql.ExecuteSQLQuery("EXPLAIN ANALYZE "+query, resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasRuntimeJoinFilterStep(baselinePlan.Plan) {
+		t.Fatalf("default materialized plan = %#v, runtime filter must be opt-in", baselinePlan.Plan)
+	}
+	filtered, err := hatSql.ExecuteSQLQueryContext(context.Background(), "EXPLAIN ANALYZE "+query, resolver, hatSql.QueryOptions{RuntimeJoinBloomFilter: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasRuntimeJoinFilterStep(filtered.Plan) {
+		t.Fatalf("materialized filtered plan = %#v, want runtime join filter", filtered.Plan)
+	}
+	result, err := hatSql.ExecuteSQLQueryContext(context.Background(), query, resolver, hatSql.QueryOptions{RuntimeJoinBloomFilter: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprintf("%#v", result.Rows) != fmt.Sprintf("%#v", baseline.Rows) {
+		t.Fatalf("materialized filtered rows = %#v, baseline = %#v", result.Rows, baseline.Rows)
+	}
+}
+
+func TestRuntimeJoinBloomFilterMaterializedPreservesDuplicateKeysAndNullSemantics(t *testing.T) {
+	resolver := &nonStreamingRuntimeJoinFilterResolver{sources: map[string][]hatSql.SQLRow{
+		"left": {
+			{"id": 1, "k": "same"},
+			{"id": 2, "k": nil},
+			{"id": 3, "k": "same"},
+		},
+		"right": {
+			{"id": 11, "k": "same"},
+			{"id": 12, "k": nil},
+			{"id": 13, "k": "same"},
+			{"id": 14, "k": "other"},
+		},
+	}}
+	query := "FROM CACHE('left') AS l JOIN CACHE('right') AS r ON l.k = r.k SELECT l.id, r.id AS right_id"
+	baseline, err := hatSql.ExecuteSQLQuery(query, resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filtered, err := hatSql.ExecuteSQLQueryContext(context.Background(), query, resolver, hatSql.QueryOptions{RuntimeJoinBloomFilter: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprintf("%#v", filtered.Rows) != fmt.Sprintf("%#v", baseline.Rows) {
+		t.Fatalf("materialized duplicate-key rows = %#v, baseline = %#v", filtered.Rows, baseline.Rows)
+	}
+	if len(filtered.Rows) != 4 {
+		t.Fatalf("materialized duplicate-key rows = %d, want 4", len(filtered.Rows))
+	}
+	filteredPlan, err := hatSql.ExecuteSQLQueryContext(context.Background(), "EXPLAIN ANALYZE "+query, resolver, hatSql.QueryOptions{RuntimeJoinBloomFilter: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasRuntimeJoinFilterStep(filteredPlan.Plan) {
+		t.Fatalf("materialized duplicate-key plan = %#v, want runtime join filter", filteredPlan.Plan)
 	}
 }
 

@@ -212,9 +212,10 @@ type SQLQueryOptions struct {
 	// SpillBloom enables compact per-partition Bloom filters for spill hash
 	// joins. It can skip partition pairs that cannot share a join key.
 	SpillBloom bool
-	// RuntimeJoinBloomFilter enables a selective in-memory Bloom filter for
-	// equality joins with a much larger probe side. It is disabled by default;
-	// balanced and hot-key joins retain the established map path.
+	// RuntimeJoinBloomFilter enables an opt-in direct equality-join fast path
+	// with a bounded Bloom filter when it can skip probe work. It is disabled by
+	// default; unsupported query shapes and index-backed joins retain their
+	// established executor paths.
 	RuntimeJoinBloomFilter bool
 	MaxResultBytes         int
 	// Workers enables bounded parallel CPU work for eligible query operators.
@@ -5067,7 +5068,7 @@ const sqlRuntimeJoinFilterFalsePositiveRate = 0.01
 // still in the resolver's streaming callback. The established materialized
 // executor remains authoritative for every other query shape.
 func sqlRuntimeJoinFilterStreamable(query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) (bool, error) {
-	if query == nil || resolver == nil || control == nil || !control.options.RuntimeJoinBloomFilter || control.options.MaxJoinBytes > 0 || control.options.Workers > 0 || query.from == nil || query.sample != nil || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 1 || query.where.kind != "" || query.having.kind != "" || query.distinct || len(query.groupBy) != 0 || len(query.orderBy) != 0 || query.offset != 0 || query.limit >= 0 || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || sqlQueryHasSubqueryExpression(query) || query.indexHint.Mode != "" {
+	if query == nil || resolver == nil || control == nil || !control.options.RuntimeJoinBloomFilter || control.options.MaxJoinBytes > 0 || control.options.Workers > 0 || query.from == nil || query.sample != nil || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 1 || query.where.kind != "" || query.prewhere.kind != "" || query.having.kind != "" || query.distinct || len(query.groupBy) != 0 || len(query.orderBy) != 0 || query.offset != 0 || query.limit >= 0 || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || sqlQueryHasSubqueryExpression(query) || query.indexHint.Mode != "" {
 		return false, nil
 	}
 	join := query.joins[0]
@@ -5231,6 +5232,172 @@ func executeSQLRuntimeJoinFilter(query *sqlQuery, resolver SQLSourceResolver, co
 	}
 	joinDetail := "INNER JOIN " + sqlExplainSource(join.source) + " ON " + sqlExplainExpression(join.on)
 	metrics.record("HASH JOIN", joinDetail, leftRows+rightRows, len(result.Rows), joinStarted)
+	return result, true, nil
+}
+
+// sqlRuntimeJoinFilterMaterialized limits the materialized runtime-filter path
+// to the same direct inner equality shape as the streaming path. It is kept
+// separate so a resolver that can stream continues to use the lower-allocation
+// implementation above, while legacy materialized resolvers can still avoid
+// wrapping every unmatched probe row in the general executor.
+func sqlRuntimeJoinFilterMaterialized(query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) (bool, error) {
+	if query == nil || resolver == nil || control == nil || !control.options.RuntimeJoinBloomFilter || control.options.MaxJoinBytes > 0 || control.options.Workers > 0 || query.from == nil || query.sample != nil || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 1 || query.where.kind != "" || query.prewhere.kind != "" || query.having.kind != "" || query.distinct || len(query.groupBy) != 0 || len(query.orderBy) != 0 || query.offset != 0 || query.limit >= 0 || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || sqlQueryHasSubqueryExpression(query) || query.indexHint.Mode != "" {
+		return false, nil
+	}
+	if _, streaming := resolver.(SQLStreamSourceResolver); streaming {
+		return false, nil
+	}
+	join := query.joins[0]
+	if join.kind != "INNER" || join.source.lateral || query.from.kind != "CACHE" || join.source.kind != "CACHE" || len(query.from.fieldTypes) != 0 || len(join.source.fieldTypes) != 0 || len(query.selects) == 0 {
+		return false, nil
+	}
+	for _, selectItem := range query.selects {
+		if selectItem.expr.kind != "field" {
+			return false, nil
+		}
+	}
+	_, _, rightField, ok := sqlHashJoinFields(join.on, []string{query.from.alias}, join.source.alias)
+	if !ok {
+		return false, nil
+	}
+	if indexed, ok := resolver.(BorrowedIndexedSourceResolver); ok {
+		_, available, err := indexed.BorrowSQLIndexedSource(join.source.kind, join.source.key, rightField, nil)
+		if err != nil {
+			return false, err
+		}
+		if available {
+			return false, nil
+		}
+	} else if indexed, ok := resolver.(IndexedSourceResolver); ok {
+		_, available, err := indexed.ResolveSQLIndexedSource(join.source.kind, join.source.key, rightField, nil)
+		if err != nil {
+			return false, err
+		}
+		if available {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// executeSQLRuntimeJoinFilterMaterialized applies the runtime Bloom filter to
+// raw rows returned by a legacy materialized resolver. Exact hash buckets still
+// decide matches, so Bloom false positives cannot change SQL results.
+func executeSQLRuntimeJoinFilterMaterialized(query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics) (SQLQueryResult, bool, error) {
+	eligible, err := sqlRuntimeJoinFilterMaterialized(query, resolver, control)
+	if err != nil {
+		return SQLQueryResult{}, true, err
+	}
+	if !eligible {
+		return SQLQueryResult{}, false, nil
+	}
+	join := query.joins[0]
+	_, leftField, rightField, _ := sqlHashJoinFields(join.on, []string{query.from.alias}, join.source.alias)
+	maxRows := control.maxRows
+	joinStarted := time.Now()
+
+	rightSourceRows, err := resolveSQLSourceContext(control.ctx, resolver, join.source.kind, join.source.key)
+	if err != nil {
+		return SQLQueryResult{}, true, err
+	}
+	if len(rightSourceRows) > maxRows {
+		return SQLQueryResult{}, true, fmt.Errorf("SQL source %q exceeds the %d row limit", join.source.alias, maxRows)
+	}
+	rightBuckets := make(map[string]sqlExecRow, len(rightSourceRows))
+	rightDuplicates := make(map[string][]sqlExecRow)
+	for _, row := range rightSourceRows {
+		if err := control.addJoinWork(1); err != nil {
+			return SQLQueryResult{}, true, err
+		}
+		key, ok := sqlHashJoinKey(row[rightField])
+		if !ok {
+			continue
+		}
+		right := newSQLSingleSourceExecRow(join.source.alias, row)
+		if _, exists := rightBuckets[key]; exists {
+			rightDuplicates[key] = append(rightDuplicates[key], right)
+		} else {
+			rightBuckets[key] = right
+		}
+	}
+
+	filterEnabled := len(rightBuckets) > 1
+	var filter hatDataStructure.BloomFilter
+	if filterEnabled {
+		filter, err = hatDataStructure.NewBloomFilter(uint64(len(rightBuckets)), sqlRuntimeJoinFilterFalsePositiveRate)
+		if err != nil {
+			return SQLQueryResult{}, true, fmt.Errorf("initialize SQL runtime join Bloom filter: %w", err)
+		}
+		for key := range rightBuckets {
+			filter.AddJSONString(key)
+		}
+	}
+
+	leftSourceRows, err := resolveSQLSourceContext(control.ctx, resolver, query.from.kind, query.from.key)
+	if err != nil {
+		return SQLQueryResult{}, true, err
+	}
+	if len(leftSourceRows) > maxRows {
+		return SQLQueryResult{}, true, fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, maxRows)
+	}
+	columns := sqlColumns(query.selects)
+	result := SQLQueryResult{Columns: columns}
+	evaluationGroup := make([]sqlExecRow, 1)
+	leftRows, filterProbes, filterSkipped := 0, 0, 0
+	for _, row := range leftSourceRows {
+		if err := control.check(); err != nil {
+			return SQLQueryResult{}, true, err
+		}
+		leftRows++
+		key, ok := sqlHashJoinKey(row[leftField])
+		if !ok {
+			continue
+		}
+		if filterEnabled {
+			filterProbes++
+			if !filter.ContainsJSONString(key) {
+				filterSkipped++
+				continue
+			}
+		}
+		candidate, exists := rightBuckets[key]
+		if !exists {
+			continue
+		}
+		left := newSQLSingleSourceExecRow(query.from.alias, row)
+		duplicates := rightDuplicates[key]
+		for candidateIndex := -1; candidateIndex < len(duplicates); candidateIndex++ {
+			if candidateIndex >= 0 {
+				candidate = duplicates[candidateIndex]
+			}
+			if err := control.addJoinWork(1); err != nil {
+				return SQLQueryResult{}, true, err
+			}
+			combined := mergeSQLRows(left, candidate)
+			projected := SQLRow{}
+			evaluationGroup[0] = combined
+			for index, selectItem := range query.selects {
+				value := evalSQLExpr(selectItem.expr, evaluationGroup, combined)
+				if err := sqlExpressionError(value); err != nil {
+					return SQLQueryResult{}, true, err
+				}
+				projected[columns[index]] = value
+			}
+			result.Rows = append(result.Rows, projected)
+			if len(result.Rows) > maxRows {
+				return SQLQueryResult{}, true, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxRows)
+			}
+		}
+	}
+	if control.options.MaxResultBytes > 0 && sqlRowsBytes(result.Rows) > control.options.MaxResultBytes {
+		return SQLQueryResult{}, true, fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+	}
+	if filterEnabled {
+		filterDetail := fmt.Sprintf("Bloom filter right_rows=%d right_keys=%d probes=%d skipped=%d false_positive_rate=%.2f%%", len(rightSourceRows), len(rightBuckets), filterProbes, filterSkipped, sqlRuntimeJoinFilterFalsePositiveRate*100)
+		metrics.record("RUNTIME JOIN FILTER", filterDetail, leftRows, filterProbes-filterSkipped, joinStarted)
+	}
+	joinDetail := "INNER JOIN " + sqlExplainSource(join.source) + " ON " + sqlExplainExpression(join.on)
+	metrics.record("HASH JOIN", joinDetail, leftRows+len(rightSourceRows), len(result.Rows), joinStarted)
 	return result, true, nil
 }
 
@@ -11573,6 +11740,9 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 	}
 	if !finalSource && !sqlQueryHasWithFill(q) && q.limitBy == nil {
 		if result, handled, runtimeErr := executeSQLRuntimeJoinFilter(q, resolver, control, metrics); handled {
+			return result, runtimeErr
+		}
+		if result, handled, runtimeErr := executeSQLRuntimeJoinFilterMaterialized(q, resolver, control, metrics); handled {
 			return result, runtimeErr
 		}
 		if result, handled, spillErr := executeSQLSpillHashJoin(q, resolver, control, metrics); handled {
