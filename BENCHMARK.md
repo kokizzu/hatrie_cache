@@ -34098,3 +34098,43 @@ duplicate-preserving retractions cannot be reconstructed from the current sum
 alone. The implementation deliberately avoids preallocating the group map to
 the full input batch; on this workload that keeps the memory tradeoff near
 one percent. The primitive is opt-in and does not alter existing SQL plans.
+
+## M037j Signed Differential Grouped COUNT(DISTINCT)
+
+This matched benchmark compares rebuilding each group's distinct count after
+every update with the incremental signed-differential implementation. Both
+paths emit the same retraction/insertion stream for 5,120 updates across 64
+groups and 32 possible values, including 1,024 valid retractions. Five samples
+used `-benchtime=250ms` on Linux/amd64.
+
+| Workload | Median CPU | Median transient memory | Median allocations | Improvement vs rebuild |
+| --- | ---: | ---: | ---: | ---: |
+| Full per-update distinct-count rebuild | 686,324 ns/op | 448,811 B/op | 260 allocs/op | 1.00x |
+| Incremental signed distinct-count state | 479,782 ns/op | 453,706 B/op | 266 allocs/op | 1.43x faster; 1.01x higher heap; 1.02x more allocs |
+
+Raw rebuild samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+692970 448825 260
+684636 448811 260
+673659 448824 260
+720851 448811 260
+686324 448811 260
+```
+
+Raw incremental samples:
+
+```text
+481139 453707 266
+488540 453706 266
+469218 453706 266
+477394 453707 266
+479782 453706 266
+```
+
+The incremental path retains a per-group value-multiplicity map because exact
+duplicate-preserving retractions cannot be reconstructed from the current
+distinct count alone. As with M037i, the group map is grown naturally rather
+than preallocated to the input batch, keeping the measured memory overhead
+near one percent. The primitive is opt-in and does not alter existing SQL
+plans.

@@ -181,6 +181,43 @@ was `1.33x` faster than rebuilding each group's sum after every update, with
 `1.01x` heap and `1.02x` allocations. The small retained per-value map is the
 explicit cost of exact duplicate-preserving retractions.
 
+## Differential grouped COUNT(DISTINCT)
+
+`GroupCountDistinctInt64DifferentialRows` maintains an exact signed
+differential `COUNT(DISTINCT value)` for callback-defined groups. It uses the
+same total and per-value multiplicity rules as the distinct sum operator, but
+emits `Row["count_distinct"]` and updates the visible count only when a value
+enters or leaves the group. Duplicate weights therefore produce no output.
+
+```go
+updates := []hatSql.DifferentialRow{
+	{Key: "one", Time: 1, Diff: 1, Row: hatSql.Row{"team": "red", "value": int64(2)}},
+	{Key: "two", Time: 2, Diff: 1, Row: hatSql.Row{"team": "red", "value": int64(2)}},
+	{Key: "three", Time: 3, Diff: 1, Row: hatSql.Row{"team": "red", "value": int64(5)}},
+}
+changes, err := hatSql.GroupCountDistinctInt64DifferentialRows(updates,
+	func(row hatSql.SQLRow) string { return row["team"].(string) },
+	func(row hatSql.SQLRow) (int64, error) { return row["value"].(int64), nil },
+)
+```
+
+The changes are equivalent to:
+
+```text
+red  +1 {count_distinct: 1}
+red  -1 {count_distinct: 1}
+red  +1 {count_distinct: 2}
+```
+
+Negative total or per-value multiplicity, callback errors, and checked count
+overflow return no partial output. The value map also handles `math.MinInt64`
+as an ordinary key. The primitive is importable and opt-in; existing SQL
+planner paths and typed-table behavior remain unchanged.
+
+On the 5,120-update benchmark workload, incremental distinct-count
+maintenance was `1.43x` faster than rebuilding each group's distinct set after
+every update, with `1.01x` heap and `1.02x` allocations.
+
 ## Measured Cost
 
 Benchmark command:

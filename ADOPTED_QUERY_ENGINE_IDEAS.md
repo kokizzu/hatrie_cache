@@ -928,3 +928,15 @@ partial output. The matched 5,120-update benchmark was `1.33x` faster than a
 full per-update group rebuild with `1.01x` heap and `1.02x` allocations. The
 API is importable and opt-in; existing SQL planner behavior is unchanged. See
 [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).
+
+## M037j: Signed Differential Grouped COUNT(DISTINCT)
+
+Adopted the adjacent Materialize-style negative-diff and ClickHouse-style
+distinct aggregate primitive `hatSql.GroupCountDistinctInt64DifferentialRows`.
+It retains exact per-group value multiplicities, suppresses duplicate-only
+changes, emits the existing `count_distinct` field, and returns no partial
+output for invalid multiplicity, callback, or overflow errors. The matched
+5,120-update benchmark was `1.43x` faster than a full rebuild with `1.01x`
+heap and `1.02x` allocations. The API is importable and opt-in; existing SQL
+planner behavior is unchanged. See
+[DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).

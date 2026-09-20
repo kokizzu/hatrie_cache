@@ -377,6 +377,10 @@ Materialize's Timely/Differential Dataflow runtime.
   exact value multiplicities, emits only visible sum transitions, and rejects
   invalid retractions or checked sum overflow; see
   [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).
+- [x] M037j Signed differential int64 grouped `COUNT(DISTINCT)` maintenance
+  keeps exact value multiplicities, suppresses duplicate-only changes, and
+  emits only visible count transitions; see
+  [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).
 - [ ] M038 Generic multiset duplicate preservation across all operators.
 - [x] M038a Duplicate multiplicity retained as signed diff weights.
 - [x] M038b Multiset-preserving expansion, union, and weighted join composition; see [DIFFERENTIAL_OPERATORS.md](DIFFERENTIAL_OPERATORS.md).
