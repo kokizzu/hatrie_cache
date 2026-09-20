@@ -189,3 +189,6 @@ generic `hat*` primitives are preferred when they provide a real reusable
 contract rather than an unintegrated placeholder. Large or irreversible ideas
 such as VShard migration, a new scripting runtime, or a consensus log remain
 proposal-only until their recovery and security contracts are complete.
+## Completed In This Branch
+
+- **T-U39 Space-level changefeed:** implemented named logical streams with key-prefix filtering, schema-version validation, checkpointed reconnect, retraction classification, and bounded backpressure. See `TU39_SPACE_CHANGEFEED.md`.

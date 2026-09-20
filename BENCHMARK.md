@@ -32627,3 +32627,14 @@ faster than the first implementation, with 12.5% lower allocation volume and
 32.0% fewer allocations. It is intentionally paid only when ownership changes
 and does not alter ordinary topology routing or defaults. Full API behavior and
 limitations are documented in [TU14_VSHARD_BUCKET_MIGRATION.md](TU14_VSHARD_BUCKET_MIGRATION.md).
+## TU39 Space Changefeed
+
+Five one-second samples, in-process channel workload, AMD Ryzen 9 5950X:
+
+| Path | Samples (ns/op) | Median | B/op | allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Raw journal record | 44.91, 45.22, 47.93, 45.68, 45.37 | 45.37 | 0 | 0 | 1.00x |
+| Named feed before background fast path | 107.2, 110.0, 107.7, 110.8, 105.6 | 107.7 | 0 | 0 | 2.37x |
+| Named feed after background fast path | 88.38, 93.42, 90.56, 89.84, 87.94 | 89.84 | 0 | 0 | 1.98x |
+
+The fast path is about 1.20x faster than the pre-optimization named feed and adds no heap allocation. The named event/checkpoint envelope costs about 44 ns/event over the raw receive path. This benchmark excludes journal disk I/O; run `make benchmark-tu39` for the current paired result.
