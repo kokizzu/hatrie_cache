@@ -12,7 +12,9 @@ paths=(
   hat/hatCache/tt051_partition_durability_test.go
   scripts/benchmark-tt051-baseline.sh
   scripts/benchmark-tt051.sh
+  scripts/commit-tt051.sh
   scripts/format-tt051.sh
+  scripts/push-tt051.sh
   scripts/race-tt051.sh
   scripts/review-tt051.sh
   scripts/stage-tt051.sh
