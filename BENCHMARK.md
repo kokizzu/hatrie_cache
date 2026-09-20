@@ -33211,3 +33211,41 @@ BenchmarkCHG42SQLQueryMemoryTracking/tracked-32  10000  14695 ns/op  9479 B/op  
 BenchmarkCHG42SQLQueryMemoryTracking/tracked-32  10000  14009 ns/op  9478 B/op  82 allocs/op
 BenchmarkCHG42SQLQueryMemoryTracking/tracked-32  10000  14923 ns/op  9478 B/op  82 allocs/op
 ```
+## T-U39 Named Space Changefeed
+
+Measured on Linux/amd64, AMD Ryzen 9 5950X, with `-benchtime=1s -count=3`.
+The baseline is a preallocated fixed-ring direct event append with the same
+small payload shape. The changefeed benchmark includes bounded history and
+payload copies; the subscriber case also includes one buffered channel
+delivery and immediate drain.
+
+| Benchmark | Run 1 | Run 2 | Run 3 | Median ns/op | B/op | allocs/op | Relative CPU to baseline |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Direct append baseline | 1.080 | 1.019 | 1.019 | 1.019 | 0 | 0 | 1.0x |
+| Changefeed publish, no subscriber | 107.9 | 111.1 | 110.6 | 110.6 | 32 | 2 | 109x |
+| Changefeed publish, one subscriber | 230.3 | 227.3 | 232.4 | 230.3 | 64 | 4 | 225x |
+
+This is a functionality-cost comparison, not a claim that the changefeed is a
+faster append primitive. The feature remains opt-in so existing writes pay no
+changefeed cost unless a caller publishes events.
+
+Raw commands:
+
+```text
+make benchmark-tu39-baseline
+make benchmark-tu39
+```
+
+Raw output:
+
+```text
+BenchmarkTU39BaselineDirectEventAppend-32     1000000000  1.080 ns/op  0 B/op  0 allocs/op
+BenchmarkTU39BaselineDirectEventAppend-32     1000000000  1.019 ns/op  0 B/op  0 allocs/op
+BenchmarkTU39BaselineDirectEventAppend-32     1000000000  1.019 ns/op  0 B/op  0 allocs/op
+BenchmarkTU39SpaceChangefeedPublish-32        11991044    107.9 ns/op 32 B/op 2 allocs/op
+BenchmarkTU39SpaceChangefeedPublish-32        11011689    111.1 ns/op 32 B/op 2 allocs/op
+BenchmarkTU39SpaceChangefeedPublish-32        11179648    110.6 ns/op 32 B/op 2 allocs/op
+BenchmarkTU39SpaceChangefeedPublishWithSubscriber-32 5113654 230.3 ns/op 64 B/op 4 allocs/op
+BenchmarkTU39SpaceChangefeedPublishWithSubscriber-32 5235781 227.3 ns/op 64 B/op 4 allocs/op
+BenchmarkTU39SpaceChangefeedPublishWithSubscriber-32 5370345 232.4 ns/op 64 B/op 4 allocs/op
+```

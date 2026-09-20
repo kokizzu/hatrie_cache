@@ -4810,3 +4810,9 @@ the API, limits, security notes, and measured CPU/heap/size tradeoff.
 Run `make test-chu06-persistent-delete-bitmap`,
 `make verify-chu06-persistent-delete-bitmap`, and
 `make benchmark-chu06-persistent-delete-bitmap` for focused verification.
+## Named Space Changefeed
+
+The opt-in `hatReplication.SpaceChangefeed` primitive provides bounded
+per-space change events with schema identity, replay checkpoints, and explicit
+subscriber overflow. It is importable and does not start a server or change
+existing journal/SQL defaults. See [TU39_SPACE_CHANGEFEED.md](TU39_SPACE_CHANGEFEED.md).

@@ -22362,3 +22362,38 @@ commit-chg42:
 
 push-chg42:
 	bash scripts/push-chg42.sh
+.PHONY: benchmark-tu39-baseline
+benchmark-tu39-baseline:
+	bash scripts/benchmark-tu39-baseline.sh
+.PHONY: format-tu39
+format-tu39:
+	bash scripts/format-tu39.sh
+
+.PHONY: test-tu39
+test-tu39:
+	bash scripts/test-tu39.sh
+
+.PHONY: test-tu39-package
+test-tu39-package:
+	bash scripts/test-tu39-package.sh
+
+.PHONY: race-tu39
+race-tu39:
+	bash scripts/race-tu39.sh
+
+.PHONY: vet-tu39
+vet-tu39:
+	bash scripts/vet-tu39.sh
+
+.PHONY: benchmark-tu39
+benchmark-tu39:
+	bash scripts/benchmark-tu39.sh
+
+
+.PHONY: commit-tu39
+commit-tu39:
+	bash scripts/commit-tu39.sh
+
+.PHONY: push-tu39
+push-tu39:
+	bash scripts/push-tu39.sh

@@ -766,3 +766,12 @@ observations and typed per-operator admission errors for `GROUP BY`, `SORT`,
 and non-`ALL` set operators. The nil option preserves the default path. See
 [CHG42_OPERATOR_MEMORY.md](CHG42_OPERATOR_MEMORY.md) and its measured
 diagnostic cost.
+## T-U39: Named Space Changefeed
+
+T-U39 is adopted as opt-in `hatReplication.SpaceChangefeed`. It provides a
+bounded named-space event ring with immutable schema identity, monotone
+sequences, replay checkpoints, payload-copy isolation, context cancellation,
+bounded subscriber count, and explicit subscriber overflow. It does not alter
+existing journal or SQL subscription defaults; durable storage, transport,
+authentication, and recovery orchestration remain caller-owned. See
+[TU39_SPACE_CHANGEFEED.md](TU39_SPACE_CHANGEFEED.md).
