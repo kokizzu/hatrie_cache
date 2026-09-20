@@ -4810,6 +4810,18 @@ the API, limits, security notes, and measured CPU/heap/size tradeoff.
 Run `make test-chu06-persistent-delete-bitmap`,
 `make verify-chu06-persistent-delete-bitmap`, and
 `make benchmark-chu06-persistent-delete-bitmap` for focused verification.
+## Selectable Memtx-Style Row Table
+
+`hatDataStructure.MemtxTable[T]` is an opt-in fixed-capacity typed row table
+for scan-heavy bounded workloads. It provides ID-keyed insert/upsert/get/delete
+operations plus allocation-free repeated scans when the caller reuses the
+destination slice. It does not change existing map or SQL defaults. See
+[TU16_MEMTX_TABLE.md](TU16_MEMTX_TABLE.md) for the API, limitations, and
+measurements.
+
+Run `make test-tu16-memtx`, `make test-tu16-package`, `make race-tu16`,
+`make vet-tu16`, and `make benchmark-tu16` for focused verification.
+
 ## Named Space Changefeed
 
 The opt-in `hatReplication.SpaceChangefeed` primitive provides bounded

@@ -33283,3 +33283,35 @@ The roughly 1.23x same-run cost is limited to explicit lifecycle event
 production on dial and close. The normal reused connection path remains
 allocation-free, and the feature is disabled when
 `ConnectionPoolOptions.Lifecycle` is nil.
+
+## T-U16 Selectable Memtx-Style Row Table
+
+This opt-in table uses preallocated typed slots plus an ID-to-slot map. The
+workload contains 4096 `uint64` rows and uses five `-benchmem` samples on Linux,
+amd64, AMD Ryzen 9 5950X. Locked-map controls include an `RWMutex` at the same
+logical operation scope as the table API.
+
+| Workload | Control median | Memtx median | Relative result | Memory |
+|---|---:|---:|---:|---|
+| Point lookup, unlocked map | 8.395 ns/op | 16.17 ns/op | 1.93x slower | 0 -> 0 B/op; 0 -> 0 allocs/op |
+| Point lookup, locked map | 10.76 ns/op | 16.17 ns/op | 1.50x slower | 0 -> 0 B/op; 0 -> 0 allocs/op |
+| Full scan, locked map | 33,276 ns/op | 5,126 ns/op | 6.49x faster | 0 -> 0 B/op; 0 -> 0 allocs/op |
+| Build 4096 rows | 88,995 ns/op | 187,348 ns/op | 2.10x slower | 147,776 -> 262,608 B/op; 17 -> 21 allocs/op |
+
+The feature is therefore scan-oriented and remains opt-in. It is not a
+general replacement for a map: point lookup and construction are slower, and
+the fixed slot array plus index retain more memory. Reproduce with
+`make benchmark-tu16`.
+
+Raw samples:
+
+```text
+BenchmarkTU16BaselineMapLookup-32             8.835  8.185  8.266  8.395  8.944 ns/op  0 B/op  0 allocs/op
+BenchmarkTU16BaselineLockedMapLookup-32      11.48 10.78 10.21 10.56 10.76 ns/op  0 B/op  0 allocs/op
+BenchmarkTU16BaselineMapScan-32             38055 33942 34188 36312 38651 ns/op  0 B/op  0 allocs/op
+BenchmarkTU16BaselineLockedMapScan-32       34491 32367 33756 32251 33276 ns/op  0 B/op  0 allocs/op
+BenchmarkTU16BaselineMapBuild-32            94083 91487 86769 88995 87330 ns/op  147776 B/op  17 allocs/op
+BenchmarkTU16MemtxLookup-32                 16.17 17.59 16.27 16.02 15.38 ns/op  0 B/op  0 allocs/op
+BenchmarkTU16MemtxScan-32                    5126  5265  4910  5103  5164 ns/op  0 B/op  0 allocs/op
+BenchmarkTU16MemtxBuild-32                 192621 192635 178335 179782 187348 ns/op  262608 B/op  21 allocs/op
+```

@@ -22432,3 +22432,39 @@ commit-tu28:
 .PHONY: push-tu28
 push-tu28:
 	bash scripts/push-tu28.sh
+
+.PHONY: test-tu16-package
+test-tu16-package:
+	bash scripts/test-tu16-package.sh
+
+.PHONY: format-tu16
+format-tu16:
+	bash scripts/format-tu16.sh
+
+.PHONY: race-tu16
+race-tu16:
+	bash scripts/race-tu16.sh
+
+.PHONY: vet-tu16
+vet-tu16:
+	bash scripts/vet-tu16.sh
+
+.PHONY: verify-tu16
+verify-tu16:
+	bash scripts/verify-tu16.sh
+
+.PHONY: commit-tu16
+commit-tu16:
+	bash scripts/commit-tu16.sh
+
+.PHONY: push-tu16
+push-tu16:
+	bash scripts/push-tu16.sh
+
+.PHONY: benchmark-tu16
+benchmark-tu16:
+	bash scripts/benchmark-tu16.sh
+
+.PHONY: test-tu16-memtx
+test-tu16-memtx:
+	bash scripts/test-tu16-memtx.sh
