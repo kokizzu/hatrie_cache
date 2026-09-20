@@ -23313,6 +23313,37 @@ test-tu53-frontier:
 test-tu54-sparse-index:
 	bash scripts/test-tu54-sparse-index.sh
 
+test-tu55-zone-map:
+	bash scripts/test-tu55-zone-map.sh
+
+format-tu55-zone-map:
+	bash scripts/format-tu55-zone-map.sh
+
+test-tu55-zone-map-package:
+	bash scripts/test-tu55-zone-map-package.sh
+
+
+race-tu55-zone-map:
+	bash scripts/race-tu55-zone-map.sh
+
+vet-tu55-zone-map:
+	bash scripts/vet-tu55-zone-map.sh
+
+benchmark-tu55-zone-map:
+	bash scripts/benchmark-tu55-zone-map.sh
+
+stage-tu55-zone-map:
+	bash scripts/stage-tu55-zone-map.sh
+
+review-tu55-zone-map:
+	bash scripts/review-tu55-zone-map.sh
+
+commit-tu55-zone-map:
+	bash scripts/commit-tu55-zone-map.sh
+
+push-tu55-zone-map:
+	bash scripts/push-tu55-zone-map.sh
+
 format-tu54-sparse-index:
 	bash scripts/format-tu54-sparse-index.sh
 

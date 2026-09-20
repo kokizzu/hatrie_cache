@@ -34462,3 +34462,17 @@ Five-sample median on AMD Ryzen 9 5950X, Linux amd64, 1,048,576 sorted
 The sparse lookup returns a block, not an exact row; the caller scans and
 verifies that block. The memory reduction is the primary benefit, while the
 build cost reflects ordering validation and anchor creation.
+## T-U55 Zone-Map Data Skipping
+
+Five-sample medians on AMD Ryzen 9 5950X, Linux amd64, 1,048,576 `uint64`
+rows and segment size 64:
+
+| Measurement | Baseline | `ZoneMapIndex` | Difference |
+| --- | ---: | ---: | ---: |
+| Dense per-row bounds build | 7,769,306 ns/op, 33,554,432 B/op | 3,601,323 ns/op, 524,288 B/op | 2.16x faster, 64x less metadata |
+| Raw value-copy build | 872,511 ns/op, 8,388,620 B/op | 3,601,323 ns/op, 524,288 B/op | 4.13x slower, 16x less retained data |
+| Clustered equality scan | 525,837 ns/op | 48,959 ns/op | 10.7x faster |
+| Deterministic scattered equality scan | 521,161 ns/op | 393,180 ns/op | 1.33x faster |
+
+Zone-map queries return candidate blocks; callers still verify rows. The
+results depend on clustering and segment size.
