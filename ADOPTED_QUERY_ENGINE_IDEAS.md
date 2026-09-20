@@ -739,3 +739,11 @@ Adopted as opt-in `hatSql.WebhookEventDeduplicator`: bounded source/event-ID adm
 ## T-U39: Named Space Changefeed
 
 Adopted a bounded, pull-based named-space changefeed over the durable command journal. It adds schema-version fencing, reconnect checkpoints, explicit upsert/retraction events, and inherited bounded-overflow behavior without adding an unbounded queue or a second delivery goroutine. See `TU39_SPACE_CHANGEFEED.md`.
+## M-U34: Historical Subscription Cancellation
+
+Adopted an opt-in bounded historical command-journal session with exact
+journal-sequence commits, durable source checkpoints, cancellation-safe
+at-least-once replay, and restart recovery. Existing source-tail checkpointing
+and ordinary subscriptions remain unchanged. See
+[MU034_HISTORICAL_SUBSCRIPTION_CANCELLATION.md](MU034_HISTORICAL_SUBSCRIPTION_CANCELLATION.md)
+and [BENCHMARK.md](BENCHMARK.md#mu-034-historical-subscription-cancellation).

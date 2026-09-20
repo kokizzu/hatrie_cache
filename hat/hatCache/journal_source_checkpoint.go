@@ -119,6 +119,36 @@ func (coordinator *CommandJournalSourceCheckpointCoordinator) Commit(ctx context
 	return checkpoint, nil
 }
 
+// CommitJournalSequence durably saves an exact journal sequence. Unlike
+// Commit, it does not advance to the journal tail; historical consumers use
+// this to acknowledge only the record they have actually applied.
+func (coordinator *CommandJournalSourceCheckpointCoordinator) CommitJournalSequence(ctx context.Context, sourceID string, sequence uint64) (CommandJournalSourceCheckpoint, error) {
+	if coordinator == nil || coordinator.journal == nil {
+		return CommandJournalSourceCheckpoint{}, ErrNilCommandJournal
+	}
+	if coordinator.store == nil {
+		return CommandJournalSourceCheckpoint{}, ErrNilCommandJournalSourceCheckpointStore
+	}
+	if err := validateCommandJournalSourceID(sourceID); err != nil {
+		return CommandJournalSourceCheckpoint{}, err
+	}
+	ctx = normalizeCommandJournalSourceCheckpointContext(ctx)
+	if err := ctx.Err(); err != nil {
+		return CommandJournalSourceCheckpoint{}, err
+	}
+	checkpoint := CommandJournalSourceCheckpoint{JournalSequence: sequence}
+	err := coordinator.journal.WithPersistenceBarrier(func(currentSequence uint64) error {
+		if sequence > currentSequence {
+			return fmt.Errorf("%w: checkpoint sequence %d, journal sequence %d", ErrCommandJournalSourceCheckpointAhead, sequence, currentSequence)
+		}
+		return coordinator.store.Save(ctx, sourceID, checkpoint)
+	})
+	if err != nil {
+		return CommandJournalSourceCheckpoint{}, err
+	}
+	return checkpoint, nil
+}
+
 func validateCommandJournalSourceID(sourceID string) error {
 	if strings.TrimSpace(sourceID) == "" {
 		return ErrInvalidCommandJournalSourceID

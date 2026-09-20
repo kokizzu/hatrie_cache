@@ -192,3 +192,8 @@ proposal-only until their recovery and security contracts are complete.
 ## Completed In This Branch
 
 - **T-U39 Space-level changefeed:** implemented named logical streams with key-prefix filtering, schema-version validation, checkpointed reconnect, retraction classification, and bounded backpressure. See `TU39_SPACE_CHANGEFEED.md`.
+## Completed In This Branch
+
+- **M-U34 Historical subscription cancellation:** added an opt-in bounded
+  historical journal session with exact-sequence durable commits, cancellation
+  replay, and restart recovery. See `MU034_HISTORICAL_SUBSCRIPTION_CANCELLATION.md`.

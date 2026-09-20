@@ -22140,3 +22140,38 @@ commit-tu39:
 .PHONY: push-tu39
 push-tu39:
 	bash scripts/push-tu39.sh
+.PHONY: test-mu34
+test-mu34:
+	bash scripts/test-mu34.sh
+.PHONY: format-mu34
+format-mu34:
+	bash scripts/format-mu34.sh
+.PHONY: benchmark-mu34-baseline
+benchmark-mu34-baseline:
+	bash scripts/benchmark-mu34-baseline.sh
+
+.PHONY: benchmark-mu34
+benchmark-mu34:
+	bash scripts/benchmark-mu34.sh
+.PHONY: race-mu34
+race-mu34:
+	bash scripts/race-mu34.sh
+
+.PHONY: vet-mu34
+vet-mu34:
+	bash scripts/vet-mu34.sh
+.PHONY: review-mu34
+review-mu34:
+	bash scripts/review-mu34.sh
+
+.PHONY: stage-mu34
+stage-mu34:
+	bash scripts/stage-mu34.sh
+
+.PHONY: commit-mu34
+commit-mu34:
+	bash scripts/commit-mu34.sh
+
+.PHONY: push-mu34
+push-mu34:
+	bash scripts/push-mu34.sh

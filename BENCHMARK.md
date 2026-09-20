@@ -32638,3 +32638,18 @@ Five one-second samples, in-process channel workload, AMD Ryzen 9 5950X:
 | Named feed after background fast path | 88.38, 93.42, 90.56, 89.84, 87.94 | 89.84 | 0 | 0 | 1.98x |
 
 The fast path is about 1.20x faster than the pre-optimization named feed and adds no heap allocation. The named event/checkpoint envelope costs about 44 ns/event over the raw receive path. This benchmark excludes journal disk I/O; run `make benchmark-tu39` for the current paired result.
+## M-U34 Historical Subscription Cancellation
+
+Five one-second samples, in-process bounded-channel workload, AMD Ryzen 9 5950X:
+
+| Path | Samples (ns/op) | Median | B/op | allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Raw journal record receive | 44.43, 46.53, 47.21, 46.01, 44.76 | 46.01 | 0 | 0 | 1.00x |
+| Historical subscription `Next` | 67.08, 71.01, 66.75, 64.41, 63.83 | 66.75 | 0 | 0 | 1.45x |
+| Legacy tail checkpoint commit | 16.58, 16.14, 17.47, 18.41, 18.14 | 17.47 | 0 | 0 | 1.00x |
+| Exact sequence checkpoint commit | 15.20, 16.36, 15.07, 15.09, 16.84 | 15.20 | 0 | 0 | 0.87x |
+
+The feature costs about 21 ns/event for checkpoint-safe delivery while keeping
+heap allocation at zero. Exact-sequence checkpointing is within the legacy
+tail path's measured cost. Checkpoint-store I/O is explicit and not included
+in this delivery benchmark. See [MU034_HISTORICAL_SUBSCRIPTION_CANCELLATION.md](MU034_HISTORICAL_SUBSCRIPTION_CANCELLATION.md).
