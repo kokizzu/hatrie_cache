@@ -33315,3 +33315,30 @@ BenchmarkTU16MemtxLookup-32                 16.17 17.59 16.27 16.02 15.38 ns/op 
 BenchmarkTU16MemtxScan-32                    5126  5265  4910  5103  5164 ns/op  0 B/op  0 allocs/op
 BenchmarkTU16MemtxBuild-32                 192621 192635 178335 179782 187348 ns/op  262608 B/op  21 allocs/op
 ```
+
+## T-U22 Cross-Index Unique Constraints
+
+This opt-in registry atomically checks multiple unique keys and retains only
+constraint ownership state; row values remain caller-owned. Measurements use
+two unique string constraints and 256 rows on Linux/amd64, AMD Ryzen 9 5950X,
+with five `-benchmem` samples.
+
+| Workload | Hand-written control | Constraint set | Relative result | Memory |
+|---|---:|---:|---:|---|
+| ID containment lookup | 7.267 ns/op | 12.39 ns/op | 1.71x slower | 0 -> 0 B/op; 0 -> 0 allocs/op |
+| Successful 256-row atomic build | 43,556 ns/op | 122,506 ns/op | 2.81x slower | 58,440 -> 113,416 B/op; 835 -> 1,130 allocs/op |
+
+This is a correctness feature, not a general speed optimization. It remains
+opt-in because the atomic cross-index guarantee has measurable CPU, allocation,
+and memory costs; existing storage paths are unchanged.
+
+Raw samples:
+
+```text
+BenchmarkTU22BaselineIDLookup-32       7.240  7.406  7.203  7.267  7.524 ns/op  0 B/op  0 allocs/op
+BenchmarkTU22BaselineAtomicInsert-32  40820 43443 44968 44456 43556 ns/op  58440 B/op 835 allocs/op
+BenchmarkTU22UniqueConstraintSetLookup-32 12.39 11.70 11.77 13.21 12.85 ns/op  0 B/op 0 allocs/op
+BenchmarkTU22UniqueConstraintSetInsert-32 122506 123435 124172 122349 122468 ns/op 113416 B/op 1130 allocs/op
+```
+
+Reproduce with `make benchmark-tu22`.

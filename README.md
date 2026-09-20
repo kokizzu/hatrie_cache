@@ -4822,6 +4822,18 @@ measurements.
 Run `make test-tu16-memtx`, `make test-tu16-package`, `make race-tu16`,
 `make vet-tu16`, and `make benchmark-tu16` for focused verification.
 
+## Cross-Index Unique Constraints
+
+`hatDataStructure.UniqueConstraintSet[T, K]` is an opt-in atomic registry for
+multiple unique keys over caller-owned rows. It checks every key before an
+insert or upsert, preserves all indexes on conflict, and supports nullable
+unique fields. Existing maps and SQL defaults are unchanged. See
+[TU22_CROSS_INDEX_UNIQUENESS.md](TU22_CROSS_INDEX_UNIQUENESS.md) for the API,
+scope, and measured cost.
+
+Run `make test-tu22`, `make race-tu22`, `make vet-tu22`, and
+`make benchmark-tu22` for focused verification.
+
 ## Named Space Changefeed
 
 The opt-in `hatReplication.SpaceChangefeed` primitive provides bounded

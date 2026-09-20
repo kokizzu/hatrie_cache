@@ -22441,6 +22441,38 @@ test-tu16-package:
 format-tu16:
 	bash scripts/format-tu16.sh
 
+.PHONY: test-tu22
+test-tu22:
+	bash scripts/test-tu22.sh
+
+.PHONY: benchmark-tu22
+benchmark-tu22:
+	bash scripts/benchmark-tu22.sh
+
+.PHONY: format-tu22
+format-tu22:
+	bash scripts/format-tu22.sh
+
+.PHONY: race-tu22
+race-tu22:
+	bash scripts/race-tu22.sh
+
+.PHONY: vet-tu22
+vet-tu22:
+	bash scripts/vet-tu22.sh
+
+.PHONY: verify-tu22
+verify-tu22:
+	bash scripts/verify-tu22.sh
+
+.PHONY: commit-tu22
+commit-tu22:
+	bash scripts/commit-tu22.sh
+
+.PHONY: push-tu22
+push-tu22:
+	bash scripts/push-tu22.sh
+
 .PHONY: race-tu16
 race-tu16:
 	bash scripts/race-tu16.sh
