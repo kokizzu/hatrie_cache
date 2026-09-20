@@ -22333,6 +22333,10 @@ format-tu17:
 commit-tu17:
 	bash scripts/commit-tu17.sh
 
+.PHONY: push-tu17
+push-tu17:
+	bash scripts/push-tu17.sh
+
 verify-tu23:
 	bash scripts/verify-tu23.sh
 benchmark-tu27:

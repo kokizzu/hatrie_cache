@@ -18,6 +18,7 @@ git add \
 	scripts/benchmark-tu17.sh \
 	scripts/commit-tu17.sh \
 	scripts/format-tu17.sh \
+	scripts/push-tu17.sh \
 	scripts/test-tu17.sh \
 	scripts/verify-tu17.sh
 git commit -m "feat(storage): add opt-in vinyl-style lsm table"
