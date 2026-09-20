@@ -18737,6 +18737,30 @@ push-chu16-adaptive-dictionary:
 delivery-chu16-adaptive-dictionary:
 	sh ./scripts/delivery-chu16-adaptive-dictionary.sh
 
+.PHONY: format-chu16-runtime-demotion
+format-chu16-runtime-demotion:
+	sh ./scripts/format-chu16-runtime-demotion.sh
+
+.PHONY: test-chu16-runtime-demotion
+test-chu16-runtime-demotion:
+	sh ./scripts/test-chu16-runtime-demotion.sh
+
+.PHONY: race-chu16-runtime-demotion
+race-chu16-runtime-demotion:
+	sh ./scripts/race-chu16-runtime-demotion.sh
+
+.PHONY: vet-chu16-runtime-demotion
+vet-chu16-runtime-demotion:
+	sh ./scripts/vet-chu16-runtime-demotion.sh
+
+.PHONY: benchmark-chu16-runtime-demotion
+benchmark-chu16-runtime-demotion:
+	sh ./scripts/benchmark-chu16-runtime-demotion.sh
+
+.PHONY: verify-chu16-runtime-demotion
+verify-chu16-runtime-demotion:
+	sh ./scripts/verify-chu16-runtime-demotion.sh
+
 format-ch017-projection-advisor:
 	sh ./scripts/format-ch017-projection-advisor.sh
 

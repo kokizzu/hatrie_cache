@@ -29546,6 +29546,40 @@ adaptive-unique:      162729 163393 167420 166593 161480
 
 Adaptive mode avoids the static dictionary's 1.32x CPU and 1.26x cumulative-allocation penalty on unique values. Its one-time probe is approximately 1.02x the repeated plain CPU median and 1.01x the unique plain allocation median. A promoted column stores one dictionary value plus one 4-byte code per row; the benchmark keeps precomputed input strings alive, so these `B/op` figures do not represent the full retained-backing reduction possible with independently allocated repeated inputs. See [CHU16_ADAPTIVE_LOW_CARDINALITY.md](CHU16_ADAPTIVE_LOW_CARDINALITY.md).
 
+### Runtime Demotion
+
+Command: `make benchmark-chu16-runtime-demotion`
+
+This compares the pre-change `origin/master` baseline with the opt-in runtime
+demotion implementation using five benchmark samples. `B/op` is cumulative Go
+allocation reported by `-benchmem`, not retained RSS. The representation
+counts are custom counters: dictionary values retained versus plain string
+slots after the workload.
+
+| Workload | Baseline median ns/op | Candidate median ns/op | Relative CPU | Baseline B/op | Candidate B/op | Baseline allocs/op | Candidate allocs/op | Representation change |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| 256 repeated then 33 unique | 166,289 | 179,379 | 1.08x slower | 183,466 | 197,804 | 660 | 662 | 34 dictionary values -> 0; 0 -> 289 string slots |
+| 256 repeated then 4,097 unique | 3,246,057 | 2,465,946 | 1.32x faster | 3,391,844 | 2,817,844 | 8,899 | 8,844 | 4,097 dictionary values -> 0; 0 -> 4,352 string slots |
+
+Raw samples, baseline then candidate:
+
+```text
+promotion-then-churn baseline: 152301 154689 166289 171774 174910 ns/op; 183466-183467 B/op; 660 allocs/op
+promotion-then-churn candidate: 176183 172175 179379 181227 183567 ns/op; 197802-197804 B/op; 662 allocs/op
+long-churn baseline:            3200583 3375336 3263282 3246057 3031734 ns/op; 3391843-3391846 B/op; 8899 allocs/op
+long-churn candidate:           2607802 2495798 2410311 2347509 2465946 ns/op; 2817842-2817853 B/op; 8844 allocs/op
+```
+
+The short transition costs about 7.9% CPU, 7.8% cumulative allocation bytes,
+and two allocations because demotion copies existing values once. The
+long-churn workload is about 32% faster, uses about 17% fewer cumulative
+allocation bytes, and retains no high-cardinality dictionary values. This is
+an opt-in tradeoff for workloads where cardinality grows after admission; the
+static dictionary mode and the default plain mode are unchanged. The table
+does not claim exact process-heap savings: `TypedTable.MemoryUsage` is a
+logical admission metric and excludes Go map capacity, allocator
+fragmentation, and other process overhead.
+
 Raw benchmark samples before shape capture:
 
 ```text

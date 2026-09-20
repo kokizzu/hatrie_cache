@@ -181,6 +181,7 @@ type typedTableColumnStorage struct {
 	kind                TypedTableKind
 	strings             []string
 	dictionary          bool
+	dictionaryAdaptive  bool
 	adaptiveDictionary  *typedTableDictionaryProbe
 	dictionaryValues    []string
 	dictionaryCodes     []uint32
@@ -226,6 +227,7 @@ func (storage *typedTableColumnStorage) append(value TypedTableValue) {
 			storage.dictionaryCodes = append(storage.dictionaryCodes, 0)
 			if value.Valid {
 				storage.dictionaryCodes[len(storage.dictionaryCodes)-1] = storage.retainDictionaryValue(value.String)
+				storage.maybeDemoteAdaptiveDictionary()
 			}
 		} else {
 			storage.strings = append(storage.strings, value.String)
@@ -251,6 +253,7 @@ func (storage *typedTableColumnStorage) set(index int, value TypedTableValue) {
 			}
 			if value.Valid {
 				storage.dictionaryCodes[index] = storage.retainDictionaryValue(value.String)
+				storage.maybeDemoteAdaptiveDictionary()
 			} else {
 				storage.dictionaryCodes[index] = 0
 			}
@@ -378,6 +381,34 @@ func (storage *typedTableColumnStorage) releaseDictionaryValue(code uint32) {
 		return
 	}
 	storage.dictionaryFree = append(storage.dictionaryFree, code)
+}
+
+func (storage *typedTableColumnStorage) maybeDemoteAdaptiveDictionary() {
+	if storage == nil || !storage.dictionary || !storage.dictionaryAdaptive || len(storage.dictionaryPositions) <= typedTableDictionaryProbeMaxDistinct {
+		return
+	}
+	storage.demoteAdaptiveDictionary()
+}
+
+func (storage *typedTableColumnStorage) demoteAdaptiveDictionary() {
+	if storage == nil || !storage.dictionary || !storage.dictionaryAdaptive {
+		return
+	}
+	values := make([]string, len(storage.dictionaryCodes))
+	for index, code := range storage.dictionaryCodes {
+		if storage.valid[index] {
+			values[index] = storage.dictionaryValues[code]
+		}
+	}
+	storage.dictionary = false
+	storage.dictionaryAdaptive = false
+	storage.strings = values
+	storage.adaptiveDictionary = nil
+	storage.dictionaryValues = nil
+	storage.dictionaryCodes = nil
+	storage.dictionaryPositions = nil
+	storage.dictionaryCounts = nil
+	storage.dictionaryFree = nil
 }
 
 func (storage *typedTableColumnStorage) observeAdaptiveDictionary(value TypedTableValue) {
@@ -549,6 +580,7 @@ func NewTypedTable(schema TypedTableSchema) (*TypedTable, error) {
 		if table.columns[index].dictionary {
 			table.columns[index].dictionaryPositions = make(map[string]uint32)
 		} else if column.Kind == TypedTableString && column.DictionaryAdaptive {
+			table.columns[index].dictionaryAdaptive = true
 			table.columns[index].adaptiveDictionary = &typedTableDictionaryProbe{}
 		}
 	}
