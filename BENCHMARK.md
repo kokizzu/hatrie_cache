@@ -1,5 +1,24 @@
 # Benchmark
 
+## C247 Adaptive Uint64 Delta Codec
+
+Five 200 ms samples on an AMD Ryzen 9 5950X, Linux amd64, with one million
+values. The adaptive encoder selects delta only when it is smaller; random
+values therefore retain the raw representation.
+
+| Operation | Median time | Heap | Relative result |
+| --- | ---: | ---: | --- |
+| Adaptive encode, monotone values | 2,252,224 ns/op | 1,056,768 B/op | Delta mode; 7.95x smaller than raw |
+| Raw fixed-width encode control | 2,234,176 ns/op | 8,396,800 B/op | Baseline |
+| Adaptive encode, random values | 2,267,390 ns/op | 8,396,801 B/op | Raw fallback; 1.015x slower, no size regression |
+| Delta decode | 4,895,592 ns/op | 8,388,608 B/op | 2.53x slower than raw decode |
+| Raw decode | 1,932,148 ns/op | 8,388,608 B/op | Baseline |
+
+The codec is opt-in and does not change existing persistence or replication
+formats. It trades decode CPU for substantially lower wire/storage bytes on
+monotone values; callers that prioritize decode CPU can retain raw mode. See
+[C247_UINT64_DELTA_CODEC.md](C247_UINT64_DELTA_CODEC.md).
+
 ## CH-U49 Skip-Index EXPLAIN Diagnostics
 
 This paired clean-worktree benchmark compares the pre-CH-U49 implementation

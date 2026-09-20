@@ -23239,6 +23239,39 @@ push-tu33-function-grants:
 audit-hatrie-tmp:
 	bash scripts/audit-hatrie-tmp.sh
 
+test-c247-delta-codec:
+	bash scripts/test-c247-delta-codec.sh
+
+format-c247-delta-codec:
+	bash scripts/format-c247-delta-codec.sh
+
+benchmark-c247-delta-codec:
+	bash scripts/benchmark-c247-delta-codec.sh
+
+test-c247-delta-codec-package:
+	bash scripts/test-c247-delta-codec-package.sh
+
+race-c247-delta-codec:
+	bash scripts/race-c247-delta-codec.sh
+
+vet-c247-delta-codec:
+	bash scripts/vet-c247-delta-codec.sh
+
+review-c247-delta-codec:
+	bash scripts/review-c247-delta-codec.sh
+
+stage-c247-delta-codec:
+	bash scripts/stage-c247-delta-codec.sh
+
+commit-c247-delta-codec:
+	bash scripts/commit-c247-delta-codec.sh
+
+push-c247-delta-codec:
+	bash scripts/push-c247-delta-codec.sh
+
+
+
+
 cleanup-hatrie-tmp-metadata:
 	bash scripts/audit-hatrie-tmp.sh clean-metadata
 
