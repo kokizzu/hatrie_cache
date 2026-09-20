@@ -33507,3 +33507,52 @@ BenchmarkTU24AfterCatalogLookup-32       40.59 39.28 37.48 37.29 41.13 ns/op 8 B
 ```
 
 Reproduce with `make benchmark-tu24` and `make verify-tu24`.
+## T-U25 R-tree Space Catalog
+
+This benchmark compares the unchanged direct `RTree` path with the opt-in
+`RTreeSpaceCatalog` path using 1,024 point entries, five samples, and
+`-benchmem` on the same AMD Ryzen 9 5950X host. Update and search controls are
+run in the same process as the catalog measurements. Reproduce with
+`make benchmark-tu25`.
+
+| Workload | Direct R-tree median | Catalog median | Catalog/direct CPU | Direct memory | Catalog memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Upsert existing point | 2,038 ns/op | 2,071 ns/op | 1.02x | 22 B/op, 0 allocs/op | 22 B/op, 0 allocs/op |
+| Search 1,024 matching points | 21,147 ns/op | 21,898 ns/op | 1.04x | 25,208 B/op, 12 allocs/op | 25,208 B/op, 12 allocs/op |
+| Rebuild 1,024 points | n/a | 1,239,864 ns/op | n/a | n/a | 336,536 B/op, 314 allocs/op |
+
+The catalog is not a raw tree-throughput optimization. Its measured cost is a
+small steady-state integration overhead in exchange for named-index lifecycle
+management, automatic membership transitions, planner metadata, and fenced
+atomic rebuilds. Rebuild memory is temporary replacement-tree construction and
+is not charged to every steady-state update.
+
+### Raw output
+
+```text
+BenchmarkTU25DirectRTreeUpsert-32   539344  2038 ns/op   22 B/op      0 allocs/op
+BenchmarkTU25DirectRTreeUpsert-32   625671  2010 ns/op   22 B/op      0 allocs/op
+BenchmarkTU25DirectRTreeUpsert-32   541242  2169 ns/op   22 B/op      0 allocs/op
+BenchmarkTU25DirectRTreeUpsert-32   519150  2072 ns/op   22 B/op      0 allocs/op
+BenchmarkTU25DirectRTreeUpsert-32   511390  2006 ns/op   22 B/op      0 allocs/op
+BenchmarkTU25CatalogUpsert-32       558771  2021 ns/op   22 B/op      0 allocs/op
+BenchmarkTU25CatalogUpsert-32       519798  2071 ns/op   22 B/op      0 allocs/op
+BenchmarkTU25CatalogUpsert-32       513918  2192 ns/op   22 B/op      0 allocs/op
+BenchmarkTU25CatalogUpsert-32       485136  2170 ns/op   22 B/op      0 allocs/op
+BenchmarkTU25CatalogUpsert-32       563772  2005 ns/op   22 B/op      0 allocs/op
+BenchmarkTU25DirectRTreeSearch-32    56844 21827 ns/op 25208 B/op     12 allocs/op
+BenchmarkTU25DirectRTreeSearch-32    58690 20192 ns/op 25208 B/op     12 allocs/op
+BenchmarkTU25DirectRTreeSearch-32    62118 20614 ns/op 25208 B/op     12 allocs/op
+BenchmarkTU25DirectRTreeSearch-32    57405 21234 ns/op 25208 B/op     12 allocs/op
+BenchmarkTU25DirectRTreeSearch-32    58394 21147 ns/op 25208 B/op     12 allocs/op
+BenchmarkTU25CatalogSearch-32        55552 21898 ns/op 25208 B/op     12 allocs/op
+BenchmarkTU25CatalogSearch-32        51031 22172 ns/op 25208 B/op     12 allocs/op
+BenchmarkTU25CatalogSearch-32        56275 21299 ns/op 25208 B/op     12 allocs/op
+BenchmarkTU25CatalogSearch-32        52514 21720 ns/op 25208 B/op     12 allocs/op
+BenchmarkTU25CatalogSearch-32        56701 21982 ns/op 25208 B/op     12 allocs/op
+BenchmarkTU25CatalogRebuild-32        925 1239864 ns/op 336543 B/op 314 allocs/op
+BenchmarkTU25CatalogRebuild-32       1012 1236597 ns/op 336536 B/op 314 allocs/op
+BenchmarkTU25CatalogRebuild-32        928 1239978 ns/op 336536 B/op 314 allocs/op
+BenchmarkTU25CatalogRebuild-32        886 1257843 ns/op 336536 B/op 314 allocs/op
+BenchmarkTU25CatalogRebuild-32        938 1229944 ns/op 336536 B/op 314 allocs/op
+```

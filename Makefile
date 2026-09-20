@@ -22632,3 +22632,51 @@ benchmark-tu16:
 .PHONY: test-tu16-memtx
 test-tu16-memtx:
 	bash scripts/test-tu16-memtx.sh
+.PHONY: test-tu25
+test-tu25:
+	bash scripts/test-tu25.sh
+.PHONY: inspect-tu25-rtree-api
+inspect-tu25-rtree-api:
+	bash scripts/inspect-tu25-rtree-api.sh
+.PHONY: format-tu25
+format-tu25:
+	bash scripts/format-tu25.sh
+.PHONY: prepare-tu25-baseline
+prepare-tu25-baseline:
+	bash scripts/prepare-tu25-baseline.sh
+.PHONY: benchmark-tu25
+benchmark-tu25:
+	bash scripts/benchmark-tu25.sh
+.PHONY: race-tu25
+race-tu25:
+	bash scripts/race-tu25.sh
+
+.PHONY: test-tu25-package
+test-tu25-package:
+	bash scripts/test-tu25-package.sh
+
+.PHONY: vet-tu25
+vet-tu25:
+	bash scripts/vet-tu25.sh
+.PHONY: inspect-tu25-docs
+inspect-tu25-docs:
+	bash scripts/inspect-tu25-docs.sh
+.PHONY: check-tu25-benchmark
+check-tu25-benchmark:
+	bash scripts/check-tu25-benchmark.sh
+.PHONY: benchmark-tu25-rebuild
+benchmark-tu25-rebuild:
+	bash scripts/benchmark-tu25-rebuild.sh
+.PHONY: verify-tu25
+verify-tu25:
+	bash scripts/verify-tu25.sh
+.PHONY: stage-tu25
+stage-tu25:
+	bash scripts/stage-tu25.sh
+.PHONY: commit-tu25
+commit-tu25:
+	bash scripts/commit-tu25.sh
+
+.PHONY: push-tu25
+push-tu25:
+	bash scripts/push-tu25.sh
