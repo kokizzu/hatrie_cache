@@ -32739,3 +32739,36 @@ check: median `101.0 ns/op`, `0 B/op`, `0 allocs/op`. The projected-range
 result is not a claim that every workload is faster: whole-part reuse can win
 when most columns are needed, while projected ranges win when a query touches
 small subsets of large parts.
+## M-U31 Transactional Aggregate Rollback
+
+This extension measures the opt-in snapshot-backed transaction added to the
+M-U31 aggregate capability contract. It uses a 32-value batch on Linux/amd64
+with an AMD Ryzen 9 5950X. The direct path is the same serializable aggregate
+mutated without a transaction; the transactional path captures one binary
+snapshot, applies all 32 values, and commits.
+
+Command: `make benchmark-mu031-transactional-aggregate`
+
+| Path | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Direct aggregate mutation | 8.9 | 0 | 0 | baseline |
+| One snapshot-backed transaction | 225.9 | 56 | 4 | 25.4x slower |
+
+Raw samples:
+
+```text
+BenchmarkMU031TransactionalAggregate/direct-batch-32  125363802  9.180 ns/op  0 B/op  0 allocs/op
+BenchmarkMU031TransactionalAggregate/direct-batch-32  131303868  8.997 ns/op  0 B/op  0 allocs/op
+BenchmarkMU031TransactionalAggregate/direct-batch-32  135570776  8.976 ns/op  0 B/op  0 allocs/op
+BenchmarkMU031TransactionalAggregate/direct-batch-32  131460362  8.786 ns/op  0 B/op  0 allocs/op
+BenchmarkMU031TransactionalAggregate/direct-batch-32  127805144  8.779 ns/op  0 B/op  0 allocs/op
+BenchmarkMU031TransactionalAggregate/transaction-batch-32  5029965  228.5 ns/op  56 B/op  4 allocs/op
+BenchmarkMU031TransactionalAggregate/transaction-batch-32  5105367  225.9 ns/op  56 B/op  4 allocs/op
+BenchmarkMU031TransactionalAggregate/transaction-batch-32  5230048  222.9 ns/op  56 B/op  4 allocs/op
+BenchmarkMU031TransactionalAggregate/transaction-batch-32  5553418  223.7 ns/op  56 B/op  4 allocs/op
+BenchmarkMU031TransactionalAggregate/transaction-batch-32  5493690  227.6 ns/op  56 B/op  4 allocs/op
+```
+
+The transaction is deliberately opt-in. It improves failure correctness and
+panic isolation, not ordinary aggregate throughput; the measured overhead is
+not present in existing non-transactional aggregate execution.

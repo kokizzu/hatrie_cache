@@ -105,6 +105,26 @@ func (combinator SQLAggregateCombinator) NewSerializableState() (SQLSerializable
 	return serializable, nil
 }
 
+// NewTransactionalState creates an opt-in snapshot-backed state. The
+// registered aggregate must implement SQLSerializableAggregateState.
+func (combinator SQLAggregateCombinator) NewTransactionalState() (*SQLTransactionalAggregateState, error) {
+	state, err := combinator.NewSerializableState()
+	if err != nil {
+		return nil, err
+	}
+	return NewSQLTransactionalAggregateState(state)
+}
+
+// NewTransactionalRetractableState creates an opt-in snapshot-backed state
+// with truthful retraction capability discovery.
+func (combinator SQLAggregateCombinator) NewTransactionalRetractableState() (*SQLTransactionalRetractableAggregateState, error) {
+	state, err := combinator.NewRetractableState()
+	if err != nil {
+		return nil, err
+	}
+	return NewSQLTransactionalRetractableAggregateState(state)
+}
+
 // SQLAggregateCombinatorRegistry stores named aggregate state factories. The
 // registry is safe for concurrent registration and lookup; returned states are
 // independent and are not shared by the registry.
@@ -187,6 +207,38 @@ func (registry *SQLAggregateCombinatorRegistry) NewSerializableState(name string
 		return nil, fmt.Errorf("%w: %s", ErrSQLAggregateCombinatorMissing, name)
 	}
 	return combinator.NewSerializableState()
+}
+
+// NewTransactionalState resolves a serializable aggregate and wraps it with
+// opt-in snapshot-backed transactions.
+func (registry *SQLAggregateCombinatorRegistry) NewTransactionalState(name string) (*SQLTransactionalAggregateState, error) {
+	if registry == nil {
+		return nil, ErrSQLAggregateCombinatorMissing
+	}
+	name = normalizeSQLAggregateCombinatorName(name)
+	registry.mu.RLock()
+	combinator, ok := registry.combinators[name]
+	registry.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrSQLAggregateCombinatorMissing, name)
+	}
+	return combinator.NewTransactionalState()
+}
+
+// NewTransactionalRetractableState resolves a retractable, serializable
+// aggregate and wraps it with opt-in snapshot-backed transactions.
+func (registry *SQLAggregateCombinatorRegistry) NewTransactionalRetractableState(name string) (*SQLTransactionalRetractableAggregateState, error) {
+	if registry == nil {
+		return nil, ErrSQLAggregateCombinatorMissing
+	}
+	name = normalizeSQLAggregateCombinatorName(name)
+	registry.mu.RLock()
+	combinator, ok := registry.combinators[name]
+	registry.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrSQLAggregateCombinatorMissing, name)
+	}
+	return combinator.NewTransactionalRetractableState()
 }
 
 // Names returns registered combinator names in deterministic order.

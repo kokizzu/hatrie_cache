@@ -2,8 +2,9 @@
 
 `hatSql.SQLAggregateState` already supports `Add`, `Merge`, and `Finalize`.
 M-U31 adds opt-in capability contracts for aggregate states that can retract a
-value or serialize a state snapshot. The original interface is unchanged, so
-existing aggregate implementations remain source-compatible.
+value, serialize a state snapshot, or run a mutation transaction. The original
+interface is unchanged, so existing aggregate implementations remain
+source-compatible.
 
 ## Retractable State
 
@@ -71,15 +72,44 @@ policy. `ErrSQLAggregateCombinatorNotSerializable` is returned when a
 registered factory exposes only the base contract. The direct combinator
 method is also available.
 
+## Transactional State
+
+`NewSQLTransactionalAggregateState` wraps a serializable state with an opt-in
+snapshot-backed transaction. A successful callback commits; a callback error
+or panic restores the snapshot and returns the original error or
+`ErrSQLAggregateStatePanic`:
+
+```go
+transaction, err := hatSql.NewSQLTransactionalAggregateState(state)
+if err != nil {
+	return err
+}
+err = transaction.Run(func(state hatSql.SQLAggregateState) error {
+	if err := state.Add(value); err != nil {
+		return err
+	}
+	return nil
+})
+```
+
+Use `NewSQLTransactionalRetractableAggregateState` when the underlying state
+also implements `SQLRetractableAggregateState`; the base transactional wrapper
+does not falsely advertise retraction. The combinator and registry expose
+matching `NewTransactionalState` and `NewTransactionalRetractableState`
+constructors. A serializable snapshot is required because the base interface
+does not provide a safe clone operation. If restoring a failed transaction
+also fails, the returned error wraps `ErrSQLAggregateStateRollback` and the
+state should be discarded.
+
 ## Compatibility And Safety
 
 - `NewState` continues to construct every valid legacy aggregate state.
 - Capability discovery is explicit and opt-in; it does not alter ordinary
   aggregate execution or enable a planner fast path automatically.
-- The capability interfaces do not promise rollback after a callback error or
-  panic. Aggregate callbacks should validate before mutation and callers should
-  discard a state after an implementation-defined failure unless its contract
-  says it is reusable.
+- The original capability interfaces remain non-transactional. Callers that
+  need rollback and panic isolation must opt into the snapshot-backed wrapper;
+  callers that use the raw interfaces retain their existing performance and
+  failure contract.
 - Retraction and serialization do not add locks. The state keeps the same
   ownership and concurrency requirements as the base aggregate contract.
 - Capability discovery constructs one state before checking its methods. The
@@ -88,8 +118,8 @@ method is also available.
 
 This is a small importable building block for Materialize-style differential
 maintenance and ClickHouse-style mergeable state transfer. Automatic SQL
-planner integration, distributed checkpoint orchestration, and transactional
-rollback remain separate contracts.
+planner integration and distributed checkpoint orchestration remain separate
+contracts.
 
 ## Measurement
 
@@ -115,8 +145,19 @@ feature is worthwhile when a caller needs correctness-preserving discovery of
 incremental or checkpoint-capable states; callers that already know the
 concrete type can keep using `NewState` and a direct type assertion.
 
+The transactional wrapper has a separate cost because it snapshots once per
+transaction. On the same machine, a 32-value batch measured as follows:
+
+| Path | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Direct aggregate mutation | 8.9 | 0 | 0 | baseline |
+| One snapshot-backed transaction | 225.9 | 56 | 4 | 25.4x slower |
+
+This is intentionally opt-in safety overhead, not a default execution path.
+
 Raw samples are recorded in
-[BENCHMARK.md](BENCHMARK.md#mu-031-retractable-aggregate-capabilities).
+[BENCHMARK.md](BENCHMARK.md#mu-031-retractable-aggregate-capabilities) and
+[BENCHMARK.md](BENCHMARK.md#mu-031-transactional-aggregate-rollback).
 
 ## Verification
 

@@ -22240,3 +22240,17 @@ commit-chu30-column-policy:
 
 push-chu30-column-policy:
 	bash scripts/push-chu30-column-policy.sh
+benchmark-mu031-transactional-aggregate:
+	bash scripts/benchmark-mu031-transactional-aggregate.sh
+
+review-mu031-transactional-aggregate:
+	bash scripts/review-mu031-transactional-aggregate.sh
+
+stage-mu031-transactional-aggregate:
+	bash scripts/stage-mu031-transactional-aggregate.sh
+
+commit-mu031-transactional-aggregate:
+	bash scripts/commit-mu031-transactional-aggregate.sh
+
+push-mu031-transactional-aggregate:
+	bash scripts/push-mu031-transactional-aggregate.sh
