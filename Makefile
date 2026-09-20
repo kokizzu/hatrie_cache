@@ -23091,3 +23091,33 @@ commit-m065y-mutable-range-nth-value:
 .PHONY: push-m065y-mutable-range-nth-value
 push-m065y-mutable-range-nth-value:
 	bash ./scripts/push-m065y-mutable-range-nth-value.sh
+.PHONY: format-tu34
+format-tu34:
+	bash scripts/format-tu34.sh
+.PHONY: test-tu34 benchmark-tu34-space-sync benchmark-tu34-baseline race-tu34 vet-tu34
+test-tu34:
+	bash scripts/test-tu34.sh
+
+benchmark-tu34-space-sync:
+	bash scripts/benchmark-tu34.sh
+
+benchmark-tu34-baseline:
+	bash scripts/benchmark-tu34-baseline.sh
+
+race-tu34:
+	bash scripts/race-tu34.sh
+
+vet-tu34:
+	bash scripts/vet-tu34.sh
+.PHONY: test-tu34-journal
+test-tu34-journal:
+	bash scripts/test-tu34-journal.sh
+.PHONY: review-tu34 stage-tu34 commit-tu34 push-tu34
+review-tu34:
+	bash scripts/review-tu34.sh
+stage-tu34:
+	bash scripts/stage-tu34.sh
+commit-tu34:
+	bash scripts/commit-tu34.sh
+push-tu34:
+	bash scripts/push-tu34.sh

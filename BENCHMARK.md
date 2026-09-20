@@ -33203,24 +33203,36 @@ their response payload when their transport serializes only matching events.
 Run `make benchmark-tu27` and `make verify-tu27` to reproduce the feature
 benchmark and checks.
 
-## T-U34 Per-Space WAL Sync Policy Registry
+## T-U34 Per-Space WAL Sync Policy
 
 The registry resolves a normalized named-space override with a bounded default
-policy. This is a control-plane benchmark; it does not measure fsync or claim
-that a journal write became faster.
+policy. The journal benchmark uses one `SETSTR` command per iteration,
+`GroupCommitMaxBatch: 1`, and a no-op sync hook so policy dispatch is measured
+without making the result depend on the host's storage device. Five samples use
+`-benchmem -count=5` on Linux/amd64.
 
-| Workload | Samples (ns/op) | Median | Memory | Relative CPU |
-| --- | --- | ---: | ---: | ---: |
-| Registry `Resolve("orders")` | 12.89, 13.04, 12.93, 12.76, 12.12 | 12.89 | 0 B/op, 0 allocs/op | 1.80x slower than direct-map control |
-| Direct map lookup control | 7.35, 7.20, 7.09, 7.15, 7.07 | 7.15 | 0 B/op, 0 allocs/op | control |
+| Workload | Median CPU | Median memory | Improvement vs baseline |
+| --- | ---: | ---: | ---: |
+| `origin/master` common journal path | 4,336 ns/op | 256 B/op; 2 allocs/op | 1.00x |
+| Post-change common `ExecuteCommand` path | 4,080 ns/op | 256 B/op; 2 allocs/op | 1.06x; 5.9% lower CPU time |
+| Post-change named periodic policy | 4,189 ns/op | 256 B/op; 2 allocs/op | 1.04x; 3.4% lower CPU time |
+| Post-change named disabled policy | 4,179 ns/op | 256 B/op; 2 allocs/op | 1.04x; 3.6% lower CPU time |
 
-The registry overhead buys bounded admission, trimmed names, policy validation,
-default fallback, replacement, and concurrent snapshot support. The feature is
-opt-in and leaves the existing journal default unchanged. The clean remote
-`hatCache` baseline could not compile because of unrelated missing SQL symbols,
-so no end-to-end before/after throughput ratio is reported here.
+The policy path has no measured allocation or transient-memory cost in this
+workload. The small CPU differences are within microbenchmark noise ranges and
+do not represent physical fsync throughput. `immediate` correctness is tested
+by counting sync-hook calls; its real cost is the required sync per immediate
+group boundary. The feature is opt-in and legacy commands retain periodic
+behavior.
 
-Raw output:
+The registry-only control remains useful for sizing the lookup itself:
+
+| Lookup | Median CPU | Memory | Relative CPU |
+| --- | ---: | ---: | ---: |
+| Registry `Resolve("orders")` | 12.89 ns/op | 0 B/op; 0 allocs/op | 1.80x slower than direct-map control |
+| Direct map lookup control | 7.15 ns/op | 0 B/op; 0 allocs/op | control |
+
+Raw registry output:
 
 ```text
 BenchmarkSpaceSyncPolicyResolve/registry-32         87594738  12.89 ns/op  0 B/op  0 allocs/op
@@ -33235,7 +33247,36 @@ BenchmarkSpaceSyncPolicyResolve/direct-map-control-32 169858632  7.15 ns/op  0 B
 BenchmarkSpaceSyncPolicyResolve/direct-map-control-32 166275471  7.07 ns/op  0 B/op  0 allocs/op
 ```
 
-Reproduce with `make benchmark-tu34` and `make verify-tu34`.
+Raw journal output, baseline first:
+
+```text
+BenchmarkTU34CommandJournal-32 272902 4444 ns/op 256 B/op 2 allocs/op
+BenchmarkTU34CommandJournal-32 260968 4521 ns/op 256 B/op 2 allocs/op
+BenchmarkTU34CommandJournal-32 300234 4315 ns/op 256 B/op 2 allocs/op
+BenchmarkTU34CommandJournal-32 262082 4336 ns/op 256 B/op 2 allocs/op
+BenchmarkTU34CommandJournal-32 282370 4249 ns/op 256 B/op 2 allocs/op
+
+BenchmarkTU34PeriodicSpaceCommandJournal-32 269161 4147 ns/op 256 B/op 2 allocs/op
+BenchmarkTU34PeriodicSpaceCommandJournal-32 300850 4189 ns/op 256 B/op 2 allocs/op
+BenchmarkTU34PeriodicSpaceCommandJournal-32 255120 4082 ns/op 256 B/op 2 allocs/op
+BenchmarkTU34PeriodicSpaceCommandJournal-32 308444 4232 ns/op 256 B/op 2 allocs/op
+BenchmarkTU34PeriodicSpaceCommandJournal-32 279556 4221 ns/op 256 B/op 2 allocs/op
+
+BenchmarkTU34DisabledSpaceCommandJournal-32 280213 4170 ns/op 256 B/op 2 allocs/op
+BenchmarkTU34DisabledSpaceCommandJournal-32 274078 4318 ns/op 256 B/op 2 allocs/op
+BenchmarkTU34DisabledSpaceCommandJournal-32 304234 4162 ns/op 256 B/op 2 allocs/op
+BenchmarkTU34DisabledSpaceCommandJournal-32 282260 4179 ns/op 256 B/op 2 allocs/op
+BenchmarkTU34DisabledSpaceCommandJournal-32 298413 4268 ns/op 256 B/op 2 allocs/op
+
+BenchmarkTU34CommandJournal-32 302098 4188 ns/op 256 B/op 2 allocs/op
+BenchmarkTU34CommandJournal-32 275103 4353 ns/op 256 B/op 2 allocs/op
+BenchmarkTU34CommandJournal-32 307065 4080 ns/op 256 B/op 2 allocs/op
+BenchmarkTU34CommandJournal-32 306981 4076 ns/op 256 B/op 2 allocs/op
+BenchmarkTU34CommandJournal-32 314335 4076 ns/op 256 B/op 2 allocs/op
+```
+
+Reproduce with `make benchmark-tu34`, `make benchmark-tu34-baseline`,
+`make benchmark-tu34-space-sync`, and `make verify-tu34`.
 
 ## T-U29 Durable Stream Transaction Recovery
 

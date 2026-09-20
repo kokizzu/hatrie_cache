@@ -103,6 +103,9 @@ type Options struct {
 	RetainedBytes       int64
 	IdempotencyCapacity int
 	Encryption          EncryptionOptions
+	// SpaceSyncPolicies optionally selects a durability policy for explicit
+	// named-space journal writes. A nil registry preserves periodic syncing.
+	SpaceSyncPolicies *SpaceSyncPolicyRegistry
 }
 
 // ValidateOptions verifies journal options and returns a copy with a

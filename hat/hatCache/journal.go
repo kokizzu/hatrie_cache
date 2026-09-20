@@ -63,6 +63,19 @@ const (
 // integrations can use hat/hatJournal.SegmentCompression directly.
 type CommandJournalSegmentCompression = hatJournal.SegmentCompression
 
+type SpaceSyncPolicy = hatJournal.SpaceSyncPolicy
+type SpaceSyncPolicyEntry = hatJournal.SpaceSyncPolicyEntry
+type SpaceSyncPolicyOptions = hatJournal.SpaceSyncPolicyOptions
+type SpaceSyncPolicyRegistry = hatJournal.SpaceSyncPolicyRegistry
+
+const (
+	SpaceSyncPolicyPeriodic  = hatJournal.SpaceSyncPolicyPeriodic
+	SpaceSyncPolicyImmediate = hatJournal.SpaceSyncPolicyImmediate
+	SpaceSyncPolicyDisabled  = hatJournal.SpaceSyncPolicyDisabled
+)
+
+var NewSpaceSyncPolicyRegistry = hatJournal.NewSpaceSyncPolicyRegistry
+
 const (
 	CommandJournalSegmentCompressionNone    = hatJournal.SegmentCompressionNone
 	CommandJournalSegmentCompressionZstd    = hatJournal.SegmentCompressionZstd
@@ -196,6 +209,7 @@ type commandJournalJob struct {
 	trie           *HatTrie
 	request        CacheCommandRequest
 	journalRequest CacheCommandRequest
+	syncPolicy     SpaceSyncPolicy
 	idempotency    commandIdempotencyCheck
 	operation      *snapshotOperation
 	submission     *CommandJournalSubmission
@@ -214,6 +228,7 @@ type CommandJournal struct {
 	format                CommandJournalFormat
 	encryption            hatJournal.EncryptionOptions
 	encryptor             *hatJournal.RecordEncryptor
+	spaceSyncPolicies     *SpaceSyncPolicyRegistry
 	file                  *os.File
 	closed                bool
 	accepting             bool
@@ -342,6 +357,7 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 		format:                format,
 		encryption:            options.Encryption,
 		encryptor:             encryptor,
+		spaceSyncPolicies:     options.SpaceSyncPolicies,
 		file:                  file,
 		accepting:             true,
 		groupCommitWindow:     options.GroupCommitWindow,
@@ -424,6 +440,13 @@ func adaptiveGroupCommitWindow(window time.Duration, maxBatch, queued int) time.
 }
 
 func (journal *CommandJournal) ExecuteCommand(trie *HatTrie, request CacheCommandRequest) CacheCommandResponse {
+	return journal.ExecuteCommandInSpace(trie, "", request)
+}
+
+// ExecuteCommandInSpace applies a journaled command with an explicit logical
+// space name. The name is configuration metadata only and is not persisted in
+// the command request; recovery remains compatible with existing records.
+func (journal *CommandJournal) ExecuteCommandInSpace(trie *HatTrie, space string, request CacheCommandRequest) CacheCommandResponse {
 	if journal == nil {
 		return commandError(ErrNilCommandJournal.Error())
 	}
@@ -433,6 +456,7 @@ func (journal *CommandJournal) ExecuteCommand(trie *HatTrie, request CacheComman
 	if !commandShouldJournal(request) {
 		return trie.ExecuteCommand(request)
 	}
+	syncPolicy := journal.resolveSpaceSyncPolicy(space)
 	journalRequest := journal.normalizeJournalRequest(request, trie.currentTime())
 	if journal.groupCommitEnabled() {
 		check, err := journal.idempotencyCheck(request)
@@ -443,6 +467,7 @@ func (journal *CommandJournal) ExecuteCommand(trie *HatTrie, request CacheComman
 			trie:           trie,
 			request:        request,
 			journalRequest: journalRequest,
+			syncPolicy:     syncPolicy,
 			idempotency:    check,
 			result:         make(chan CacheCommandResponse, 1),
 		})
@@ -460,7 +485,7 @@ func (journal *CommandJournal) ExecuteCommand(trie *HatTrie, request CacheComman
 	} else if duplicate {
 		return response
 	}
-	appendState, err := journal.appendLockedWithIdempotency(journalRequest, commandIdempotencyFingerprintData(check))
+	appendState, err := journal.appendLockedWithPolicy(journalRequest, commandIdempotencyFingerprintData(check), syncPolicy)
 	if err != nil {
 		return commandError(err.Error())
 	}
@@ -477,6 +502,46 @@ func (journal *CommandJournal) ExecuteCommand(trie *HatTrie, request CacheComman
 		})
 	}
 	return response
+}
+
+func (journal *CommandJournal) resolveSpaceSyncPolicy(space string) SpaceSyncPolicy {
+	if journal == nil || journal.spaceSyncPolicies == nil {
+		return SpaceSyncPolicyPeriodic
+	}
+	policy := journal.spaceSyncPolicies.Resolve(space)
+	if policy == 0 {
+		return SpaceSyncPolicyPeriodic
+	}
+	return policy
+}
+
+func normalizedCommandJournalSyncPolicy(policy SpaceSyncPolicy) SpaceSyncPolicy {
+	if policy == 0 {
+		return SpaceSyncPolicyPeriodic
+	}
+	return policy
+}
+
+func commandJournalSyncRequired(policy SpaceSyncPolicy) bool {
+	return normalizedCommandJournalSyncPolicy(policy) != SpaceSyncPolicyDisabled
+}
+
+func commandJournalBatchSyncRequired(batch []*commandJournalJob) bool {
+	for _, job := range batch {
+		if job != nil && commandJournalSyncRequired(job.syncPolicy) {
+			return true
+		}
+	}
+	return false
+}
+
+func commandJournalIdempotentEntriesSyncRequired(entries []commandJournalIdempotentGroupEntry) bool {
+	for _, entry := range entries {
+		if entry.job != nil && commandJournalSyncRequired(entry.job.syncPolicy) {
+			return true
+		}
+	}
+	return false
 }
 
 func (journal *CommandJournal) idempotencyCheck(request CacheCommandRequest) (commandIdempotencyCheck, error) {
@@ -561,6 +626,23 @@ func (journal *CommandJournal) runGroupCommit() {
 }
 
 func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
+	start := 0
+	for index, job := range batch {
+		if normalizedCommandJournalSyncPolicy(job.syncPolicy) != SpaceSyncPolicyImmediate {
+			continue
+		}
+		if index > start {
+			journal.processGroupCommitBatch(batch[start:index])
+		}
+		journal.processGroupCommitBatch(batch[index : index+1])
+		start = index + 1
+	}
+	if start < len(batch) {
+		journal.processGroupCommitBatch(batch[start:])
+	}
+}
+
+func (journal *CommandJournal) processGroupCommitBatch(batch []*commandJournalJob) {
 	journal.mu.Lock()
 	defer journal.mu.Unlock()
 	if journal.idempotency.enabled() {
@@ -625,10 +707,12 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 			failCommandJournalJobs(pending, err)
 			return
 		}
-		if err := journal.syncLocked(); err != nil {
-			err = journal.rollbackPreparedBatchLocked(batchState, err)
-			failCommandJournalJobs(pending, err)
-			return
+		if commandJournalBatchSyncRequired(pending) {
+			if err := journal.syncLocked(); err != nil {
+				err = journal.rollbackPreparedBatchLocked(batchState, err)
+				failCommandJournalJobs(pending, err)
+				return
+			}
 		}
 		for idx, job := range pending {
 			if job.submission != nil {
@@ -763,10 +847,12 @@ func (journal *CommandJournal) processIdempotentGroupCommitLocked(batch []*comma
 			failCommandJournalIdempotentGroupEntries(entries, err)
 			return
 		}
-		if err := journal.syncLocked(); err != nil {
-			err = journal.rollbackPreparedBatchLocked(batchState, err)
-			failCommandJournalIdempotentGroupEntries(entries, err)
-			return
+		if commandJournalIdempotentEntriesSyncRequired(entries) {
+			if err := journal.syncLocked(); err != nil {
+				err = journal.rollbackPreparedBatchLocked(batchState, err)
+				failCommandJournalIdempotentGroupEntries(entries, err)
+				return
+			}
 		}
 		setCommandJournalIdempotentGroupSequences(entries)
 
@@ -1743,12 +1829,18 @@ func (journal *CommandJournal) appendLocked(request CacheCommandRequest) (comman
 }
 
 func (journal *CommandJournal) appendLockedWithIdempotency(request CacheCommandRequest, fingerprint []byte) (commandJournalAppendState, error) {
+	return journal.appendLockedWithPolicy(request, fingerprint, SpaceSyncPolicyPeriodic)
+}
+
+func (journal *CommandJournal) appendLockedWithPolicy(request CacheCommandRequest, fingerprint []byte, policy SpaceSyncPolicy) (commandJournalAppendState, error) {
 	appendState, err := journal.appendWithoutSyncLockedWithIdempotency(request, fingerprint)
 	if err != nil {
 		return commandJournalAppendState{}, journal.rollbackFailedAppendLocked(appendState, err)
 	}
-	if err := journal.syncLocked(); err != nil {
-		return commandJournalAppendState{}, journal.rollbackFailedAppendLocked(appendState, err)
+	if commandJournalSyncRequired(policy) {
+		if err := journal.syncLocked(); err != nil {
+			return commandJournalAppendState{}, journal.rollbackFailedAppendLocked(appendState, err)
+		}
 	}
 	return appendState, nil
 }
