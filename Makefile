@@ -23091,3 +23091,46 @@ commit-m065y-mutable-range-nth-value:
 .PHONY: push-m065y-mutable-range-nth-value
 push-m065y-mutable-range-nth-value:
 	bash ./scripts/push-m065y-mutable-range-nth-value.sh
+.PHONY: test-tu33-function-grants
+test-tu33-function-grants:
+	bash scripts/test-tu33-function-grants.sh
+
+.PHONY: format-tu33-function-grants
+format-tu33-function-grants:
+	bash scripts/format-tu33-function-grants.sh
+
+.PHONY: benchmark-tu33-baseline
+benchmark-tu33-baseline:
+	bash scripts/benchmark-tu33-baseline.sh
+
+.PHONY: benchmark-tu33-function-grants
+benchmark-tu33-function-grants:
+	bash scripts/benchmark-tu33-function-grants.sh
+
+.PHONY: test-tu33-package
+test-tu33-package:
+	bash scripts/test-tu33-package.sh
+
+.PHONY: race-tu33-function-grants
+race-tu33-function-grants:
+	bash scripts/race-tu33-function-grants.sh
+
+.PHONY: vet-tu33-function-grants
+vet-tu33-function-grants:
+	bash scripts/vet-tu33-function-grants.sh
+
+.PHONY: review-tu33-function-grants
+review-tu33-function-grants:
+	bash scripts/review-tu33-function-grants.sh
+
+.PHONY: stage-tu33-function-grants
+stage-tu33-function-grants:
+	bash scripts/stage-tu33-function-grants.sh
+
+.PHONY: commit-tu33-function-grants
+commit-tu33-function-grants:
+	bash scripts/commit-tu33-function-grants.sh
+
+.PHONY: push-tu33-function-grants
+push-tu33-function-grants:
+	bash scripts/push-tu33-function-grants.sh

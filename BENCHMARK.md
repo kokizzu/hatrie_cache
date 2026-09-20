@@ -34237,3 +34237,50 @@ distinct count alone. As with M037i, the group map is grown naturally rather
 than preallocated to the input batch, keeping the measured memory overhead
 near one percent. The primitive is opt-in and does not alter existing SQL
 plans.
+
+## T-U33 Function Grants
+
+This benchmark measures the opt-in `hatAuth.RoleCatalog` authorization path
+with and without the new function selector. Five samples ran on Linux/amd64
+with an AMD Ryzen 9 5950X using `-benchmem -count=5`. The baseline was run
+from the unchanged `origin/master` worktree before the feature change.
+
+| Path | Median CPU | Median memory | Relative |
+| --- | ---: | ---: | ---: |
+| Origin RoleCatalog baseline | 178.3 ns/op | 0 B/op, 0 allocs/op | 1.00x |
+| Current namespace grant, no function selector | 168.5 ns/op | 0 B/op, 0 allocs/op | 1.00x |
+| Current trailing-prefix function grant | 180.5 ns/op | 0 B/op, 0 allocs/op | 1.07x vs namespace |
+
+Raw origin baseline samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+183.7 0 0
+183.8 0 0
+174.1 0 0
+177.9 0 0
+178.3 0 0
+```
+
+Raw current namespace samples:
+
+```text
+168.2 0 0
+168.6 0 0
+161.2 0 0
+168.5 0 0
+170.9 0 0
+```
+
+Raw current function samples:
+
+```text
+177.1 0 0
+182.9 0 0
+178.9 0 0
+180.5 0 0
+180.8 0 0
+```
+
+The added selector costs about 12 ns/op in this fixture and does not allocate.
+It remains an acceptable tradeoff because the catalog is opt-in and the
+legacy `hatAuth.Policy` path is unchanged.

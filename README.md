@@ -4555,8 +4555,9 @@ included in metadata snapshots. See [MU020_SECRET_CONNECTION_RESOURCES.md](MU020
 
 Role and namespace ownership can be managed with the opt-in
 `hatAuth.RoleCatalog`. It supports inherited roles, hierarchical namespaces,
-scoped grants, exact-version mutation fencing, and deterministic policy
-snapshots while leaving the legacy `hatAuth.Policy` path unchanged. See
+scoped grants, optional function selectors, exact-version mutation fencing, and
+deterministic policy snapshots while leaving the legacy `hatAuth.Policy` path
+unchanged. See [TU33_FUNCTION_GRANTS.md](TU33_FUNCTION_GRANTS.md),
 [MU021_ROLE_NAMESPACE_CATALOG.md](MU021_ROLE_NAMESPACE_CATALOG.md) and the
 [M-U21 benchmark](BENCHMARK.md#mu-021-role-and-namespace-catalog).
 

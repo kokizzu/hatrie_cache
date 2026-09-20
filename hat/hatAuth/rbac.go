@@ -9,14 +9,15 @@ type Role struct {
 	Rules []Rule `json:"rules"`
 }
 
-// Rule matches cache commands, key namespaces, SQL sources, and optional
-// objects. An empty selector is unrestricted for that selector; a trailing *
-// is a prefix match.
+// Rule matches cache commands, key namespaces, SQL sources, optional objects,
+// and optional functions. An empty selector is unrestricted for that selector;
+// a trailing * is a prefix match.
 type Rule struct {
 	Commands   []string `json:"commands,omitempty"`
 	Namespaces []string `json:"namespaces,omitempty"`
 	Sources    []string `json:"sources,omitempty"`
 	Objects    []string `json:"objects,omitempty"`
+	Functions  []string `json:"functions,omitempty"`
 }
 
 // Policy maps authenticated principals to named roles.
@@ -26,13 +27,14 @@ type Policy struct {
 }
 
 // AuthorizationRequest contains the dimensions used by a policy rule. Object
-// is optional for legacy callers but is required when a matching rule has an
-// object selector.
+// and Function are optional for legacy callers but are required when a
+// matching rule has the corresponding selector.
 type AuthorizationRequest struct {
 	Command   string
 	Namespace string
 	Source    string
 	Object    string
+	Function  string
 }
 
 // Authorize reports whether principal has one role rule matching every
@@ -76,7 +78,8 @@ func (policy Policy) AuthorizeRequest(principal string, request AuthorizationReq
 			if commandSelectorMatches(rule.Commands, request.Command) &&
 				selectorMatches(rule.Namespaces, request.Namespace) &&
 				selectorMatches(rule.Sources, request.Source) &&
-				requiredSelectorMatches(rule.Objects, request.Object) {
+				requiredSelectorMatches(rule.Objects, request.Object) &&
+				requiredSelectorMatches(rule.Functions, request.Function) {
 				return true
 			}
 		}
