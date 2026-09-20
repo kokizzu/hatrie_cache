@@ -22048,3 +22048,47 @@ measure-mu47-payload:
 
 verify-mu47:
 	@bash scripts/verify-mu47.sh
+
+.PHONY: test-tu09-red
+test-tu09-red:
+	bash scripts/test-tu09-red.sh
+
+.PHONY: format-tu09
+format-tu09:
+	bash scripts/format-tu09.sh
+
+.PHONY: test-tu09
+test-tu09:
+	bash scripts/test-tu09.sh
+
+.PHONY: test-tu09-package
+test-tu09-package:
+	bash scripts/test-tu09-package.sh
+
+.PHONY: benchmark-tu09
+benchmark-tu09:
+	bash scripts/benchmark-tu09.sh
+
+.PHONY: race-tu09
+race-tu09:
+	bash scripts/race-tu09.sh
+
+.PHONY: vet-tu09
+vet-tu09:
+	bash scripts/vet-tu09.sh
+
+.PHONY: review-tu09
+review-tu09:
+	bash scripts/review-tu09.sh
+
+.PHONY: stage-tu09
+stage-tu09:
+	bash scripts/stage-tu09.sh
+
+.PHONY: commit-tu09
+commit-tu09:
+	bash scripts/commit-tu09.sh
+
+.PHONY: push-tu09
+push-tu09:
+	bash scripts/push-tu09.sh

@@ -32580,3 +32580,21 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+<a id="tu-09-snapshot-plus-wal-join-bootstrap"></a>
+## TU-09 Snapshot-Plus-WAL Join Bootstrap
+
+This measures the opt-in Tarantool-inspired join coordinator against a clean
+pre-feature direct sequence-check control. Both runs use two records. The
+coordinator additionally validates the manifest, locks its state transitions,
+copies payloads for callback isolation, and supports fenced activation. The
+checkpoint row measures deterministic SJC1 CRC-protected encode/decode.
+
+| Workload | Median ns/op | B/op | allocs/op | Relative to direct control |
+| --- | ---: | ---: | ---: | ---: |
+| Direct two-record sequence control | 2.607 | 0 | 0 | 1.00x |
+| Snapshot plus two-record WAL coordinator | 201.1 | 240 | 4 | 77.1x cost |
+| SJC1 checkpoint encode/decode | 294.7 | 288 | 3 | 113.0x cost |
+
+The ratios are coordination overhead, not a claim that a join is slower than
+an equivalent complete snapshot transfer. The ordinary write, replay, and
+backup paths do not construct this coordinator.
