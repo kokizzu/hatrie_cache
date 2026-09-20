@@ -2094,6 +2094,7 @@ make benchmark-sql-columnar-segment-skip
 | Current pass | [Persistent partition replication cursors](#persistent-partition-replication-cursors), 100k keys, 100 pages | Full materialize/sort per page: 1.076 s; 1.394 GB heap; 10,069,862 allocs | 16 retained cursors plus k-way heap: 56.721 ms; 9.78 MB heap; 300,538 allocs | 18.97x faster, 142.52x lower heap, 33.51x fewer allocs | Cursor restarts after a partition mutation; local partitions remain opt-in |
 | Current pass | [Packed internal scan arenas](#packed-internal-scan-arenas), 100k keys, 100 pages | Prior persistent cursor: 56.721 ms; 9.78 MB heap; 300,538 allocs | Reusable arenas plus typed heap: 49.752 ms; 0.357 MB heap; 669 allocs | 1.14x faster, 27.41x lower heap, 449.23x fewer allocs | Borrowed keys are internal-only; durable scans retain one immutable arena per 256-key batch |
 | Final architecture | [Durable journal group commit](#durable-journal-group-commit), 16 callers | 878,909 ns/write | 73,286 ns/write | 11.99x faster | Sparse traffic can opt into a collection window; durability still precedes apply/ack |
+| Current pass | [TT051 partitioned synchronous durability](#tt051-partitioned-synchronous-durability), 4 partitions | Global: 886,485 ns/op; 354 B/op; 4 allocs/op | Partitioned: 332,949 ns/op; 298 B/op; 2 allocs/op | 2.66x faster parallel writes; 15.8% fewer bytes; 50% fewer allocs | Opt-in; single-writer median is 1.03x faster with 9.6% fewer bytes, and cross-partition batches are rejected |
 | Current pass | [Durable public batches](#durable-public-batches), 10k writes | 9.821 s; 10,000 syncs | 29.051 ms; 3 syncs | 338x faster, 3,333x fewer syncs | Cumulative heap is 1.20x higher; ordinary item errors remain non-transactional |
 | Current pass | [Native C command batching](#native-c-command-batching), 4,096 commands | Go loop: set 1.137 ms, get 1.123 ms | One C call: set 0.998 ms, get 0.979 ms | Set 1.14x faster, get 1.15x faster | Activates at 32 same-family commands; state-sensitive batches fall back |
 | Current pass | [Native batch oversized-key guard](#native-batch-oversized-key-guard), 4,096 valid C operations | SET: 447,156 ns; GET: 418,473 ns | SET: 444,204 ns; GET: 414,628 ns | CPU neutral (1.007x/1.009x faster in this run); identical heap and allocations | Invalid direct C input returns `MISSING` rather than dereferencing a null native location |
@@ -6255,6 +6256,32 @@ The concurrent result is about 13,645 acknowledged durable writes/second on the
 benchmark filesystem. A deterministic 16-caller test with a 20 ms collection
 window records exactly one `fsync` and verifies that neither response nor trie
 mutation occurs before that sync completes.
+
+<a id="tt051-partitioned-synchronous-durability"></a>
+### TT051 Partitioned Synchronous Durability
+
+`PartitionedCommandJournal` is an opt-in Tarantool-inspired durability mode:
+one local journal file and mutex per configured HAT-trie partition. The default
+`CommandJournal` and local partition count remain unchanged. Five samples used
+`-benchtime=1s`, binary records, synchronous commits, four partitions, and
+an AMD Ryzen 9 5950X on Linux amd64.
+
+| Workload | Global one-file journal | Partitioned journal | Result |
+| --- | ---: | ---: | --- |
+| Single writer | 836,240 ns/op; 313 B/op; 4 allocs/op | 812,132 ns/op; 283 B/op; 2 allocs/op | 1.03x faster; 9.6% fewer bytes; 50% fewer allocs |
+| Parallel writers | 886,485 ns/op; 354 B/op; 4 allocs/op | 332,949 ns/op; 298 B/op; 2 allocs/op | 2.66x faster; 15.8% fewer bytes; 50% fewer allocs |
+
+Raw `ns/op` samples from that invocation, in emitted order:
+
+| Workload | Global one-file journal | Partitioned journal |
+| --- | ---: | ---: |
+| Single writer | 845,627; 803,973; 869,871; 833,068; 836,240 | 835,108; 812,132; 845,333; 703,682; 740,629 |
+| Parallel writers | 867,099; 850,313; 886,485; 894,509; 2,761,705 | 324,907; 339,512; 332,949; 316,181; 353,332 |
+
+The parallel gain is from independent journal locks and sync paths. The mode
+costs one append file per partition and rejects cross-partition batches because
+independent journals cannot provide a global transaction order. Full API,
+backup, and recovery rules are in [TT051_PARTITIONED_DURABILITY.md](TT051_PARTITIONED_DURABILITY.md).
 
 ### Durable Public Batches
 

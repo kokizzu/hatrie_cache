@@ -22079,3 +22079,29 @@ push-tu14:
 	bash scripts/push-tu14.sh
 format-tu14:
 	bash scripts/format-tu14.sh
+benchmark-tt051-baseline:
+	bash scripts/benchmark-tt051-baseline.sh
+format-tt051:
+	bash scripts/format-tt051.sh
+benchmark-tt051:
+	bash scripts/benchmark-tt051.sh
+test-tt051:
+	bash scripts/test-tt051.sh
+
+race-tt051:
+	bash scripts/race-tt051.sh
+
+vet-tt051:
+	bash scripts/vet-tt051.sh
+
+review-tt051:
+	bash scripts/review-tt051.sh
+
+stage-tt051:
+	bash scripts/stage-tt051.sh
+
+commit-tt051:
+	bash scripts/commit-tt051.sh
+
+push-tt051:
+	bash scripts/push-tt051.sh
