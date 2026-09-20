@@ -224,6 +224,16 @@ func (session *SQLSession) projectionCatalog() *MaterializedViews {
 }
 
 func (session *SQLSession) ResolveSQLSource(name, key string) ([]Row, error) {
+	return session.resolveSQLSource(context.Background(), name, key)
+}
+
+// ResolveSQLSourceContext forwards the query context to the underlying source
+// when it implements the optional context-aware materialized contract.
+func (session *SQLSession) ResolveSQLSourceContext(ctx context.Context, name, key string) ([]Row, error) {
+	return session.resolveSQLSource(ctx, name, key)
+}
+
+func (session *SQLSession) resolveSQLSource(ctx context.Context, name, key string) ([]Row, error) {
 	if strings.EqualFold(name, "CACHE") {
 		session.mu.RLock()
 		if rows, exists := session.tables[strings.ToLower(key)]; exists {
@@ -237,7 +247,7 @@ func (session *SQLSession) ResolveSQLSource(name, key string) ([]Row, error) {
 		view, exists := session.views[strings.ToLower(key)]
 		session.mu.RUnlock()
 		if exists {
-			result, err := session.Execute(context.Background(), view.source, nil, SQLQueryOptions{})
+			result, err := session.Execute(ctx, view.source, nil, SQLQueryOptions{})
 			if err != nil {
 				return nil, err
 			}
@@ -247,7 +257,7 @@ func (session *SQLSession) ResolveSQLSource(name, key string) ([]Row, error) {
 	if session.source == nil {
 		return nil, nil
 	}
-	return session.source.ResolveSQLSource(name, key)
+	return resolveSQLSourceContext(ctx, session.source, name, key)
 }
 
 func (session *SQLSession) hasLocalSQLSource(name, key string) bool {

@@ -55,6 +55,13 @@ type SourceResolver interface {
 	ResolveSQLSource(name string, key string) ([]Row, error)
 }
 
+// ContextSourceResolver optionally resolves materialized source rows with the
+// query context. It lets remote storage adapters observe cancellation while
+// preserving the legacy SourceResolver contract for existing implementations.
+type ContextSourceResolver interface {
+	ResolveSQLSourceContext(ctx context.Context, name string, key string) ([]Row, error)
+}
+
 // SourceCardinalityResolver optionally exposes a current row-count estimate
 // without materializing source rows. The estimate is a planning hint only;
 // the executor always resolves and rechecks the source rows before producing
@@ -1302,6 +1309,31 @@ func (fn SourceResolverFunc) ResolveSQLSource(name string, key string) ([]Row, e
 		return nil, nil
 	}
 	return fn(name, key)
+}
+
+// ContextSourceResolverFunc adapts a context-aware materialized source
+// callback to ContextSourceResolver and SourceResolver.
+type ContextSourceResolverFunc func(ctx context.Context, name string, key string) ([]Row, error)
+
+func (fn ContextSourceResolverFunc) ResolveSQLSource(name string, key string) ([]Row, error) {
+	return fn.ResolveSQLSourceContext(context.Background(), name, key)
+}
+
+func (fn ContextSourceResolverFunc) ResolveSQLSourceContext(ctx context.Context, name string, key string) ([]Row, error) {
+	if fn == nil {
+		return nil, nil
+	}
+	return fn(ctx, name, key)
+}
+
+func resolveSQLSourceContext(ctx context.Context, resolver SourceResolver, name string, key string) ([]Row, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if contextResolver, ok := resolver.(ContextSourceResolver); ok {
+		return contextResolver.ResolveSQLSourceContext(ctx, name, key)
+	}
+	return resolver.ResolveSQLSource(name, key)
 }
 
 // StreamSourceResolver supplies source rows one at a time for stream-compatible queries.

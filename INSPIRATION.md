@@ -595,6 +595,12 @@ Materialize's Timely/Differential Dataflow runtime.
   registration and execution remain unchanged. See
   [SQL_COMPUTE_STORAGE_SEPARATION.md](SQL_COMPUTE_STORAGE_SEPARATION.md) and
   [BENCHMARK.md#m090a-resolver-only-sql-compute-adapter](BENCHMARK.md#m090a-resolver-only-sql-compute-adapter).
+- [x] M090b Context-aware materialized source resolution. `hatSql.ContextSourceResolver`
+  propagates query cancellation through materialized remote-source fetches,
+  including native dataflow and explain snapshots, while legacy resolvers keep
+  their existing behavior. See
+  [SQL_COMPUTE_STORAGE_SEPARATION.md](SQL_COMPUTE_STORAGE_SEPARATION.md) and
+  [BENCHMARK.md#m090b-context-aware-materialized-source-resolver](BENCHMARK.md#m090b-context-aware-materialized-source-resolver).
 - [x] M091 Durable persistent shards through the local storage layer.
 - [x] M092 Batched writes to durable storage.
 - [x] M093 Caller-driven bounded persistent-shard compaction scheduling with duplicate request coalescing, deterministic task ordering, retry-preserving failures, and explicit concurrency limits; see [COMPACTION_SCHEDULER.md](COMPACTION_SCHEDULER.md).

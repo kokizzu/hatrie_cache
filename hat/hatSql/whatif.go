@@ -565,7 +565,7 @@ func minSQLWhatIfRows(rows, maximum int) int {
 }
 
 func loadSQLWhatIfSnapshot(ctx context.Context, resolver SQLSourceResolver, source sqlSource, fields []string, predicates []sqlWhatIfPredicate) (sqlWhatIfSnapshot, error) {
-	rows, err := resolver.ResolveSQLSource(source.kind, source.key)
+	rows, err := resolveSQLSourceContext(ctx, resolver, source.kind, source.key)
 	if err != nil {
 		return sqlWhatIfSnapshot{}, err
 	}

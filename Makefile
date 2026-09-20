@@ -21805,6 +21805,25 @@ benchmark-m090a:
 verify-m090a:
 	@bash scripts/verify-m090a.sh
 
+.PHONY: format-m090b test-m090b race-m090b vet-m090b benchmark-m090b verify-m090b
+format-m090b:
+	@bash scripts/format-m090b.sh
+
+test-m090b:
+	@bash scripts/test-m090b.sh
+
+race-m090b:
+	@bash scripts/race-m090b.sh
+
+vet-m090b:
+	@bash scripts/vet-m090b.sh
+
+benchmark-m090b:
+	@bash scripts/benchmark-m090b.sh
+
+verify-m090b:
+	@bash scripts/verify-m090b.sh
+
 .PHONY: verify-m052
 verify-m052:
 	@bash scripts/verify-m052.sh

@@ -22635,6 +22635,39 @@ frontier consistency are intentionally outside this benchmark.
 
 Reproduce with `make benchmark-m090a`.
 
+<a id="m090b-context-aware-materialized-source-resolver"></a>
+## M090b Context-Aware Materialized Source Resolver
+
+This benchmark compares the optional `hatSql.ContextSourceResolver` dispatch
+with the unchanged legacy `SourceResolver` path on a deterministic one-row
+`CACHE` query. The pre-change context-capable workload deliberately fell back
+to the legacy method; the post-change workload uses
+`ResolveSQLSourceContext`. Five samples were collected with
+`go test -benchmem -count=5` on `linux/amd64` with an AMD Ryzen 9 5950X.
+
+### Raw Samples
+
+| Workload | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| Legacy resolver, before | 4,878; 4,855; 4,410; 4,449; 4,381 | 4,360; 4,360; 4,360; 4,360; 4,360 | 18; 18; 18; 18; 18; 18 |
+| Context-capable resolver, before (legacy fallback) | 4,909; 4,277; 4,940; 4,785; 4,744 | 4,360; 4,360; 4,360; 4,360; 4,360 | 18; 18; 18; 18; 18 |
+| Legacy resolver, after | 5,316; 5,260; 4,837; 4,783; 4,903 | 4,360; 4,360; 4,360; 4,360; 4,360 | 18; 18; 18; 18; 18 |
+| Context-aware resolver, after | 4,682; 5,134; 4,958; 4,926; 4,927 | 4,360; 4,360; 4,360; 4,360; 4,360 | 18; 18; 18; 18; 18 |
+
+### Median Comparison
+
+| Workload | Median ns/op | Median B/op | Median allocs/op | Relative to legacy after |
+| --- | ---: | ---: | ---: | --- |
+| Legacy resolver, after | 4,903 | 4,360 | 18 | `1.00x` |
+| Context-aware resolver, after | 4,927 | 4,360 | 18 | `1.00x` time, same memory and allocations |
+
+The measured context-dispatch delta is about `0.5%` in this tiny local query,
+within normal benchmark noise, with no allocation increase. The feature is not
+a throughput optimization: its value is that a remote resolver can honor
+request cancellation and avoid finishing work after a compute caller has
+timed out. Successful payload size and bandwidth are unchanged. Reproduce with
+`make benchmark-m090b`.
+
 <a id="mz-019-named-sql-compute-pools"></a>
 ## MZ-019 Named SQL Compute Pools
 

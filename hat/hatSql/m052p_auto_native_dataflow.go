@@ -19,7 +19,7 @@ func executeSQLAutoNativeDataflow(ctx context.Context, query *sqlQuery, resolver
 	if control == nil || resolver == nil {
 		return SQLQueryResult{}, false, nil
 	}
-	rows, err := resolver.ResolveSQLSource(query.from.kind, query.from.key)
+	rows, err := resolveSQLSourceContext(ctx, resolver, query.from.kind, query.from.key)
 	if err != nil {
 		return SQLQueryResult{}, true, err
 	}

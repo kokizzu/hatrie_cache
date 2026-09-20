@@ -131,6 +131,7 @@ type SQLExplainAlternative = ExplainAlternative
 type SQLExplainNotice = ExplainNotice
 type SQLQueryStats = QueryStats
 type SQLSourceResolver = SourceResolver
+type SQLContextSourceResolver = ContextSourceResolver
 type SQLHistoricalSourceResolver = HistoricalSourceResolver
 type SQLColumnarBatch = ColumnarBatch
 type SQLColumnarSourceResolver = ColumnarSourceResolver
@@ -157,6 +158,7 @@ type SQLJSONIndexFrequencyBucket = JSONIndexFrequencyBucket
 type SQLJSONIndexStats = JSONIndexStats
 type SQLSourceCardinalityResolver = SourceCardinalityResolver
 type SQLSourceResolverFunc = SourceResolverFunc
+type SQLContextSourceResolverFunc = ContextSourceResolverFunc
 type SQLFunctionDefinition = FunctionDefinition
 type SQLFunctionCall = FunctionCall
 type SQLFunctionError = FunctionError
@@ -4822,7 +4824,7 @@ func streamSQLSourceRowsWithPartitionPredicates(ctx context.Context, source sqlS
 				return visitRows(rows)
 			}
 		}
-		rows, err := resolver.ResolveSQLSource(source.kind, source.key)
+		rows, err := resolveSQLSourceContext(ctx, resolver, source.kind, source.key)
 		if err != nil {
 			return err
 		}
@@ -13615,7 +13617,7 @@ func resolveSQLSourceWithPartitionPredicates(source sqlSource, resolver SQLSourc
 			}
 		}
 		if !borrowed && err == nil {
-			rows, err = resolver.ResolveSQLSource(source.kind, source.key)
+			rows, err = resolveSQLSourceContext(sqlResolverExecutionContext(control), resolver, source.kind, source.key)
 		}
 		return finishSQLSourceRows(source, control, rows, borrowed, err)
 	case "EXTERNAL":
@@ -13659,6 +13661,13 @@ func resolveSQLSourceWithPartitionPredicates(source sqlSource, resolver SQLSourc
 		return finalizeSQLSourceRows(source, control, rows)
 	}
 	return nil, nil
+}
+
+func sqlResolverExecutionContext(control *sqlExecutionControl) context.Context {
+	if control == nil {
+		return context.Background()
+	}
+	return control.executionContext()
 }
 
 func finishSQLSourceRows(source sqlSource, control *sqlExecutionControl, rows []SQLRow, borrowed bool, err error) ([]SQLRow, error) {

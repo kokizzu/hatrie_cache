@@ -1,6 +1,7 @@
 package hatSql
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
@@ -99,6 +100,16 @@ func catalogIdentifier(value string) bool {
 }
 
 func (resolver CatalogResolver) ResolveSQLSource(name, key string) ([]Row, error) {
+	return resolver.resolveSQLSource(context.Background(), name, key)
+}
+
+// ResolveSQLSourceContext forwards the query context for ordinary sources;
+// catalog-owned virtual sources remain local and deterministic.
+func (resolver CatalogResolver) ResolveSQLSourceContext(ctx context.Context, name, key string) ([]Row, error) {
+	return resolver.resolveSQLSource(ctx, name, key)
+}
+
+func (resolver CatalogResolver) resolveSQLSource(ctx context.Context, name, key string) ([]Row, error) {
 	if strings.EqualFold(name, "CACHE") {
 		switch strings.ToLower(key) {
 		case "information_schema.namespaces":
@@ -140,7 +151,7 @@ func (resolver CatalogResolver) ResolveSQLSource(name, key string) ([]Row, error
 	if resolver.Source == nil {
 		return nil, nil
 	}
-	return resolver.Source.ResolveSQLSource(name, key)
+	return resolveSQLSourceContext(ctx, resolver.Source, name, key)
 }
 
 func catalogOwnsVirtualSource(name, key string) bool {

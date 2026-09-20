@@ -35,6 +35,37 @@ This is a registration boundary, not a distributed database protocol. It does
 not replicate data, coordinate frontiers, or hide network failures. Those
 responsibilities stay with the resolver or the service that supplies it.
 
+## Context-Aware Materialized Sources
+
+M090b adds an optional `hatSql.ContextSourceResolver` contract for remote
+storage adapters that materialize a source as a row slice. Its
+`ResolveSQLSourceContext` method receives the query context, so a canceled or
+timed-out compute request can stop a remote fetch before the whole source is
+returned:
+
+```go
+type RemoteResolver struct{}
+
+func (RemoteResolver) ResolveSQLSource(name, key string) ([]hatSql.Row, error) {
+	return fetchSnapshot(context.Background(), name, key)
+}
+
+func (RemoteResolver) ResolveSQLSourceContext(ctx context.Context, name, key string) ([]hatSql.Row, error) {
+	return fetchSnapshot(ctx, name, key)
+}
+```
+
+The SQL executor prefers the context-aware method for materialized cache/keys
+sources, including the native dataflow and `EXPLAIN` snapshot paths. Ordinary
+`SourceResolver` implementations remain source-compatible. `SQLSession` and
+`CatalogResolver` forward the optional contract; partition, borrowed, and
+streaming resolver extensions keep their existing precedence.
+
+This does not make a remote transport interruptible by itself: the resolver
+must pass `ctx` to its database, HTTP, or RPC client. It also does not change
+the row payload format or reduce bandwidth for successful reads. Its benefit
+is cancellation propagation and avoiding work after the caller has gone away.
+
 ## Configuration
 
 The default is unchanged:
@@ -103,3 +134,5 @@ See the raw samples and baseline comparison in
 
 The resolver-only adapter measurement is recorded in
 [BENCHMARK.md#m090a-resolver-only-sql-compute-adapter](BENCHMARK.md#m090a-resolver-only-sql-compute-adapter).
+The context-aware materialized resolver measurement is recorded in
+[BENCHMARK.md#m090b-context-aware-materialized-source-resolver](BENCHMARK.md#m090b-context-aware-materialized-source-resolver).
