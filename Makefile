@@ -22175,3 +22175,35 @@ commit-mu34:
 .PHONY: push-mu34
 push-mu34:
 	bash scripts/push-mu34.sh
+test-chu20:
+	bash scripts/test-chu20.sh
+
+format-chu20:
+	bash scripts/format-chu20.sh
+
+benchmark-chu20-baseline:
+	bash scripts/benchmark-chu20-baseline.sh
+
+benchmark-chu20:
+	bash scripts/benchmark-chu20.sh
+
+race-chu20:
+	bash scripts/race-chu20.sh
+
+vet-chu20:
+	bash scripts/vet-chu20.sh
+
+test-chu20-package:
+	bash scripts/test-chu20-package.sh
+
+review-chu20:
+	bash scripts/review-chu20.sh
+
+stage-chu20:
+	bash scripts/stage-chu20.sh
+
+commit-chu20:
+	bash scripts/commit-chu20.sh
+
+push-chu20:
+	bash scripts/push-chu20.sh

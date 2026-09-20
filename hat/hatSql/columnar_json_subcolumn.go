@@ -1,6 +1,7 @@
 package hatSql
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -18,6 +19,7 @@ const (
 	ColumnarJSONSubcolumnFloat64
 	ColumnarJSONSubcolumnString
 	ColumnarJSONSubcolumnBool
+	ColumnarJSONSubcolumnJSON
 )
 
 // ColumnarJSONSubcolumnKey identifies one canonical JSON path rooted at a
@@ -51,8 +53,12 @@ type ColumnarJSONSubcolumn struct {
 	Float64  []float64
 	Strings  []string
 	BoolBits []byte
-	Present  []byte
-	Validity []byte
+	// JSONOffsets and JSONData store valid object/array values in one
+	// contiguous buffer. JSONOffsets has Rows+1 entries for the JSON kind.
+	JSONOffsets []uint32
+	JSONData    []byte
+	Present     []byte
+	Validity    []byte
 }
 
 // NewColumnarJSONSubcolumn infers a compact scalar kind from the non-NULL
@@ -78,6 +84,9 @@ func NewColumnarJSONSubcolumnOfKind(kind ColumnarJSONSubcolumnKind, values []Col
 	}
 	column := ColumnarJSONSubcolumn{Kind: kind, Rows: len(values)}
 	bitmapBytes := columnarPackedBitmapBytes(len(values))
+	if kind == ColumnarJSONSubcolumnJSON {
+		column.JSONOffsets = make([]uint32, len(values)+1)
+	}
 	if len(values) > 0 {
 		column.Present = make([]byte, bitmapBytes)
 		column.Validity = make([]byte, bitmapBytes)
@@ -94,6 +103,9 @@ func NewColumnarJSONSubcolumnOfKind(kind ColumnarJSONSubcolumnKind, values []Col
 	}
 	allPresent, allValid := true, true
 	for row, entry := range values {
+		if kind == ColumnarJSONSubcolumnJSON {
+			column.JSONOffsets[row+1] = column.JSONOffsets[row]
+		}
 		if !entry.Present {
 			allPresent, allValid = false, false
 			continue
@@ -120,10 +132,9 @@ func NewColumnarJSONSubcolumnOfKind(kind ColumnarJSONSubcolumnKind, values []Col
 	return column, nil
 }
 
-// MaterializeJSONSubcolumn extracts one scalar path from JSON documents and
-// stores the result in the compact typed representation. Objects and arrays
-// are rejected because this API is for scalar subcolumns; JSON_QUERY over
-// those values retains the ordinary JSON/map path.
+// MaterializeJSONSubcolumn extracts one path from JSON documents and stores
+// scalar values in typed arrays or objects/arrays as compact raw JSON. Raw
+// objects and arrays are decoded only when JSON_QUERY reads a row.
 func MaterializeJSONSubcolumn(path string, documents []interface{}) (ColumnarJSONSubcolumn, error) {
 	canonical, err := NormalizeJSONPath(strings.TrimSpace(path))
 	if err != nil {
@@ -170,6 +181,23 @@ func (column ColumnarJSONSubcolumn) Validate(rowCount int) error {
 		if len(column.BoolBits) != bitmapBytes || len(column.Int64) != 0 || len(column.Float64) != 0 || len(column.Strings) != 0 {
 			return fmt.Errorf("%w: invalid bool payload", ErrColumnarJSONSubcolumnInvalid)
 		}
+	case ColumnarJSONSubcolumnJSON:
+		if len(column.JSONOffsets) != rowCount+1 || len(column.Int64) != 0 || len(column.Float64) != 0 || len(column.Strings) != 0 || len(column.BoolBits) != 0 {
+			return fmt.Errorf("%w: invalid JSON payload", ErrColumnarJSONSubcolumnInvalid)
+		}
+		if len(column.JSONOffsets) != 0 && uint64(column.JSONOffsets[len(column.JSONOffsets)-1]) != uint64(len(column.JSONData)) {
+			return fmt.Errorf("%w: JSON payload offsets do not cover data", ErrColumnarJSONSubcolumnInvalid)
+		}
+		for row := 0; row < rowCount; row++ {
+			if !columnarJSONSubcolumnBitmapSet(column.Present, row) || !columnarJSONSubcolumnBitmapSet(column.Validity, row) {
+				continue
+			}
+			start := column.JSONOffsets[row]
+			end := column.JSONOffsets[row+1]
+			if end < start || uint64(end) > uint64(len(column.JSONData)) || !columnarJSONSubcolumnContainer(column.JSONData[start:end]) {
+				return fmt.Errorf("%w: invalid JSON value at row %d", ErrColumnarJSONSubcolumnInvalid, row)
+			}
+		}
 	default:
 		return fmt.Errorf("%w: unknown kind %d", ErrColumnarJSONSubcolumnInvalid, column.Kind)
 	}
@@ -187,6 +215,16 @@ func (column ColumnarJSONSubcolumn) Value(row int) (interface{}, bool) {
 		return nil, true
 	}
 	return value, true
+}
+
+// Exists reports whether a JSON path exists at row. JSON null is present;
+// out-of-range rows and missing paths are false. It avoids touching the
+// payload, which keeps JSON_EXISTS allocation-free for columnar scans.
+func (column ColumnarJSONSubcolumn) Exists(row int) bool {
+	if row < 0 || row >= column.Rows {
+		return false
+	}
+	return columnarJSONSubcolumnBitmapSet(column.Present, row)
 }
 
 func (column ColumnarJSONSubcolumn) lookup(row int) (interface{}, bool, bool) {
@@ -223,6 +261,16 @@ func (column ColumnarJSONSubcolumn) lookup(row int) (interface{}, bool, bool) {
 			return nil, false, false
 		}
 		return column.BoolBits[bitmapIndex]&bitmapMask != 0, true, true
+	case ColumnarJSONSubcolumnJSON:
+		if row+1 >= len(column.JSONOffsets) {
+			return nil, false, false
+		}
+		start := column.JSONOffsets[row]
+		end := column.JSONOffsets[row+1]
+		if end < start || uint64(end) > uint64(len(column.JSONData)) {
+			return nil, false, false
+		}
+		return json.RawMessage(column.JSONData[start:end]), true, true
 	default:
 		return nil, false, false
 	}
@@ -256,6 +304,16 @@ func (column *ColumnarJSONSubcolumn) store(row int, value interface{}) error {
 		if boolean {
 			column.BoolBits[row>>3] |= byte(1 << uint(row&7))
 		}
+	case ColumnarJSONSubcolumnJSON:
+		raw, ok := columnarJSONSubcolumnJSONBytes(value)
+		if !ok {
+			return fmt.Errorf("%w: value at row %d is not a JSON object or array", ErrColumnarJSONSubcolumnInvalid, row)
+		}
+		if uint64(len(column.JSONData)) > uint64(math.MaxUint32)-uint64(len(raw)) {
+			return fmt.Errorf("%w: JSON payload is too large", ErrColumnarJSONSubcolumnInvalid)
+		}
+		column.JSONData = append(column.JSONData, raw...)
+		column.JSONOffsets[row+1] = uint32(len(column.JSONData))
 	default:
 		return fmt.Errorf("%w: unknown kind %d", ErrColumnarJSONSubcolumnInvalid, column.Kind)
 	}
@@ -263,7 +321,7 @@ func (column *ColumnarJSONSubcolumn) store(row int, value interface{}) error {
 }
 
 func inferColumnarJSONSubcolumnKind(values []ColumnarJSONSubcolumnValue) (ColumnarJSONSubcolumnKind, error) {
-	hasInteger, hasFloat, hasString, hasBool := false, false, false, false
+	hasInteger, hasFloat, hasString, hasBool, hasJSON := false, false, false, false, false
 	for _, entry := range values {
 		if !entry.Present || entry.Value == nil {
 			continue
@@ -277,6 +335,8 @@ func inferColumnarJSONSubcolumnKind(values []ColumnarJSONSubcolumnValue) (Column
 			hasString = true
 		case func() bool { _, ok := entry.Value.(bool); return ok }():
 			hasBool = true
+		case columnarJSONSubcolumnIsJSON(entry.Value):
+			hasJSON = true
 		default:
 			return 0, fmt.Errorf("%w: unsupported scalar type %T", ErrColumnarJSONSubcolumnInvalid, entry.Value)
 		}
@@ -286,6 +346,8 @@ func inferColumnarJSONSubcolumnKind(values []ColumnarJSONSubcolumnValue) (Column
 		return ColumnarJSONSubcolumnString, nil
 	case hasBool && !hasInteger && !hasFloat && !hasString:
 		return ColumnarJSONSubcolumnBool, nil
+	case hasJSON && !hasInteger && !hasFloat && !hasString && !hasBool:
+		return ColumnarJSONSubcolumnJSON, nil
 	case (hasInteger || hasFloat) && !hasString && !hasBool:
 		if hasFloat {
 			return ColumnarJSONSubcolumnFloat64, nil
@@ -299,7 +361,64 @@ func inferColumnarJSONSubcolumnKind(values []ColumnarJSONSubcolumnValue) (Column
 }
 
 func validColumnarJSONSubcolumnKind(kind ColumnarJSONSubcolumnKind) bool {
-	return kind >= ColumnarJSONSubcolumnInt64 && kind <= ColumnarJSONSubcolumnBool
+	return kind >= ColumnarJSONSubcolumnInt64 && kind <= ColumnarJSONSubcolumnJSON
+}
+
+func columnarJSONSubcolumnBitmapSet(bitmap []byte, row int) bool {
+	return len(bitmap) == 0 || row>>3 < len(bitmap) && bitmap[row>>3]&(byte(1)<<uint(row&7)) != 0
+}
+
+func columnarJSONSubcolumnIsJSON(value interface{}) bool {
+	switch value := value.(type) {
+	case json.RawMessage:
+		return columnarJSONSubcolumnContainer(value)
+	case []byte:
+		return columnarJSONSubcolumnContainer(value)
+	case map[string]interface{}, SQLRow, []interface{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func columnarJSONSubcolumnJSONBytes(value interface{}) ([]byte, bool) {
+	switch value := value.(type) {
+	case json.RawMessage:
+		if !columnarJSONSubcolumnContainer(value) {
+			return nil, false
+		}
+		return value, true
+	case []byte:
+		if !columnarJSONSubcolumnContainer(value) {
+			return nil, false
+		}
+		return value, true
+	case map[string]interface{}, SQLRow, []interface{}:
+		encoded, err := json.Marshal(value)
+		if err != nil || !columnarJSONSubcolumnContainer(encoded) {
+			return nil, false
+		}
+		return encoded, true
+	default:
+		return nil, false
+	}
+}
+
+func columnarJSONSubcolumnContainer(value []byte) bool {
+	if !json.Valid(value) {
+		return false
+	}
+	for _, character := range value {
+		switch character {
+		case ' ', '\t', '\n', '\r':
+			continue
+		case '{', '[':
+			return true
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 func columnarJSONSubcolumnIsInteger(value interface{}) bool {

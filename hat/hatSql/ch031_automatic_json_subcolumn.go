@@ -568,6 +568,8 @@ func columnarJSONSubcolumnRetainedBytes(column ColumnarJSONSubcolumn) uint64 {
 		add(uint64(len(value)))
 	}
 	add(uint64(len(column.BoolBits)))
+	add(uint64(len(column.JSONOffsets)) * uint64(unsafe.Sizeof(uint32(0))))
+	add(uint64(len(column.JSONData)))
 	add(uint64(len(column.Present)))
 	add(uint64(len(column.Validity)))
 	return retained

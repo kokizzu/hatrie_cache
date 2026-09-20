@@ -228,6 +228,9 @@ func sqlColumnarJSONSubcolumnValue(expr sqlExpr, row sqlExecRow) (interface{}, b
 		if !found {
 			continue
 		}
+		if expr.name == "JSON_EXISTS" {
+			return nil, column.Exists(current.columnarRow), true
+		}
 		value, present := column.Value(current.columnarRow)
 		return value, present, true
 	}

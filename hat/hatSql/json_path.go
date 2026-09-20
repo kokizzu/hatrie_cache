@@ -292,6 +292,15 @@ func evalSQLJSONPathFunction(expr sqlExpr, group []sqlExecRow, row sqlExecRow) i
 		if !present {
 			return nil
 		}
+		if expr.name == "JSON_QUERY" {
+			return sqlJSONMaterialize(value)
+		}
+		if expr.name == "JSON_VALUE" {
+			switch value.(type) {
+			case map[string]interface{}, SQLRow, []interface{}, json.RawMessage, sqlJSONMemberLookup:
+				return sqlEvalError{err: fmt.Errorf("JSON_VALUE requires a scalar path result; use JSON_QUERY"), token: expr.token}
+			}
+		}
 		return value
 	}
 	input := evalSQLExpr(expr.args[0], group, row)
@@ -337,7 +346,7 @@ func evalSQLJSONPathFunction(expr sqlExpr, group []sqlExecRow, row sqlExecRow) i
 			return nil
 		}
 		switch value.(type) {
-		case map[string]interface{}, SQLRow, []interface{}, sqlJSONMemberLookup:
+		case map[string]interface{}, SQLRow, []interface{}, json.RawMessage, sqlJSONMemberLookup:
 			return sqlEvalError{err: fmt.Errorf("JSON_VALUE requires a scalar path result; use JSON_QUERY"), token: expr.token}
 		}
 		return value
@@ -347,6 +356,13 @@ func evalSQLJSONPathFunction(expr sqlExpr, group []sqlExecRow, row sqlExecRow) i
 }
 
 func sqlJSONMaterialize(value interface{}) interface{} {
+	if raw, ok := value.(json.RawMessage); ok {
+		var decoded interface{}
+		if err := json.Unmarshal(raw, &decoded); err == nil {
+			return decoded
+		}
+		return nil
+	}
 	if materializer, ok := value.(sqlJSONMaterializer); ok {
 		return materializer.sqlJSONMaterialize()
 	}

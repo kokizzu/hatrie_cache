@@ -27740,6 +27740,64 @@ See [CH031_AUTOMATIC_TYPED_JSON_SUBCOLUMNS.md](CH031_AUTOMATIC_TYPED_JSON_SUBCOL
 for the source-generation contract, fallback behavior, and configuration
 limits.
 
+<a id="ch-u20-arrayjson-late-materialization"></a>
+## CH-U20 Array/JSON Late Materialization
+
+This compares the existing row-source evaluator with the opt-in CH-031
+columnar representation for a complex `$.items` path over 256 deterministic
+documents. Five `-count=5` samples were collected on an AMD Ryzen 9 5950X
+Linux `amd64` host. The row path compiles the path once but decodes each full
+document; the columnar path reuses one offset/data subcolumn.
+
+| Operation | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Row fallback `JSON_QUERY` | 746,441 | 489,407 | 7,927 | 1.00x |
+| Columnar late-materialized `JSON_QUERY` | 452,795 | 266,101 | 5,367 | 1.65x faster, 45.6% lower heap, 32.3% fewer allocations |
+| Row fallback `JSON_EXISTS` | 710,116 | 489,407 | 7,927 | 1.00x |
+| Columnar bitmap-only `JSON_EXISTS` | 1,099 | 0 | 0 | 646x faster, allocation-free |
+| One-time complex subcolumn materialization | 1,341,533 | 653,815 | 10,511 | promotion/build cost |
+
+The source fixture was `35,768` bytes; the retained complex-path column was
+`14,780` bytes, a 2.42x reduction. `JSON_QUERY` still allocates its decoded
+map/slice result, while `JSON_EXISTS` does not touch the raw payload. The
+one-time materialization cost must be amortized over repeated reads, which is
+why automatic promotion remains bounded and opt-in.
+
+Raw output from `make benchmark-chu20`:
+
+```text
+BenchmarkCHU20JSONSubcolumnMaterialize-32             	     963	   1340554 ns/op	  26.68 MB/s	  653826 B/op	   10511 allocs/op
+BenchmarkCHU20JSONSubcolumnMaterialize-32             	     928	   1402143 ns/op	  25.51 MB/s	  653801 B/op	   10511 allocs/op
+BenchmarkCHU20JSONSubcolumnMaterialize-32             	     924	   1331925 ns/op	  26.85 MB/s	  653791 B/op	   10511 allocs/op
+BenchmarkCHU20JSONSubcolumnMaterialize-32             	     940	   1341533 ns/op	  26.66 MB/s	  653815 B/op	   10511 allocs/op
+BenchmarkCHU20JSONSubcolumnMaterialize-32             	     915	   1345475 ns/op	  26.58 MB/s	  653777 B/op	   10511 allocs/op
+BenchmarkCHU20JSONQueryRowFallback-32                 	    1592	    707919 ns/op	   0.36 MB/s	     35768 source_bytes/op	  489430 B/op	    7927 allocs/op
+BenchmarkCHU20JSONQueryRowFallback-32                 	    1579	    778758 ns/op	   0.33 MB/s	     35768 source_bytes/op	  489439 B/op	    7927 allocs/op
+BenchmarkCHU20JSONQueryRowFallback-32                 	    1810	    750916 ns/op	   0.34 MB/s	     35768 source_bytes/op	  489429 B/op	    7927 allocs/op
+BenchmarkCHU20JSONQueryRowFallback-32                 	    1641	    746441 ns/op	   0.34 MB/s	     35768 source_bytes/op	  489432 B/op	    7927 allocs/op
+BenchmarkCHU20JSONQueryRowFallback-32                 	    1710	    731300 ns/op	   0.35 MB/s	     35768 source_bytes/op	  489429 B/op	    7927 allocs/op
+BenchmarkCHU20JSONQueryColumnarLateMaterialized-32    	    2312	    439348 ns/op	   0.58 MB/s	     14780 column_bytes/op	  266101 B/op	    5367 allocs/op
+BenchmarkCHU20JSONQueryColumnarLateMaterialized-32    	    2851	    468031 ns/op	   0.55 MB/s	     14780 column_bytes/op	  266101 B/op	    5367 allocs/op
+BenchmarkCHU20JSONQueryColumnarLateMaterialized-32    	    2598	    460720 ns/op	   0.56 MB/s	     14780 column_bytes/op	  266100 B/op	    5367 allocs/op
+BenchmarkCHU20JSONQueryColumnarLateMaterialized-32    	    2992	    437706 ns/op	   0.58 MB/s	     14780 column_bytes/op	  266100 B/op	    5367 allocs/op
+BenchmarkCHU20JSONQueryColumnarLateMaterialized-32    	    2827	    452795 ns/op	   0.57 MB/s	     14780 column_bytes/op	  266101 B/op	    5367 allocs/op
+BenchmarkCHU20JSONExistsRowFallback-32                	    1636	    729382 ns/op	   0.35 MB/s	  489407 B/op	    7927 allocs/op
+BenchmarkCHU20JSONExistsRowFallback-32                	    1620	    710116 ns/op	   0.36 MB/s	  489407 B/op	    7927 allocs/op
+BenchmarkCHU20JSONExistsRowFallback-32                	    1720	    689993 ns/op	   0.37 MB/s	  489407 B/op	    7927 allocs/op
+BenchmarkCHU20JSONExistsRowFallback-32                	    1873	    691355 ns/op	   0.37 MB/s	  489407 B/op	    7927 allocs/op
+BenchmarkCHU20JSONExistsRowFallback-32                	    1892	    785903 ns/op	   0.33 MB/s	  489408 B/op	    7927 allocs/op
+BenchmarkCHU20JSONExistsColumnar-32                   	 1000000	      1146 ns/op	 223.45 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCHU20JSONExistsColumnar-32                   	 1000000	      1045 ns/op	 245.03 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCHU20JSONExistsColumnar-32                   	 1041888	      1099 ns/op	 233.04 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCHU20JSONExistsColumnar-32                   	 1045014	      1134 ns/op	 225.75 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCHU20JSONExistsColumnar-32                   	 1089188	      1095 ns/op	 233.70 MB/s	       0 B/op	       0 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatSql	35.256s
+```
+
+See [CHU20_ARRAY_JSON_LATE_MATERIALIZATION.md](CHU20_ARRAY_JSON_LATE_MATERIALIZATION.md)
+for representation, correctness limits, and the complete tradeoff discussion.
+
 <a id="ch-u01-durable-asynchronous-insert-deduplication"></a>
 ## CH-U01 Durable Asynchronous-Insert Deduplication
 
