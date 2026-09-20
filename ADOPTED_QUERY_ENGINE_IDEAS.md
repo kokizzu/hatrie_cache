@@ -775,3 +775,13 @@ bounded subscriber count, and explicit subscriber overflow. It does not alter
 existing journal or SQL subscription defaults; durable storage, transport,
 authentication, and recovery orchestration remain caller-owned. See
 [TU39_SPACE_CHANGEFEED.md](TU39_SPACE_CHANGEFEED.md).
+
+## T-U28: Connection Pool Lifecycle Integration
+
+Adopted the opt-in `hatPeer.ConnectionPool` lifecycle integration. Successful
+dials emit `connected`, physical closes emit `disconnected`, and shutdown is
+emitted once after active handlers drain. Reused idle connections do not
+create duplicate events, and peer/error metadata is bounded before history
+retention. The nil registry preserves the existing default path. See
+[TU28_CONNECTION_POOL_LIFECYCLE.md](TU28_CONNECTION_POOL_LIFECYCLE.md) and
+[BENCHMARK.md](BENCHMARK.md#t-u28-connection-pool-lifecycle).

@@ -4334,7 +4334,7 @@ lookup and preparation tradeoff is documented in
 - Opt-in Tarantool-style compact peer session adapter: [COMPACT_PEER_SESSION.md](COMPACT_PEER_SESSION.md)
 - Prepared compact peer calls: [TR043A_COMPACT_PEER_PREPARED_CALL.md](TR043A_COMPACT_PEER_PREPARED_CALL.md)
 - Reusable compact peer frame buffers: [TR043B_COMPACT_PEER_WRITE_BUFFER.md](TR043B_COMPACT_PEER_WRITE_BUFFER.md)
-- Opt-in bounded peer connection and schema lifecycle hooks: [PEER_LIFECYCLE.md](PEER_LIFECYCLE.md)
+- Opt-in bounded peer connection, pool, and schema lifecycle hooks: [PEER_LIFECYCLE.md](PEER_LIFECYCLE.md) and [TU28_CONNECTION_POOL_LIFECYCLE.md](TU28_CONNECTION_POOL_LIFECYCLE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#t-u28-connection-pool-lifecycle)
 - Opt-in bounded peer transaction streams: [PEER_STREAM.md](PEER_STREAM.md)
 - Opt-in durable stream transaction recovery with bounded CRC-protected snapshots: [TU29_DURABLE_STREAM_TRANSACTION_RECOVERY.md](TU29_DURABLE_STREAM_TRANSACTION_RECOVERY.md), with measured sync-mode tradeoffs in [BENCHMARK.md](BENCHMARK.md#t-u29-durable-stream-transaction-recovery)
 

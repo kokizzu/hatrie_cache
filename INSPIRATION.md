@@ -652,6 +652,10 @@ explicit regional partitioning and simple backups over automatic sharding.
 
 - [x] T027 Consistent read views.
 - [x] T028 Public multi-operation transaction API.
+- [x] T028a Opt-in `hatPeer.ConnectionPool` lifecycle integration emits bounded
+  connected, disconnected, and post-drain shutdown events through the existing
+  lifecycle registry; daemon and schema integration remain caller-owned. See
+  [TU28_CONNECTION_POOL_LIFECYCLE.md](TU28_CONNECTION_POOL_LIFECYCLE.md).
 - [x] T029 Atomic callback or box.atomic-style mutation.
 - [x] T030 Configurable transaction isolation levels.
 - [x] T031 Savepoints and partial rollback.

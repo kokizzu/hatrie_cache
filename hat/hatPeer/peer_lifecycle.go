@@ -2,6 +2,7 @@ package hatPeer
 
 import (
 	"errors"
+	"strings"
 	"sync"
 	"time"
 )
@@ -24,8 +25,12 @@ const (
 	DefaultPeerLifecycleMaxHooks = 64
 	// DefaultPeerLifecycleHistoryLimit bounds retained event history per registry.
 	DefaultPeerLifecycleHistoryLimit = 32
-	maxPeerLifecycleHooks            = 4096
-	maxPeerLifecycleHistory          = 4096
+	// MaxPeerLifecycleErrorBytes bounds terminal error text retained in history.
+	MaxPeerLifecycleErrorBytes = 1024
+	// MaxPeerLifecyclePeerIDBytes bounds peer identity text retained in history.
+	MaxPeerLifecyclePeerIDBytes = 256
+	maxPeerLifecycleHooks       = 4096
+	maxPeerLifecycleHistory     = 4096
 )
 
 // PeerLifecycleKind identifies a peer connection or schema lifecycle event.
@@ -180,6 +185,8 @@ func (registry *PeerLifecycleRegistry) Emit(event PeerLifecycleEvent) error {
 	} else {
 		event.At = event.At.UTC()
 	}
+	event.PeerID = boundPeerLifecycleText(event.PeerID, MaxPeerLifecyclePeerIDBytes)
+	event.Error = boundPeerLifecycleText(event.Error, MaxPeerLifecycleErrorBytes)
 	registry.mu.Lock()
 	if registry.historySize < registry.historyLimit {
 		index := (registry.historyStart + registry.historySize) % registry.historyLimit
@@ -206,6 +213,13 @@ func (registry *PeerLifecycleRegistry) Emit(event PeerLifecycleEvent) error {
 		invokePeerLifecycleHook(entry.hook, event)
 	}
 	return nil
+}
+
+func boundPeerLifecycleText(value string, maxBytes int) string {
+	if len(value) <= maxBytes {
+		return value
+	}
+	return strings.Clone(value[:maxBytes])
 }
 
 func invokePeerLifecycleHook(hook PeerLifecycleHook, event PeerLifecycleEvent) {

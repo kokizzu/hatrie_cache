@@ -33249,3 +33249,37 @@ BenchmarkTU39SpaceChangefeedPublishWithSubscriber-32 5113654 230.3 ns/op 64 B/op
 BenchmarkTU39SpaceChangefeedPublishWithSubscriber-32 5235781 227.3 ns/op 64 B/op 4 allocs/op
 BenchmarkTU39SpaceChangefeedPublishWithSubscriber-32 5370345 232.4 ns/op 64 B/op 4 allocs/op
 ```
+## T-U28 Connection Pool Lifecycle
+
+The baseline was measured before the lifecycle integration. All measurements
+used `make benchmark-tu28-lifecycle`, five samples, `-benchmem`, on the same
+machine and checkout.
+
+| Workload | Before median | After median | After / before | Memory change |
+|---|---:|---:|---:|---:|
+| Dial, handler error, physical close | 493.6 ns/op | 659.1 ns/op | 1.34x from first baseline; 1.23x versus same-run control | 240 -> 240 B/op; 5 -> 5 allocs/op |
+| Reused idle connection | 48.93 ns/op | 48.0 ns/op | 0.98x latency | 0 -> 0 B/op; 0 -> 0 allocs/op |
+
+Raw samples:
+
+```text
+Before BenchmarkTU28PoolDialEachCallNoLifecycle:
+505.5 485.9 493.6 494.0 488.0 ns/op; 240 B/op; 5 allocs/op
+
+After BenchmarkTU28PoolDialEachCallWithLifecycle:
+651.4 676.6 650.0 659.1 662.7 ns/op; 240 B/op; 5 allocs/op
+
+Final same-run control BenchmarkTU28PoolDialEachCallNoLifecycle:
+528.6 543.9 555.0 535.5 512.2 ns/op; 240 B/op; 5 allocs/op
+
+Before BenchmarkConnectionPoolDo:
+50.95 47.34 48.96 47.27 48.93 ns/op; 0 B/op; 0 allocs/op
+
+After BenchmarkTU28PoolReuseWithLifecycle:
+48.00 48.14 46.73 49.26 47.64 ns/op; 0 B/op; 0 allocs/op
+```
+
+The roughly 1.23x same-run cost is limited to explicit lifecycle event
+production on dial and close. The normal reused connection path remains
+allocation-free, and the feature is disabled when
+`ConnectionPoolOptions.Lifecycle` is nil.

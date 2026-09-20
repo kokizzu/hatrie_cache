@@ -22397,3 +22397,38 @@ commit-tu39:
 .PHONY: push-tu39
 push-tu39:
 	bash scripts/push-tu39.sh
+.PHONY: benchmark-tu28-lifecycle
+benchmark-tu28-lifecycle:
+	bash scripts/benchmark-tu28-lifecycle.sh
+
+.PHONY: test-tu28-lifecycle
+test-tu28-lifecycle:
+	bash scripts/test-tu28-lifecycle.sh
+
+.PHONY: format-tu28-lifecycle
+format-tu28-lifecycle:
+	bash scripts/format-tu28-lifecycle.sh
+
+.PHONY: test-tu28-package
+test-tu28-package:
+	bash scripts/test-tu28-package.sh
+
+.PHONY: race-tu28-lifecycle
+race-tu28-lifecycle:
+	bash scripts/race-tu28-lifecycle.sh
+
+.PHONY: vet-tu28-lifecycle
+vet-tu28-lifecycle:
+	bash scripts/vet-tu28-lifecycle.sh
+
+.PHONY: verify-tu28
+verify-tu28:
+	bash scripts/verify-tu28.sh
+
+.PHONY: commit-tu28
+commit-tu28:
+	bash scripts/commit-tu28.sh
+
+.PHONY: push-tu28
+push-tu28:
+	bash scripts/push-tu28.sh

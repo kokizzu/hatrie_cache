@@ -105,6 +105,11 @@ type ConnectionPoolOptions struct {
 	DialRetryMaxDelay time.Duration
 	Dial              DialFunc
 	Breaker           *ConnectionPoolCircuitBreakerOptions
+	// Lifecycle records opt-in connection and pool lifecycle events. A nil
+	// registry preserves the allocation-free legacy path.
+	Lifecycle *PeerLifecycleRegistry
+	// PeerID is attached to lifecycle events emitted by this pool.
+	PeerID string
 }
 
 // ConnectionPoolStats is a point-in-time pool snapshot.
@@ -129,20 +134,23 @@ type ConnectionPool struct {
 	dialRetryMaxDelay time.Duration
 	breaker           *connectionPoolCircuitBreaker
 
-	slots   chan struct{}
-	idle    chan Connection
-	closed  chan struct{}
-	done    chan struct{}
-	poolCtx context.Context
-	cancel  context.CancelFunc
+	slots     chan struct{}
+	idle      chan Connection
+	closed    chan struct{}
+	done      chan struct{}
+	poolCtx   context.Context
+	cancel    context.CancelFunc
+	lifecycle *PeerLifecycleRegistry
+	peerID    string
 
-	mu           sync.Mutex
-	closedState  bool
-	active       int
-	open         int
-	acquires     uint64
-	dialAttempts uint64
-	dialFailures uint64
+	mu              sync.Mutex
+	closedState     bool
+	shutdownEmitted bool
+	active          int
+	open            int
+	acquires        uint64
+	dialAttempts    uint64
+	dialFailures    uint64
 }
 
 // NewConnectionPool creates a bounded reusable connection pool.
@@ -249,6 +257,8 @@ func NewConnectionPool(options ConnectionPoolOptions) (*ConnectionPool, error) {
 		done:              make(chan struct{}),
 		poolCtx:           poolContext,
 		cancel:            cancel,
+		lifecycle:         options.Lifecycle,
+		peerID:            options.PeerID,
 	}, nil
 }
 
@@ -294,9 +304,13 @@ func (pool *ConnectionPool) Close(ctx context.Context) error {
 		return ErrConnectionPoolContextRequired
 	}
 
+	startShutdownWatcher := false
 	pool.mu.Lock()
 	if !pool.closedState {
 		pool.closedState = true
+		if pool.lifecycle != nil {
+			startShutdownWatcher = true
+		}
 		close(pool.closed)
 		pool.cancel()
 		if pool.active == 0 {
@@ -304,10 +318,14 @@ func (pool *ConnectionPool) Close(ctx context.Context) error {
 		}
 	}
 	pool.mu.Unlock()
+	if startShutdownWatcher {
+		go pool.waitForShutdownLifecycle()
+	}
 
 	pool.closeIdle()
 	select {
 	case <-pool.done:
+		pool.emitShutdownLifecycle()
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -443,6 +461,7 @@ func (pool *ConnectionPool) dialWithRetry(ctx context.Context) (Connection, erro
 			if pool.breaker != nil {
 				pool.breaker.success()
 			}
+			pool.emitLifecycle(PeerLifecycleEvent{Kind: PeerLifecycleConnected})
 			return connection, nil
 		}
 		if err == nil {
@@ -526,7 +545,13 @@ func (pool *ConnectionPool) closeConnection(connection Connection) error {
 		pool.open--
 	}
 	pool.mu.Unlock()
-	return connection.Close()
+	err := connection.Close()
+	event := PeerLifecycleEvent{Kind: PeerLifecycleDisconnected}
+	if err != nil {
+		event.Error = err.Error()
+	}
+	pool.emitLifecycle(event)
+	return err
 }
 
 func (pool *ConnectionPool) closeConnectionAndReleaseSlot(connection Connection) error {
@@ -544,6 +569,30 @@ func (pool *ConnectionPool) isClosed() bool {
 	closed := pool.closedState
 	pool.mu.Unlock()
 	return closed
+}
+
+func (pool *ConnectionPool) emitLifecycle(event PeerLifecycleEvent) {
+	if pool == nil || pool.lifecycle == nil {
+		return
+	}
+	event.PeerID = pool.peerID
+	_ = pool.lifecycle.Emit(event)
+}
+
+func (pool *ConnectionPool) emitShutdownLifecycle() {
+	pool.mu.Lock()
+	if pool.shutdownEmitted {
+		pool.mu.Unlock()
+		return
+	}
+	pool.shutdownEmitted = true
+	pool.mu.Unlock()
+	pool.emitLifecycle(PeerLifecycleEvent{Kind: PeerLifecycleShutdown})
+}
+
+func (pool *ConnectionPool) waitForShutdownLifecycle() {
+	<-pool.done
+	pool.emitShutdownLifecycle()
 }
 
 func connectionPoolContextError(err error) bool {
