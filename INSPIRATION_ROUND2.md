@@ -78,7 +78,7 @@ operator control remain the preferred deployment model.
 - [ ] C242 Parallel restore of independent parts with bounded concurrency.
 - [ ] C243 Remote-part read-through caching with immutable checksum keys.
 - [ ] C244 Local cache reuse validated by part and column checksums.
-- [ ] C245 Vertical TTL deletion that reads only the deletion mask and key columns.
+- [x] C245 Vertical TTL deletion that reads only the deletion mask and key columns is implemented as an opt-in `hatDataStructure.PersistentDeleteBitmap` operation with a reusable zero-allocation buffer form. See [C245_VERTICAL_TTL_DELETE.md](C245_VERTICAL_TTL_DELETE.md) and [BENCHMARK.md](BENCHMARK.md#c245-vertical-ttl-deletion).
 - [x] C246 TTL-driven recompression policies separate from row deletion are implemented as an opt-in `hatDataStructure.TTLRecompressionPolicy` and `TupleCompressor.RecompressIfDue`. See [C246_TTL_RECOMPRESSION.md](C246_TTL_RECOMPRESSION.md) and [BENCHMARK.md](BENCHMARK.md#c246-ttl-driven-recompression).
 - [x] C247 Adaptive `uint64` delta and Gorilla `float64` compression with raw fallback are implemented as opt-in `hatDataStructure` codecs; ALP-style floating-point compression remains open. See [C247_UINT64_DELTA_CODEC.md](C247_UINT64_DELTA_CODEC.md).
 - [x] C248 Variant/JSON subcolumn projection that reads only referenced paths is adopted through the existing typed scalar and opt-in dynamic JSON subcolumns. See [C248_VARIANT_JSON_SUBCOLUMNS.md](C248_VARIANT_JSON_SUBCOLUMNS.md) and [BENCHMARK.md](BENCHMARK.md#c248-variantjson-subcolumn-projection).

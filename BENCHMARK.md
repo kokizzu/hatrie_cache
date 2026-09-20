@@ -1,5 +1,48 @@
 # Benchmark
 
+## C245 Vertical TTL Deletion
+
+Five 200 ms samples on Linux amd64, AMD Ryzen 9 5950X, with 65,536 rows.
+Ten percent of rows were expired, every seventeenth row was pre-deleted, and
+the full-row control carried a 512-byte payload. All paths returned the same
+row/key candidate shape; the control read the full payload for every row.
+
+| Operation | Median time | Heap/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Vertical TTL, convenience result | 317,988 ns/op | 603,905 B/op | 11 | 6.78x faster than full-row control; slice growth costs heap |
+| Vertical TTL, reusable buffer | 114,738 ns/op | 0 B/op | 0 | 18.78x faster than full-row control; no per-pass allocation |
+| Full-row control | 2,155,322 ns/op | 163,840 B/op | 1 | Baseline; reads the 512-byte payload |
+
+The reusable-buffer form retains its candidate backing array in the caller, so
+the zero-allocation result is a per-pass measurement rather than a claim of
+zero resident memory. The convenience form is kept for one-shot callers. The
+vertical operation only reads the deletion mask, key column, and expiry
+column; payload columns remain untouched for later compaction.
+
+Raw samples:
+
+```text
+BenchmarkPersistentDeleteBitmapVerticalTTL-32       317988 ns/op 603905 B/op 11 allocs/op
+BenchmarkPersistentDeleteBitmapVerticalTTL-32       294064 ns/op 603906 B/op 11 allocs/op
+BenchmarkPersistentDeleteBitmapVerticalTTL-32       282492 ns/op 603911 B/op 11 allocs/op
+BenchmarkPersistentDeleteBitmapVerticalTTL-32       337193 ns/op 603904 B/op 11 allocs/op
+BenchmarkPersistentDeleteBitmapVerticalTTL-32       344784 ns/op 603904 B/op 11 allocs/op
+BenchmarkPersistentDeleteBitmapVerticalTTLInto-32   111747 ns/op 0 B/op 0 allocs/op
+BenchmarkPersistentDeleteBitmapVerticalTTLInto-32   114738 ns/op 0 B/op 0 allocs/op
+BenchmarkPersistentDeleteBitmapVerticalTTLInto-32   119617 ns/op 0 B/op 0 allocs/op
+BenchmarkPersistentDeleteBitmapVerticalTTLInto-32   117572 ns/op 0 B/op 0 allocs/op
+BenchmarkPersistentDeleteBitmapVerticalTTLInto-32   106356 ns/op 0 B/op 0 allocs/op
+BenchmarkPersistentDeleteBitmapFullRowControl-32    2117872 ns/op 163840 B/op 1 allocs/op
+BenchmarkPersistentDeleteBitmapFullRowControl-32    2024986 ns/op 163840 B/op 1 allocs/op
+BenchmarkPersistentDeleteBitmapFullRowControl-32    2155322 ns/op 163840 B/op 1 allocs/op
+BenchmarkPersistentDeleteBitmapFullRowControl-32    2408245 ns/op 163840 B/op 1 allocs/op
+BenchmarkPersistentDeleteBitmapFullRowControl-32    2443958 ns/op 163840 B/op 1 allocs/op
+```
+
+Reproduce with `make benchmark-c245-vertical-ttl-delete`; run correctness,
+race, and vet checks with `make test-c245-vertical-ttl-delete`,
+`make race-c245-vertical-ttl-delete`, and `make vet-c245-vertical-ttl-delete`.
+
 ## C246 TTL-Driven Recompression
 
 Five 200 ms samples on an AMD Ryzen 9 5950X, Linux amd64. The rewrite tests

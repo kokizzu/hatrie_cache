@@ -23356,6 +23356,36 @@ commit-c246-ttl-recompression:
 push-c246-ttl-recompression:
 	bash scripts/push-c246-ttl-recompression.sh
 
+inspect-c245-scope:
+	bash scripts/inspect-c245-scope.sh
+
+test-c245-vertical-ttl-delete:
+	bash scripts/test-c245-vertical-ttl-delete.sh
+
+format-c245-vertical-ttl-delete:
+	bash scripts/format-c245-vertical-ttl-delete.sh
+
+race-c245-vertical-ttl-delete:
+	bash scripts/race-c245-vertical-ttl-delete.sh
+
+vet-c245-vertical-ttl-delete:
+	bash scripts/vet-c245-vertical-ttl-delete.sh
+
+benchmark-c245-vertical-ttl-delete:
+	bash scripts/benchmark-c245-vertical-ttl-delete.sh
+
+review-c245-vertical-ttl-delete:
+	bash scripts/review-c245-vertical-ttl-delete.sh
+
+stage-c245-vertical-ttl-delete:
+	bash scripts/stage-c245-vertical-ttl-delete.sh
+
+commit-c245-vertical-ttl-delete:
+	bash scripts/commit-c245-vertical-ttl-delete.sh
+
+push-c245-vertical-ttl-delete:
+	bash scripts/push-c245-vertical-ttl-delete.sh
+
 test-c249-offset-inspection-package:
 	bash scripts/test-c249-offset-inspection-package.sh
 
