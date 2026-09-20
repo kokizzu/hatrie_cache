@@ -12,6 +12,7 @@ git add -- \
   hat/hatReplication/c249_offset_inspection_benchmark_test.go \
   hat/hatReplication/c249_offset_inspection_test.go \
   scripts/benchmark-c249-offset-inspection.sh \
+  scripts/commit-c249-offset-inspection.sh \
   scripts/format-c249-offset-inspection.sh \
   scripts/inspect-c249-scope.sh \
   scripts/race-c249-offset-inspection.sh \
@@ -19,7 +20,8 @@ git add -- \
   scripts/stage-c249-offset-inspection.sh \
   scripts/test-c249-offset-inspection-package.sh \
   scripts/test-c249-offset-inspection.sh \
-  scripts/vet-c249-offset-inspection.sh
+  scripts/vet-c249-offset-inspection.sh \
+  scripts/push-c249-offset-inspection.sh
 
 git diff --cached --check
 git diff --cached --stat
