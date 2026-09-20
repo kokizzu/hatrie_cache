@@ -1097,7 +1097,11 @@ func normalizeRoleCatalogRule(rule Rule, limits roleCatalogLimits, namespaces ma
 	if err != nil {
 		return Rule{}, err
 	}
-	return Rule{Commands: commands, Namespaces: namespaceSelectors, Sources: sources, Objects: objects}, nil
+	functions, err := normalizeRoleCatalogSelectors(rule.Functions, limits.maxSelectors, limits.maxNameBytes, false)
+	if err != nil {
+		return Rule{}, err
+	}
+	return Rule{Commands: commands, Namespaces: namespaceSelectors, Sources: sources, Objects: objects, Functions: functions}, nil
 }
 
 func namespaceSelectorBase(selector string) string {
@@ -1131,7 +1135,8 @@ func roleCatalogRuleMatches(rule Rule, request AuthorizationRequest) bool {
 	return roleCatalogCommandMatches(rule.Commands, request.Command) &&
 		roleCatalogSelectorMatches(rule.Namespaces, request.Namespace, true) &&
 		roleCatalogSelectorMatches(rule.Sources, request.Source, false) &&
-		roleCatalogSelectorMatches(rule.Objects, request.Object, false)
+		roleCatalogSelectorMatches(rule.Objects, request.Object, false) &&
+		roleCatalogSelectorMatches(rule.Functions, request.Function, false)
 }
 
 func roleCatalogCommandMatches(selectors []string, value string) bool {
@@ -1184,7 +1189,7 @@ func roleCatalogSelectorMatches(selectors []string, value string, namespace bool
 }
 
 func sameRoleCatalogRule(left, right Rule) bool {
-	return sameStringSlice(left.Commands, right.Commands) && sameStringSlice(left.Namespaces, right.Namespaces) && sameStringSlice(left.Sources, right.Sources) && sameStringSlice(left.Objects, right.Objects)
+	return sameStringSlice(left.Commands, right.Commands) && sameStringSlice(left.Namespaces, right.Namespaces) && sameStringSlice(left.Sources, right.Sources) && sameStringSlice(left.Objects, right.Objects) && sameStringSlice(left.Functions, right.Functions)
 }
 
 func sameStringSlice(left, right []string) bool {
@@ -1220,7 +1225,8 @@ func validRoleCatalogRequest(request AuthorizationRequest, maxBytes int) bool {
 	return validOptionalRoleCatalogText(request.Command, maxBytes) &&
 		validOptionalRoleCatalogText(request.Namespace, maxBytes) &&
 		validOptionalRoleCatalogText(request.Source, maxBytes) &&
-		validOptionalRoleCatalogText(request.Object, maxBytes)
+		validOptionalRoleCatalogText(request.Object, maxBytes) &&
+		validOptionalRoleCatalogText(request.Function, maxBytes)
 }
 
 func validOptionalRoleCatalogText(value string, maxBytes int) bool {
@@ -1253,6 +1259,7 @@ func cloneRule(rule Rule) Rule {
 		Namespaces: append([]string(nil), rule.Namespaces...),
 		Sources:    append([]string(nil), rule.Sources...),
 		Objects:    append([]string(nil), rule.Objects...),
+		Functions:  append([]string(nil), rule.Functions...),
 	}
 }
 

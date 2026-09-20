@@ -34359,3 +34359,50 @@ BenchmarkTU32FiberMapSetup-32            79357  874.2 ns/op 3968 B/op  3 allocs/
 ```
 
 Reproduce with `make benchmark-tu32`.
+
+## T-U33 Function Grants
+
+This benchmark measures authorization before and after adding the opt-in
+function selector to `hatAuth.RoleCatalog`. Five samples ran on Linux/amd64
+with an AMD Ryzen 9 5950X using `-benchmem`. The paths all performed zero
+allocations; the function selector is a security capability with measurable
+CPU overhead, not a speed optimization.
+
+| Path | Median CPU | Median memory | Relative CPU |
+| --- | ---: | ---: | ---: |
+| Baseline policy authorization | 87.42 ns/op | 0 B/op, 0 allocs/op | 1.00x |
+| Existing role-catalog authorization | 190.7 ns/op | 0 B/op, 0 allocs/op | 2.18x |
+| Namespace grant, no function selector | 174.0 ns/op | 0 B/op, 0 allocs/op | 1.99x |
+| Function grant selector | 202.3 ns/op | 0 B/op, 0 allocs/op | 2.32x |
+
+The function selector adds about 28.3 ns/op versus the equivalent namespace
+grant (`1.16x` that path) without allocations. The cost is opt-in and buys
+bounded exact/trailing-prefix function authorization plus snapshot/restore
+coverage; the legacy policy path remains unchanged.
+
+Raw output (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+BenchmarkMU021BeforePolicyAuthorize-32         14379561  87.14 ns/op   0 B/op  0 allocs/op
+BenchmarkMU021BeforePolicyAuthorize-32         14404224  85.72 ns/op   0 B/op  0 allocs/op
+BenchmarkMU021BeforePolicyAuthorize-32         14680021  87.42 ns/op   0 B/op  0 allocs/op
+BenchmarkMU021BeforePolicyAuthorize-32         11793223  87.46 ns/op   0 B/op  0 allocs/op
+BenchmarkMU021BeforePolicyAuthorize-32         12490905  90.42 ns/op   0 B/op  0 allocs/op
+BenchmarkMU021AfterRoleCatalogAuthorize-32      5588887 195.7 ns/op   0 B/op  0 allocs/op
+BenchmarkMU021AfterRoleCatalogAuthorize-32      5880558 184.7 ns/op   0 B/op  0 allocs/op
+BenchmarkMU021AfterRoleCatalogAuthorize-32      6565828 192.8 ns/op   0 B/op  0 allocs/op
+BenchmarkMU021AfterRoleCatalogAuthorize-32      6154276 190.5 ns/op   0 B/op  0 allocs/op
+BenchmarkMU021AfterRoleCatalogAuthorize-32      6508707 190.7 ns/op   0 B/op  0 allocs/op
+BenchmarkTU33NamespaceGrantAuthorize-32         7185606 172.9 ns/op   0 B/op  0 allocs/op
+BenchmarkTU33NamespaceGrantAuthorize-32         7165609 179.6 ns/op   0 B/op  0 allocs/op
+BenchmarkTU33NamespaceGrantAuthorize-32         7345888 174.0 ns/op   0 B/op  0 allocs/op
+BenchmarkTU33NamespaceGrantAuthorize-32         6385448 164.3 ns/op   0 B/op  0 allocs/op
+BenchmarkTU33NamespaceGrantAuthorize-32         6479923 179.6 ns/op   0 B/op  0 allocs/op
+BenchmarkTU33FunctionGrantAuthorize-32          6466324 181.7 ns/op   0 B/op  0 allocs/op
+BenchmarkTU33FunctionGrantAuthorize-32          5805284 207.0 ns/op   0 B/op  0 allocs/op
+BenchmarkTU33FunctionGrantAuthorize-32          6596540 202.3 ns/op   0 B/op  0 allocs/op
+BenchmarkTU33FunctionGrantAuthorize-32          6043406 190.6 ns/op   0 B/op  0 allocs/op
+BenchmarkTU33FunctionGrantAuthorize-32          5828281 203.5 ns/op   0 B/op  0 allocs/op
+```
+
+Reproduce with `make benchmark-tu33-function-grants`.
