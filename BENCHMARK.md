@@ -33420,3 +33420,31 @@ BenchmarkTU18AfterVolatileCacheGetTTL-32 15.17 14.87 14.72 15.95 14.77 ns/op  0 
 ```
 
 Reproduce with `make benchmark-tu18` and `make verify-tu18`.
+
+## T-U21 Versioned Migration Manager
+
+Measured on Linux/amd64, AMD Ryzen 9 5950X, with five `-benchmem` samples.
+The lifecycle benchmarks use one active in-memory plan; snapshot benchmarks
+include JSON encoding, CRC32C, validation, and atomic restore preparation.
+
+| Operation | Median | Memory |
+| --- | ---: | ---: |
+| Status | 46.33 ns/op | 0 B/op; 0 allocs/op |
+| Advance | 14.06 ns/op | 0 B/op; 0 allocs/op |
+| MarshalBinary | 863.0 ns/op | 528 B/op; 4 allocs/op |
+| UnmarshalBinary | 4.261 us/op | 1,952 B/op; 25 allocs/op |
+
+This is coordination overhead, not a row-conversion benchmark. Snapshot costs
+are intentionally higher than lifecycle counters because the snapshot validates
+metadata and corruption boundaries before state replacement.
+
+Raw samples:
+
+```text
+BenchmarkTU21MigrationStatus-32    47.48 44.89 46.33 50.03 45.66 ns/op  0 B/op    0 allocs/op
+BenchmarkTU21MigrationAdvance-32   13.34 14.52 14.02 14.24 14.06 ns/op  0 B/op    0 allocs/op
+BenchmarkTU21MigrationMarshal-32  903.9 846.9 871.9 823.1 863.0 ns/op  528 B/op  4 allocs/op
+BenchmarkTU21MigrationUnmarshal-32 4383 4607 4261 4129 4234 ns/op       1952 B/op 25 allocs/op
+```
+
+Reproduce with `make benchmark-tu21` and `make verify-tu21`.

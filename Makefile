@@ -22357,6 +22357,30 @@ commit-tu18:
 push-tu18:
 	bash scripts/push-tu18.sh
 
+.PHONY: test-tu21
+test-tu21:
+	bash scripts/test-tu21.sh
+
+.PHONY: format-tu21
+format-tu21:
+	bash scripts/format-tu21.sh
+
+.PHONY: benchmark-tu21
+benchmark-tu21:
+	bash scripts/benchmark-tu21.sh
+
+.PHONY: verify-tu21
+verify-tu21:
+	bash scripts/verify-tu21.sh
+
+.PHONY: commit-tu21
+commit-tu21:
+	bash scripts/commit-tu21.sh
+
+.PHONY: push-tu21
+push-tu21:
+	bash scripts/push-tu21.sh
+
 .PHONY: commit-tu17
 commit-tu17:
 	bash scripts/commit-tu17.sh
