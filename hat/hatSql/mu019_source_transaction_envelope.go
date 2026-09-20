@@ -25,9 +25,10 @@ var ErrSQLSourceTransactionEnvelopeInvalid = ErrSQLSourceIngestionInvalid
 // relation changes in one callback; the coordinator records the commit marker
 // only after that callback returns nil.
 type SQLSourceTransactionEnvelope struct {
-	Source      string               `json:"source"`
-	Transaction SQLSourceTransaction `json:"transaction"`
-	Relations   []string             `json:"relations"`
+	Source        string               `json:"source"`
+	SchemaVersion string               `json:"schema_version,omitempty"`
+	Transaction   SQLSourceTransaction `json:"transaction"`
+	Relations     []string             `json:"relations"`
 }
 
 // SQLSourceTransactionEnvelopeCoordinator is the descriptive name for the
@@ -42,6 +43,13 @@ func NewSQLSourceTransactionEnvelopeCoordinator() *SQLSourceTransactionEnvelopeC
 
 func normalizeSQLSourceTransactionEnvelope(envelope SQLSourceTransactionEnvelope, requireRelations bool) (sqlSourceIngestionKey, SQLSourceTransactionEnvelope, error) {
 	envelope.Source = strings.TrimSpace(envelope.Source)
+	if envelope.SchemaVersion != "" {
+		schemaVersion, schemaErr := normalizeSQLSchemaVersion(envelope.SchemaVersion)
+		if schemaErr != nil {
+			return sqlSourceIngestionKey{}, SQLSourceTransactionEnvelope{}, fmt.Errorf("envelope schema: %w", schemaErr)
+		}
+		envelope.SchemaVersion = schemaVersion
+	}
 	envelope.Transaction.ID = strings.TrimSpace(envelope.Transaction.ID)
 	if envelope.Source == "" || envelope.Transaction.ID == "" || len(envelope.Transaction.Offsets) == 0 {
 		return sqlSourceIngestionKey{}, SQLSourceTransactionEnvelope{}, ErrSQLSourceTransactionEnvelopeInvalid
@@ -97,7 +105,7 @@ func normalizeSQLSourceTransactionEnvelope(envelope SQLSourceTransactionEnvelope
 }
 
 func equalSQLSourceTransactionMetadata(left, right SQLSourceTransactionEnvelope) bool {
-	return equalSQLSourceOffsets(left.Transaction.Offsets, right.Transaction.Offsets) && equalStringSlices(left.Relations, right.Relations)
+	return left.SchemaVersion == right.SchemaVersion && equalSQLSourceOffsets(left.Transaction.Offsets, right.Transaction.Offsets) && equalStringSlices(left.Relations, right.Relations)
 }
 
 func equalStringSlices(left, right []string) bool {

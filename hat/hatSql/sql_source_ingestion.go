@@ -29,8 +29,9 @@ var (
 // SQLSourceIngestion identifies one source transaction and its complete
 // offset group. All offsets must belong to Source.
 type SQLSourceIngestion struct {
-	Source      string               `json:"source"`
-	Transaction SQLSourceTransaction `json:"transaction"`
+	Source        string               `json:"source"`
+	SchemaVersion string               `json:"schema_version,omitempty"`
+	Transaction   SQLSourceTransaction `json:"transaction"`
 }
 
 type sqlSourceIngestionKey struct {
@@ -39,25 +40,37 @@ type sqlSourceIngestionKey struct {
 }
 
 type sqlSourceIngestionState struct {
-	offsets   []SQLSourceOffset
-	relations []string
-	done      chan struct{}
-	committed bool
-	err       error
+	offsets       []SQLSourceOffset
+	relations     []string
+	schemaVersion string
+	done          chan struct{}
+	committed     bool
+	err           error
 }
 
 // SQLSourceIngestionCoordinator provides a single-flight, idempotent source
 // transaction gate. It stores only transaction metadata and does not retain
 // ingested rows or source payloads.
 type SQLSourceIngestionCoordinator struct {
-	mu         sync.Mutex
-	ingestions map[sqlSourceIngestionKey]*sqlSourceIngestionState
+	mu             sync.Mutex
+	ingestions     map[sqlSourceIngestionKey]*sqlSourceIngestionState
+	schemaRegistry *SQLSchemaRegistry
 }
 
 // NewSQLSourceIngestionCoordinator creates an empty source ingestion
 // coordinator.
 func NewSQLSourceIngestionCoordinator() *SQLSourceIngestionCoordinator {
-	return &SQLSourceIngestionCoordinator{ingestions: make(map[sqlSourceIngestionKey]*sqlSourceIngestionState)}
+	return NewSQLSourceIngestionCoordinatorWithSchemaRegistry(nil)
+}
+
+// NewSQLSourceIngestionCoordinatorWithSchemaRegistry creates an ingestion
+// coordinator that validates every transaction's schema version before its
+// apply callback runs. A nil registry preserves the legacy behavior.
+func NewSQLSourceIngestionCoordinatorWithSchemaRegistry(registry *SQLSchemaRegistry) *SQLSourceIngestionCoordinator {
+	return &SQLSourceIngestionCoordinator{
+		ingestions:     make(map[sqlSourceIngestionKey]*sqlSourceIngestionState),
+		schemaRegistry: registry,
+	}
 }
 
 // Ingest invokes apply once for a new source transaction. Concurrent calls for
@@ -75,9 +88,13 @@ func (coordinator *SQLSourceIngestionCoordinator) Ingest(ingestion SQLSourceInge
 	if err != nil {
 		return false, err
 	}
+	if err := coordinator.validateSchemaVersion(normalized.Source, normalized.SchemaVersion); err != nil {
+		return false, err
+	}
 	envelope := SQLSourceTransactionEnvelope{
-		Source:      normalized.Source,
-		Transaction: normalized.Transaction,
+		Source:        normalized.Source,
+		SchemaVersion: normalized.SchemaVersion,
+		Transaction:   normalized.Transaction,
 	}
 	return coordinator.ingestNormalized(key, envelope, apply)
 }
@@ -98,6 +115,9 @@ func (coordinator *SQLSourceIngestionCoordinator) IngestEnvelope(envelope SQLSou
 	if err != nil {
 		return false, err
 	}
+	if err := coordinator.validateSchemaVersion(normalized.Source, normalized.SchemaVersion); err != nil {
+		return false, err
+	}
 	return coordinator.ingestNormalized(key, normalized, apply)
 }
 
@@ -107,7 +127,8 @@ func (coordinator *SQLSourceIngestionCoordinator) ingestNormalized(key sqlSource
 	coordinator.ensureMapLocked()
 	if existing, found := coordinator.ingestions[key]; found {
 		existingEnvelope := SQLSourceTransactionEnvelope{
-			Source: key.source,
+			Source:        key.source,
+			SchemaVersion: existing.schemaVersion,
 			Transaction: SQLSourceTransaction{
 				ID:      key.transactionID,
 				Offsets: existing.offsets,
@@ -128,9 +149,10 @@ func (coordinator *SQLSourceIngestionCoordinator) ingestNormalized(key sqlSource
 		return false, existing.err
 	}
 	state := &sqlSourceIngestionState{
-		offsets:   envelope.Transaction.Offsets,
-		relations: envelope.Relations,
-		done:      make(chan struct{}),
+		offsets:       envelope.Transaction.Offsets,
+		relations:     envelope.Relations,
+		schemaVersion: envelope.SchemaVersion,
+		done:          make(chan struct{}),
 	}
 	coordinator.ingestions[key] = state
 	coordinator.mu.Unlock()
@@ -200,7 +222,8 @@ func (coordinator *SQLSourceIngestionCoordinator) Snapshot() []SQLSourceIngestio
 			continue
 		}
 		snapshot = append(snapshot, SQLSourceIngestion{
-			Source: key.source,
+			Source:        key.source,
+			SchemaVersion: state.schemaVersion,
 			Transaction: SQLSourceTransaction{
 				ID:      key.transactionID,
 				Offsets: cloneSQLSourceOffsets(state.offsets),
@@ -231,7 +254,8 @@ func (coordinator *SQLSourceIngestionCoordinator) SnapshotEnvelopes() []SQLSourc
 			continue
 		}
 		snapshot = append(snapshot, SQLSourceTransactionEnvelope{
-			Source: key.source,
+			Source:        key.source,
+			SchemaVersion: state.schemaVersion,
 			Transaction: SQLSourceTransaction{
 				ID:      key.transactionID,
 				Offsets: cloneSQLSourceOffsets(state.offsets),
@@ -260,13 +284,17 @@ func (coordinator *SQLSourceIngestionCoordinator) Restore(snapshot []SQLSourceIn
 		if err != nil {
 			return err
 		}
+		if err := coordinator.validateSchemaVersion(normalized.Source, normalized.SchemaVersion); err != nil {
+			return err
+		}
 		if _, found := replacement[key]; found {
 			return fmt.Errorf("transaction %q for source %q: %w", key.transactionID, key.source, ErrSQLSourceIngestionInvalid)
 		}
 		replacement[key] = &sqlSourceIngestionState{
-			offsets:   normalized.Transaction.Offsets,
-			done:      closedSQLSourceIngestionChannel(),
-			committed: true,
+			offsets:       normalized.Transaction.Offsets,
+			schemaVersion: normalized.SchemaVersion,
+			done:          closedSQLSourceIngestionChannel(),
+			committed:     true,
 		}
 	}
 
@@ -294,14 +322,18 @@ func (coordinator *SQLSourceIngestionCoordinator) RestoreEnvelopes(snapshot []SQ
 		if err != nil {
 			return err
 		}
+		if err := coordinator.validateSchemaVersion(normalized.Source, normalized.SchemaVersion); err != nil {
+			return err
+		}
 		if _, found := replacement[key]; found {
 			return fmt.Errorf("%w: transaction %q for source %q", ErrSQLSourceTransactionEnvelopeInvalid, key.transactionID, key.source)
 		}
 		replacement[key] = &sqlSourceIngestionState{
-			offsets:   normalized.Transaction.Offsets,
-			relations: normalized.Relations,
-			done:      closedSQLSourceIngestionChannel(),
-			committed: true,
+			offsets:       normalized.Transaction.Offsets,
+			relations:     normalized.Relations,
+			schemaVersion: normalized.SchemaVersion,
+			done:          closedSQLSourceIngestionChannel(),
+			committed:     true,
 		}
 	}
 
@@ -324,6 +356,13 @@ func (coordinator *SQLSourceIngestionCoordinator) ensureMapLocked() {
 
 func normalizeSQLSourceIngestion(ingestion SQLSourceIngestion) (sqlSourceIngestionKey, SQLSourceIngestion, error) {
 	ingestion.Source = strings.TrimSpace(ingestion.Source)
+	if ingestion.SchemaVersion != "" {
+		schemaVersion, schemaErr := normalizeSQLSchemaVersion(ingestion.SchemaVersion)
+		if schemaErr != nil {
+			return sqlSourceIngestionKey{}, SQLSourceIngestion{}, fmt.Errorf("transaction schema: %w", schemaErr)
+		}
+		ingestion.SchemaVersion = schemaVersion
+	}
 	ingestion.Transaction.ID = strings.TrimSpace(ingestion.Transaction.ID)
 	if ingestion.Source == "" || ingestion.Transaction.ID == "" || len(ingestion.Transaction.Offsets) == 0 {
 		return sqlSourceIngestionKey{}, SQLSourceIngestion{}, ErrSQLSourceIngestionInvalid
@@ -346,6 +385,13 @@ func normalizeSQLSourceIngestion(ingestion SQLSourceIngestion) (sqlSourceIngesti
 	})
 	ingestion.Transaction.Offsets = normalized
 	return sqlSourceIngestionKey{source: ingestion.Source, transactionID: ingestion.Transaction.ID}, ingestion, nil
+}
+
+func (coordinator *SQLSourceIngestionCoordinator) validateSchemaVersion(source, version string) error {
+	if coordinator == nil || coordinator.schemaRegistry == nil {
+		return nil
+	}
+	return coordinator.schemaRegistry.validateNormalized(source, version)
 }
 
 func equalSQLSourceOffsets(left, right []SQLSourceOffset) bool {

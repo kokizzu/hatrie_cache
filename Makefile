@@ -23152,3 +23152,32 @@ commit-tu05-session-settings:
 .PHONY: push-tu05-session-settings
 push-tu05-session-settings:
 	@bash scripts/push-tu05-session-settings.sh
+test-mu040-schema-registry:
+	bash scripts/test-mu040-schema-registry.sh
+
+format-mu040-schema-registry:
+	bash scripts/format-mu040-schema-registry.sh
+
+benchmark-mu040-schema-registry:
+	bash scripts/benchmark-mu040-schema-registry.sh
+
+race-mu040-schema-registry:
+	bash scripts/race-mu040-schema-registry.sh
+
+vet-mu040-schema-registry:
+	bash scripts/vet-mu040-schema-registry.sh
+
+review-mu040-schema-registry:
+	bash scripts/review-mu040-schema-registry.sh
+
+stage-mu040-schema-registry:
+	bash scripts/stage-mu040-schema-registry.sh
+
+commit-mu040-schema-registry:
+	bash scripts/commit-mu040-schema-registry.sh
+
+amend-mu040-schema-registry:
+	bash scripts/amend-mu040-schema-registry.sh
+
+push-mu040-schema-registry:
+	bash scripts/push-mu040-schema-registry.sh

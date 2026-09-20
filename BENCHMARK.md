@@ -34481,3 +34481,45 @@ Raw after timeout-settings samples:
 7693 5600 37
 ```
 ```
+<a id="m-u40-source-schema-registry"></a>
+## M-U40 Source Schema Registry
+
+The benchmark measures one source-transaction admission path over a 256-entry
+deduplication window. The registry candidate validates a registered `events/v1`
+schema before the callback; the legacy control uses the same ingestion gate
+without a registry. Linux/amd64, AMD Ryzen 9 5950X, Go `-benchmem`, five
+samples.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Legacy ingestion control, paired final run | 472.1 | 449 | 4 | 1.00x |
+| Registry-gated ingestion, paired final run | 556.5 | 449 | 4 | 1.18x CPU, equal bytes/allocations |
+
+The clean pre-change baseline, before adding schema metadata to the ingestion
+contract, was `457.1 ns/op`, `433 B/op`, and `4 allocs/op`. The default-off
+path is therefore near the pre-change control; the compatibility gate is
+explicitly opt-in and pays its lookup cost only when configured.
+
+Raw final paired samples:
+
+```text
+BenchmarkMU040LegacyIngestionBaseline-32
+485.8 ns/op 449 B/op 4 allocs/op
+472.1 ns/op 449 B/op 4 allocs/op
+469.3 ns/op 449 B/op 4 allocs/op
+479.7 ns/op 449 B/op 4 allocs/op
+471.1 ns/op 449 B/op 4 allocs/op
+
+BenchmarkMU040RegistryIngestion-32
+557.8 ns/op 449 B/op 4 allocs/op
+557.1 ns/op 449 B/op 4 allocs/op
+556.1 ns/op 449 B/op 4 allocs/op
+542.6 ns/op 449 B/op 4 allocs/op
+556.5 ns/op 449 B/op 4 allocs/op
+```
+
+Reproduce with:
+
+```text
+make benchmark-mu040-schema-registry
+```
