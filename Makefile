@@ -21889,22 +21889,22 @@ verify-m054:
 	@bash scripts/verify-m054.sh
 
 tmp-hatrie-plan:
-	sh scripts/cleanup-hatrie-tmp.sh plan
+	bash scripts/cleanup-hatrie-tmp-safe.sh plan
 
 tmp-hatrie-clean:
-	sh scripts/cleanup-hatrie-tmp.sh apply
+	bash scripts/cleanup-hatrie-tmp-safe.sh apply
 
 tmp-hatrie-plan:
-	sh scripts/cleanup-hatrie-tmp.sh plan
+	bash scripts/cleanup-hatrie-tmp-safe.sh plan
 
 tmp-hatrie-clean:
-	sh scripts/cleanup-hatrie-tmp.sh apply
+	bash scripts/cleanup-hatrie-tmp-safe.sh apply
 
 tmp-hatrie-plan:
-	sh scripts/cleanup-hatrie-tmp.sh plan
+	bash scripts/cleanup-hatrie-tmp-safe.sh plan
 
 tmp-hatrie-clean:
-	sh scripts/cleanup-hatrie-tmp.sh apply
+	bash scripts/cleanup-hatrie-tmp-safe.sh apply
 
 benchmark-m055-baseline:
 	sh scripts/benchmark-m055-baseline.sh
@@ -23234,3 +23234,24 @@ commit-tu33-function-grants:
 .PHONY: push-tu33-function-grants
 push-tu33-function-grants:
 	bash scripts/push-tu33-function-grants.sh
+
+.PHONY: audit-hatrie-tmp
+audit-hatrie-tmp:
+	bash scripts/audit-hatrie-tmp.sh
+.PHONY: test-hatrie-tmp-cleanup
+test-hatrie-tmp-cleanup:
+	bash scripts/test-hatrie-tmp-cleanup.sh
+.PHONY: stage-hatrie-tmp-cleanup
+stage-hatrie-tmp-cleanup:
+	bash scripts/stage-hatrie-tmp-cleanup.sh
+
+.PHONY: commit-hatrie-tmp-cleanup
+commit-hatrie-tmp-cleanup:
+	bash scripts/commit-hatrie-tmp-cleanup.sh
+
+.PHONY: push-hatrie-tmp-cleanup
+push-hatrie-tmp-cleanup:
+	bash scripts/push-hatrie-tmp-cleanup.sh
+.PHONY: review-hatrie-tmp-cleanup
+review-hatrie-tmp-cleanup:
+	bash scripts/review-hatrie-tmp-cleanup.sh
