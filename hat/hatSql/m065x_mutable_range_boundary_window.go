@@ -76,8 +76,8 @@ func (window *MutableIncrementalRangeBoundaryWindow) Apply(mutations []Increment
 	if len(mutations) == 0 {
 		return nil, nil
 	}
-	if len(mutations) == 1 && mutations[0].Operation == IncrementalRangeBoundaryWindowUpdate {
-		changes, handled, err := window.applyStableMutableIncrementalRangeBoundaryWindowUpdate(mutations[0])
+	if len(mutations) > 0 {
+		changes, handled, err := window.applyStableMutableIncrementalRangeBoundaryWindowUpdates(mutations)
 		if handled || err != nil {
 			return changes, err
 		}
@@ -206,32 +206,52 @@ func (window *MutableIncrementalRangeBoundaryWindow) prepareMutableIncrementalRa
 	}, nil
 }
 
-func (window *MutableIncrementalRangeBoundaryWindow) applyStableMutableIncrementalRangeBoundaryWindowUpdate(mutation IncrementalRangeBoundaryWindowMutation) ([]DifferentialRow, bool, error) {
-	if strings.TrimSpace(mutation.Key) == "" {
-		return nil, true, ErrMutableIncrementalRangeBoundaryWindowKeyRequired
-	}
-	oldEntry, exists := window.entries[mutation.Key]
-	if !exists {
-		return nil, true, ErrMutableIncrementalRangeBoundaryWindowMissingKey
-	}
-	newEntry, err := window.prepareMutableIncrementalRangeBoundaryWindowEntry(mutation.Row)
-	if err != nil {
-		return nil, true, err
-	}
-	if newEntry.key != mutation.Key {
-		return nil, true, ErrMutableIncrementalRangeBoundaryWindowKeyMismatch
-	}
-	if oldEntry.partition != newEntry.partition || oldEntry.order != newEntry.order {
+func (window *MutableIncrementalRangeBoundaryWindow) applyStableMutableIncrementalRangeBoundaryWindowUpdates(mutations []IncrementalRangeBoundaryWindowMutation) ([]DifferentialRow, bool, error) {
+	if len(mutations) == 0 {
 		return nil, false, nil
+	}
+	prepared := make(map[string]mutableIncrementalRangeBoundaryWindowEntry, len(mutations))
+	partition := ""
+	partitionSet := false
+	for _, mutation := range mutations {
+		if mutation.Operation != IncrementalRangeBoundaryWindowUpdate {
+			return nil, false, nil
+		}
+		if strings.TrimSpace(mutation.Key) == "" {
+			return nil, true, ErrMutableIncrementalRangeBoundaryWindowKeyRequired
+		}
+		oldEntry, exists := window.entries[mutation.Key]
+		if !exists {
+			return nil, true, ErrMutableIncrementalRangeBoundaryWindowMissingKey
+		}
+		newEntry, err := window.prepareMutableIncrementalRangeBoundaryWindowEntry(mutation.Row)
+		if err != nil {
+			return nil, true, err
+		}
+		if newEntry.key != mutation.Key {
+			return nil, true, ErrMutableIncrementalRangeBoundaryWindowKeyMismatch
+		}
+		if oldEntry.partition != newEntry.partition || oldEntry.order != newEntry.order {
+			return nil, false, nil
+		}
+		if partitionSet && partition != oldEntry.partition {
+			return nil, false, nil
+		}
+		if _, exists := prepared[mutation.Key]; exists {
+			return nil, false, nil
+		}
+		partition = oldEntry.partition
+		partitionSet = true
+		prepared[mutation.Key] = newEntry
 	}
 
 	entries := make([]mutableIncrementalRangeBoundaryWindowEntry, 0)
 	for _, entry := range window.entries {
-		if entry.partition != oldEntry.partition {
+		if entry.partition != partition {
 			continue
 		}
-		if entry.key == mutation.Key {
-			entry = newEntry
+		if replacement, ok := prepared[entry.key]; ok {
+			entry = replacement
 		}
 		entries = append(entries, entry)
 	}
@@ -245,15 +265,17 @@ func (window *MutableIncrementalRangeBoundaryWindow) applyStableMutableIncrement
 		return entries[left].key < entries[right].key
 	})
 
-	updatedOutputs, changes := window.stableMutableIncrementalRangeBoundaryWindowOutputs(entries, mutation.Key)
-	window.entries[mutation.Key] = newEntry
+	updatedOutputs, changes := window.stableMutableIncrementalRangeBoundaryWindowOutputs(entries, prepared)
+	for key, entry := range prepared {
+		window.entries[key] = entry
+	}
 	for key, row := range updatedOutputs {
 		window.outputs[key] = row
 	}
 	return changes, true, nil
 }
 
-func (window *MutableIncrementalRangeBoundaryWindow) stableMutableIncrementalRangeBoundaryWindowOutputs(entries []mutableIncrementalRangeBoundaryWindowEntry, updatedKey string) (map[string]Row, []DifferentialRow) {
+func (window *MutableIncrementalRangeBoundaryWindow) stableMutableIncrementalRangeBoundaryWindowOutputs(entries []mutableIncrementalRangeBoundaryWindowEntry, updatedKeys map[string]mutableIncrementalRangeBoundaryWindowEntry) (map[string]Row, []DifferentialRow) {
 	updatedOutputs := make(map[string]Row)
 	changes := make([]DifferentialRow, 0)
 	frameStart := 0
@@ -265,7 +287,7 @@ func (window *MutableIncrementalRangeBoundaryWindow) stableMutableIncrementalRan
 		if window.definition.Kind == IncrementalRangeLastValue {
 			value := entries[peerEnd].value
 			for peerIndex := index; peerIndex <= peerEnd; peerIndex++ {
-				window.appendStableMutableIncrementalRangeBoundaryWindowOutput(entries[peerIndex], value, updatedKey, updatedOutputs, &changes)
+				window.appendStableMutableIncrementalRangeBoundaryWindowOutput(entries[peerIndex], value, updatedKeys, updatedOutputs, &changes)
 			}
 		} else {
 			for peerIndex := index; peerIndex <= peerEnd; peerIndex++ {
@@ -281,7 +303,7 @@ func (window *MutableIncrementalRangeBoundaryWindow) stableMutableIncrementalRan
 						frameStart++
 					}
 				}
-				window.appendStableMutableIncrementalRangeBoundaryWindowOutput(entries[peerIndex], entries[frameStart].value, updatedKey, updatedOutputs, &changes)
+				window.appendStableMutableIncrementalRangeBoundaryWindowOutput(entries[peerIndex], entries[frameStart].value, updatedKeys, updatedOutputs, &changes)
 			}
 		}
 		index = peerEnd + 1
@@ -289,9 +311,9 @@ func (window *MutableIncrementalRangeBoundaryWindow) stableMutableIncrementalRan
 	return updatedOutputs, changes
 }
 
-func (window *MutableIncrementalRangeBoundaryWindow) appendStableMutableIncrementalRangeBoundaryWindowOutput(entry mutableIncrementalRangeBoundaryWindowEntry, value interface{}, updatedKey string, updatedOutputs map[string]Row, changes *[]DifferentialRow) {
+func (window *MutableIncrementalRangeBoundaryWindow) appendStableMutableIncrementalRangeBoundaryWindowOutput(entry mutableIncrementalRangeBoundaryWindowEntry, value interface{}, updatedKeys map[string]mutableIncrementalRangeBoundaryWindowEntry, updatedOutputs map[string]Row, changes *[]DifferentialRow) {
 	oldRow, oldOK := window.outputs[entry.key]
-	if entry.key != updatedKey && oldOK {
+	if _, updated := updatedKeys[entry.key]; !updated && oldOK {
 		oldValue, valueOK := oldRow[window.definition.OutputColumn]
 		if valueOK && reflect.DeepEqual(oldValue, value) {
 			return

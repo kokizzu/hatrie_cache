@@ -22847,6 +22847,38 @@ commit-m065ab-mutable-range-sum-batch:
 .PHONY: push-m065ab-mutable-range-sum-batch
 push-m065ab-mutable-range-sum-batch:
 	bash ./scripts/push-m065ab-mutable-range-sum-batch.sh
+
+.PHONY: test-m065ac-mutable-range-boundary-batch
+test-m065ac-mutable-range-boundary-batch:
+	bash ./scripts/test-m065ac-mutable-range-boundary-batch.sh
+
+.PHONY: format-m065ac-mutable-range-boundary-batch
+format-m065ac-mutable-range-boundary-batch:
+	bash ./scripts/format-m065ac-mutable-range-boundary-batch.sh
+
+.PHONY: benchmark-m065ac-mutable-range-boundary-batch
+benchmark-m065ac-mutable-range-boundary-batch:
+	bash ./scripts/benchmark-m065ac-mutable-range-boundary-batch.sh
+
+.PHONY: verify-m065ac-mutable-range-boundary-batch
+verify-m065ac-mutable-range-boundary-batch:
+	bash ./scripts/verify-m065ac-mutable-range-boundary-batch.sh
+
+.PHONY: review-m065ac-mutable-range-boundary-batch
+review-m065ac-mutable-range-boundary-batch:
+	bash ./scripts/review-m065ac-mutable-range-boundary-batch.sh
+
+.PHONY: stage-m065ac-mutable-range-boundary-batch
+stage-m065ac-mutable-range-boundary-batch:
+	bash ./scripts/stage-m065ac-mutable-range-boundary-batch.sh
+
+.PHONY: commit-m065ac-mutable-range-boundary-batch
+commit-m065ac-mutable-range-boundary-batch:
+	bash ./scripts/commit-m065ac-mutable-range-boundary-batch.sh
+
+.PHONY: push-m065ac-mutable-range-boundary-batch
+push-m065ac-mutable-range-boundary-batch:
+	bash ./scripts/push-m065ac-mutable-range-boundary-batch.sh
 .PHONY: test-m065x-mutable-range-boundary
 test-m065x-mutable-range-boundary:
 	bash ./scripts/test-m065x-mutable-range-boundary.sh

@@ -1007,3 +1007,9 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   rows, while preserving the rebuild fallback for structural or NULL-state
   changes. See [INCREMENTAL_MUTABLE_RANGE_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_WINDOW.md)
   and [BENCHMARK.md](BENCHMARK.md#m065ab-batched-mutable-numeric-range-sum-fast-path).
+- [x] M065ac Batched same-position mutable numeric `RANGE` `FIRST_VALUE` /
+  `LAST_VALUE` updates validate all payload-only changes and scan the affected
+  ordered frame once, while preserving the affected-partition rebuild fallback
+  for structural batches. See
+  [INCREMENTAL_MUTABLE_RANGE_BOUNDARY_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_BOUNDARY_WINDOW.md)
+  and [BENCHMARK.md](BENCHMARK.md#m065ac-batched-mutable-range-boundary-fast-path).

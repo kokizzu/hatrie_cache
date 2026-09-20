@@ -33855,3 +33855,58 @@ and the mutable constructor's O(rows) retained-state tradeoff are unchanged.
 Focused correctness, race, and vet checks use the M065w mutable RANGE target;
 the isolated feature worktree's unrelated typed-table checkpoint tests still
 require the parallel typed-table changes and are not attributed to M065ab.
+
+## M065ac Batched Mutable RANGE Boundary Fast Path
+
+Command: `make benchmark-m065ac-mutable-range-boundary-batch`.
+
+This compares a two-row same-position `FIRST_VALUE`/`LAST_VALUE` mutation
+batch on one 2,000-row partition. The baseline is the pre-change M065x
+implementation, which rebuilt the affected partition for the batch. Five
+samples used `-benchtime=100x` on Linux/amd64.
+
+| Workload | Median CPU | Median transient memory | Median allocations | Improvement vs baseline |
+| --- | ---: | ---: | ---: | ---: |
+| `FIRST_VALUE` full affected-partition batch rebuild | 10,332,855 ns/op | 5,911,027 B/op | 68,113 allocs/op | 1.00x |
+| `FIRST_VALUE` batched same-position fast path | 1,251,013 ns/op | 389,806 B/op | 84 allocs/op | 8.26x CPU, 15.2x lower bytes, 811x fewer allocs |
+| `LAST_VALUE` full affected-partition batch rebuild | 10,247,158 ns/op | 5,901,933 B/op | 68,102 allocs/op | 1.00x |
+| `LAST_VALUE` batched same-position fast path | 1,225,511 ns/op | 387,118 B/op | 49 allocs/op | 8.36x CPU, 15.2x lower bytes, 1,390x fewer allocs |
+
+Raw baseline samples (`ns/op`, `B/op`, `allocs/op`), `FIRST_VALUE` first:
+
+```text
+10332785 5911198 68113
+10369115 5911011 68112
+10382362 5911027 68113
+10332855 5911038 68113
+9926029 5911012 68112
+
+10180679 5901933 68102
+10644860 5901918 68101
+10091861 5901936 68102
+10247158 5901910 68100
+10551622 5901990 68102
+```
+
+Raw optimized samples, `FIRST_VALUE` first:
+
+```text
+1279865 389800 83
+1251013 389826 85
+1219181 389792 83
+1269450 389871 84
+1224644 389806 84
+
+1280319 387116 49
+1224074 387117 49
+1225511 387118 49
+1214121 387122 49
+1293819 387132 50
+```
+
+The optimization is limited to all-update batches that retain one partition
+and each row's order position. Mixed operations, duplicate keys,
+cross-partition batches, and structural updates retain the existing
+correctness-first rebuild path. Focused correctness, race, and vet checks use
+the M065ac feature workflow; the isolated feature worktree's unrelated
+typed-table checkpoint tests still require the parallel typed-table changes.

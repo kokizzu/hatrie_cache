@@ -61,6 +61,52 @@ func BenchmarkM065xMutableRangeBoundary(b *testing.B) {
 	}
 }
 
+func BenchmarkM065acMutableRangeBoundaryBatchedSamePosition(b *testing.B) {
+	for _, kind := range []IncrementalRangeBoundaryWindowKind{IncrementalRangeFirstValue, IncrementalRangeLastValue} {
+		b.Run(fmt.Sprintf("kind-%d", kind), func(b *testing.B) {
+			window, err := NewMutableIncrementalRangeBoundaryWindow(IncrementalRangeBoundaryWindowDefinition{
+				Kind:           kind,
+				OutputColumn:   "result",
+				FramePreceding: 64,
+				OrderKey:       func(row Row) (interface{}, error) { return row["order"], nil },
+				RowKey:         func(row Row) (string, error) { return row["id"].(string), nil },
+				ValueKey:       func(row Row) (interface{}, error) { return row["value"], nil },
+			})
+			if err != nil {
+				b.Fatal(err)
+			}
+			rows := m065xMutableRangeBoundaryBenchmarkRows(2000)
+			inserts := make([]IncrementalRangeBoundaryWindowMutation, 0, len(rows))
+			for _, row := range rows {
+				inserts = append(inserts, IncrementalRangeBoundaryWindowMutation{
+					Operation: IncrementalRangeBoundaryWindowInsert,
+					Row:       row,
+				})
+			}
+			if _, err := window.Apply(inserts); err != nil {
+				b.Fatal(err)
+			}
+			batches := [2][]IncrementalRangeBoundaryWindowMutation{
+				{
+					{Operation: IncrementalRangeBoundaryWindowUpdate, Key: "row-1000", Row: Row{"id": "row-1000", "order": int64(1000), "value": int64(-1000)}},
+					{Operation: IncrementalRangeBoundaryWindowUpdate, Key: "row-1001", Row: Row{"id": "row-1001", "order": int64(1001), "value": int64(-1001)}},
+				},
+				{
+					{Operation: IncrementalRangeBoundaryWindowUpdate, Key: "row-1000", Row: Row{"id": "row-1000", "order": int64(1000), "value": int64(1000)}},
+					{Operation: IncrementalRangeBoundaryWindowUpdate, Key: "row-1001", Row: Row{"id": "row-1001", "order": int64(1001), "value": int64(1001)}},
+				},
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				if _, err := window.Apply(batches[iteration%len(batches)]); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 func m065xMutableRangeBoundaryBenchmarkRows(count int) []Row {
 	rows := make([]Row, count)
 	for index := range rows {

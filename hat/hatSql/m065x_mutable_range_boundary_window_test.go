@@ -91,6 +91,149 @@ func TestMutableIncrementalRangeBoundaryWindowTracksUpdatesAndDeletes(t *testing
 	}
 }
 
+func TestMutableIncrementalRangeBoundaryWindowBatchedStableUpdates(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		kind IncrementalRangeBoundaryWindowKind
+	}{
+		{name: "first", kind: IncrementalRangeFirstValue},
+		{name: "last", kind: IncrementalRangeLastValue},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			partitionCalls := 0
+			orderCalls := 0
+			rowKeyCalls := 0
+			valueCalls := 0
+			definition := IncrementalRangeBoundaryWindowDefinition{
+				Kind:           testCase.kind,
+				OutputColumn:   "result",
+				FramePreceding: 2,
+				PartitionKey: func(row Row) (string, error) {
+					partitionCalls++
+					return row["partition"].(string), nil
+				},
+				OrderKey: func(row Row) (interface{}, error) {
+					orderCalls++
+					return row["order"], nil
+				},
+				RowKey: func(row Row) (string, error) {
+					rowKeyCalls++
+					return row["id"].(string), nil
+				},
+				ValueKey: func(row Row) (interface{}, error) {
+					valueCalls++
+					return row["value"], nil
+				},
+			}
+			window, err := NewMutableIncrementalRangeBoundaryWindow(definition)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sequentialDefinition := definition
+			sequentialDefinition.PartitionKey = func(row Row) (string, error) { return row["partition"].(string), nil }
+			sequentialDefinition.OrderKey = func(row Row) (interface{}, error) { return row["order"], nil }
+			sequentialDefinition.RowKey = func(row Row) (string, error) { return row["id"].(string), nil }
+			sequentialDefinition.ValueKey = func(row Row) (interface{}, error) { return row["value"], nil }
+			sequential, err := NewMutableIncrementalRangeBoundaryWindow(sequentialDefinition)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inserts := []IncrementalRangeBoundaryWindowMutation{
+				{Operation: IncrementalRangeBoundaryWindowInsert, Row: Row{"id": "a", "partition": "p", "order": int64(1), "value": "A"}},
+				{Operation: IncrementalRangeBoundaryWindowInsert, Row: Row{"id": "b", "partition": "p", "order": int64(2), "value": "B"}},
+				{Operation: IncrementalRangeBoundaryWindowInsert, Row: Row{"id": "c", "partition": "p", "order": int64(3), "value": "C"}},
+				{Operation: IncrementalRangeBoundaryWindowInsert, Row: Row{"id": "d", "partition": "p", "order": int64(4), "value": "D"}},
+				{Operation: IncrementalRangeBoundaryWindowInsert, Row: Row{"id": "e", "partition": "p", "order": int64(5), "value": "E"}},
+			}
+			if _, err := window.Apply(inserts); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := sequential.Apply(inserts); err != nil {
+				t.Fatal(err)
+			}
+			partitionCalls = 0
+			orderCalls = 0
+			rowKeyCalls = 0
+			valueCalls = 0
+
+			mutations := []IncrementalRangeBoundaryWindowMutation{
+				{Operation: IncrementalRangeBoundaryWindowUpdate, Key: "b", Row: Row{"id": "b", "partition": "p", "order": int64(2), "value": "B2"}},
+				{Operation: IncrementalRangeBoundaryWindowUpdate, Key: "d", Row: Row{"id": "d", "partition": "p", "order": int64(4), "value": "D2"}},
+			}
+			if _, err := window.Apply(mutations); err != nil {
+				t.Fatal(err)
+			}
+			for _, mutation := range mutations {
+				if _, err := sequential.Apply([]IncrementalRangeBoundaryWindowMutation{mutation}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if partitionCalls != 2 || orderCalls != 2 || rowKeyCalls != 2 || valueCalls != 2 {
+				t.Fatalf("stable boundary callback calls = partition:%d order:%d row-key:%d value:%d, want 2 each", partitionCalls, orderCalls, rowKeyCalls, valueCalls)
+			}
+			if !reflect.DeepEqual(window.outputs, sequential.outputs) {
+				t.Fatalf("batched outputs = %#v, sequential outputs = %#v", window.outputs, sequential.outputs)
+			}
+		})
+	}
+}
+
+func TestMutableIncrementalRangeBoundaryWindowBatchedStableUpdatesMatchPeersAndPartitions(t *testing.T) {
+	for _, descending := range []bool{false, true} {
+		for _, kind := range []IncrementalRangeBoundaryWindowKind{IncrementalRangeFirstValue, IncrementalRangeLastValue} {
+			t.Run(testMutableRangeBoundaryName(kind, descending), func(t *testing.T) {
+				definition := IncrementalRangeBoundaryWindowDefinition{
+					Kind:           kind,
+					OutputColumn:   "result",
+					FramePreceding: 2,
+					Descending:     descending,
+					PartitionKey:   func(row Row) (string, error) { return row["partition"].(string), nil },
+					OrderKey:       func(row Row) (interface{}, error) { return row["order"], nil },
+					RowKey:         func(row Row) (string, error) { return row["id"].(string), nil },
+					ValueKey:       func(row Row) (interface{}, error) { return row["value"], nil },
+				}
+				batched, err := NewMutableIncrementalRangeBoundaryWindow(definition)
+				if err != nil {
+					t.Fatal(err)
+				}
+				sequential, err := NewMutableIncrementalRangeBoundaryWindow(definition)
+				if err != nil {
+					t.Fatal(err)
+				}
+				inserts := []IncrementalRangeBoundaryWindowMutation{
+					{Operation: IncrementalRangeBoundaryWindowInsert, Row: Row{"id": "a", "partition": "p", "order": int64(1), "value": "A"}},
+					{Operation: IncrementalRangeBoundaryWindowInsert, Row: Row{"id": "b", "partition": "p", "order": int64(1), "value": "B"}},
+					{Operation: IncrementalRangeBoundaryWindowInsert, Row: Row{"id": "c", "partition": "p", "order": int64(2), "value": "C"}},
+					{Operation: IncrementalRangeBoundaryWindowInsert, Row: Row{"id": "d", "partition": "p", "order": int64(3), "value": "D"}},
+					{Operation: IncrementalRangeBoundaryWindowInsert, Row: Row{"id": "e", "partition": "q", "order": int64(1), "value": "E"}},
+					{Operation: IncrementalRangeBoundaryWindowInsert, Row: Row{"id": "f", "partition": "q", "order": int64(2), "value": "F"}},
+				}
+				if _, err := batched.Apply(inserts); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := sequential.Apply(inserts); err != nil {
+					t.Fatal(err)
+				}
+				mutations := []IncrementalRangeBoundaryWindowMutation{
+					{Operation: IncrementalRangeBoundaryWindowUpdate, Key: "b", Row: Row{"id": "b", "partition": "p", "order": int64(1), "value": "B2"}},
+					{Operation: IncrementalRangeBoundaryWindowUpdate, Key: "c", Row: Row{"id": "c", "partition": "p", "order": int64(2), "value": "C2"}},
+				}
+				if _, err := batched.Apply(mutations); err != nil {
+					t.Fatal(err)
+				}
+				for _, mutation := range mutations {
+					if _, err := sequential.Apply([]IncrementalRangeBoundaryWindowMutation{mutation}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if !reflect.DeepEqual(batched.outputs, sequential.outputs) {
+					t.Fatalf("batched outputs = %#v, sequential outputs = %#v", batched.outputs, sequential.outputs)
+				}
+			})
+		}
+	}
+}
+
 func TestMutableIncrementalRangeBoundaryWindowIsAtomicAndSupportsDescending(t *testing.T) {
 	window, err := NewMutableIncrementalRangeBoundaryWindow(IncrementalRangeBoundaryWindowDefinition{
 		Kind:           IncrementalRangeLastValue,
