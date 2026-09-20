@@ -100,3 +100,66 @@ The fast path is limited to all-update batches that retain one partition and
 each row's order position. NULL values remain ignored by the extrema; invalid
 values fail atomically. Structural, cross-partition, duplicate-key, and mixed
 operation batches retain the existing affected-partition rebuild path.
+
+## Batched same-position COUNT(DISTINCT) and AVG updates
+
+The opt-in mutable numeric RANGE maintainer now has a stable-position fast path
+for `COUNT(DISTINCT int64)` and `AVG(int64)`. It validates every update before
+publication, retains each validated numeric value in the mutable entry, and
+recomputes only output frames containing one of the changed order positions.
+`COUNT(DISTINCT)` continues to ignore NULL values and count each remaining value
+once. `AVG` continues to ignore NULL values and uses checked `int64` sums before
+converting to `float64`. Existing rebuild behavior remains for inserts, deletes,
+position or partition changes, mixed operations, duplicate keys, and invalid
+values. The append-only constructor and defaults are unchanged.
+
+Run the optimized benchmark with:
+
+```text
+make benchmark-m065af-mutable-range-aggregate-batch
+```
+
+Matched five-sample medians use 2,000 rows, one partition, a 64-unit frame,
+and two same-position updates per operation:
+
+| Kind | Parent fallback | M065af fast path | Improvement |
+| --- | --- | --- | --- |
+| `COUNT(DISTINCT int64)` | 6,658,542 ns; 3,634,962 B; 40,155 allocs | 1,417,661 ns; 322,257 B; 2,247 allocs | 4.70x faster; 11.28x lower heap; 17.87x fewer allocs |
+| `AVG(int64)` | 6,654,410 ns; 3,721,772 B; 41,994 allocs | 1,052,390 ns; 327,635 B; 2,394 allocs | 6.32x faster; 11.36x lower heap; 17.54x fewer allocs |
+
+The cached value fields retain 16 bytes per mutable range entry on the 64-bit
+test platform. This feature is opt-in with `NewMutableIncrementalRangeWindow`;
+the faster update path therefore trades a small retained-state increase for a
+much larger reduction in per-update work and transient allocation.
+
+Raw parent samples (`ns/op`, `B/op`, `allocs/op`), `COUNT(DISTINCT)` first:
+
+```text
+6794931 3634996 40154
+6752739 3634945 40154
+6695959 3635024 40155
+6476539 3634962 40155
+6658542 3634961 40155
+
+6930399 3721855 41993
+6671674 3721841 41999
+5461463 3721751 41994
+6529930 3721661 41988
+6654410 3721772 41995
+```
+
+Raw M065af samples, `COUNT(DISTINCT)` first:
+
+```text
+1457658 322254 2247
+1417661 322258 2248
+1304933 322267 2248
+1419971 322250 2247
+1357748 322257 2247
+
+1035296 327676 2396
+1052390 327521 2386
+1014107 327635 2394
+1088752 327588 2391
+1061798 327672 2396
+```

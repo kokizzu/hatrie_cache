@@ -22912,6 +22912,38 @@ commit-m065ae-mutable-range-extrema-batch:
 push-m065ae-mutable-range-extrema-batch:
 	bash ./scripts/push-m065ae-mutable-range-extrema-batch.sh
 
+.PHONY: test-m065af-mutable-range-aggregate-batch
+test-m065af-mutable-range-aggregate-batch:
+	bash ./scripts/test-m065af-mutable-range-aggregate-batch.sh
+
+.PHONY: format-m065af-mutable-range-aggregate-batch
+format-m065af-mutable-range-aggregate-batch:
+	bash ./scripts/format-m065af-mutable-range-aggregate-batch.sh
+
+.PHONY: benchmark-m065af-mutable-range-aggregate-batch
+benchmark-m065af-mutable-range-aggregate-batch:
+	bash ./scripts/benchmark-m065af-mutable-range-aggregate-batch.sh
+
+.PHONY: verify-m065af-mutable-range-aggregate-batch
+verify-m065af-mutable-range-aggregate-batch:
+	bash ./scripts/verify-m065af-mutable-range-aggregate-batch.sh
+
+.PHONY: review-m065af-mutable-range-aggregate-batch
+review-m065af-mutable-range-aggregate-batch:
+	bash ./scripts/review-m065af-mutable-range-aggregate-batch.sh
+
+.PHONY: stage-m065af-mutable-range-aggregate-batch
+stage-m065af-mutable-range-aggregate-batch:
+	bash ./scripts/stage-m065af-mutable-range-aggregate-batch.sh
+
+.PHONY: commit-m065af-mutable-range-aggregate-batch
+commit-m065af-mutable-range-aggregate-batch:
+	bash ./scripts/commit-m065af-mutable-range-aggregate-batch.sh
+
+.PHONY: push-m065af-mutable-range-aggregate-batch
+push-m065af-mutable-range-aggregate-batch:
+	bash ./scripts/push-m065af-mutable-range-aggregate-batch.sh
+
 .PHONY: test-m065ac-mutable-range-boundary-batch
 test-m065ac-mutable-range-boundary-batch:
 	bash ./scripts/test-m065ac-mutable-range-boundary-batch.sh

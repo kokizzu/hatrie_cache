@@ -901,3 +901,18 @@ is `13.13x` to `13.78x` faster, uses `13.8x` to `14.6x` fewer transient bytes,
 and uses `9.9x` to `19.8x` fewer allocations. See
 [INCREMENTAL_MUTABLE_RANGE_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_WINDOW.md)
 and [BENCHMARK.md](BENCHMARK.md#m065ae-batched-mutable-range-extrema-fast-path).
+
+## M065af: Batched Mutable RANGE Aggregate Fast Path
+
+Extended the Materialize-style mutable arrangement optimization to same-position
+`COUNT(DISTINCT int64)` and `AVG(int64)` update batches. Mutable entries retain
+validated numeric values for these opt-in kinds, allowing only frames that
+contain changed order positions to be recomputed. NULL handling, exact distinct
+membership, checked average sums, peer semantics, and atomic invalid-value
+validation remain unchanged. Structural, cross-partition, duplicate-key, and
+mixed-operation batches retain the existing affected-partition rebuild path.
+The matched 2,000-row benchmark measured `4.70x` to `6.32x` lower CPU time,
+`11.28x` to `11.36x` lower transient heap, and `17.54x` to `17.87x` fewer
+allocations. See
+[INCREMENTAL_MUTABLE_RANGE_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_WINDOW.md)
+and [BENCHMARK.md](BENCHMARK.md#m065af-batched-mutable-range-aggregate-fast-path).

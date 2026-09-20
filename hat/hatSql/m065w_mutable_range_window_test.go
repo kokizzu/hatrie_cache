@@ -340,6 +340,181 @@ func TestMutableIncrementalRangeWindowBatchedStableExtremaInvalidIsAtomic(t *tes
 	}
 }
 
+func TestMutableIncrementalRangeWindowBatchedStableDistinctAndAvgUpdates(t *testing.T) {
+	for _, kind := range []IncrementalRangeWindowKind{IncrementalRangeWindowCountDistinctInt64, IncrementalRangeWindowAvgInt64} {
+		t.Run(fmt.Sprintf("kind=%d", kind), func(t *testing.T) {
+			newWindow := func(valueCalls *int) *MutableIncrementalRangeWindow {
+				window, err := NewMutableIncrementalRangeWindow(IncrementalRangeWindowDefinition{
+					Kind:           kind,
+					OutputColumn:   "range_value",
+					FramePreceding: 2,
+					PartitionKey:   func(row Row) (string, error) { return row["partition"].(string), nil },
+					OrderKey:       func(row Row) (interface{}, error) { return row["order"], nil },
+					RowKey:         func(row Row) (string, error) { return row["id"].(string), nil },
+					ValueKey: func(row Row) (interface{}, error) {
+						*valueCalls = *valueCalls + 1
+						return row["value"], nil
+					},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return window
+			}
+			rows := []Row{
+				{"id": "a", "partition": "p", "order": int64(1), "value": int64(1)},
+				{"id": "b", "partition": "p", "order": int64(2), "value": int64(1)},
+				{"id": "c", "partition": "p", "order": int64(3), "value": int64(2)},
+				{"id": "d", "partition": "p", "order": int64(4), "value": int64(3)},
+			}
+			inserts := make([]IncrementalRangeWindowMutation, len(rows))
+			for index, row := range rows {
+				inserts[index] = IncrementalRangeWindowMutation{Operation: IncrementalRangeWindowInsert, Row: row}
+			}
+			updates := []IncrementalRangeWindowMutation{
+				{Operation: IncrementalRangeWindowUpdate, Key: "b", Row: Row{"id": "b", "partition": "p", "order": int64(2), "value": int64(3)}},
+				{Operation: IncrementalRangeWindowUpdate, Key: "d", Row: Row{"id": "d", "partition": "p", "order": int64(4), "value": int64(2)}},
+			}
+
+			batchedValueCalls := 0
+			batched := newWindow(&batchedValueCalls)
+			if _, err := batched.Apply(inserts); err != nil {
+				t.Fatal(err)
+			}
+			batchedValueCalls = 0
+			if _, err := batched.Apply(updates); err != nil {
+				t.Fatal(err)
+			}
+			if batchedValueCalls != len(updates) {
+				t.Fatalf("stable batch value calls = %d, want %d", batchedValueCalls, len(updates))
+			}
+
+			sequentialValueCalls := 0
+			sequential := newWindow(&sequentialValueCalls)
+			if _, err := sequential.Apply(inserts); err != nil {
+				t.Fatal(err)
+			}
+			for _, update := range updates {
+				if _, err := sequential.Apply([]IncrementalRangeWindowMutation{update}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !reflect.DeepEqual(batched.outputs, sequential.outputs) {
+				t.Fatalf("batched outputs = %#v, sequential outputs = %#v", batched.outputs, sequential.outputs)
+			}
+		})
+	}
+}
+
+func TestMutableIncrementalRangeWindowBatchedStableDistinctAndAvgMatchesPeersDescendingAndNulls(t *testing.T) {
+	for _, kind := range []IncrementalRangeWindowKind{IncrementalRangeWindowCountDistinctInt64, IncrementalRangeWindowAvgInt64} {
+		for _, descending := range []bool{false, true} {
+			t.Run(fmt.Sprintf("kind=%d/descending=%t", kind, descending), func(t *testing.T) {
+				newWindow := func() *MutableIncrementalRangeWindow {
+					window, err := NewMutableIncrementalRangeWindow(IncrementalRangeWindowDefinition{
+						Kind:           kind,
+						OutputColumn:   "range_value",
+						FramePreceding: 2,
+						Descending:     descending,
+						PartitionKey:   func(row Row) (string, error) { return row["partition"].(string), nil },
+						OrderKey:       func(row Row) (interface{}, error) { return row["order"], nil },
+						RowKey:         func(row Row) (string, error) { return row["id"].(string), nil },
+						ValueKey:       func(row Row) (interface{}, error) { return row["value"], nil },
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					return window
+				}
+				rows := []Row{
+					{"id": "a", "partition": "p", "order": int64(4), "value": nil},
+					{"id": "b", "partition": "p", "order": int64(4), "value": int64(1)},
+					{"id": "c", "partition": "p", "order": int64(3), "value": int64(1)},
+					{"id": "d", "partition": "p", "order": int64(2), "value": int64(2)},
+					{"id": "e", "partition": "q", "order": int64(4), "value": int64(9)},
+				}
+				inserts := make([]IncrementalRangeWindowMutation, len(rows))
+				for index, row := range rows {
+					inserts[index] = IncrementalRangeWindowMutation{Operation: IncrementalRangeWindowInsert, Row: row}
+				}
+				updates := []IncrementalRangeWindowMutation{
+					{Operation: IncrementalRangeWindowUpdate, Key: "a", Row: Row{"id": "a", "partition": "p", "order": int64(4), "value": int64(1)}},
+					{Operation: IncrementalRangeWindowUpdate, Key: "d", Row: Row{"id": "d", "partition": "p", "order": int64(2), "value": nil}},
+				}
+
+				batched := newWindow()
+				if _, err := batched.Apply(inserts); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := batched.Apply(updates); err != nil {
+					t.Fatal(err)
+				}
+
+				sequential := newWindow()
+				if _, err := sequential.Apply(inserts); err != nil {
+					t.Fatal(err)
+				}
+				for _, update := range updates {
+					if _, err := sequential.Apply([]IncrementalRangeWindowMutation{update}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if !reflect.DeepEqual(batched.outputs, sequential.outputs) {
+					t.Fatalf("batched outputs = %#v, sequential outputs = %#v", batched.outputs, sequential.outputs)
+				}
+			})
+		}
+	}
+}
+
+func TestMutableIncrementalRangeWindowBatchedStableDistinctAndAvgInvalidIsAtomic(t *testing.T) {
+	for _, kind := range []IncrementalRangeWindowKind{IncrementalRangeWindowCountDistinctInt64, IncrementalRangeWindowAvgInt64} {
+		t.Run(fmt.Sprintf("kind=%d", kind), func(t *testing.T) {
+			window, err := NewMutableIncrementalRangeWindow(IncrementalRangeWindowDefinition{
+				Kind:           kind,
+				OutputColumn:   "range_value",
+				FramePreceding: 2,
+				OrderKey:       func(row Row) (interface{}, error) { return row["order"], nil },
+				RowKey:         func(row Row) (string, error) { return row["id"].(string), nil },
+				ValueKey:       func(row Row) (interface{}, error) { return row["value"], nil },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := window.Apply([]IncrementalRangeWindowMutation{
+				{Operation: IncrementalRangeWindowInsert, Row: mutableRangeRow("a", 1, 1)},
+				{Operation: IncrementalRangeWindowInsert, Row: mutableRangeRow("b", 2, 2)},
+				{Operation: IncrementalRangeWindowInsert, Row: mutableRangeRow("c", 3, 3)},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			beforeOutputs := make(map[string]Row, len(window.outputs))
+			for key, row := range window.outputs {
+				beforeOutputs[key] = cloneIncrementalRangeWindowRow(row)
+			}
+			beforeRows := make(map[string]mutableIncrementalRangeWindowEntry, len(window.rows))
+			for key, entry := range window.rows {
+				entry.row = cloneIncrementalRangeWindowRow(entry.row)
+				beforeRows[key] = entry
+			}
+			_, err = window.Apply([]IncrementalRangeWindowMutation{
+				{Operation: IncrementalRangeWindowUpdate, Key: "a", Row: mutableRangeRow("a", 1, 4)},
+				{Operation: IncrementalRangeWindowUpdate, Key: "b", Row: Row{"id": "b", "order": int64(2), "value": "invalid"}},
+			})
+			wantErr := ErrIncrementalRangeWindowDistinctValueInvalid
+			if kind == IncrementalRangeWindowAvgInt64 {
+				wantErr = ErrIncrementalRangeWindowAvgValueInvalid
+			}
+			if !errors.Is(err, wantErr) {
+				t.Fatalf("invalid stable batch error = %v, want %v", err, wantErr)
+			}
+			if !reflect.DeepEqual(window.outputs, beforeOutputs) || !reflect.DeepEqual(window.rows, beforeRows) {
+				t.Fatalf("invalid stable batch changed state: outputs=%#v rows=%#v", window.outputs, window.rows)
+			}
+		})
+	}
+}
+
 func TestMutableIncrementalRangeWindowIsAtomicAndSupportsDescending(t *testing.T) {
 	window, err := NewMutableIncrementalRangeWindow(IncrementalRangeWindowDefinition{
 		Kind:           IncrementalRangeWindowCount,

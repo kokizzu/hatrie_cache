@@ -137,6 +137,58 @@ func BenchmarkM065aeMutableRangeExtremaBatchedSamePosition(b *testing.B) {
 	}
 }
 
+func BenchmarkM065afMutableRangeAggregateBatchedSamePosition(b *testing.B) {
+	for _, kind := range []IncrementalRangeWindowKind{IncrementalRangeWindowCountDistinctInt64, IncrementalRangeWindowAvgInt64} {
+		b.Run(strconv.Itoa(int(kind)), func(b *testing.B) {
+			definition := IncrementalRangeWindowDefinition{
+				Kind:           kind,
+				OutputColumn:   "range_value",
+				FramePreceding: 64,
+				PartitionKey:   func(row Row) (string, error) { return row["partition"].(string), nil },
+				OrderKey:       func(row Row) (interface{}, error) { return row["order"], nil },
+				RowKey:         func(row Row) (string, error) { return row["id"].(string), nil },
+				ValueKey:       func(row Row) (interface{}, error) { return row["value"], nil },
+			}
+			window, err := NewMutableIncrementalRangeWindow(definition)
+			if err != nil {
+				b.Fatal(err)
+			}
+			inserts := make([]IncrementalRangeWindowMutation, 2000)
+			for index := range inserts {
+				inserts[index] = IncrementalRangeWindowMutation{
+					Operation: IncrementalRangeWindowInsert,
+					Row: Row{
+						"id":        "row-" + strconv.Itoa(index),
+						"partition": "p",
+						"order":     int64(index),
+						"value":     int64(index % 97),
+					},
+				}
+			}
+			if _, err := window.Apply(inserts); err != nil {
+				b.Fatal(err)
+			}
+			batches := [][]IncrementalRangeWindowMutation{
+				{
+					{Operation: IncrementalRangeWindowUpdate, Key: "row-1000", Row: Row{"id": "row-1000", "partition": "p", "order": int64(1000), "value": int64(-1000)}},
+					{Operation: IncrementalRangeWindowUpdate, Key: "row-1500", Row: Row{"id": "row-1500", "partition": "p", "order": int64(1500), "value": int64(1500)}},
+				},
+				{
+					{Operation: IncrementalRangeWindowUpdate, Key: "row-1000", Row: Row{"id": "row-1000", "partition": "p", "order": int64(1000), "value": int64(1000)}},
+					{Operation: IncrementalRangeWindowUpdate, Key: "row-1500", Row: Row{"id": "row-1500", "partition": "p", "order": int64(1500), "value": int64(-1500)}},
+				},
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				if _, err := window.Apply(batches[iteration%len(batches)]); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 func m065wRangeBenchmarkDefinition() IncrementalRangeWindowDefinition {
 	return IncrementalRangeWindowDefinition{
 		Kind:           IncrementalRangeWindowSumInt64,

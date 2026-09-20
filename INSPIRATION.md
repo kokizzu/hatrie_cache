@@ -1025,3 +1025,9 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   rebuild/error path. See
   [INCREMENTAL_MUTABLE_RANGE_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_WINDOW.md)
   and [BENCHMARK.md](BENCHMARK.md#m065ae-batched-mutable-range-extrema-fast-path).
+- [x] M065af Batched same-position mutable numeric `RANGE COUNT(DISTINCT)` and
+  `AVG` updates reuse cached validated values and recompute only frames that
+  contain changed orders. Structural, cross-partition, duplicate-key, and
+  invalid-value batches retain the existing rebuild/error path. See
+  [INCREMENTAL_MUTABLE_RANGE_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_WINDOW.md)
+  and [BENCHMARK.md](BENCHMARK.md#m065af-batched-mutable-range-aggregate-fast-path).
