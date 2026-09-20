@@ -33654,3 +33654,46 @@ BenchmarkM065wMutableRangeWindow-32 195073 ns/op 196616 B/op 1207 allocs/op
 
 Reproduce with `make benchmark-m065w-mutable-range-window`; run correctness
 and race/vet checks with `make verify-m065w-mutable-range-window`.
+
+## M065x Mutable RANGE Boundary Windows
+
+The control recomputes every output row for a 2,000-row partition on each
+update. The mutable path updates one row with the same partition and order.
+The benchmark uses five `200ms` samples per subbenchmark:
+
+| Kind | Control median | Mutable median | CPU improvement | Control bytes | Mutable bytes | Bytes improvement | Control allocs | Mutable allocs | Allocation improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `FIRST_VALUE` | 2,106,369 ns/op | 1,311,115 ns/op | 1.61x | 781,278 B/op | 386,866 B/op | 2.02x lower | 4,010 | 52 | 77.1x fewer |
+| `LAST_VALUE` | 2,235,947 ns/op | 1,332,325 ns/op | 1.68x | 781,276 B/op | 385,521 B/op | 2.03x lower | 4,010 | 34 | 117.9x fewer |
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+FIRST_VALUE control:
+1957828 781273 4010
+2174698 781276 4010
+2106369 781280 4010
+2232452 781280 4010
+2080557 781278 4010
+FIRST_VALUE mutable:
+1316985 386866 52
+1311115 386866 52
+1259214 386858 52
+1388465 386864 52
+1300157 386870 52
+LAST_VALUE control:
+2189886 781274 4010
+2235947 781276 4010
+2272721 781278 4010
+2352059 781277 4010
+2092056 781274 4010
+LAST_VALUE mutable:
+1303617 385525 34
+1346379 385519 34
+1332325 385518 34
+1357547 385522 34
+1229050 385521 34
+```
+
+The fast path improves this workload without changing the append-only default.
+Structural mutations intentionally retain the affected-partition rebuild cost.

@@ -805,3 +805,13 @@ same-position delta updates for `COUNT` and `SUM(int64)`. The append-only
 constructor remains the default. See
 [INCREMENTAL_MUTABLE_RANGE_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_WINDOW.md)
 and [BENCHMARK.md](BENCHMARK.md#m065w-mutable-numeric-range-windows).
+
+## M065x: Mutable RANGE Boundary Windows
+
+Adopted the opt-in `hatSql.MutableIncrementalRangeBoundaryWindow` for exact
+mutable `FIRST_VALUE`/`LAST_VALUE` differentials. It validates complete
+mutation batches, rebuilds only affected partitions for structural changes,
+and uses an ordered same-position frame scan without cloning the full state.
+The existing append-only constructor and default behavior remain unchanged.
+See [INCREMENTAL_MUTABLE_RANGE_BOUNDARY_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_BOUNDARY_WINDOW.md)
+and [BENCHMARK.md](BENCHMARK.md#m065x-mutable-range-boundary-windows).

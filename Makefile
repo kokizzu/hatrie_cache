@@ -22783,3 +22783,30 @@ commit-m065w-mutable-range-window:
 .PHONY: push-m065w-mutable-range-window
 push-m065w-mutable-range-window:
 	bash ./scripts/push-m065w-mutable-range-window.sh
+.PHONY: test-m065x-mutable-range-boundary
+test-m065x-mutable-range-boundary:
+	bash ./scripts/test-m065x-mutable-range-boundary.sh
+.PHONY: format-m065x-mutable-range-boundary
+format-m065x-mutable-range-boundary:
+	bash ./scripts/format-m065x-mutable-range-boundary.sh
+.PHONY: benchmark-m065x-mutable-range-boundary
+benchmark-m065x-mutable-range-boundary:
+	bash ./scripts/benchmark-m065x-mutable-range-boundary.sh
+.PHONY: review-m065x-mutable-range-boundary
+review-m065x-mutable-range-boundary:
+	bash ./scripts/review-m065x-mutable-range-boundary.sh
+
+.PHONY: stage-m065x-mutable-range-boundary
+stage-m065x-mutable-range-boundary:
+	bash ./scripts/stage-m065x-mutable-range-boundary.sh
+
+.PHONY: commit-m065x-mutable-range-boundary
+commit-m065x-mutable-range-boundary:
+	bash ./scripts/commit-m065x-mutable-range-boundary.sh
+
+.PHONY: push-m065x-mutable-range-boundary
+push-m065x-mutable-range-boundary:
+	bash ./scripts/push-m065x-mutable-range-boundary.sh
+.PHONY: verify-m065x-mutable-range-boundary
+verify-m065x-mutable-range-boundary:
+	bash ./scripts/verify-m065x-mutable-range-boundary.sh
