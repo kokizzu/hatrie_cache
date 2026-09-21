@@ -35688,6 +35688,25 @@ ordinary data writes. The safety tradeoff is explicit: a transition remains
 pending until both configurations acknowledge it, preventing a partial
 membership change from being treated as committed.
 
+# CH-020: Zero-Copy Part Sharing
+
+Five `-benchmem` samples ran on Linux amd64 with an AMD Ryzen 9 5950X. The
+baseline clones a 1 MiB payload; the shared path registers its descriptor
+outside the timer and measures repeated acquire/release of an already verified
+reference.
+
+| Path | Raw ns/op samples | Median ns/op | B/op | allocs/op | Relative result |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 1 MiB payload clone | 150,489; 124,192; 138,216; 153,889; 194,424 | 150,489 | 1,048,585 | 1 | 1.00x |
+| Shared reference lease | 162.2; 157.8; 162.7; 168.3; 162.6 | 162.6 | 0 | 0 | 925.5x faster |
+
+The shared path avoids one 1 MiB heap copy per reuse. This is a local
+steady-state control-path measurement, not a claim that unrelated replicas can
+skip network transfer; the caller must provide shared storage and verify the
+manifest and authorization. See
+[CH020_ZERO_COPY_PART_SHARING.md](CH020_ZERO_COPY_PART_SHARING.md) for the
+lifecycle and limits.
+
 # TT-006: Hot-Standby WAL Catch-Up
 
 Five `-benchmem` samples ran on Linux amd64 with an AMD Ryzen 9 5950X. The

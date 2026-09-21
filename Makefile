@@ -24947,3 +24947,28 @@ commit-tt006-hot-standby:
 	bash scripts/commit-tt006-hot-standby.sh
 push-tt006-hot-standby:
 	bash scripts/push-tt006-hot-standby.sh
+.PHONY: format-ch020-zero-copy-part-sharing test-ch020-zero-copy-part-sharing test-ch020-zero-copy-part-sharing-package race-ch020-zero-copy-part-sharing race-ch020-zero-copy-part-sharing-package benchmark-ch020-zero-copy-part-sharing vet-ch020-zero-copy-part-sharing verify-ch020-zero-copy-part-sharing stage-ch020-zero-copy-part-sharing review-ch020-zero-copy-part-sharing commit-ch020-zero-copy-part-sharing push-ch020-zero-copy-part-sharing
+format-ch020-zero-copy-part-sharing:
+	bash scripts/ch020-zero-copy-part-sharing.sh format
+test-ch020-zero-copy-part-sharing:
+	bash scripts/ch020-zero-copy-part-sharing.sh test
+test-ch020-zero-copy-part-sharing-package:
+	bash scripts/ch020-zero-copy-part-sharing.sh package
+race-ch020-zero-copy-part-sharing:
+	bash scripts/ch020-zero-copy-part-sharing.sh race
+race-ch020-zero-copy-part-sharing-package:
+	bash scripts/ch020-zero-copy-part-sharing.sh race-package
+benchmark-ch020-zero-copy-part-sharing:
+	bash scripts/ch020-zero-copy-part-sharing.sh benchmark
+vet-ch020-zero-copy-part-sharing:
+	bash scripts/ch020-zero-copy-part-sharing.sh vet
+verify-ch020-zero-copy-part-sharing:
+	bash scripts/ch020-zero-copy-part-sharing.sh verify
+stage-ch020-zero-copy-part-sharing:
+	bash scripts/stage-ch020-zero-copy-part-sharing.sh
+review-ch020-zero-copy-part-sharing:
+	bash scripts/review-ch020-zero-copy-part-sharing.sh
+commit-ch020-zero-copy-part-sharing:
+	bash scripts/commit-ch020-zero-copy-part-sharing.sh
+push-ch020-zero-copy-part-sharing:
+	bash scripts/push-ch020-zero-copy-part-sharing.sh
