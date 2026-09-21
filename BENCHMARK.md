@@ -35149,3 +35149,44 @@ The ready queue removes 73,728 bytes and one allocation from this empty-poll
 path. It adds reverse-edge and heap metadata and `O(log R)` ready-index work to
 task updates; see [CH014B_MUTATION_DEPENDENCY_READY.md](CH014B_MUTATION_DEPENDENCY_READY.md)
 for raw samples and scope.
+
+## TT-035 Request Deadlines
+
+Command: `make benchmark-tt035-request-deadlines`.
+
+The helper benchmark uses five one-second samples on Linux amd64, AMD Ryzen 9
+5950X. The default-off path returns the original context; the enabled path
+creates a standard Go timeout context.
+
+| Path | Median ns/op | B/op | allocs/op | Relative time |
+| --- | ---: | ---: | ---: | ---: |
+| Timeout disabled | 7.063 | 0 | 0 | 1.00x |
+| Timeout enabled | 420.4 | 272 | 4 | 59.5x slower |
+
+The enabled setting has a measurable timer/context cost, so the CLI default is
+intentionally off. It changes neither command payload size nor replication
+bandwidth.
+
+The existing HTTP command benchmark was also run three times before and after
+the default-off wiring:
+
+| Path | Median ns/op | B/op | allocs/op | Relative time |
+| --- | ---: | ---: | ---: | ---: |
+| Before TT-035 | 1,062,474 | 10,328 | 58 | 1.00x |
+| After, timeout disabled | 799,647 | 10,361 | 58 | 0.75x observed |
+
+The end-to-end difference is run-to-run noise rather than an intended speedup;
+allocation count stayed constant and heap usage remained within 0.4%. Raw
+samples:
+
+```text
+Before: 1062474 ns/op 10351 B/op 58 allocs/op
+Before: 1410410 ns/op 10328 B/op 58 allocs/op
+Before:  866874 ns/op 10312 B/op 58 allocs/op
+After:   854169 ns/op 10364 B/op 58 allocs/op
+After:   799647 ns/op 10361 B/op 58 allocs/op
+After:   754772 ns/op 10347 B/op 58 allocs/op
+```
+
+See [TT035_REQUEST_DEADLINES.md](TT035_REQUEST_DEADLINES.md) for semantics and
+the embedded API configuration.

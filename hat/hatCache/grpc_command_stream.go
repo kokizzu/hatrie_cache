@@ -27,7 +27,12 @@ func normalizedCommandStreamWorkers(workers int) int {
 }
 
 func (server *CacheGRPCServer) executeGRPCCommandStreamRequest(ctx context.Context, request *hatriecachev1.CommandRequest) (*hatriecachev1.CommandResponse, error) {
-	response, err := server.executeGRPCCommand(ctx, request, "/hatriecache.v1.CacheService/CommandStream")
+	commandCtx, cancel, err := server.commandDeadlineContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+	response, err := server.executeGRPCCommand(commandCtx, request, "/hatriecache.v1.CacheService/CommandStream")
 	if err != nil {
 		return nil, err
 	}

@@ -24071,3 +24071,28 @@ commit-ch014b-mutation-dependency-graph:
 
 push-ch014b-mutation-dependency-graph:
 	bash ./scripts/push-ch014b-mutation-dependency-graph.sh
+
+.PHONY: test-tt035-request-deadlines
+test-tt035-request-deadlines:
+	bash ./scripts/test-tt035-request-deadlines.sh
+
+format-tt035-request-deadlines:
+	bash ./scripts/format-tt035-request-deadlines.sh
+
+benchmark-tt035-request-deadlines:
+	bash ./scripts/benchmark-tt035-request-deadlines.sh
+
+race-tt035-request-deadlines:
+	bash ./scripts/race-tt035-request-deadlines.sh
+
+review-tt035-request-deadlines:
+	bash ./scripts/review-tt035-request-deadlines.sh
+
+stage-tt035-request-deadlines:
+	bash ./scripts/stage-tt035-request-deadlines.sh
+
+commit-tt035-request-deadlines:
+	bash ./scripts/commit-tt035-request-deadlines.sh
+
+push-tt035-request-deadlines:
+	bash ./scripts/push-tt035-request-deadlines.sh

@@ -1175,6 +1175,23 @@ gRPC APIs, set `MONITORING_AUTH_TOKEN` on the server and pass `-token` to
 `make cli` for HTTP CLI calls; for native protobuf clients, set `GRPC_ADDR` and
 send the same token as gRPC metadata.
 
+### Command Request Deadlines
+
+The HTTP monitoring API and native gRPC API can share an optional server-side
+deadline for each synchronous command:
+
+```text
+./hatrie-cache -command-request-timeout=2s
+```
+
+The default is `0` (disabled), so existing caller deadlines and legacy command
+behavior remain unchanged. Earlier caller deadlines still win. The timeout is
+also applied independently to each gRPC stream message and is propagated to
+context-aware replication and quorum work. A local in-memory command remains
+atomic if it has already started. See
+[TT035_REQUEST_DEADLINES.md](TT035_REQUEST_DEADLINES.md) for embedded API use
+and measured overhead.
+
 ### Persistence Model
 
 The server restores data in this order:

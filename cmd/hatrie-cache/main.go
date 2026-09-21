@@ -80,6 +80,7 @@ type config struct {
 	sqlFunctionsPath                     string
 	monitoringReadHeaderTimeout          time.Duration
 	monitoringIdleTimeout                time.Duration
+	commandRequestTimeout                time.Duration
 	nodeID                               string
 	topologyPath                         string
 	electionTimeout                      time.Duration
@@ -476,6 +477,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		RequireHealthyReplicaReads:       cfg.requireHealthyReplicaReads,
 		RuntimeConfig:                    redactedConfig(cfg),
 		SQLFunctions:                     sqlFunctions,
+		RequestTimeout:                   cfg.commandRequestTimeout,
 	})
 	stopDBCompactor := startLevelDBCompactor(ctx, dbStore, cfg.dbCompactInterval, levelDBCompactorOptions{
 		StartKey: cfg.dbCompactStartKey,
@@ -638,6 +640,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.sqlFunctionsPath, "sql-functions-path", cfg.sqlFunctionsPath, "optional path that persists registered SQL function definitions across restart")
 	flags.DurationVar(&cfg.monitoringReadHeaderTimeout, "monitoring-read-header-timeout", cfg.monitoringReadHeaderTimeout, "maximum time to read monitoring HTTP request headers; use 0 to disable")
 	flags.DurationVar(&cfg.monitoringIdleTimeout, "monitoring-idle-timeout", cfg.monitoringIdleTimeout, "maximum idle monitoring HTTP keep-alive time; use 0 to disable")
+	flags.DurationVar(&cfg.commandRequestTimeout, "command-request-timeout", cfg.commandRequestTimeout, "maximum duration for one synchronous HTTP or gRPC command, including replication; use 0 to disable")
 	flags.StringVar(&cfg.nodeID, "node-id", "", "local cluster node id")
 	flags.StringVar(&cfg.topologyPath, "topology-path", "", "optional cluster topology JSON path to load and update")
 	flags.DurationVar(&cfg.electionTimeout, "election-timeout", cfg.electionTimeout, "node heartbeat timeout for deterministic topology leader election")
@@ -788,6 +791,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	if cfg.monitoringIdleTimeout < 0 {
 		return config{}, errors.New("monitoring idle timeout must be non-negative")
+	}
+	if cfg.commandRequestTimeout < 0 {
+		return config{}, errors.New("command request timeout must be non-negative")
 	}
 	if cfg.rateLimit < 0 {
 		return config{}, errors.New("rate limit must be non-negative")
@@ -1303,6 +1309,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"monitoring_web_dir":                       cfg.monitoringWebDir,
 		"monitoring_read_header_timeout":           cfg.monitoringReadHeaderTimeout.String(),
 		"monitoring_idle_timeout":                  cfg.monitoringIdleTimeout.String(),
+		"command_request_timeout":                  cfg.commandRequestTimeout.String(),
 		"node_id":                                  cfg.nodeID,
 		"topology_path":                            cfg.topologyPath,
 		"election_timeout":                         cfg.electionTimeout.String(),
@@ -1827,6 +1834,7 @@ func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.C
 		ReplicationSafety:                replicationSafety,
 		EnforceLeaderWrites:              cfg.enforceLeaderWrites,
 		RequireHealthyReplicaReads:       cfg.requireHealthyReplicaReads,
+		RequestTimeout:                   cfg.commandRequestTimeout,
 	}))
 	return server, listener, nil
 }

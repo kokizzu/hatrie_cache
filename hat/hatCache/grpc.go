@@ -70,6 +70,9 @@ type CacheGRPCOptions struct {
 	// ProtocolVersions is the inclusive gRPC protocol range this server accepts.
 	// A zero value defaults to the current protocol version for compatibility.
 	ProtocolVersions hatCommand.ProtocolVersionRange
+	// RequestTimeout bounds one synchronous command, including its replication
+	// work. Zero preserves the caller-provided gRPC deadline and legacy behavior.
+	RequestTimeout time.Duration
 	// CommandStreamWorkers bounds opt-in request-ID multiplexing. Zero preserves
 	// the legacy serialized stream behavior; values above the safety cap are
 	// clamped during server construction.
@@ -160,6 +163,18 @@ func (server *CacheGRPCServer) requestContext(ctx context.Context) (context.Cont
 		return ctx, err
 	}
 	return ctx, nil
+}
+
+func (server *CacheGRPCServer) commandDeadlineContext(ctx context.Context) (context.Context, context.CancelFunc, error) {
+	return hatCommand.WithRequestTimeout(ctx, server.options.RequestTimeout)
+}
+
+func (server *CacheGRPCServer) commandContext(ctx context.Context) (context.Context, context.CancelFunc, error) {
+	ctx, err := server.requestContext(ctx)
+	if err != nil {
+		return ctx, func() {}, err
+	}
+	return server.commandDeadlineContext(ctx)
 }
 
 func (server *CacheGRPCServer) negotiateProtocol(ctx context.Context) error {
@@ -311,10 +326,11 @@ func (server *CacheGRPCServer) Entries(ctx context.Context, request *hatriecache
 }
 
 func (server *CacheGRPCServer) Command(ctx context.Context, request *hatriecachev1.CommandRequest) (*hatriecachev1.CommandResponse, error) {
-	ctx, err := server.requestContext(ctx)
+	ctx, cancel, err := server.commandContext(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer cancel()
 	return server.executeGRPCCommand(ctx, request, "/hatriecache.v1.CacheService/Command")
 }
 
@@ -372,7 +388,12 @@ func (server *CacheGRPCServer) CommandBatchStream(stream hatriecachev1.CacheServ
 		}
 		requests := batch.GetRequests()
 		request := &hatriecachev1.CommandRequest{Command: "BATCH", Batch: requests}
-		response, err := server.executeGRPCCommand(ctx, request, "/hatriecache.v1.CacheService/CommandBatchStream")
+		commandCtx, cancel, err := server.commandDeadlineContext(ctx)
+		if err != nil {
+			return err
+		}
+		response, err := server.executeGRPCCommand(commandCtx, request, "/hatriecache.v1.CacheService/CommandBatchStream")
+		cancel()
 		if err != nil {
 			return err
 		}

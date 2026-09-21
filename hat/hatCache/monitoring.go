@@ -158,6 +158,9 @@ type MonitoringOptions struct {
 	// ProtocolVersions is the inclusive HTTP command protocol range accepted
 	// by this monitoring server. Zero defaults to the current supported range.
 	ProtocolVersions hatCommand.ProtocolVersionRange
+	// RequestTimeout bounds one synchronous command, including its replication
+	// work. Zero preserves the caller-provided HTTP deadline and legacy behavior.
+	RequestTimeout time.Duration
 	// RequireReplicationSchemaCompatibility rejects missing or mismatched schema
 	// metadata on internal replication. It is disabled by default.
 	RequireReplicationSchemaCompatibility bool
@@ -514,6 +517,10 @@ func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringH
 		handler.slowCommands = newMonitoringSlowCommandCapture(options.SlowCommandThreshold, options.SlowCommandCapacity)
 	}
 	return handler
+}
+
+func (handler *MonitoringHandler) commandContext(ctx context.Context) (context.Context, context.CancelFunc, error) {
+	return hatCommand.WithRequestTimeout(ctx, handler.options.RequestTimeout)
 }
 
 const (
@@ -1877,6 +1884,17 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 	if r.Method != http.MethodPost {
 		writeMethodNotAllowed(w)
 		return
+	}
+	if handler.options.RequestTimeout != 0 {
+		commandCtx, cancel, err := handler.commandContext(r.Context())
+		if err != nil {
+			writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
+			return
+		}
+		defer cancel()
+		if commandCtx != r.Context() {
+			r = r.WithContext(commandCtx)
+		}
 	}
 	if requestContextDone(w, r) {
 		return
