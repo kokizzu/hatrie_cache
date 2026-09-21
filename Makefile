@@ -24699,3 +24699,35 @@ push-ch046-compression:
 	bash scripts/push-ch046-compression.sh
 benchmark-mz026-adaptive:
 	bash scripts/benchmark-mz026-after.sh
+format-mz045-arrangement-workload:
+	bash scripts/mz045-arrangement-workload.sh format
+
+test-mz045-arrangement-workload:
+	bash scripts/mz045-arrangement-workload.sh test
+
+benchmark-mz045-arrangement-workload:
+	bash scripts/mz045-arrangement-workload.sh benchmark
+
+race-mz045-arrangement-workload:
+	bash scripts/mz045-arrangement-workload.sh race
+
+test-mz045-arrangement-workload-package:
+	bash scripts/mz045-arrangement-workload.sh package
+
+race-mz045-arrangement-workload-package:
+	bash scripts/mz045-arrangement-workload.sh race-package
+
+vet-mz045-arrangement-workload:
+	bash scripts/mz045-arrangement-workload.sh vet
+
+verify-mz045-arrangement-workload:
+	bash scripts/mz045-arrangement-workload.sh verify
+
+stage-mz045-arrangement-workload:
+	bash scripts/stage-mz045-arrangement-workload.sh
+
+commit-mz045-arrangement-workload:
+	bash scripts/commit-mz045-arrangement-workload.sh
+
+push-mz045-arrangement-workload:
+	bash scripts/push-mz045-arrangement-workload.sh

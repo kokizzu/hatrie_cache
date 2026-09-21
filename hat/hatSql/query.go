@@ -5801,6 +5801,7 @@ func cloneSQLQuery(source *sqlQuery) *sqlQuery {
 		return nil
 	}
 	query := *source
+	query.arrangementWorkload = nil
 	query.ctes = make([]sqlCTE, len(source.ctes))
 	for index, cte := range source.ctes {
 		query.ctes[index] = cte
@@ -5936,34 +5937,35 @@ func sqlQueryOutputsTie(order []sqlOrder, left, right sqlQueryOutput) bool {
 }
 
 type sqlQuery struct {
-	cacheKey           string
-	cacheVolatile      bool
-	indexHint          SQLIndexHint
-	maxThreads         int
-	ctes               []sqlCTE
-	selects            []sqlSelectItem
-	from               *sqlSource
-	joins              []sqlJoin
-	where              sqlExpr
-	prewhere           sqlExpr
-	groupBy            []sqlExpr
-	groupingSets       [][]sqlExpr
-	groupingDimensions []sqlExpr
-	having             sqlExpr
-	qualify            sqlExpr
-	orderBy            []sqlOrder
-	windows            map[string]sqlWindow
-	sample             *sqlTableSample
-	limitBy            *sqlLimitBy
-	limit              int
-	limitWithTies      bool
-	offset             int
-	distinct           bool
-	unions             []sqlUnion
-	explain            bool
-	explainCost        bool
-	pipeline           bool
-	analyze            bool
+	cacheKey            string
+	cacheVolatile       bool
+	arrangementWorkload *SQLArrangementWorkload
+	indexHint           SQLIndexHint
+	maxThreads          int
+	ctes                []sqlCTE
+	selects             []sqlSelectItem
+	from                *sqlSource
+	joins               []sqlJoin
+	where               sqlExpr
+	prewhere            sqlExpr
+	groupBy             []sqlExpr
+	groupingSets        [][]sqlExpr
+	groupingDimensions  []sqlExpr
+	having              sqlExpr
+	qualify             sqlExpr
+	orderBy             []sqlOrder
+	windows             map[string]sqlWindow
+	sample              *sqlTableSample
+	limitBy             *sqlLimitBy
+	limit               int
+	limitWithTies       bool
+	offset              int
+	distinct            bool
+	unions              []sqlUnion
+	explain             bool
+	explainCost         bool
+	pipeline            bool
+	analyze             bool
 }
 
 type sqlLimitBy struct {

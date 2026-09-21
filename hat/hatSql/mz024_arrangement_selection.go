@@ -320,6 +320,16 @@ func sqlArrangementWorkloadForQuery(query *sqlQuery) SQLArrangementWorkload {
 	if query == nil {
 		return SQLArrangementWorkload{}
 	}
+	if query.arrangementWorkload != nil {
+		return *query.arrangementWorkload
+	}
+	return sqlComputeArrangementWorkload(query)
+}
+
+func sqlComputeArrangementWorkload(query *sqlQuery) SQLArrangementWorkload {
+	if query == nil {
+		return SQLArrangementWorkload{}
+	}
 	shape := sqlProjectionAdvisorQueryShape(query)
 	workload := SQLArrangementWorkload{
 		FilterFields:  shape.filterFields,
@@ -330,4 +340,27 @@ func sqlArrangementWorkloadForQuery(query *sqlQuery) SQLArrangementWorkload {
 		sqlProjectionAdvisorCollectFields(join.on, &workload.JoinFields)
 	}
 	return sqlNormalizeArrangementWorkload(workload)
+}
+
+// sqlPrepareArrangementWorkloads freezes immutable workload fingerprints on a
+// compiled query tree. Cloned execution trees intentionally do not retain the
+// fingerprint because parameter binding can change the rewritten shape.
+func sqlPrepareArrangementWorkloads(query *sqlQuery) {
+	if query == nil {
+		return
+	}
+	workload := sqlComputeArrangementWorkload(query)
+	query.arrangementWorkload = &workload
+	for _, cte := range query.ctes {
+		sqlPrepareArrangementWorkloads(cte.query)
+	}
+	if query.from != nil {
+		sqlPrepareArrangementWorkloads(query.from.query)
+	}
+	for _, join := range query.joins {
+		sqlPrepareArrangementWorkloads(join.source.query)
+	}
+	for _, union := range query.unions {
+		sqlPrepareArrangementWorkloads(union.query)
+	}
 }

@@ -35,6 +35,7 @@ func CompileSQLQuery(source string) (*CompiledSQLQuery, error) {
 	// binding so parameter-dependent folds remain execution-local.
 	rewriteSQLQuery(template)
 	applySQLQueryCollation(template, SQLCollationBinary)
+	sqlPrepareArrangementWorkloads(template)
 	return &CompiledSQLQuery{
 		source:        source,
 		template:      template,

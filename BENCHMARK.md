@@ -35612,3 +35612,19 @@ limits, raw samples, and interpretation.
 | Current default raw v1 | 415,888 | 351,660 | 196 | 119,217 | 1.11x faster | 1.00x |
 | Explicit Auto / BestSpeed | 11,496,941 | 58,011,656 | 1,228 | 9,025 | 24.9x slower | 13.2x smaller |
 | Explicit Flate / HuffmanOnly | 7,688,601 | 35,688,752 | 1,133 | 46,225 | 16.7x slower | 2.58x smaller |
+
+# MZ-045: Compiled Arrangement Workload Reuse
+
+This benchmark repeats the same multi-join `EXPLAIN` workload. The parsed
+control recomputes normalized arrangement fields for each explain; the
+compiled path prepares the immutable workload once and reuses it.
+
+| Path | Median ns/op | B/op | allocs/op | Relative latency |
+| --- | ---: | ---: | ---: | ---: |
+| Parsed workload recomputed per explain | 6,459 | 4,920 | 62 | 1.00x |
+| Compiled workload reused | 4,812 | 4,272 | 42 | 1.34x faster |
+
+The compiled path also uses 13% less heap and 32% fewer allocations per
+repeated explain. The one-time compile step now pays the workload preparation
+cost; parameter-bound clones clear the cache before rewrite so correctness is
+preserved.
