@@ -108,7 +108,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | MZ-023 | `IN CLUSTER` index placement | Indexes cannot be assigned to an isolated compute pool. | Medium |
 | MZ-024 | Automatic arrangement key selection | Partially adopted: bounded deterministic scoring marks the best existing arrangement for `EXPLAIN` workloads across `WHERE`, `GROUP BY`, `ORDER BY`, and joins; automatic arrangement creation and execution rewrites remain caller-owned. | Medium |
 | MZ-025 | Arrangement sharing by logical key | Existing sharing is definition-based; no canonical equivalence for semantically equal plans. | Medium |
-| MZ-026 | Dictionary arrangement compression | Repeated arrangement strings are not transparently dictionary encoded. | Medium |
+| MZ-026 | Dictionary arrangement compression | Partially adopted as opt-in `DictionaryEncodeGroups` for typed aggregates and `DictionaryEncoded` sorted arrangements with exactness and benchmark coverage; transparent automatic selection remains open. | Medium |
 | MZ-027 | Arrangement memory telemetry | Implemented as an explicit read-only stats API reporting per-arrangement distinct values, bounded retained-byte estimates, checkpoints, source sequence, changelog compaction watermark, and dictionary group-order rebuild counts. | Low |
 | MZ-028 | Adaptive arrangement compaction | No feedback loop that changes compaction cadence from memory and update rates. | Medium |
 | MZ-029 | Spillable arrangements | Adopted as an opt-in bounded local payload spill tier with binary records, CRC validation, disk limits, exact cold reads, and explicit compaction; fully disk-resident arrangement indexes and reopen/restore remain future work. | High |
