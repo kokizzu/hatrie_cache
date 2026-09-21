@@ -35825,3 +35825,19 @@ sampling is separately measured. Raw samples and platform behavior are in
 | Existing checkpoint after C233 | 3.916 ns | 0 | 0 |
 | CPU budget, default quantum 64 | 19.58 ns | 0 | 0 |
 | CPU budget, every checkpoint | 858.1 ns | 0 | 0 |
+
+## C228 Stable External Sort Runs
+
+Five `-benchmem` samples ran on Linux amd64 with an AMD Ryzen 9 5950X. The
+workload streams 192 rows with three repeated `ORDER BY` keys through a
+128-byte external-sort threshold. This measures the existing stable ordinal
+path; C228 added regression coverage and documentation but no production code,
+so there is no before/after speedup claim.
+
+| Benchmark | Raw ns/op samples | Median ns/op | Bytes/op | Allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Stable external sort, 192 rows | 9,210,662; 9,290,696; 9,204,048; 9,039,272; 9,065,712 | 9,204,048 | 1,655,386 | 31,047 |
+
+Run with `make benchmark-c228-external-sort`; correctness and temporary-file
+cleanup are covered by `make test-c228-external-sort`. See
+[`C228_EXTERNAL_SORT_STABILITY.md`](C228_EXTERNAL_SORT_STABILITY.md).

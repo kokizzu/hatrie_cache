@@ -25169,3 +25169,34 @@ test-c233-package:
 
 race-c233-package:
 	bash scripts/race-c233-package.sh
+.PHONY: format-c228-external-sort
+format-c228-external-sort:
+	bash scripts/format-c228-external-sort.sh
+
+.PHONY: test-c228-external-sort
+test-c228-external-sort:
+	bash scripts/test-c228-external-sort.sh
+
+.PHONY: benchmark-c228-external-sort
+benchmark-c228-external-sort:
+	bash scripts/benchmark-c228-external-sort.sh
+
+.PHONY: test-c228-package
+test-c228-package:
+	bash scripts/test-c228-package.sh
+
+.PHONY: race-c228-external-sort
+race-c228-external-sort:
+	bash scripts/race-c228-external-sort.sh
+
+.PHONY: vet-c228-external-sort
+vet-c228-external-sort:
+	bash scripts/vet-c228-external-sort.sh
+
+.PHONY: commit-c228-external-sort
+commit-c228-external-sort:
+	bash scripts/commit-c228-external-sort.sh
+
+.PHONY: push-c228-external-sort
+push-c228-external-sort:
+	bash scripts/push-c228-external-sort.sh

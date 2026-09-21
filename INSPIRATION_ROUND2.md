@@ -61,7 +61,7 @@ operator control remain the preferred deployment model.
 - [ ] C225 Incremental window-frame state for repeated ordered windows.
 - [ ] C226 Grace-hash join spilling with bounded disk runs.
 - [x] C227 External aggregation spilling with merge-time memory limits; `SQLQueryOptions.MaxGroupMergeBytes` bounds the decoded spill-reader frontier, stays off by default, and cleans temporary files on rejection. See [C227_GROUP_MERGE_BUDGET.md](C227_GROUP_MERGE_BUDGET.md) and [BENCHMARK.md#c227-external-group-merge-memory-budget](BENCHMARK.md#c227-external-group-merge-memory-budget).
-- [ ] C228 External sort spilling with stable run ordering.
+- [x] C228 External sort spilling with stable run ordering; the existing spill record ordinal is preserved through run files and merge passes, and equal-key stability is covered by [C228_EXTERNAL_SORT_STABILITY.md](C228_EXTERNAL_SORT_STABILITY.md) and [BENCHMARK.md#c228-stable-external-sort-runs](BENCHMARK.md#c228-stable-external-sort-runs).
 - [x] C229 Explicit join overflow policy for auto, reject, and bounded spill; truncation remains intentionally unsupported to preserve SQL correctness. See [C229_JOIN_OVERFLOW_POLICY.md](C229_JOIN_OVERFLOW_POLICY.md) and [BENCHMARK.md#c229-join-overflow-policy](BENCHMARK.md#c229-join-overflow-policy).
 - [ ] C230 Memory-overcommit wait queues before query cancellation.
 - [ ] C231 Workload groups with per-class concurrency and memory budgets.
