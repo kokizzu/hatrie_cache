@@ -25488,6 +25488,52 @@ commit-m209-monotone-frontier:
 push-m209-monotone-frontier:
 	bash scripts/push-m209-monotone-frontier.sh
 
+.PHONY: test-m210-retained-sql-snapshot
+test-m210-retained-sql-snapshot:
+	bash scripts/test-m210-retained-sql-snapshot.sh
+
+.PHONY: format-m210-retained-sql-snapshot
+format-m210-retained-sql-snapshot:
+	bash scripts/format-m210-retained-sql-snapshot.sh
+
+.PHONY: benchmark-m210-retained-sql-snapshot-baseline
+benchmark-m210-retained-sql-snapshot-baseline:
+	bash scripts/benchmark-m210-retained-sql-snapshot-baseline.sh
+
+.PHONY: benchmark-m210-retained-sql-snapshot
+benchmark-m210-retained-sql-snapshot:
+	bash scripts/benchmark-m210-retained-sql-snapshot.sh
+
+.PHONY: test-m210-retained-sql-snapshot-package
+test-m210-retained-sql-snapshot-package:
+	bash scripts/test-m210-retained-sql-snapshot-package.sh
+
+.PHONY: race-m210-retained-sql-snapshot
+race-m210-retained-sql-snapshot:
+	bash scripts/race-m210-retained-sql-snapshot.sh
+
+.PHONY: vet-m210-retained-sql-snapshot
+vet-m210-retained-sql-snapshot:
+	bash scripts/vet-m210-retained-sql-snapshot.sh
+
+.PHONY: verify-m210-retained-sql-snapshot
+verify-m210-retained-sql-snapshot:
+	bash scripts/verify-m210-retained-sql-snapshot.sh
+
+
+
+.PHONY: stage-m210-retained-sql-snapshot
+stage-m210-retained-sql-snapshot:
+	bash scripts/stage-m210-retained-sql-snapshot.sh
+
+.PHONY: commit-m210-retained-sql-snapshot
+commit-m210-retained-sql-snapshot:
+	bash scripts/commit-m210-retained-sql-snapshot.sh
+
+.PHONY: push-m210-retained-sql-snapshot
+push-m210-retained-sql-snapshot:
+	bash scripts/push-m210-retained-sql-snapshot.sh
+
 .PHONY: benchmark-m208-differential-folding-baseline
 benchmark-m208-differential-folding-baseline:
 	bash scripts/benchmark-m208-differential-folding-baseline.sh

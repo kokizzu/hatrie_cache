@@ -1053,3 +1053,12 @@ Adopted one lock-free scalar frontier for both SQL source-partition reads and
 changefeed progress. Equal timestamps remain idempotent, regressions retain
 the existing API errors, and hot callers have a zero-allocation fast path.
 See `M209_MONOTONE_LOGICAL_TIMESTAMP.md` for the measured CPU tradeoff.
+## M210: Retained SQL Snapshots
+
+Adopted an opt-in historical-read adapter over retained `TypedTable` MVCC
+state. A single table implements `SQLFrontierSnapshotProvider` directly, while
+`TypedTableSQLSnapshotRegistry` captures multiple tables at one logical
+frontier and preserves the existing row/columnar resolver capabilities. A
+requested frontier that is unavailable or compacted fails explicitly rather
+than returning a partial result. See `M210_RETAINED_SQL_SNAPSHOTS.md` for the
+API, semantics, and benchmark tradeoff.

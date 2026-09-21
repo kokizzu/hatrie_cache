@@ -96,7 +96,7 @@ operator control remain the preferred deployment model.
 - [x] M207 Debezium envelopes with before/after images and operation type. `hatSql.DebeziumChangefeed` requires declared unique key columns, emits snapshot/create/update/delete payloads, preserves subscription frontier metadata, and rejects ambiguous multiplicity; the optimized adapter measured about 16x lower latency, 18x lower allocated bytes, and 10x fewer allocations than its full-state-copy baseline; see [M207_DEBEZIUM_CHANGEFEED.md](M207_DEBEZIUM_CHANGEFEED.md).
 - [x] M208 Differential multiplicity folding for insert/delete update streams. See [M208_DIFFERENTIAL_MULTIPLICITY_FOLDING.md](M208_DIFFERENTIAL_MULTIPLICITY_FOLDING.md).
 - [x] M209 Monotone logical timestamp frontiers for read and stream APIs. See [M209_MONOTONE_LOGICAL_TIMESTAMP.md](M209_MONOTONE_LOGICAL_TIMESTAMP.md).
-- [ ] M210 Historical `AS OF` reads against retained logical state.
+- [x] M210 Historical `AS OF` reads against retained logical state. See [M210_RETAINED_SQL_SNAPSHOTS.md](M210_RETAINED_SQL_SNAPSHOTS.md) and [BENCHMARK.md#m210-retained-sql-snapshots](BENCHMARK.md#m210-retained-sql-snapshots).
 - [ ] M211 Explicit rejection of reads before `since` or at/after `upper` frontiers.
 - [ ] M212 Logical compaction that advances retained history without rewriting live state.
 - [ ] M213 Consolidation of equal updates before forwarding to downstream consumers.

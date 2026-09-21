@@ -36002,3 +36002,20 @@ Commands: `make benchmark-m209-monotone-frontier` and
 
 The full raw samples and checked-error-path measurement are in
 `M209_MONOTONE_LOGICAL_TIMESTAMP.md`.
+
+## M210 Retained SQL Snapshots
+
+Commands: `make benchmark-m210-retained-sql-snapshot-baseline` and
+`make benchmark-m210-retained-sql-snapshot`.
+
+Linux/amd64 on AMD Ryzen 9 5950X, five `-count=5` samples:
+
+| Workload | Baseline median | M210 median | M210 B/op | M210 allocs/op | Relative result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| One table, direct historical capture | 949.9 ns/op | 977.7 ns/op | 1112 | 10 | 1.03x CPU cost; bytes/allocs unchanged |
+| Two tables, common-frontier capture | 1943 ns/op | 2205 ns/op | 2336 | 22 | 1.13x CPU cost; 1.05x bytes; 1.10x allocs |
+
+The baseline manually calls `SnapshotAt` for the same retained fixtures. M210 is
+an opt-in correctness/capability path; live reads remain unchanged. Raw samples
+and the AS OF contract are recorded in
+[M210_RETAINED_SQL_SNAPSHOTS.md](M210_RETAINED_SQL_SNAPSHOTS.md).
