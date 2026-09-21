@@ -276,6 +276,11 @@ name.
   node ordering, independent hook snapshots, cancellation checkpoints, and
   phase-preserving retries; transport and authentication remain caller-owned.
   See [SCHEMA_ROLLOUT.md](SCHEMA_ROLLOUT.md).
+- [x] C154e Bounded HRC1 rolling-schema checkpoints with exact previous/next
+  schema fingerprint matching, stable-phase restart recovery, and CRC-checked
+  deterministic binary encoding; persistence and authentication remain
+  caller-owned. See [SCHEMA_ROLLOUT.md](SCHEMA_ROLLOUT.md) and the measured
+  [BENCHMARK.md](BENCHMARK.md#c154e-durable-rolling-schema-checkpoint).
 - [x] C155 Rolling binary upgrades with compatibility gates for the gRPC and HTTP command protocols; schema compatibility remains tracked separately under C154.
 - [x] C155a gRPC protocol-version metadata negotiation and server compatibility gates with legacy omission defaults; see [GRPC_PROTOCOL_COMPATIBILITY.md](GRPC_PROTOCOL_COMPATIBILITY.md).
 - [x] C155b Configurable HTTP command protocol ranges and optional HTTP replication-client range advertisement with legacy omission defaults; see [HTTP_PROTOCOL_COMPATIBILITY.md](HTTP_PROTOCOL_COMPATIBILITY.md).

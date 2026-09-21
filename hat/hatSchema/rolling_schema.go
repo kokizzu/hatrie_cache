@@ -54,9 +54,11 @@ type RollingSchemaNode struct {
 // one conservative rolling deployment. It does not alter schemas or contact
 // replicas; the deployment state machine supplies the coordination boundary.
 type RollingSchemaPlan struct {
-	previous Schema
-	next     Schema
-	nodes    []string
+	previous            Schema
+	next                Schema
+	previousFingerprint string
+	nextFingerprint     string
+	nodes               []string
 }
 
 // NewRollingSchemaPlan validates a conservative schema transition and returns
@@ -92,10 +94,14 @@ func NewRollingSchemaPlan(previous, next Schema, nodes []string) (RollingSchemaP
 		normalizedNodes[index] = node
 	}
 	sort.Strings(normalizedNodes)
+	previousCopy := previous.Clone()
+	nextCopy := next.Clone()
 	return RollingSchemaPlan{
-		previous: previous.Clone(),
-		next:     next.Clone(),
-		nodes:    normalizedNodes,
+		previous:            previousCopy,
+		next:                nextCopy,
+		previousFingerprint: previousCopy.Fingerprint(),
+		nextFingerprint:     nextCopy.Fingerprint(),
+		nodes:               normalizedNodes,
 	}, nil
 }
 

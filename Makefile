@@ -24375,3 +24375,36 @@ commit-ch019:
 
 push-ch019:
 	bash ./scripts/push-ch019.sh
+.PHONY: test-c154-checkpoint
+test-c154-checkpoint:
+	bash scripts/test-c154-checkpoint.sh
+.PHONY: format-c154-checkpoint
+format-c154-checkpoint:
+	bash scripts/format-c154-checkpoint.sh
+.PHONY: benchmark-c154-checkpoint
+benchmark-c154-checkpoint:
+	bash scripts/benchmark-c154-checkpoint.sh
+
+.PHONY: test-c154-schema-package
+test-c154-schema-package:
+	bash scripts/test-c154-schema-package.sh
+
+.PHONY: race-c154-checkpoint
+race-c154-checkpoint:
+	bash scripts/race-c154-checkpoint.sh
+
+.PHONY: vet-c154-checkpoint
+vet-c154-checkpoint:
+	bash scripts/vet-c154-checkpoint.sh
+
+.PHONY: stage-c154-checkpoint
+stage-c154-checkpoint:
+	bash scripts/stage-c154-checkpoint.sh
+
+.PHONY: commit-c154-checkpoint
+commit-c154-checkpoint:
+	bash scripts/commit-c154-checkpoint.sh
+
+.PHONY: push-c154-checkpoint
+push-c154-checkpoint:
+	bash scripts/push-c154-checkpoint.sh

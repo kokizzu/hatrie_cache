@@ -108,3 +108,52 @@ The existing manual transition path has the same measured heap and allocation
 profile after the change. The coordinator cost is opt-in and is dominated by
 independent schema snapshots and callback dispatch; it is paid during schema
 rollouts, not by cache commands or query execution.
+
+## Durable Checkpoints
+
+The opt-in `RollingSchemaPlan.Checkpoint` API makes the control-plane state
+restartable without serializing schema bodies:
+
+```go
+checkpoint, err := plan.Checkpoint(deployment)
+if err != nil {
+	return err
+}
+wire, err := checkpoint.MarshalBinary()
+if err != nil {
+	return err
+}
+
+decoded, err := hatSchema.DecodeRollingSchemaCheckpoint(wire)
+if err != nil {
+	return err
+}
+deployment, err = plan.Restore(decoded)
+```
+
+The HRC1 frame contains both schema fingerprints and the deterministic node
+phase list. Restore rejects a different schema transition, node set, order, or
+phase, and the decoder bounds frames to 1 MiB and 65,536 nodes. A checkpoint
+taken while an install or activation hook is running records the last stable
+phase, so retrying after a process restart is safe. The Castagnoli CRC32
+detects accidental truncation or corruption; it is not authentication, so
+callers must use authenticated storage or transport when an attacker can
+modify checkpoints. Persistence, fsync, and hook-side authentication remain
+caller-owned and the default replication path is unchanged.
+
+### Checkpoint Cost
+
+Linux/amd64, AMD Ryzen 9 5950X, five benchmark samples, `-benchmem`; medians:
+
+| Operation | ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Manual four-node phase replay | 516.3 | 468 | 6 |
+| In-memory checkpoint restore | 367.2 | 404 | 5 |
+| HRC1 marshal | 160.6 | 120 | 2 |
+| HRC1 unmarshal | 284.5 | 224 | 8 |
+| Full unmarshal plus restore | 607.1 | 560 | 12 |
+
+Compared with manual replay, restore-only is 0.71x the time, 0.86x the bytes,
+and 0.83x the allocations. A full durable round trip is 1.18x the time, 1.20x
+the bytes, and 2.00x the allocations; that cost is paid only when persisting
+or recovering rollout state.

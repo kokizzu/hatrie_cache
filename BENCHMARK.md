@@ -35336,3 +35336,58 @@ The two-phase path is about 2.1x slower, uses 2.29x the transient bytes, and
 uses 1.8x the allocations in this local control-plane benchmark. It remains
 opt-in because the additional prepare barrier and explicit unknown-outcome
 handling are the feature; ordinary writes retain the existing path.
+
+<a id="c154e-durable-rolling-schema-checkpoint"></a>
+## C154e Durable Rolling-Schema Checkpoint
+
+Command: `make benchmark-c154-checkpoint`.
+
+This compares manual four-node phase replay with the opt-in HRC1 checkpoint
+restore path. The latter validates exact plan fingerprints and stable phases;
+the full round-trip additionally decodes the bounded CRC-protected binary
+frame. Five samples ran on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+Raw output:
+
+```text
+BenchmarkRollingSchemaManualRecovery-32       479.7 ns/op  468 B/op  6 allocs/op
+BenchmarkRollingSchemaManualRecovery-32       516.3 ns/op  468 B/op  6 allocs/op
+BenchmarkRollingSchemaManualRecovery-32       508.2 ns/op  468 B/op  6 allocs/op
+BenchmarkRollingSchemaManualRecovery-32       578.9 ns/op  468 B/op  6 allocs/op
+BenchmarkRollingSchemaManualRecovery-32       552.2 ns/op  468 B/op  6 allocs/op
+BenchmarkRollingSchemaCheckpointRestore-32    369.4 ns/op  404 B/op  5 allocs/op
+BenchmarkRollingSchemaCheckpointRestore-32    367.2 ns/op  404 B/op  5 allocs/op
+BenchmarkRollingSchemaCheckpointRestore-32    349.9 ns/op  404 B/op  5 allocs/op
+BenchmarkRollingSchemaCheckpointRestore-32    351.2 ns/op  404 B/op  5 allocs/op
+BenchmarkRollingSchemaCheckpointRestore-32    367.3 ns/op  404 B/op  5 allocs/op
+BenchmarkRollingSchemaCheckpointMarshal-32    160.2 ns/op  120 B/op  2 allocs/op
+BenchmarkRollingSchemaCheckpointMarshal-32    160.6 ns/op  120 B/op  2 allocs/op
+BenchmarkRollingSchemaCheckpointMarshal-32    162.8 ns/op  120 B/op  2 allocs/op
+BenchmarkRollingSchemaCheckpointMarshal-32    164.9 ns/op  120 B/op  2 allocs/op
+BenchmarkRollingSchemaCheckpointMarshal-32    157.7 ns/op  120 B/op  2 allocs/op
+BenchmarkRollingSchemaCheckpointUnmarshal-32  283.6 ns/op  224 B/op  8 allocs/op
+BenchmarkRollingSchemaCheckpointUnmarshal-32  292.3 ns/op  224 B/op  8 allocs/op
+BenchmarkRollingSchemaCheckpointUnmarshal-32  281.2 ns/op  224 B/op  8 allocs/op
+BenchmarkRollingSchemaCheckpointUnmarshal-32  284.5 ns/op  224 B/op  8 allocs/op
+BenchmarkRollingSchemaCheckpointUnmarshal-32  289.1 ns/op  224 B/op  8 allocs/op
+BenchmarkRollingSchemaCheckpointRoundTrip-32  658.5 ns/op  560 B/op 12 allocs/op
+BenchmarkRollingSchemaCheckpointRoundTrip-32  616.6 ns/op  560 B/op 12 allocs/op
+BenchmarkRollingSchemaCheckpointRoundTrip-32  607.1 ns/op  560 B/op 12 allocs/op
+BenchmarkRollingSchemaCheckpointRoundTrip-32  568.2 ns/op  560 B/op 12 allocs/op
+BenchmarkRollingSchemaCheckpointRoundTrip-32  591.1 ns/op  560 B/op 12 allocs/op
+```
+
+| Operation | Median ns/op | B/op | allocs/op | Relative to manual replay |
+| --- | ---: | ---: | ---: | --- |
+| Manual four-node phase replay | 516.3 | 468 | 6 | 1.00x |
+| In-memory checkpoint restore | 367.2 | 404 | 5 | 0.71x time, 0.86x bytes, 0.83x allocs |
+| HRC1 marshal | 160.6 | 120 | 2 | persistence component |
+| HRC1 unmarshal | 284.5 | 224 | 8 | recovery component |
+| Full unmarshal plus restore | 607.1 | 560 | 12 | 1.18x time, 1.20x bytes, 2.00x allocs |
+
+Restore-only is faster than replay after plan fingerprints are cached. The
+durable path has the expected codec cost, but it runs only at checkpoint or
+restart boundaries; no default command, query, or replication path is changed.
+The CRC detects accidental corruption, not malicious modification; callers
+must authenticate checkpoint storage or transport when required. See
+[SCHEMA_ROLLOUT.md](SCHEMA_ROLLOUT.md).

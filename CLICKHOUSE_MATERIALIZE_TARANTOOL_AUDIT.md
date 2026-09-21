@@ -187,6 +187,10 @@ records a separate implementation boundary.
 
 - [ ] C153 Metadata consensus for partition ownership.
 - [ ] C154 Rolling schema changes across replicas.
+- [x] C154e Durable HRC1 rolling-schema checkpoints with exact plan fingerprint
+  validation, stable-phase restart recovery, and bounded CRC-checked binary
+  frames; storage and authentication remain caller-owned. See
+  [SCHEMA_ROLLOUT.md](SCHEMA_ROLLOUT.md).
 - [ ] M032 Strong consistency across all independent source partitions.
 - [x] M032a Opt-in SQL snapshot provider pins every source read in one query to a caller-owned immutable view; full distributed frontier coordination remains open. See [SQL_SNAPSHOT_PROVIDER.md](SQL_SNAPSHOT_PROVIDER.md).
 - [x] M033 Timestamp oracle for globally ordered writes. The opt-in
