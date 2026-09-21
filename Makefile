@@ -23975,3 +23975,31 @@ commit-mz048-secret-rotation:
 .PHONY: push-mz048-secret-rotation
 push-mz048-secret-rotation:
 	bash ./scripts/push-mz048-secret-rotation.sh
+
+.PHONY: cleanup-go-build-preview
+cleanup-go-build-preview:
+	bash ./scripts/cleanup-go-build-preview.sh
+
+.PHONY: cleanup-go-build
+cleanup-go-build:
+	bash ./scripts/cleanup-go-build.sh
+
+.PHONY: test-cleanup-go-build
+test-cleanup-go-build:
+	bash ./scripts/test-cleanup-go-build.sh
+
+.PHONY: review-cleanup-go-build
+review-cleanup-go-build:
+	bash ./scripts/review-cleanup-go-build.sh
+
+.PHONY: stage-cleanup-go-build
+stage-cleanup-go-build:
+	bash ./scripts/stage-cleanup-go-build.sh
+
+.PHONY: commit-cleanup-go-build
+commit-cleanup-go-build:
+	bash ./scripts/commit-cleanup-go-build.sh
+
+.PHONY: push-cleanup-go-build
+push-cleanup-go-build:
+	bash ./scripts/push-cleanup-go-build.sh
