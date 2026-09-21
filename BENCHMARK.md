@@ -36131,3 +36131,18 @@ Five `-benchmem` samples ran on Linux amd64 / AMD Ryzen 9 5950X with a
 
 Details and atomicity coverage are recorded in
 [M217_MATERIALIZED_POINT_LOOKUP.md](M217_MATERIALIZED_POINT_LOOKUP.md).
+
+## M218 Materialized Point Lookup Planner
+
+Command: `make benchmark-m218-point-lookup-planner`
+
+Five `-benchmem` samples ran on Linux amd64 / AMD Ryzen 9 5950X over a
+10,000-row materialized view and one equality predicate.
+
+| Planner path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Maintained point lookup | 8,931 | 6,580 | 30 | baseline |
+| Full arrangement scan | 6,941,275 | 8,012,628 | 40,030 | point plan 777.2x faster; 1,217.7x lower bytes; 1,334.3x fewer allocations |
+
+Raw samples and fallback semantics are recorded in
+[M218_MATERIALIZED_POINT_LOOKUP_PLANNER.md](M218_MATERIALIZED_POINT_LOOKUP_PLANNER.md).

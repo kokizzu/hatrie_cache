@@ -25753,3 +25753,20 @@ commit-m217-benchmark-correction:
 
 push-m217-benchmark-correction:
 	bash scripts/push-m217-benchmark-correction.sh
+test-m218-point-lookup-planner:
+	bash scripts/test-m218-point-lookup-planner.sh
+format-m218-point-lookup-planner:
+	bash scripts/format-m218-point-lookup-planner.sh
+benchmark-m218-point-lookup-planner:
+	bash scripts/benchmark-m218-point-lookup-planner.sh
+
+race-m218-point-lookup-planner:
+	bash scripts/race-m218-point-lookup-planner.sh
+stage-m218-point-lookup-planner:
+	bash scripts/stage-m218-point-lookup-planner.sh
+
+commit-m218-point-lookup-planner:
+	bash scripts/commit-m218-point-lookup-planner.sh
+
+push-m218-point-lookup-planner:
+	bash scripts/push-m218-point-lookup-planner.sh

@@ -1127,3 +1127,12 @@ duplicate keys, and return isolated row copies. A 10k-row probe was 8,334x
 faster than cloning and scanning the full snapshot, while indexed refreshes
 cost 25.4% more CPU in the measured workload. See
 [M217_MATERIALIZED_POINT_LOOKUP.md](M217_MATERIALIZED_POINT_LOOKUP.md).
+
+## M218: Materialized Point Lookup Planner
+
+Added the opt-in `MaterializedViewPointLookupResolver`, which lets the existing
+SQL planner choose a maintained point arrangement for supported `EXTERNAL`
+equality predicates and fall back to a complete scan for unsupported shapes or
+value conversions. On a 10k-row view, the point plan was 777.2x faster, with
+1,217.7x lower benchmark bytes and 1,334.3x fewer allocations. See
+[M218_MATERIALIZED_POINT_LOOKUP_PLANNER.md](M218_MATERIALIZED_POINT_LOOKUP_PLANNER.md).
