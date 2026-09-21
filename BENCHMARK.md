@@ -35871,6 +35871,39 @@ The C230 queue is opt-in. The benchmark uses the same materialized `VALUES ... G
 
 Queue mode is a bounded-memory reliability policy, not a speed optimization. It waits for capacity before cancellation and is disabled by default, so the matched default path retains the baseline allocation and heap behavior. See [C230_MEMORY_OVERCOMMIT.md](C230_MEMORY_OVERCOMMIT.md) for raw commands, limits, and safety boundaries.
 
+## C231 SQL Workload Groups
+
+C231 is opt-in. The benchmark compares the existing nil-admission path with a
+single uncontended serving-class lease on the same materialized query. The
+workload-group path adds bounded class admission and memory reservation; it is a
+fairness/isolation policy, not a query execution optimization.
+
+### Raw output
+
+```text
+BenchmarkC231SQLWorkloadGroupAdmission/default-32          27388   8421 ns/op   6888 B/op  39 allocs/op
+BenchmarkC231SQLWorkloadGroupAdmission/default-32          19942  11106 ns/op   6888 B/op  39 allocs/op
+BenchmarkC231SQLWorkloadGroupAdmission/default-32          25652   8371 ns/op   6888 B/op  39 allocs/op
+BenchmarkC231SQLWorkloadGroupAdmission/default-32          27344  10921 ns/op   6888 B/op  39 allocs/op
+BenchmarkC231SQLWorkloadGroupAdmission/default-32          32092   7331 ns/op   6888 B/op  39 allocs/op
+BenchmarkC231SQLWorkloadGroupAdmission/workload-group-32   34218   9182 ns/op   6984 B/op  40 allocs/op
+BenchmarkC231SQLWorkloadGroupAdmission/workload-group-32   28822   7861 ns/op   6984 B/op  40 allocs/op
+BenchmarkC231SQLWorkloadGroupAdmission/workload-group-32   31694  10393 ns/op   6984 B/op  40 allocs/op
+BenchmarkC231SQLWorkloadGroupAdmission/workload-group-32   29943   8348 ns/op   6984 B/op  40 allocs/op
+BenchmarkC231SQLWorkloadGroupAdmission/workload-group-32   30878   9136 ns/op   6984 B/op  40 allocs/op
+```
+
+### Median comparison
+
+| Variant | Median ns/op | B/op | allocs/op | Relative CPU | Heap delta | Allocation delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Default admission disabled | 8,421 | 6,888 | 39 | 1.00x | baseline | baseline |
+| Workload group enabled | 9,136 | 6,984 | 40 | 1.08x | +96 B | +1 |
+
+The workload-group queue and release/cancellation behavior are covered by
+`make test-c231-workload-groups`; raw measurements come from
+`make benchmark-c231-workload-groups`. See [C231_SQL_WORKLOAD_GROUPS.md](C231_SQL_WORKLOAD_GROUPS.md).
+
 ## C226 Grace-Hash Join Spilling
 
 Five `-benchmem` samples ran on Linux amd64 with an AMD Ryzen 9 5950X over the

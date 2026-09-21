@@ -25285,6 +25285,38 @@ commit-c230-memory-overcommit:
 push-c230-memory-overcommit:
 	bash scripts/push-c230-memory-overcommit.sh
 
+.PHONY: test-c231-workload-groups
+test-c231-workload-groups:
+	bash scripts/test-c231-workload-groups.sh
+
+.PHONY: format-c231-workload-groups
+format-c231-workload-groups:
+	bash scripts/format-c231-workload-groups.sh
+
+.PHONY: benchmark-c231-workload-groups
+benchmark-c231-workload-groups:
+	bash scripts/benchmark-c231-workload-groups.sh
+
+.PHONY: race-c231-workload-groups
+race-c231-workload-groups:
+	bash scripts/race-c231-workload-groups.sh
+
+.PHONY: vet-c231-workload-groups
+vet-c231-workload-groups:
+	bash scripts/vet-c231-workload-groups.sh
+
+.PHONY: stage-c231-workload-groups
+stage-c231-workload-groups:
+	bash scripts/stage-c231-workload-groups.sh
+
+.PHONY: commit-c231-workload-groups
+commit-c231-workload-groups:
+	bash scripts/commit-c231-workload-groups.sh
+
+.PHONY: push-c231-workload-groups
+push-c231-workload-groups:
+	bash scripts/push-c231-workload-groups.sh
+
 .PHONY: race-c226-grace-hash-join
 race-c226-grace-hash-join:
 	bash scripts/race-c226-grace-hash-join.sh

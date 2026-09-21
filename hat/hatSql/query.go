@@ -238,6 +238,11 @@ type SQLQueryOptions struct {
 	// ComputeCluster selects an opt-in named SQLQueryManager compute pool.
 	// Empty preserves the existing manager default or direct execution path.
 	ComputeCluster string
+	// ClusterAdmission optionally reserves one class-specific workload-group
+	// lease for the lifetime of this query. Nil keeps the existing admission
+	// and execution path unchanged.
+	ClusterAdmission        *SQLClusterAdmission
+	ClusterAdmissionRequest SQLClusterAdmissionRequest
 	// OperatorYieldEvery inserts a cooperative runtime yield after this many
 	// execution-control checks. Zero disables scheduler yielding and preserves
 	// the existing context-check-only behavior. This is a fairness quantum, not
@@ -861,6 +866,7 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		return result, controlErr
 	}
 	defer cancel()
+	defer control.releaseAdmission()
 	if err = control.check(); err != nil {
 		return result, err
 	}
@@ -1095,6 +1101,7 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 		return err
 	}
 	defer cancel()
+	defer control.releaseAdmission()
 	query, err := prepareSQLQueryForExecution(source, parameters, &options)
 	if err != nil {
 		return err
@@ -5417,6 +5424,7 @@ func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceR
 		return result, controlErr
 	}
 	defer cancel()
+	defer control.releaseAdmission()
 	query, parseErr := parseSQLQueryWithCache(source, parameters, options.PreparedCache, options.PreparedSchemaVersion)
 	if parseErr != nil {
 		return result, parseErr
@@ -8191,6 +8199,7 @@ type sqlExecutionControl struct {
 	operatorMemory   *SQLOperatorMemoryTracker
 	memoryOvercommit *SQLMemoryOvercommitQueue
 	overcommitBytes  map[string]int
+	admissionLease   *SQLClusterAdmissionLease
 	yieldEvery       uint64
 	yieldFuel        atomic.Uint64
 	yields           atomic.Uint64
@@ -8269,6 +8278,15 @@ func (control *sqlExecutionControl) releaseOperatorMemory(operator string) {
 	}
 }
 
+func (control *sqlExecutionControl) releaseAdmission() {
+	if control == nil || control.admissionLease == nil {
+		return
+	}
+	lease := control.admissionLease
+	control.admissionLease = nil
+	lease.Release()
+}
+
 // sqlExecutionArena reuses row backing only while one query is executing. Its
 // callers overwrite every active row; a smaller later scan clears only the
 // dropped tail so prior columnar batch references cannot survive there.
@@ -8330,11 +8348,31 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 		}
 		return control
 	}
+	acquireAdmission := func(control *sqlExecutionControl) error {
+		if options.ClusterAdmission == nil {
+			return nil
+		}
+		lease, err := options.ClusterAdmission.Acquire(control.ctx, options.ClusterAdmissionRequest)
+		if err != nil {
+			return err
+		}
+		control.admissionLease = lease
+		return nil
+	}
 	if options.Timeout > 0 {
 		ctx, cancel := context.WithTimeout(ctx, options.Timeout)
-		return newControl(ctx), cancel, nil
+		control := newControl(ctx)
+		if err := acquireAdmission(control); err != nil {
+			cancel()
+			return nil, func() {}, err
+		}
+		return control, cancel, nil
 	}
-	return newControl(ctx), func() {}, nil
+	control := newControl(ctx)
+	if err := acquireAdmission(control); err != nil {
+		return nil, func() {}, err
+	}
+	return control, func() {}, nil
 }
 
 func applySQLMaxThreads(query *sqlQuery, options *SQLQueryOptions) error {
