@@ -35303,3 +35303,36 @@ Relative to the map baseline, the planner is approximately 2.1x faster, uses
 metadata copies and sorting are required for input immutability and stable
 repair plans; transport, verification, attach, and quarantine side effects
 remain caller-owned. See [CH019_REPLICA_PART_CHECKS.md](CH019_REPLICA_PART_CHECKS.md).
+
+<a id="t047-cluster-write-commit"></a>
+## T047 Cluster Write Commit
+
+Command: `make benchmark-t047-cluster-write-commit`.
+
+This compares the new opt-in two-phase coordinator with the existing
+one-phase `ExecuteWriteQuorum` call over three nodes. Callbacks are local
+no-ops, so the measurement isolates coordinator overhead and intentionally
+does not model network latency or participant durability.
+
+Machine: AMD Ryzen 9 5950X, Linux amd64, three samples.
+
+Raw output:
+
+```text
+BenchmarkTU047ClusterWriteCommit-32      335950  3345 ns/op  1248 B/op  18 allocs/op
+BenchmarkTU047ClusterWriteCommit-32      356312  3402 ns/op  1248 B/op  18 allocs/op
+BenchmarkTU047ClusterWriteCommit-32      349149  3303 ns/op  1248 B/op  18 allocs/op
+BenchmarkTU047ExistingWriteQuorum-32     779157  1614 ns/op   544 B/op  10 allocs/op
+BenchmarkTU047ExistingWriteQuorum-32     674365  1572 ns/op   544 B/op  10 allocs/op
+BenchmarkTU047ExistingWriteQuorum-32     738970  1469 ns/op   544 B/op  10 allocs/op
+```
+
+| Path | Median ns/op | B/op | allocs/op | Relative time |
+| --- | ---: | ---: | ---: | ---: |
+| `ExecuteClusterWriteCommit` | 3,345 | 1,248 | 18 | 2.13x |
+| Existing `ExecuteWriteQuorum` | 1,572 | 544 | 10 | 1.00x |
+
+The two-phase path is about 2.1x slower, uses 2.29x the transient bytes, and
+uses 1.8x the allocations in this local control-plane benchmark. It remains
+opt-in because the additional prepare barrier and explicit unknown-outcome
+handling are the feature; ordinary writes retain the existing path.

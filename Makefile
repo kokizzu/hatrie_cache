@@ -23239,6 +23239,38 @@ push-tu33-function-grants:
 audit-hatrie-tmp:
 	bash scripts/audit-hatrie-tmp.sh
 
+.PHONY: format-t047-cluster-write-commit test-t047-cluster-write-commit test-t047-replication-package benchmark-t047-cluster-write-commit race-t047-cluster-write-commit vet-t047-cluster-write-commit review-t047 stage-t047 commit-t047 push-t047
+
+format-t047-cluster-write-commit:
+	bash scripts/format-t047-cluster-write-commit.sh
+
+test-t047-cluster-write-commit:
+	bash scripts/test-t047-cluster-write-commit.sh
+
+test-t047-replication-package:
+	bash scripts/test-t047-replication-package.sh
+
+benchmark-t047-cluster-write-commit:
+	bash scripts/benchmark-t047-cluster-write-commit.sh
+
+race-t047-cluster-write-commit:
+	bash scripts/race-t047-cluster-write-commit.sh
+
+vet-t047-cluster-write-commit:
+	bash scripts/vet-t047-cluster-write-commit.sh
+
+review-t047:
+	bash scripts/review-t047.sh
+
+stage-t047:
+	bash scripts/stage-t047.sh
+
+commit-t047:
+	bash scripts/commit-t047.sh
+
+push-t047:
+	bash scripts/push-t047.sh
+
 .PHONY: test-tt025-online-uniqueness
 test-tt025-online-uniqueness:
 	bash scripts/test-tt025-online-uniqueness.sh
