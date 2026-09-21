@@ -23253,6 +23253,30 @@ stage-t042-rejection:
 inspect-inspiration-ledgers:
 	bash scripts/inspect-inspiration-ledgers.sh
 
+test-ch237-projection-explain:
+	bash scripts/test-ch237-projection-explain.sh
+
+format-ch237-projection-explain:
+	bash scripts/format-ch237-projection-explain.sh
+
+race-ch237-projection-explain:
+	bash scripts/race-ch237-projection-explain.sh
+
+vet-ch237-projection-explain:
+	bash scripts/vet-ch237-projection-explain.sh
+
+stage-ch237-projection-explain:
+	bash scripts/stage-ch237-projection-explain.sh
+
+commit-ch237-projection-explain:
+	bash scripts/commit-ch237-projection-explain.sh
+
+push-ch237-projection-explain:
+	bash scripts/push-ch237-projection-explain.sh
+
+benchmark-ch237-projection-explain:
+	bash scripts/benchmark-ch237-projection-explain.sh
+
 .PHONY: test-ch235-part-column-profiler benchmark-ch235-part-column-profiler race-ch235-part-column-profiler test-ch235-package verify-ch235-baseline benchmark-ch235-baseline
 
 .PHONY: format-ch235-part-column-profiler

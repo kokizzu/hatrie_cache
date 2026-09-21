@@ -881,7 +881,7 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		query.indexHint = options.IndexHint
 	}
 	if query.explain {
-		result, err = explainSQLQuery(query, resolver, control)
+		result, err = explainSQLQuery(source, query, resolver, options, control)
 		operatorSteps = result.Plan
 		result.QueryID = observation.id
 		return result, err
@@ -13138,7 +13138,7 @@ func sqlCTEOutputRows(cte sqlCTE, result SQLQueryResult) ([]SQLRow, error) {
 	return rows, nil
 }
 
-func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) (SQLQueryResult, error) {
+func explainSQLQuery(source string, query *sqlQuery, resolver SQLSourceResolver, options SQLQueryOptions, control *sqlExecutionControl) (SQLQueryResult, error) {
 	if query.pipeline {
 		return explainSQLPipelineQuery(query, resolver)
 	}
@@ -13152,15 +13152,24 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		if query.explainCost {
 			steps = CostSQLExplainSteps(steps, SQLExplainCostOptions{})
 		}
+		if options.ProjectionCatalog != nil {
+			if diagnostics, ok := options.ProjectionCatalog.explainProjection(explainProjectionSource(source), resolver, options); ok {
+				steps = append(steps, SQLExplainStep{Node: "PROJECTION SELECTION", Detail: projectionExplainDetail(diagnostics), Projection: &diagnostics})
+			}
+		}
 	}
 	hasArrangementMetadata := sqlExplainHasArrangementMetadata(steps)
 	hasExplainCost := sqlExplainHasCost(steps)
+	hasProjectionDiagnostics := sqlExplainHasProjectionDiagnostics(steps)
 	columns := []string{"node", "detail", "estimated_rows"}
 	if hasExplainCost {
 		columns = append(columns, "estimated_cost", "estimated_memory_bytes")
 	}
 	if hasArrangementMetadata {
 		columns = append(columns, "arrangements")
+	}
+	if hasProjectionDiagnostics {
+		columns = append(columns, "projection")
 	}
 	result := SQLQueryResult{
 		Columns: columns,
@@ -13180,6 +13189,9 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		}
 		if hasArrangementMetadata && len(step.Arrangements) > 0 {
 			row["arrangements"] = cloneSQLArrangementMetadata(step.Arrangements)
+		}
+		if step.Projection != nil {
+			row["projection"] = *step.Projection
 		}
 		result.Rows = append(result.Rows, row)
 	}

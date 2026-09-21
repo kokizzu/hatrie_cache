@@ -1013,3 +1013,12 @@ caller input, and provides allocation-free `QueryInto` and `Visit` paths.
 Mutable updates, SQL planner integration, persistence, and replication remain
 deferred. See [TT021_PACKED_RTREE.md](TT021_PACKED_RTREE.md) and
 [BENCHMARK.md](BENCHMARK.md#tt-021-packed-r-tree-spatial-index).
+
+## C237: Projection Selection Explain Output
+
+ClickHouse-style projection diagnostics are available for opt-in non-pipeline
+`EXPLAIN`. The plan reports exact candidate selection, stale-source rejection,
+logical source/projection bytes, and estimated bytes saved. The implementation
+avoids cloning retained projection rows and does not change normal query
+execution. See [CH237_PROJECTION_EXPLAIN.md](CH237_PROJECTION_EXPLAIN.md) and
+[BENCHMARK.md](BENCHMARK.md#c237-projection-selection-explain-output).

@@ -35758,3 +35758,21 @@ The C235 cost is paid only by callers that explicitly record part/column
 observations. The existing sample path remains allocation-free, and the
 normal SQL executor does not construct this profiler automatically. See
 [CH235_PART_COLUMN_PROFILER.md](CH235_PART_COLUMN_PROFILER.md).
+
+# C237: Projection Selection Explain Output
+
+Five `-benchmem` samples ran on Linux amd64 with an AMD Ryzen 9 5950X over a
+128-row query. The control runs the same `EXPLAIN` without a projection
+catalog. The diagnostics path uses metadata-only projection snapshots and an
+allocation-free byte estimate when exact registry accounting is unavailable.
+
+| Path | Raw ns/op samples | Median ns/op | B/op | allocs/op | Relative result |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Existing `EXPLAIN` control | 9416; 8953; 9349; 8164; 9335 | 9335 | 9112 | 31 | 1.00x |
+| Projection diagnostics | 26782; 27830; 25774; 24986; 25411 | 25774 | 10370 | 47 | 2.76x CPU, +13.8% bytes, +16 allocs |
+
+The cost is opt-in and applies to `EXPLAIN`, not normal query execution. The
+initial row-cloning implementation was rejected during the same measurement:
+it reached a `196822 ns/op` median, `91884 B/op`, and `1584 allocs/op`; the
+metadata-only implementation reduced that to `25774 ns/op`, `10370 B/op`, and
+`47 allocs/op`. See [CH237_PROJECTION_EXPLAIN.md](CH237_PROJECTION_EXPLAIN.md).

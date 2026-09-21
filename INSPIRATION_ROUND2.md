@@ -70,7 +70,7 @@ operator control remain the preferred deployment model.
 - [ ] C234 Query profiler records for stage time, bytes, and allocations.
 - [x] C235 Read/write task profiler aggregation by table part and column; bounded `hatSql.SQLQueryProfiler.RecordPartColumn` with deterministic snapshots and explicit dropped-observation counters. See [CH235_PART_COLUMN_PROFILER.md](CH235_PART_COLUMN_PROFILER.md) and [BENCHMARK.md#c235-part-column-query-profiling](BENCHMARK.md#c235-part-column-query-profiling).
 - [ ] C236 Explain output for data-skipping-index decisions and rejected marks.
-- [ ] C237 Explain output for projection selection and estimated I/O cost.
+- [x] C237 Explain output for projection selection and estimated I/O cost. See [CH237_PROJECTION_EXPLAIN.md](CH237_PROJECTION_EXPLAIN.md) and [BENCHMARK.md#c237-projection-selection-explain-output](BENCHMARK.md#c237-projection-selection-explain-output).
 - [ ] C238 Mutation queue progress with rows remaining and elapsed estimates.
 - [ ] C239 Part-merge backlog, amplification, and age metrics.
 - [ ] C240 Read-only backup database attachment for querying backup parts in place.
