@@ -23259,6 +23259,15 @@ test-ch237-projection-explain:
 format-ch237-projection-explain:
 	bash scripts/format-ch237-projection-explain.sh
 
+stage-ch238-ledger:
+	bash scripts/stage-ch238-ledger.sh
+
+commit-ch238-ledger:
+	bash scripts/commit-ch238-ledger.sh
+
+push-ch238-ledger:
+	bash scripts/push-ch238-ledger.sh
+
 race-ch237-projection-explain:
 	bash scripts/race-ch237-projection-explain.sh
 
