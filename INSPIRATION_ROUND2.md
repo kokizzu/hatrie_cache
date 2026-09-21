@@ -98,7 +98,7 @@ operator control remain the preferred deployment model.
 - [x] M209 Monotone logical timestamp frontiers for read and stream APIs. See [M209_MONOTONE_LOGICAL_TIMESTAMP.md](M209_MONOTONE_LOGICAL_TIMESTAMP.md).
 - [x] M210 Historical `AS OF` reads against retained logical state. See [M210_RETAINED_SQL_SNAPSHOTS.md](M210_RETAINED_SQL_SNAPSHOTS.md) and [BENCHMARK.md#m210-retained-sql-snapshots](BENCHMARK.md#m210-retained-sql-snapshots).
 - [x] M211 Explicit rejection of reads before `since` or at/after `upper` frontiers. See [M211_SQL_FRONTIER_BOUNDS.md](M211_SQL_FRONTIER_BOUNDS.md) and [BENCHMARK.md#m211-sql-frontier-bounds](BENCHMARK.md#m211-sql-frontier-bounds).
-- [ ] M212 Logical compaction that advances retained history without rewriting live state.
+- [x] M212 Logical compaction that advances retained history without rewriting live state. See [M212_LOGICAL_COMPACTION.md](M212_LOGICAL_COMPACTION.md).
 - [ ] M213 Consolidation of equal updates before forwarding to downstream consumers.
 - [ ] M214 Arrangement reuse across indexes and compatible query plans.
 - [ ] M215 Delta-join maintenance for high-churn join inputs.

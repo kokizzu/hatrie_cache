@@ -25565,6 +25565,50 @@ commit-m211-frontier-bounds:
 push-m211-frontier-bounds:
 	bash scripts/push-m211-frontier-bounds.sh
 
+.PHONY: test-m212-logical-compaction
+test-m212-logical-compaction:
+	bash scripts/test-m212-logical-compaction.sh
+
+.PHONY: format-m212-logical-compaction
+format-m212-logical-compaction:
+	bash scripts/format-m212-logical-compaction.sh
+
+.PHONY: benchmark-m212-logical-compaction-baseline
+benchmark-m212-logical-compaction-baseline:
+	bash scripts/benchmark-m212-logical-compaction-baseline.sh
+
+.PHONY: benchmark-m212-logical-compaction
+benchmark-m212-logical-compaction:
+	bash scripts/benchmark-m212-logical-compaction.sh
+
+.PHONY: test-m212-logical-compaction-package
+test-m212-logical-compaction-package:
+	bash scripts/test-m212-logical-compaction-package.sh
+
+.PHONY: race-m212-logical-compaction
+race-m212-logical-compaction:
+	bash scripts/race-m212-logical-compaction.sh
+
+.PHONY: vet-m212-logical-compaction
+vet-m212-logical-compaction:
+	bash scripts/vet-m212-logical-compaction.sh
+
+.PHONY: verify-m212-logical-compaction
+verify-m212-logical-compaction:
+	bash scripts/verify-m212-logical-compaction.sh
+
+.PHONY: stage-m212-logical-compaction
+stage-m212-logical-compaction:
+	bash scripts/stage-m212-logical-compaction.sh
+
+.PHONY: commit-m212-logical-compaction
+commit-m212-logical-compaction:
+	bash scripts/commit-m212-logical-compaction.sh
+
+.PHONY: push-m212-logical-compaction
+push-m212-logical-compaction:
+	bash scripts/push-m212-logical-compaction.sh
+
 
 
 

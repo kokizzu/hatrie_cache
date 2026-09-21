@@ -33,10 +33,11 @@ type typedTableMVCCVersion struct {
 // nodes become immutable before publication, so snapshots can read them
 // without retaining the table lock.
 type typedTableMVCCState struct {
-	heads            map[string]*typedTableMVCCVersion
-	keys             []string
-	knownKeys        map[string]struct{}
-	compactedThrough uint64
+	heads                    map[string]*typedTableMVCCVersion
+	keys                     []string
+	knownKeys                map[string]struct{}
+	compactedThrough         uint64
+	physicalCompactedThrough uint64
 }
 
 func newTypedTableMVCCState() *typedTableMVCCState {
@@ -131,10 +132,30 @@ func (table *TypedTable) SQLFrontierBounds() (SQLFrontierBounds, error) {
 	return SQLFrontierBounds{Since: table.mvcc.compactedThrough, Upper: table.sequence + 1}, nil
 }
 
-// CompactMVCCThrough discards historical links older than sequence from the
-// table's current version chains. Snapshots created before compaction retain
-// their immutable head pointers and remain valid until released by the
-// caller/GC. New snapshots before sequence are rejected.
+// AdvanceMVCCCompactionThrough advances the logical retained-history frontier
+// without rewriting any version chains. It is O(1) and keeps existing
+// snapshots valid, but it does not reclaim historical memory. Call
+// CompactMVCCThrough later when physical reclamation is appropriate.
+func (table *TypedTable) AdvanceMVCCCompactionThrough(sequence uint64) error {
+	if table == nil {
+		return fmt.Errorf("typed table is nil")
+	}
+	table.mu.Lock()
+	defer table.mu.Unlock()
+	if table.mvcc == nil {
+		return ErrTypedTableMVCCDisabled
+	}
+	if sequence < table.mvcc.compactedThrough || sequence > table.sequence {
+		return fmt.Errorf("typed table MVCC logical compaction sequence %d is outside %d..%d", sequence, table.mvcc.compactedThrough, table.sequence)
+	}
+	table.mvcc.compactedThrough = sequence
+	return nil
+}
+
+// CompactMVCCThrough physically discards historical links older than
+// sequence from the table's current version chains. Snapshots created before
+// compaction retain their immutable head pointers and remain valid until
+// released by the caller/GC. New snapshots before sequence are rejected.
 func (table *TypedTable) CompactMVCCThrough(sequence uint64) error {
 	if table == nil {
 		return fmt.Errorf("typed table is nil")
@@ -147,7 +168,7 @@ func (table *TypedTable) CompactMVCCThrough(sequence uint64) error {
 	if sequence < table.mvcc.compactedThrough || sequence > table.sequence {
 		return fmt.Errorf("typed table MVCC compaction sequence %d is outside %d..%d", sequence, table.mvcc.compactedThrough, table.sequence)
 	}
-	if sequence == table.mvcc.compactedThrough {
+	if sequence == table.mvcc.compactedThrough && sequence == table.mvcc.physicalCompactedThrough {
 		return nil
 	}
 	for key, head := range table.mvcc.heads {
@@ -159,6 +180,7 @@ func (table *TypedTable) CompactMVCCThrough(sequence uint64) error {
 		table.mvcc.heads[key] = retained
 	}
 	table.mvcc.compactedThrough = sequence
+	table.mvcc.physicalCompactedThrough = sequence
 	return nil
 }
 

@@ -36035,3 +36035,18 @@ Linux/amd64 on AMD Ryzen 9 5950X, five `-count=5` samples:
 M211 is a correctness contract for retained frontier intervals, not a claimed
 hot-path speedup. Details and raw samples are in
 [M211_SQL_FRONTIER_BOUNDS.md](M211_SQL_FRONTIER_BOUNDS.md).
+
+## M212 Logical MVCC Compaction
+
+Raw samples from `make benchmark-m212-logical-compaction-baseline` and
+`make benchmark-m212-logical-compaction`:
+
+| Path | Raw ns/op samples | Median ns/op | B/op | allocs/op | Retained version nodes | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Physical `CompactMVCCThrough` baseline | 75139; 74363; 74189; 71529; 69176 | 74189 | 73728 | 1024 | 512 | 1.00x |
+| Logical `AdvanceMVCCCompactionThrough` | 8.987; 8.727; 8.767; 8.855; 8.047 | 8.767 | 0 | 0 | 4096 | 8460x faster |
+| Logical frontier transition | 8.363; 8.766; 8.785; 8.342; 9.078 | 8.766 | 0 | 0 | 4096 | 8460x faster |
+
+Logical compaction removes the compaction allocation cost and is about 8.5k
+times faster here, but retains 8x more version nodes until physical
+reclamation. It is therefore explicit and does not change the default.

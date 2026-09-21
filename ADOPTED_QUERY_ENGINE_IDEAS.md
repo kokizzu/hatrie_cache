@@ -1072,3 +1072,12 @@ out-of-range reads with typed errors before opening a snapshot. Legacy
 providers without the optional capability remain unbounded. See
 `M211_SQL_FRONTIER_BOUNDS.md` for the API and measured zero-allocation
 validation cost.
+
+## M212: Logical MVCC Compaction
+
+M212 adds explicit logical MVCC compaction through
+`AdvanceMVCCCompactionThrough`. The new path advances the retained snapshot
+frontier without rewriting version chains, while preserving physical
+`CompactMVCCThrough` for later memory reclamation. It is opt-in because it
+retains 8x as many version nodes in the benchmark fixture until physical
+compaction runs. See [M212_LOGICAL_COMPACTION.md](M212_LOGICAL_COMPACTION.md).
