@@ -35425,3 +35425,36 @@ This is an ordering-policy measurement, not a claim that one policy improves
 every storage workload. The opt-in policies add a small CPU cost in this
 workload and no measured allocation or byte increase; the default path and
 ordering remain unchanged.
+<a id="ch-042-storage-aware-sampling"></a>
+## CH-042 Storage-Aware Sampling
+
+This benchmark compares the legacy full-source `TABLESAMPLE` path with the
+optional `SampledSourceResolver` path. Both use 10,000 rows and
+`TABLESAMPLE BERNOULLI (10) REPEATABLE (7)`. The baseline ran at the parent
+commit in a detached temporary worktree; the final run used the same query and
+five samples on Linux/amd64, AMD Ryzen 9 5950X.
+
+```text
+Parent BenchmarkSQLTableSample/Bernoulli10-32
+2,679,974 2,583,561 2,617,150 2,633,838 2,577,381 ns/op
+3,986,662 3,986,623 3,986,637 3,986,638 3,986,607 B/op
+22,035 22,034 22,034 22,034 22,034 allocs/op
+BenchmarkCH042StorageAwareSample/legacy-materialize-32
+2,638,259 2,593,018 2,428,171 2,692,181 2,729,824 ns/op
+3,986,609 3,986,612 3,986,584 3,986,565 3,986,640 B/op
+22,033 22,033 22,033 22,033 22,033 allocs/op
+BenchmarkCH042StorageAwareSample/storage-aware-32
+304,133 306,241 300,647 318,661 314,770 ns/op
+521,437 521,437 521,430 521,440 521,435 B/op
+2,024 2,024 2,024 2,024 2,024 allocs/op
+```
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | ---: |
+| Parent legacy baseline | 2,617,150 | 3,986,637 | 22,034 | 1.00x |
+| Current legacy control | 2,638,259 | 3,986,609 | 22,033 | 1.01x slower than parent |
+| Storage-aware sample | 306,241 | 521,437 | 2,024 | 8.54x faster than parent, 7.64x lower memory, 10.89x fewer allocations |
+
+The result depends on a storage adapter having a stable sampling strategy and
+an exact full-source cardinality. Adapters that cannot guarantee that return
+`available=false` and preserve the existing behavior.

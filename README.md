@@ -46,6 +46,7 @@ security guidance before exposing it on a network.
 - Static soft/hard namespace admission previews: [SQL_NAMESPACE_ADMISSION.md](SQL_NAMESPACE_ADMISSION.md)
 - Privacy-safe SQL query-log retention and rotation: [SQL_QUERY_LOG.md](SQL_QUERY_LOG.md)
 - Opt-in deterministic probabilistic SQL query-log sampling: [CHU38_QUERY_LOG_SAMPLING.md](CHU38_QUERY_LOG_SAMPLING.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u38-sampled-query-log-export)
+- Storage-aware repeatable `TABLESAMPLE` pushdown through `hatSql.SampledSourceResolver`: [CH042_STORAGE_AWARE_SAMPLING.md](CH042_STORAGE_AWARE_SAMPLING.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-042-storage-aware-sampling)
 - Opt-in bounded typed-table part and merge lifecycle events: [TYPED_TABLE_STORAGE_EVENTS.md](TYPED_TABLE_STORAGE_EVENTS.md)
 - Opt-in LRU sparse-primary marks separate from typed-table data layouts: [TYPED_TABLE_SPARSE_MARK_CACHE.md](TYPED_TABLE_SPARSE_MARK_CACHE.md)
 - ClickHouse-style deterministic storage-tier movement planning with caller-owned execution: [STORAGE_TIER_MOVEMENT.md](STORAGE_TIER_MOVEMENT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-015-storage-tier-movement)

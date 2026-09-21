@@ -24443,3 +24443,47 @@ commit-ch026-compaction-selector:
 .PHONY: push-ch026-compaction-selector
 push-ch026-compaction-selector:
 	bash scripts/push-ch026-compaction-selector.sh
+
+.PHONY: test-ch042-storage-sample
+test-ch042-storage-sample:
+	bash scripts/test-ch042-storage-sample.sh
+
+.PHONY: format-ch042-storage-sample
+format-ch042-storage-sample:
+	bash scripts/format-ch042-storage-sample.sh
+
+.PHONY: benchmark-ch042-storage-sample-before
+benchmark-ch042-storage-sample-before:
+	bash scripts/benchmark-ch042-storage-sample-before.sh
+
+.PHONY: benchmark-ch042-storage-sample
+benchmark-ch042-storage-sample:
+	bash scripts/benchmark-ch042-storage-sample.sh
+
+.PHONY: test-ch042-sql-package
+test-ch042-sql-package:
+	bash scripts/test-ch042-sql-package.sh
+
+.PHONY: race-ch042-storage-sample
+race-ch042-storage-sample:
+	bash scripts/race-ch042-storage-sample.sh
+
+.PHONY: vet-ch042-storage-sample
+vet-ch042-storage-sample:
+	bash scripts/vet-ch042-storage-sample.sh
+
+.PHONY: test-ch042-sampling-compat
+test-ch042-sampling-compat:
+	bash scripts/test-ch042-sampling-compat.sh
+
+.PHONY: stage-ch042-storage-sample
+stage-ch042-storage-sample:
+	bash scripts/stage-ch042-storage-sample.sh
+
+.PHONY: commit-ch042-storage-sample
+commit-ch042-storage-sample:
+	bash scripts/commit-ch042-storage-sample.sh
+
+.PHONY: push-ch042-storage-sample
+push-ch042-storage-sample:
+	bash scripts/push-ch042-storage-sample.sh

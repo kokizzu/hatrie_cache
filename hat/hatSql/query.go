@@ -11607,6 +11607,8 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		started = time.Now()
 		base, ordered, err := resolveSQLOrderedSource(q, resolver)
 		indexed := ordered
+		sampled := false
+		sampleInputRows := 0
 		if !indexed && q.sample == nil {
 			if q.indexHint.Mode == SQLIndexHintForce && q.indexHint.applies(*q.from) {
 				base, indexed, err = resolveSQLForcedIndex(*q.from, q.where, resolver, metrics, q.indexHint)
@@ -11624,21 +11626,34 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 				return result, err
 			}
 		}
-		if !indexed {
+		if !indexed && q.sample != nil {
+			var available bool
+			base, sampleInputRows, available, err = resolveSQLSampledSource(*q.from, *q.sample, resolver, control)
+			if err != nil {
+				return SQLQueryResult{}, err
+			}
+			sampled = available
+		}
+		if !indexed && !sampled {
 			base, err = resolveSQLSourceWithPartitionPredicates(*q.from, resolver, ctes, metrics, control, sqlQueryPartitionPredicates(q))
 		}
 		if err != nil {
 			return SQLQueryResult{}, err
 		}
-		if len(base) > maxRows {
+		inputRows := len(base)
+		if sampled {
+			inputRows = sampleInputRows
+		}
+		if inputRows > maxRows {
 			return SQLQueryResult{}, fmt.Errorf("SQL source %q exceeds the %d row limit", q.from.alias, maxRows)
 		}
-		if q.sample != nil {
-			inputRows := len(base)
+		if q.sample != nil && !sampled {
 			base = sqlSampleRows(base, *q.sample)
 			metrics.record("TABLESAMPLE", q.sample.detail(), inputRows, len(base), started)
 		}
-		if ordered {
+		if sampled {
+			metrics.record("TABLESAMPLE STORAGE", q.sample.detail(), inputRows, len(base), started)
+		} else if ordered {
 			metrics.record("INDEX ORDER SCAN", sqlExplainSource(*q.from)+" ORDER BY "+sqlExplainOrders(q.orderBy), 0, len(base), started)
 			indexOrdered = true
 		} else if indexed {
@@ -13557,6 +13572,33 @@ func sqlOutputRowKeyWithCollation(row SQLRow, collation SQLCollation) string {
 	}
 	return sqlOutputRowKey(key)
 }
+func resolveSQLSampledSource(source sqlSource, sample sqlTableSample, resolver SQLSourceResolver, control *sqlExecutionControl) ([]SQLRow, int, bool, error) {
+	if resolver == nil || source.kind != "CACHE" && source.kind != "KEYS" {
+		return nil, 0, false, nil
+	}
+	sampled, ok := resolver.(SampledSourceResolver)
+	if !ok {
+		return nil, 0, false, nil
+	}
+	rows, inputRows, available, err := sampled.ResolveSQLSampledSource(source.kind, source.key, SQLSampleRequest{
+		Mode:  sample.mode,
+		Value: sample.value,
+		Seed:  sample.seed,
+	})
+	if err != nil || !available {
+		return rows, inputRows, available, err
+	}
+	if inputRows < 0 || inputRows < len(rows) {
+		return nil, 0, true, fmt.Errorf("SQL sampled source %q returned invalid input row count %d for %d rows", source.alias, inputRows, len(rows))
+	}
+	validated, err := validateSQLSourceFieldTypes(source, rows)
+	if err != nil {
+		return nil, 0, true, err
+	}
+	finalized, err := finalizeSQLSourceRows(source, control, validated)
+	return finalized, inputRows, true, err
+}
+
 func resolveSQLSource(source sqlSource, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl) ([]SQLRow, error) {
 	return resolveSQLSourceWithPartitionPredicates(source, resolver, ctes, metrics, control, nil)
 }

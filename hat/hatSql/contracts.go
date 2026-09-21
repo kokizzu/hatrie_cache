@@ -132,6 +132,24 @@ type BorrowedSourceResolver interface {
 	BorrowSQLSource(name string, key string) ([]Row, bool, error)
 }
 
+// SQLSampleRequest describes a parsed TABLESAMPLE request. Storage-aware
+// resolvers may use a stable source key or physical sample index to avoid
+// materializing the full source. Value is a percentage for BERNOULLI and a
+// row count for RESERVOIR.
+type SQLSampleRequest struct {
+	Mode  string
+	Value int
+	Seed  uint64
+}
+
+// SampledSourceResolver optionally performs TABLESAMPLE in the storage layer.
+// rows must remain in source order, inputRows must be the full source
+// cardinality, and available=false preserves the ordinary materialized path.
+// The executor still applies WHERE, projection, and all other SQL semantics.
+type SampledSourceResolver interface {
+	ResolveSQLSampledSource(name, key string, sample SQLSampleRequest) (rows []Row, inputRows int, available bool, err error)
+}
+
 // DictionaryColumn stores repeated text values once and addresses them through
 // row-aligned codes. Values are ordered by first appearance for determinism.
 // Values and Codes are the compatibility representation. PackedValueData and
