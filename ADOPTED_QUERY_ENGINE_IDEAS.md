@@ -1109,3 +1109,12 @@ pair deltas instead of rebuilding the relation. The focused correctness suite
 and randomized reference test passed; the 10k-row benchmark measured a
 2,424x median latency advantage over rebuilding. See
 [M215_DELTA_JOIN_AUDIT.md](M215_DELTA_JOIN_AUDIT.md).
+
+## M216: Incremental Top-K Audit
+
+`hatSql.IncrementalTopK` already maintains an ordered exact Top-K under signed
+weighted updates and emits only bounded selected-row replacements. It retains
+the full active input index because exact replacement needs non-selected rows,
+but avoids rebuilding and sorting the relation. The 10k-row benchmark measured
+33.5x lower median latency with the same allocations. See
+[M216_INCREMENTAL_TOP_K_AUDIT.md](M216_INCREMENTAL_TOP_K_AUDIT.md).

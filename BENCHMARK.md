@@ -36099,3 +36099,18 @@ row-per-side join with one changed left row per iteration.
 
 The operator and correctness evidence are recorded in
 [M215_DELTA_JOIN_AUDIT.md](M215_DELTA_JOIN_AUDIT.md).
+
+## M216 Incremental Top-K Audit
+
+Command: `make benchmark-m216-incremental-top-k-audit`
+
+Five `-benchmem` samples ran on Linux amd64 / AMD Ryzen 9 5950X over 10,000
+rows with `K=20` and one changed row per iteration.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Rebuild and sort all 10k rows | 93,209 | 1,090 | 7 | baseline |
+| Existing incremental Top-K | 2,778 | 1,212 | 7 | 33.5x faster; 11.2% higher transient bytes; same allocations |
+
+The retained-state semantics and correctness evidence are recorded in
+[M216_INCREMENTAL_TOP_K_AUDIT.md](M216_INCREMENTAL_TOP_K_AUDIT.md).
