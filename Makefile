@@ -24874,3 +24874,51 @@ commit-tt007-snapshot-wal-join:
 .PHONY: push-tt007-snapshot-wal-join
 push-tt007-snapshot-wal-join:
 	bash scripts/push-tt007-snapshot-wal-join.sh
+
+.PHONY: format-tt005-raft-configuration
+format-tt005-raft-configuration:
+	bash scripts/tt005-raft-configuration.sh format
+
+.PHONY: test-tt005-raft-configuration
+test-tt005-raft-configuration:
+	bash scripts/tt005-raft-configuration.sh test
+
+.PHONY: test-tt005-raft-configuration-package
+test-tt005-raft-configuration-package:
+	bash scripts/tt005-raft-configuration.sh package
+
+.PHONY: race-tt005-raft-configuration
+race-tt005-raft-configuration:
+	bash scripts/tt005-raft-configuration.sh race
+
+.PHONY: race-tt005-raft-configuration-package
+race-tt005-raft-configuration-package:
+	bash scripts/tt005-raft-configuration.sh race-package
+
+.PHONY: benchmark-tt005-raft-configuration
+benchmark-tt005-raft-configuration:
+	bash scripts/tt005-raft-configuration.sh benchmark
+
+.PHONY: vet-tt005-raft-configuration
+vet-tt005-raft-configuration:
+	bash scripts/tt005-raft-configuration.sh vet
+
+.PHONY: verify-tt005-raft-configuration
+verify-tt005-raft-configuration:
+	bash scripts/tt005-raft-configuration.sh verify
+
+.PHONY: review-tt005-raft-configuration
+review-tt005-raft-configuration:
+	bash scripts/tt005-raft-configuration.sh review
+
+.PHONY: stage-tt005-raft-configuration
+stage-tt005-raft-configuration:
+	bash scripts/stage-tt005-raft-configuration.sh
+
+.PHONY: commit-tt005-raft-configuration
+commit-tt005-raft-configuration:
+	bash scripts/commit-tt005-raft-configuration.sh
+
+.PHONY: push-tt005-raft-configuration
+push-tt005-raft-configuration:
+	bash scripts/push-tt005-raft-configuration.sh

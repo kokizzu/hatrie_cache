@@ -35671,6 +35671,23 @@ The reused path constructs the plan once outside the measured loop; the
 rebuild path includes plan construction and row adaptation for every row. Both
 paths allocate the adapted output row. See [MZ016_SCHEMA_EVOLUTION.md](MZ016_SCHEMA_EVOLUTION.md) for raw samples, semantics, and test status.
 
+# TT-005: Raft-Style Configuration State
+
+Five `-benchmem` samples ran on Linux amd64 with an AMD Ryzen 9 5950X. The
+joint benchmark alternates learner promotion and demotion, requiring old and
+new majority validation on every transition. Snapshot measures a detached
+status copy.
+
+| Operation | Raw ns/op samples | Median ns/op | B/op | allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Joint propose + commit | 1,546, 1,563, 1,520, 1,651, 1,695 | 1,563 | 864 | 14 |
+| Detached configuration snapshot | 112.6, 110.9, 100.4, 98.65, 105.0 | 105.0 | 96 | 2 |
+
+Membership changes are control-plane operations, so this cost is not added to
+ordinary data writes. The safety tradeoff is explicit: a transition remains
+pending until both configurations acknowledge it, preventing a partial
+membership change from being treated as committed.
+
 # TT-007: Snapshot-plus-WAL Join
 
 This benchmark measures 128 appends per bounded batch, resetting both modes
