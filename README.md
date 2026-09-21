@@ -270,7 +270,7 @@ security guidance before exposing it on a network.
 - Generic composite-key ordered ranges: [TT020_ORDERED_INDEX_RANGES.md](TT020_ORDERED_INDEX_RANGES.md)
 - Opt-in bounded page-index residency with LRU eviction metrics: [TT018_PAGE_INDEX_RESIDENCY.md](TT018_PAGE_INDEX_RESIDENCY.md)
 - Opt-in immutable packed RTREE spatial queries: [TT021_PACKED_RTREE.md](TT021_PACKED_RTREE.md)
-- Canonical compiled-plan reuse: [MZ045_COMPILED_PLAN_EQUIVALENCE.md](MZ045_COMPILED_PLAN_EQUIVALENCE.md)
+- Canonical compiled-plan and per-EXPLAIN workload reuse: [MZ045_COMPILED_PLAN_EQUIVALENCE.md](MZ045_COMPILED_PLAN_EQUIVALENCE.md)
 - Compact secondary-index posting lists: [TR053_COMPACT_POSTING_LIST.md](TR053_COMPACT_POSTING_LIST.md)
 - Single-task compaction scheduler fast path: [TR054_COMPACTION_SCHEDULER_SINGLE_TASK.md](TR054_COMPACTION_SCHEDULER_SINGLE_TASK.md)
 - Opt-in bounded grouped value collection: [SQL bounded `GROUP_ARRAY`](SQL_BOUNDED_GROUP_ARRAY.md)

@@ -51,6 +51,10 @@ test-mz045-package:
 benchmark-mz045:
 	@sh ./scripts/test-mz045.sh benchmark
 
+.PHONY: benchmark-mz045-explain-workload
+benchmark-mz045-explain-workload:
+	@sh ./scripts/benchmark-mz045-explain-workload.sh
+
 .PHONY: race-mz045
 race-mz045:
 	@sh ./scripts/test-mz045.sh race

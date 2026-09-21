@@ -18,7 +18,7 @@ vet)
 	go vet ./hat/hatSql
 	;;
 format)
-	gofmt -w hat/hatSql/mz045_plan_equivalence_test.go hat/hatSql/c213_compiled_plan_cache.go
+	gofmt -w hat/hatSql/mz045_plan_equivalence_test.go hat/hatSql/mz045_explain_workload_test.go hat/hatSql/c213_compiled_plan_cache.go
 	;;
 *)
 	printf 'usage: %s {test|package|benchmark|race|vet|format}\n' "$0" >&2

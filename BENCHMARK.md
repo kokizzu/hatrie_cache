@@ -24356,6 +24356,45 @@ BenchmarkMZ045ExactPlanCacheHit-32              41618862  27.43 ns/op  0 B/op  0
 The implementation is opt-in through the existing compiled-plan cache option;
 queries with different literals or schema versions cannot alias.
 
+## MZ-045 EXPLAIN Workload Reuse
+
+Command: `make benchmark-mz045-explain-workload`.
+
+This workload runs `EXPLAIN` planning for one query with three equality joins.
+Before the change, the planner derived the same normalized arrangement workload
+once for the scan and again for every join. After the change, it derives that
+workload once for the query-level explain recursion and reuses the value. The
+five-sample measurements were collected on Linux/amd64 with an AMD Ryzen 9
+5950X and `-benchmem`.
+
+| Workload | Before median | After median | Improvement | Before memory | After memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Three-join `EXPLAIN` | 12,109 ns/op | 6,476 ns/op | **1.87x faster** | 6,864 B/op, 122 allocs | 4,920 B/op, 62 allocs |
+
+The change reduces benchmark heap by 28.3% and allocations by 49.2%. It is a
+local reuse optimization: it does not retain query text, add a process-wide
+recommendation cache, or alter the arrangement scoring rules.
+
+Raw output from the before run:
+
+```text
+BenchmarkMZ045ExplainWorkload-32  109311  12073 ns/op  6864 B/op  122 allocs/op
+BenchmarkMZ045ExplainWorkload-32   95702  11681 ns/op  6864 B/op  122 allocs/op
+BenchmarkMZ045ExplainWorkload-32  107905  12123 ns/op  6864 B/op  122 allocs/op
+BenchmarkMZ045ExplainWorkload-32  102788  12109 ns/op  6864 B/op  122 allocs/op
+BenchmarkMZ045ExplainWorkload-32  107774  12179 ns/op  6864 B/op  122 allocs/op
+```
+
+Raw output from the after run:
+
+```text
+BenchmarkMZ045ExplainWorkload-32  169876  6525 ns/op  4920 B/op  62 allocs/op
+BenchmarkMZ045ExplainWorkload-32  180591  6476 ns/op  4920 B/op  62 allocs/op
+BenchmarkMZ045ExplainWorkload-32  191919  6119 ns/op  4920 B/op  62 allocs/op
+BenchmarkMZ045ExplainWorkload-32  191131  6422 ns/op  4920 B/op  62 allocs/op
+BenchmarkMZ045ExplainWorkload-32  194593  6673 ns/op  4920 B/op  62 allocs/op
+```
+
 ## TT-020 Generic Multi-Part Ordered Ranges
 
 Command: `make benchmark-tt020`.

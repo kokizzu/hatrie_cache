@@ -13302,6 +13302,7 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 			*steps = append(*steps, SQLExplainStep{Node: prefix + "  VALUES", Detail: "CTE " + cte.name, EstimatedRows: &estimate})
 		}
 	}
+	workload := sqlArrangementWorkloadForQuery(query)
 	sourceEstimate := sqlCardinalityEstimateForSource(*query.from, resolver)
 	currentEstimate := sourceEstimate
 	prewhereEstimate := sqlUnknownCardinalityEstimate()
@@ -13316,7 +13317,7 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 		currentEstimate = whereEstimate
 	}
 	scanStep := sqlExplainSourceStep(prefix+"SCAN", *query.from, resolver)
-	sqlMarkArrangementRecommendation(scanStep.Arrangements, sqlArrangementWorkloadForQuery(query))
+	sqlMarkArrangementRecommendation(scanStep.Arrangements, workload)
 	sqlSetExplainCardinalityEstimate(&scanStep, sourceEstimate)
 	*steps = append(*steps, scanStep)
 	if query.from.kind == "SUBQUERY" && query.from.query != nil {
@@ -13359,7 +13360,7 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 		}
 		joinStep := SQLExplainStep{Node: prefix + node, Detail: detail}
 		joinStep.Arrangements = resolveSQLArrangementMetadata(resolver, join.source)
-		sqlMarkArrangementRecommendation(joinStep.Arrangements, sqlArrangementWorkloadForQuery(query))
+		sqlMarkArrangementRecommendation(joinStep.Arrangements, workload)
 		joinEstimate := sqlCardinalityEstimateForJoin(currentEstimate, join, leftAliases, resolver)
 		sqlSetExplainCardinalityEstimate(&joinStep, joinEstimate)
 		currentEstimate = joinEstimate

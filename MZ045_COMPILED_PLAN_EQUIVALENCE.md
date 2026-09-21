@@ -12,5 +12,10 @@ raw and canonical lookup paths. Exact-source hits do not lex or allocate.
 
 This is a scoped MZ-045 adoption. It improves compiled-plan reuse, but it does
 not yet connect literal-independent query fingerprints to arrangement choices.
+Within one `EXPLAIN`, the normalized arrangement workload is now derived once
+per query and reused for its scan and join steps. This avoids repeated shape
+extraction without caching recommendations across calls or changing which
+arrangement is selected.
 
-See the benchmark details in [BENCHMARK.md](BENCHMARK.md#mz-045-canonical-compiled-plan-equivalence).
+See the benchmark details in [BENCHMARK.md](BENCHMARK.md#mz-045-canonical-compiled-plan-equivalence)
+and [the EXPLAIN workload reuse result](BENCHMARK.md#mz-045-explain-workload-reuse).
