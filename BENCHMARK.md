@@ -34701,3 +34701,40 @@ the roughly 12,000 ns/op baseline, about 3.6x slower, with the same 66,848 B/op
 and 9 allocations. The rejected variant therefore does not ship.
 
 ## C242: Bounded Parallel Restore
+## C244: Local Cache Reuse Validation
+
+The C244 benchmark uses a 1 MiB immutable part split into four columns. The
+baseline is the existing whole-part `ChecksumPart` operation. The manifest
+validation intentionally performs one whole-part hash and one hash per column;
+the metadata equality path performs no byte scan.
+
+| Workload | Median ns/op | Range ns/op | Bytes/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Existing `ChecksumPart` baseline | 537,180 | 473,871-550,542 | 0 | 0 | baseline |
+| `PartManifest.Validate` | 1,007,281 | 960,479-1,051,332 | 0 | 0 | 1.87x CPU cost, expected integrity tradeoff |
+| `PartManifest.Equal` reuse decision | 34.69 | 33.79-36.94 | 0 | 0 | metadata-only fast path, not a byte-scan equivalent |
+
+Raw candidate output:
+
+```text
+BenchmarkC244PartManifestEqual-32        37721659  34.69 ns/op  0 B/op  0 allocs/op
+BenchmarkC244PartManifestEqual-32        33043701  36.54 ns/op  0 B/op  0 allocs/op
+BenchmarkC244PartManifestEqual-32        35583934  33.79 ns/op  0 B/op  0 allocs/op
+BenchmarkC244PartManifestEqual-32        30469196  36.94 ns/op  0 B/op  0 allocs/op
+BenchmarkC244PartManifestEqual-32        29851978  33.96 ns/op  0 B/op  0 allocs/op
+BenchmarkC244PartManifestValidate-32        1072  1007281 ns/op  0 B/op  0 allocs/op
+BenchmarkC244PartManifestValidate-32        1110   997036 ns/op  0 B/op  0 allocs/op
+BenchmarkC244PartManifestValidate-32        1215   960479 ns/op  0 B/op  0 allocs/op
+BenchmarkC244PartManifestValidate-32        1158  1051332 ns/op  0 B/op  0 allocs/op
+BenchmarkC244PartManifestValidate-32        1036  1032441 ns/op  0 B/op  0 allocs/op
+```
+
+Raw baseline output:
+
+```text
+BenchmarkChecksumPart-32  2395  537180 ns/op  1952.00 MB/s  0 B/op  0 allocs/op
+BenchmarkChecksumPart-32  2262  550542 ns/op  1904.62 MB/s  0 B/op  0 allocs/op
+BenchmarkChecksumPart-32  2212  473871 ns/op  2212.79 MB/s  0 B/op  0 allocs/op
+BenchmarkChecksumPart-32  2370  484803 ns/op  2162.89 MB/s  0 B/op  0 allocs/op
+BenchmarkChecksumPart-32  2419  537548 ns/op  1950.67 MB/s  0 B/op  0 allocs/op
+```

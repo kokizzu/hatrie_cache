@@ -981,3 +981,12 @@ retain their existing verified-file reuse semantics. Each part is copied with
 exclusive destination creation plus size and SHA-256 verification before the
 existing atomic publish. See [C242_PARALLEL_RESTORE.md](C242_PARALLEL_RESTORE.md)
 and [BENCHMARK.md](BENCHMARK.md#c242-bounded-parallel-restore).
+## C244: Local Cache Reuse Validation
+
+ClickHouse-style immutable-part metadata is available through the opt-in
+`hatMerkle.PartManifest`. A manifest combines a whole-part checksum with
+independent named column checksums. `Validate` is used when bytes enter a
+local cache or cross an untrusted boundary; `Equal` is an allocation-free
+metadata check for repeated reuse. See [C244_LOCAL_CACHE_REUSE.md](C244_LOCAL_CACHE_REUSE.md)
+and [BENCHMARK.md](BENCHMARK.md#c244-local-cache-reuse-validation) for the
+measured validation cost and the fast reuse path.

@@ -23675,3 +23675,17 @@ push-tu04-runtime:
 	bash scripts/push-tu04-runtime.sh
 audit-hatrie-tmp:
 	bash scripts/audit-hatrie-tmp.sh
+test-c244-isolated:
+	bash scripts/test-c244-isolated.sh
+format-c244-isolated:
+	bash scripts/format-c244-isolated.sh
+benchmark-c244-isolated:
+	bash scripts/benchmark-c244-isolated.sh
+stage-c244-local-cache-reuse:
+	bash scripts/stage-c244-local-cache-reuse.sh
+
+commit-c244-local-cache-reuse:
+	bash scripts/commit-c244-local-cache-reuse.sh
+
+push-c244-local-cache-reuse:
+	bash scripts/push-c244-local-cache-reuse.sh
