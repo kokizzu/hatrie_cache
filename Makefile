@@ -24123,6 +24123,22 @@ verify-ch045-map-subcolumns:
 .PHONY: review-ch045-map-subcolumns
 review-ch045-map-subcolumns:
 	bash scripts/review-ch045-map-subcolumns.sh
+
+.PHONY: verify-ledger-corrections
+verify-ledger-corrections:
+	bash scripts/verify-ledger-corrections.sh
+
+.PHONY: stage-ledger-corrections
+stage-ledger-corrections:
+	bash scripts/stage-ledger-corrections.sh
+
+.PHONY: commit-ledger-corrections
+commit-ledger-corrections:
+	bash scripts/commit-ledger-corrections.sh
+
+.PHONY: push-ledger-corrections
+push-ledger-corrections:
+	bash scripts/push-ledger-corrections.sh
 .PHONY: stage-ch045-map-subcolumns
 stage-ch045-map-subcolumns:
 	bash scripts/stage-ch045-map-subcolumns.sh

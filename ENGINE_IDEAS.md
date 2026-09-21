@@ -43,7 +43,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-014 | Uncompressed hot-data cache | No cache that stores decoded hot ranges while preserving compressed storage. | Medium |
 | CH-014b | Mutation dependency graph with resumable progress | Implemented as an in-memory reverse dependency index plus deterministic ready min-heap; empty polls avoid graph-wide scans and allocations, while snapshot/WAL formats remain compatible. See [CH014B_MUTATION_DEPENDENCY_READY.md](CH014B_MUTATION_DEPENDENCY_READY.md). | Medium |
 | CH-015 | Filesystem cache admission | Adopted as opt-in `RemotePartCacheOptions.MinAccesses`; zero preserves eager admission, while positive thresholds suppress one-hit retention with bounded candidate metadata. See [CH015_FILESYSTEM_CACHE_ADMISSION.md](CH015_FILESYSTEM_CACHE_ADMISSION.md). | Medium |
-| CH-016 | Asynchronous insert queue | Writes cannot be acknowledged before bounded background batching. | Medium |
+| CH-016 | Asynchronous insert queue | Partially adopted as the opt-in bounded `AsyncInsertBuffer`: journaled writes batch in a background worker with bounded capacity, flush/close futures, queue stats, registry monitoring, and idempotency gating; automatic SQL `INSERT` grammar integration remains caller-owned. | Medium |
 | CH-017 | Async-insert deduplication | No idempotency token ledger for safely retrying queued inserts. | Medium |
 | CH-018 | Insert quorum | No write acknowledgement policy requiring a configured replica quorum. | High |
 | CH-019 | Replicated-part checks | No per-part checksums and replica consistency repair workflow. | High |
@@ -64,7 +64,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-034 | Parallel replicas | No coordinated replica reads that divide ranges and merge ordered results. | High |
 | CH-035 | Remote shard pruning | No shard-level predicate routing before distributed execution. | High |
 | CH-036 | `ASOF JOIN` | Partially adopted: constrained `ASOF [LEFT] JOIN` with one equality and one temporal inequality, keyed right-side buckets, and binary search. | High |
-| CH-037 | `ARRAY JOIN` | No row-expanding array join operator with SQL NULL semantics. | Medium |
+| CH-037 | `ARRAY JOIN` | Adopted for direct row-source arrays with optional aliases, deterministic expansion, empty/NULL-array behavior, scalar rejection, row/work limits, and `EXPLAIN` output; richer nested/left-array forms remain open. | Medium |
 | CH-038 | Aggregate combinators | `COUNT_IF`/`COUNTIF`, numeric `*_IF`, `ARGMAX_IF`/`ARGMIN_IF`, and opt-in `COUNT_STATE`/`SUM_STATE`/`AVG_STATE`/`MIN_STATE`/`MAX_STATE` with matching `*_MERGE` are adopted; `OrNull` remains absent. | Medium |
 | CH-039 | Approximate distinct/quantile sketches | Partially adopted: global `APPROX_COUNT_DISTINCT` and `APPROX_PERCENTILE` queries now feed bounded sketches while streaming; grouped, top-k, and other complex shapes remain on the materialized evaluator. | Medium |
 | CH-040 | `argMax`/`argMin` aggregates | Implemented for ordinary, grouped, filtered, and window aggregates, with a constant-state stream fast path for eligible global scans. `ARGMAX_STATE`/`ARGMIN_STATE` and matching merge functions add explicit transferable partial winners. | Low |
