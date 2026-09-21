@@ -24140,6 +24140,44 @@ commit-ledger-corrections:
 push-ledger-corrections:
 	bash scripts/push-ledger-corrections.sh
 
+.PHONY: list-open-inspiration-ideas
+.PHONY: inspect-ch046-wire-protocol
+test-ch046-native-wire-protocol:
+	bash scripts/ch046-native-wire-protocol.sh test
+
+race-ch046-native-wire-protocol:
+	bash scripts/ch046-native-wire-protocol.sh race
+
+test-ch046-native-wire-protocol-package:
+	bash scripts/ch046-native-wire-protocol.sh package
+
+test-ch046-native-wire-protocol-cache-package:
+	bash scripts/ch046-native-wire-protocol.sh cache-package
+
+test-ch046-native-wire-protocol-size:
+	bash scripts/ch046-native-wire-protocol.sh size
+
+benchmark-ch046-native-wire-protocol:
+	bash scripts/ch046-native-wire-protocol.sh benchmark
+
+benchmark-ch046-native-wire-protocol-baseline:
+	bash scripts/ch046-native-wire-protocol.sh baseline
+
+format-ch046-native-wire-protocol:
+	bash scripts/ch046-native-wire-protocol.sh format
+
+verify-ch046-native-wire-protocol:
+	bash scripts/verify-ch046-native-wire-protocol.sh
+
+stage-ch046-native-wire-protocol:
+	bash scripts/stage-ch046-native-wire-protocol.sh
+
+commit-ch046-native-wire-protocol:
+	bash scripts/commit-ch046-native-wire-protocol.sh
+
+push-ch046-native-wire-protocol:
+	bash scripts/push-ch046-native-wire-protocol.sh
+
 .PHONY: test-mz028-adaptive-arrangement
 test-mz028-adaptive-arrangement:
 	bash scripts/mz028-adaptive-arrangement.sh test

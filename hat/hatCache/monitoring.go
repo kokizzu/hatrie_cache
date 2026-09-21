@@ -1425,6 +1425,10 @@ func (handler *MonitoringHandler) handleSQL(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		w.Header().Set("Vary", "Accept")
+		if monitoringSQLRequestAcceptsColumnar(r.Header.Get("Accept")) {
+			handler.handleSQLColumnarBlockStream(w, r, request, query, sources)
+			return
+		}
 		if monitoringSQLRequestAcceptsRowBinary(r.Header.Get("Accept")) {
 			handler.handleSQLRowBinaryStream(w, r, request, query, sources)
 			return
