@@ -220,6 +220,9 @@ type SQLQueryOptions struct {
 	// Workers enables bounded parallel CPU work for eligible query operators.
 	// Zero keeps the deterministic sequential default.
 	Workers int
+	// ComputeCluster selects an opt-in named SQLQueryManager compute pool.
+	// Empty preserves the existing manager default or direct execution path.
+	ComputeCluster string
 	// OperatorYieldEvery inserts a cooperative runtime yield after this many
 	// execution-control checks. Zero disables scheduler yielding and preserves
 	// the existing context-check-only behavior. This is a fairness quantum, not

@@ -23907,3 +23907,28 @@ commit-mz046-frontier-cancellation:
 
 push-mz046-frontier-cancellation:
 	bash ./scripts/push-mz046-frontier-cancellation.sh
+benchmark-mz047-session-routing-baseline:
+	bash ./scripts/benchmark-mz047-session-routing-baseline.sh
+test-mz047-session-routing:
+	bash ./scripts/test-mz047-session-routing.sh
+format-mz047-session-routing:
+	bash ./scripts/format-mz047-session-routing.sh
+
+benchmark-mz047-session-routing:
+	bash ./scripts/run-mz047-session-routing-benchmark.sh final
+race-mz047-session-routing:
+	bash ./scripts/race-mz047-session-routing.sh
+
+verify-mz047-session-routing:
+	bash ./scripts/verify-mz047-session-routing.sh
+review-mz047-session-routing:
+	bash ./scripts/review-mz047-session-routing.sh
+
+stage-mz047-session-routing:
+	bash ./scripts/stage-mz047-session-routing.sh
+
+commit-mz047-session-routing:
+	bash ./scripts/commit-mz047-session-routing.sh
+
+push-mz047-session-routing:
+	bash ./scripts/push-mz047-session-routing.sh

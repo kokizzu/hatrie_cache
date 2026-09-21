@@ -4868,3 +4868,8 @@ existing journal/SQL defaults. See [TU39_SPACE_CHANGEFEED.md](TU39_SPACE_CHANGEF
   cancels a caller-provided query or pipeline context at a named freshness
   frontier and keeps default execution unchanged. See the measured tradeoff in
   [BENCHMARK.md](BENCHMARK.md#mz-046-frontier-aware-cancellation).
+- Opt-in Materialize-style session compute routing is available through
+  `SQLQueryManagerOptions.ComputeClusters` and `QueryOptions.ComputeCluster`;
+  callers can select bounded named SQL pools while empty routing preserves the
+  existing path. See [MZ047_SESSION_COMPUTE_ROUTING.md](MZ047_SESSION_COMPUTE_ROUTING.md)
+  and the measurements in [BENCHMARK.md](BENCHMARK.md#mz-047-session-compute-routing).

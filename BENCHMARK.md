@@ -35040,3 +35040,38 @@ allocation bytes by 1.2%, and reduces allocations by 25%. It is opt-in because
 an active watcher uses one goroutine per guarded operation; callers should
 close it when the operation finishes before the frontier does. See
 [MZ046_FRONTIER_CANCELLATION.md](MZ046_FRONTIER_CANCELLATION.md).
+
+## MZ-047 Session Compute Routing
+
+Command: `make benchmark-mz047-session-routing`
+
+Five 500 ms samples on Linux/amd64, AMD Ryzen 9 5950X with `-cpu=1`. Both paths
+use one worker and queue capacity eight and measure one managed query. The
+named-pool path is compared with the existing unnamed managed pool.
+
+Raw result:
+
+```text
+BenchmarkMZ047ExistingManagedComputePool  141190  8671 ns/op  5800 B/op  30 allocs/op
+BenchmarkMZ047ExistingManagedComputePool  145892  8163 ns/op  5800 B/op  30 allocs/op
+BenchmarkMZ047ExistingManagedComputePool  174589  8581 ns/op  5800 B/op  30 allocs/op
+BenchmarkMZ047ExistingManagedComputePool  156646  9268 ns/op  5800 B/op  30 allocs/op
+BenchmarkMZ047ExistingManagedComputePool  120340  9505 ns/op  5800 B/op  30 allocs/op
+BenchmarkMZ047NamedComputeCluster        123735  8644 ns/op  5800 B/op  30 allocs/op
+BenchmarkMZ047NamedComputeCluster        133750  8929 ns/op  5800 B/op  30 allocs/op
+BenchmarkMZ047NamedComputeCluster        166507  8350 ns/op  5800 B/op  30 allocs/op
+BenchmarkMZ047NamedComputeCluster        158020  7850 ns/op  5800 B/op  30 allocs/op
+BenchmarkMZ047NamedComputeCluster        123344  8399 ns/op  5800 B/op  30 allocs/op
+```
+
+Median comparison:
+
+| Path | Median time | Memory | Allocations | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Existing managed pool | 8,671 ns/op | 5,800 B/op | 30 | 1.00x |
+| Named `analytics` pool | 8,399 ns/op | 5,800 B/op | 30 | 0.97x |
+
+Named routing is neutral within scheduler noise and adds no measured per-query
+allocation or retained-byte cost. Pool creation and worker memory are opt-in,
+one per configured named pool. See
+[MZ047_SESSION_COMPUTE_ROUTING.md](MZ047_SESSION_COMPUTE_ROUTING.md).

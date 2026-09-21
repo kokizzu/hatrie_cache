@@ -25,12 +25,20 @@ const (
 	// MaxSQLQueryManagerComputeQueueCapacity bounds retained query closures and
 	// their caller-owned arguments while they wait for compute capacity.
 	MaxSQLQueryManagerComputeQueueCapacity = 100000
-	maxSQLQueryManagerIDBytes              = 256
-	maxSQLQueryManagerReasonBytes          = 512
+	// MaxSQLQueryManagerComputeClusters bounds named compute pools in one
+	// manager.
+	MaxSQLQueryManagerComputeClusters = 64
+	maxSQLQueryManagerIDBytes         = 256
+	maxSQLQueryManagerReasonBytes     = 512
+	maxSQLComputeClusterNameBytes     = 128
 )
 
 // ErrSQLQueryManagerClosed identifies execution submitted after Close.
-var ErrSQLQueryManagerClosed = errors.New("SQL query manager is closed")
+var (
+	ErrSQLQueryManagerClosed                 = errors.New("SQL query manager is closed")
+	ErrSQLQueryManagerComputeClusterNotFound = errors.New("SQL compute cluster is not configured")
+	ErrSQLQueryManagerComputeClusterInvalid  = errors.New("SQL compute cluster configuration is invalid")
+)
 
 // SQLQueryState describes one managed query's lifecycle.
 type SQLQueryState string
@@ -73,6 +81,13 @@ func (err *SQLQueryCanceledError) Error() string {
 
 func (err *SQLQueryCanceledError) Unwrap() error { return context.Canceled }
 
+// SQLComputeClusterOptions bounds one named SQL compute pool.
+// Workers must be positive; zero QueueCapacity selects the manager default.
+type SQLComputeClusterOptions struct {
+	Workers       int
+	QueueCapacity int
+}
+
 // SQLQueryManagerOptions configures SQL query history and optional compute
 // admission. ComputeWorkers is zero by default, preserving direct execution;
 // a positive value runs managed queries on an independently bounded compute
@@ -93,6 +108,10 @@ type SQLQueryManagerOptions struct {
 	// ComputeQueueCapacity bounds admitted queries waiting for a compute worker.
 	// Zero uses DefaultSQLQueryManagerComputeQueueCapacity when workers are on.
 	ComputeQueueCapacity int
+	// ComputeClusters configures additional named compute pools. A query opts
+	// into one through QueryOptions.ComputeCluster; an empty name preserves the
+	// existing default pool or direct execution path.
+	ComputeClusters map[string]SQLComputeClusterOptions
 }
 
 // SQLQueryManager owns cancellation contexts for opt-in SQL executions. It
@@ -109,6 +128,8 @@ type SQLQueryManager struct {
 	history            []SQLQueryStatus
 	historyStart       int
 	compute            *sqlQueryManagerCompute
+	computeClusters    map[string]*sqlQueryManagerCompute
+	configurationErr   error
 }
 
 type managedSQLQuery struct {
@@ -156,6 +177,7 @@ func newSQLQueryManagerWithConfiguration(options SQLQueryManagerOptions) *SQLQue
 		historySampleEvery: options.HistorySampleEvery,
 		queryLog:           options.QueryLog,
 		active:             make(map[string]*managedSQLQuery),
+		configurationErr:   configurationErr,
 	}
 	if configurationErr != nil || computeWorkers > 0 {
 		manager.compute = &sqlQueryManagerCompute{configurationErr: configurationErr}
@@ -169,6 +191,23 @@ func newSQLQueryManagerWithConfiguration(options SQLQueryManagerOptions) *SQLQue
 			} else {
 				manager.compute.pool = pool
 			}
+		}
+	}
+	if configurationErr == nil && len(options.ComputeClusters) > 0 {
+		manager.computeClusters = make(map[string]*sqlQueryManagerCompute, len(options.ComputeClusters))
+		names := make([]string, 0, len(options.ComputeClusters))
+		for name := range options.ComputeClusters {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			cluster := options.ComputeClusters[name]
+			pool, err := hatPipeline.NewWorkStealingPool(context.Background(), cluster.Workers, normalizedSQLComputeQueueCapacity(cluster.QueueCapacity))
+			if err != nil {
+				manager.configurationErr = fmt.Errorf("SQL compute cluster %q: %w", name, err)
+				break
+			}
+			manager.computeClusters[name] = &sqlQueryManagerCompute{pool: pool}
 		}
 	}
 	return manager
@@ -194,6 +233,17 @@ func ValidateSQLQueryManagerOptions(options SQLQueryManagerOptions) error {
 	if options.ComputeQueueCapacity > MaxSQLQueryManagerComputeQueueCapacity {
 		return fmt.Errorf("SQL compute queue capacity exceeds %d", MaxSQLQueryManagerComputeQueueCapacity)
 	}
+	if len(options.ComputeClusters) > MaxSQLQueryManagerComputeClusters {
+		return fmt.Errorf("SQL compute clusters exceed %d", MaxSQLQueryManagerComputeClusters)
+	}
+	for name, cluster := range options.ComputeClusters {
+		if name == "" || strings.TrimSpace(name) != name || len(name) > maxSQLComputeClusterNameBytes {
+			return ErrSQLQueryManagerComputeClusterInvalid
+		}
+		if cluster.Workers < 1 || cluster.Workers > MaxSQLQueryManagerComputeWorkers || cluster.QueueCapacity < 0 || cluster.QueueCapacity > MaxSQLQueryManagerComputeQueueCapacity {
+			return ErrSQLQueryManagerComputeClusterInvalid
+		}
+	}
 	return nil
 }
 
@@ -208,11 +258,39 @@ func (manager *SQLQueryManager) Close() error {
 	if compute != nil {
 		compute.closed = true
 	}
-	manager.mu.Unlock()
-	if compute == nil || compute.pool == nil {
-		return nil
+	computes := make([]*sqlQueryManagerCompute, 0, len(manager.computeClusters)+1)
+	if compute != nil {
+		computes = append(computes, compute)
 	}
-	return compute.pool.Wait()
+	for _, cluster := range manager.computeClusters {
+		cluster.closed = true
+		computes = append(computes, cluster)
+	}
+	manager.mu.Unlock()
+	var firstErr error
+	for _, compute := range computes {
+		if compute.pool == nil {
+			continue
+		}
+		if err := compute.pool.Wait(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+// ComputeClusters returns the configured named pools in deterministic order.
+// The result is empty when the manager has no named pools.
+func (manager *SQLQueryManager) ComputeClusters() []string {
+	if manager == nil || len(manager.computeClusters) == 0 {
+		return []string{}
+	}
+	names := make([]string, 0, len(manager.computeClusters))
+	for name := range manager.computeClusters {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // Execute runs one query under a manager-owned cancellation context. When
@@ -224,7 +302,13 @@ func (manager *SQLQueryManager) Execute(ctx context.Context, source string, reso
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	compute := manager.compute
+	if manager.configurationErr != nil {
+		return SQLQueryResult{}, manager.configurationErr
+	}
+	compute, err := manager.computeFor(options.ComputeCluster)
+	if err != nil {
+		return SQLQueryResult{}, err
+	}
 	if compute != nil && compute.configurationErr != nil {
 		return SQLQueryResult{}, compute.configurationErr
 	}
@@ -243,7 +327,7 @@ func (manager *SQLQueryManager) Execute(ctx context.Context, source string, reso
 		cancel: cancel,
 	}
 	manager.mu.Lock()
-	if manager.compute != nil && manager.compute.closed {
+	if compute != nil && compute.closed {
 		manager.mu.Unlock()
 		cancel()
 		return SQLQueryResult{}, ErrSQLQueryManagerClosed
@@ -294,6 +378,25 @@ func (manager *SQLQueryManager) Execute(ctx context.Context, source string, reso
 	}
 	cancel()
 	return result, err
+}
+
+func (manager *SQLQueryManager) computeFor(name string) (*sqlQueryManagerCompute, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return manager.compute, nil
+	}
+	compute, ok := manager.computeClusters[name]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrSQLQueryManagerComputeClusterNotFound, name)
+	}
+	return compute, nil
+}
+
+func normalizedSQLComputeQueueCapacity(value int) int {
+	if value == 0 {
+		return DefaultSQLQueryManagerComputeQueueCapacity
+	}
+	return value
 }
 
 func executeSQLQueryOnComputePool(pool *hatPipeline.WorkStealingPool, queryContext context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions) (result SQLQueryResult, err error) {
