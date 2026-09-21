@@ -35516,3 +35516,15 @@ BenchmarkCH042StorageAwareSample/storage-aware-32
 The result depends on a storage adapter having a stable sampling strategy and
 an exact full-source cardinality. Adapters that cannot guarantee that return
 `available=false` and preserve the existing behavior.
+# CH-046: Columnar Wire Compression
+
+The current raw columnar stream remains the default after measurement. See
+[CH046_WIRE_COMPRESSION.md](CH046_WIRE_COMPRESSION.md) for the API, security
+limits, raw samples, and interpretation.
+
+| Mode | Median ns/op | B/op | allocs/op | Wire bytes | CPU vs pre-change | Wire vs pre-change |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Pre-change raw v1 | 460,968 | 351,479 | 195 | 119,217 | 1.00x | 1.00x |
+| Current default raw v1 | 415,888 | 351,660 | 196 | 119,217 | 1.11x faster | 1.00x |
+| Explicit Auto / BestSpeed | 11,496,941 | 58,011,656 | 1,228 | 9,025 | 24.9x slower | 13.2x smaller |
+| Explicit Flate / HuffmanOnly | 7,688,601 | 35,688,752 | 1,133 | 46,225 | 16.7x slower | 2.58x smaller |

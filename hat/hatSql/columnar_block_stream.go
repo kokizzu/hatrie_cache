@@ -2,6 +2,8 @@ package hatSql
 
 import (
 	"bufio"
+	"bytes"
+	"compress/flate"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -11,14 +13,17 @@ import (
 const (
 	// SQLColumnarBlockStreamContentType identifies the opt-in typed block
 	// stream used for column-oriented query transfer.
-	SQLColumnarBlockStreamContentType = "application/x-hatrie-columnar"
-	sqlColumnarBlockStreamFormat      = "hatrie-columnar-block"
-	sqlColumnarBlockStreamVersion     = 1
-	sqlColumnarBlockStreamDefaultRows = 1024
-	sqlColumnarBlockStreamMaxRows     = 1 << 16
-	sqlColumnarBlockStreamMaxBytes    = 64 << 20
-	sqlColumnarBlockFrameEnd          = 0
-	sqlColumnarBlockFrameData         = 1
+	SQLColumnarBlockStreamContentType        = "application/x-hatrie-columnar"
+	sqlColumnarBlockStreamFormat             = "hatrie-columnar-block"
+	sqlColumnarBlockStreamLegacyVersion      = 1
+	sqlColumnarBlockStreamVersion            = 2
+	sqlColumnarBlockStreamDefaultRows        = 1024
+	sqlColumnarBlockStreamMaxRows            = 1 << 16
+	sqlColumnarBlockStreamMaxBytes           = 64 << 20
+	sqlColumnarBlockFrameEnd                 = 0
+	sqlColumnarBlockFrameData                = 1
+	sqlColumnarBlockEncodingRaw         byte = 0
+	sqlColumnarBlockEncodingFlate       byte = 1
 )
 
 var sqlColumnarBlockStreamMagic = [4]byte{'H', 'C', 'B', '1'}
@@ -40,6 +45,26 @@ type SQLColumnarBlockStreamProgress struct {
 	Rows   uint64
 }
 
+// SQLColumnarBlockStreamCompression controls the per-column payload encoding.
+// None is the default and emits the version 1 wire format for compatibility
+// with existing producers. Auto keeps Flate output only when it is smaller
+// than the raw payload. Flate always emits compressed payloads.
+type SQLColumnarBlockStreamCompression uint8
+
+const (
+	SQLColumnarBlockStreamCompressionNone SQLColumnarBlockStreamCompression = iota
+	SQLColumnarBlockStreamCompressionAuto
+	SQLColumnarBlockStreamCompressionFlate
+)
+
+// SQLColumnarBlockStreamOptions configures a columnar block writer. A zero
+// value preserves the legacy raw v1 wire format. Adaptive compression is
+// explicit because its CPU and allocation cost is workload-dependent.
+type SQLColumnarBlockStreamOptions struct {
+	Compression      SQLColumnarBlockStreamCompression
+	CompressionLevel int
+}
+
 // SQLColumnarBlockStreamWriter writes a bounded sequence of typed column
 // blocks. Each block contains one independently framed payload per column,
 // followed by cumulative block and row progress.
@@ -48,6 +73,9 @@ type SQLColumnarBlockStreamWriter struct {
 	columnNames     []string
 	columns         []SQLRowBinaryColumn
 	columnsProvided bool
+	options         SQLColumnarBlockStreamOptions
+	optionsErr      error
+	version         int
 	blockRows       int
 	buffers         [][]byte
 	previousLengths []int
@@ -64,6 +92,7 @@ type SQLColumnarBlockStreamReader struct {
 	reader    *bufio.Reader
 	closer    io.Closer
 	columns   []SQLRowBinaryColumn
+	version   int
 	blockRows int
 	block     []Row
 	progress  SQLColumnarBlockStreamProgress
@@ -76,9 +105,24 @@ type SQLColumnarBlockStreamReader struct {
 // and marks every column nullable, matching the existing streaming RowBinary
 // behavior.
 func NewSQLColumnarBlockStreamWriter(writer io.Writer, columnNames []string, blockRows int) *SQLColumnarBlockStreamWriter {
+	return NewSQLColumnarBlockStreamWriterWithOptions(writer, columnNames, blockRows, SQLColumnarBlockStreamOptions{})
+}
+
+// NewSQLColumnarBlockStreamWriterWithOptions creates a stream writer whose
+// schema is inferred from the first row and whose payload encoding follows
+// options.
+func NewSQLColumnarBlockStreamWriterWithOptions(writer io.Writer, columnNames []string, blockRows int, options SQLColumnarBlockStreamOptions) *SQLColumnarBlockStreamWriter {
+	options, optionsErr := normalizeSQLColumnarBlockStreamOptions(options)
+	version := sqlColumnarBlockStreamVersion
+	if options.Compression == SQLColumnarBlockStreamCompressionNone {
+		version = sqlColumnarBlockStreamLegacyVersion
+	}
 	return &SQLColumnarBlockStreamWriter{
 		writer:      writer,
 		columnNames: append([]string(nil), columnNames...),
+		options:     options,
+		optionsErr:  optionsErr,
+		version:     version,
 		blockRows:   normalizeSQLColumnarBlockRows(blockRows),
 	}
 }
@@ -86,10 +130,24 @@ func NewSQLColumnarBlockStreamWriter(writer io.Writer, columnNames []string, blo
 // NewSQLColumnarBlockStreamWriterWithColumns creates a stream writer with an
 // explicit physical schema. The schema is copied before any rows are written.
 func NewSQLColumnarBlockStreamWriterWithColumns(writer io.Writer, columns []SQLRowBinaryColumn, blockRows int) *SQLColumnarBlockStreamWriter {
+	return NewSQLColumnarBlockStreamWriterWithColumnsAndOptions(writer, columns, blockRows, SQLColumnarBlockStreamOptions{})
+}
+
+// NewSQLColumnarBlockStreamWriterWithColumnsAndOptions creates a stream
+// writer with an explicit physical schema and payload encoding options.
+func NewSQLColumnarBlockStreamWriterWithColumnsAndOptions(writer io.Writer, columns []SQLRowBinaryColumn, blockRows int, options SQLColumnarBlockStreamOptions) *SQLColumnarBlockStreamWriter {
+	options, optionsErr := normalizeSQLColumnarBlockStreamOptions(options)
+	version := sqlColumnarBlockStreamVersion
+	if options.Compression == SQLColumnarBlockStreamCompressionNone {
+		version = sqlColumnarBlockStreamLegacyVersion
+	}
 	return &SQLColumnarBlockStreamWriter{
 		writer:          writer,
 		columns:         cloneSQLRowBinaryColumns(columns),
 		columnsProvided: true,
+		options:         options,
+		optionsErr:      optionsErr,
+		version:         version,
 		blockRows:       normalizeSQLColumnarBlockRows(blockRows),
 	}
 }
@@ -177,7 +235,7 @@ func (writer *SQLColumnarBlockStreamWriter) Flush() error {
 			return fmt.Errorf("SQL columnar block payload exceeds %d bytes", sqlColumnarBlockStreamMaxBytes)
 		}
 	}
-	if err := writeSQLColumnarBlockFrame(writer.writer, writer.progress, writer.rowsInBlock, writer.buffers); err != nil {
+	if err := writeSQLColumnarBlockFrame(writer.writer, writer.progress, writer.rowsInBlock, writer.buffers, writer.version, writer.options); err != nil {
 		return err
 	}
 	writer.progress.Blocks++
@@ -215,6 +273,9 @@ func (writer *SQLColumnarBlockStreamWriter) Finish() error {
 }
 
 func (writer *SQLColumnarBlockStreamWriter) initialize(firstRow Row) error {
+	if writer.optionsErr != nil {
+		return writer.optionsErr
+	}
 	if writer.blockRows <= 0 || writer.blockRows > sqlColumnarBlockStreamMaxRows {
 		return fmt.Errorf("SQL columnar block row limit %d is outside 1..%d", writer.blockRows, sqlColumnarBlockStreamMaxRows)
 	}
@@ -259,7 +320,7 @@ func (writer *SQLColumnarBlockStreamWriter) writeHeader() error {
 	}
 	header, err := json.Marshal(SQLColumnarBlockStreamHeader{
 		Format:    sqlColumnarBlockStreamFormat,
-		Version:   sqlColumnarBlockStreamVersion,
+		Version:   writer.version,
 		BlockRows: writer.blockRows,
 		Columns:   headerColumns,
 	})
@@ -287,7 +348,7 @@ func NewSQLColumnarBlockStreamReader(source io.Reader) (*SQLColumnarBlockStreamR
 	if !ok {
 		buffered = bufio.NewReader(source)
 	}
-	columns, blockRows, err := readSQLColumnarBlockStreamHeader(buffered)
+	columns, blockRows, version, err := readSQLColumnarBlockStreamHeader(buffered)
 	if err != nil {
 		return nil, err
 	}
@@ -295,7 +356,7 @@ func NewSQLColumnarBlockStreamReader(source io.Reader) (*SQLColumnarBlockStreamR
 	if sourceCloser, ok := source.(io.Closer); ok {
 		closer = sourceCloser
 	}
-	return &SQLColumnarBlockStreamReader{reader: buffered, closer: closer, columns: columns, blockRows: blockRows}, nil
+	return &SQLColumnarBlockStreamReader{reader: buffered, closer: closer, columns: columns, version: version, blockRows: blockRows}, nil
 }
 
 // NextBlock advances to the next complete block. Clean EOF is not accepted:
@@ -437,7 +498,18 @@ func (reader *SQLColumnarBlockStreamReader) readBlock(selected []bool) bool {
 		block[index] = make(Row, selectedCount)
 	}
 	var blockBytes uint64
+	var decodedBlockBytes uint64
 	for columnIndex, column := range reader.columns {
+		encoding := sqlColumnarBlockEncodingRaw
+		if reader.version >= sqlColumnarBlockStreamVersion {
+			encoding, err = reader.reader.ReadByte()
+			if err != nil {
+				return reader.fail(fmt.Errorf("read SQL columnar block column %q encoding: %w", column.Name, err))
+			}
+			if encoding != sqlColumnarBlockEncodingRaw && encoding != sqlColumnarBlockEncodingFlate {
+				return reader.fail(fmt.Errorf("SQL columnar block column %q has unsupported encoding %d", column.Name, encoding))
+			}
+		}
 		payloadLength, err := readSQLColumnarBlockUvarint(reader.reader, fmt.Sprintf("column %q payload length", column.Name))
 		if err != nil {
 			return reader.fail(err)
@@ -461,7 +533,12 @@ func (reader *SQLColumnarBlockStreamReader) readBlock(selected []bool) bool {
 			return reader.fail(fmt.Errorf("read SQL columnar block column %q: %w", column.Name, err))
 		}
 		blockBytes += payloadLength
-		if err := decodeSQLColumnarBlockColumn(block, column, payload); err != nil {
+		decoded, err := decodeSQLColumnarBlockPayload(payload, encoding, sqlColumnarBlockStreamMaxBytes-decodedBlockBytes)
+		if err != nil {
+			return reader.fail(fmt.Errorf("decode SQL columnar block column %q: %w", column.Name, err))
+		}
+		decodedBlockBytes += uint64(len(decoded))
+		if err := decodeSQLColumnarBlockColumn(block, column, decoded); err != nil {
 			return reader.fail(err)
 		}
 	}
@@ -532,7 +609,7 @@ func decodeSQLColumnarBlockColumn(rows []Row, column SQLRowBinaryColumn, payload
 	return nil
 }
 
-func writeSQLColumnarBlockFrame(writer io.Writer, progress SQLColumnarBlockStreamProgress, rows int, columns [][]byte) error {
+func writeSQLColumnarBlockFrame(writer io.Writer, progress SQLColumnarBlockStreamProgress, rows int, columns [][]byte, version int, options SQLColumnarBlockStreamOptions) error {
 	if err := writeSQLColumnarBlockByte(writer, sqlColumnarBlockFrameData); err != nil {
 		return err
 	}
@@ -553,48 +630,126 @@ func writeSQLColumnarBlockFrame(writer io.Writer, progress SQLColumnarBlockStrea
 	}
 	var totalBytes uint64
 	for index, column := range columns {
-		totalBytes += uint64(len(column))
+		encoding := sqlColumnarBlockEncodingRaw
+		payload := column
+		if version >= sqlColumnarBlockStreamVersion {
+			var err error
+			encoding, payload, err = encodeSQLColumnarBlockPayload(column, options)
+			if err != nil {
+				return fmt.Errorf("encode SQL columnar block column %d: %w", index, err)
+			}
+		}
+		totalBytes += uint64(len(payload))
 		if totalBytes > sqlColumnarBlockStreamMaxBytes {
 			return fmt.Errorf("SQL columnar block %d payload exceeds %d bytes", index, sqlColumnarBlockStreamMaxBytes)
 		}
-		if err := writeSQLColumnarBlockUvarint(writer, uint64(len(column))); err != nil {
+		if version >= sqlColumnarBlockStreamVersion {
+			if err := writeSQLColumnarBlockByte(writer, encoding); err != nil {
+				return err
+			}
+		}
+		if err := writeSQLColumnarBlockUvarint(writer, uint64(len(payload))); err != nil {
 			return err
 		}
-		if err := writeSQLColumnarBlockBytes(writer, column); err != nil {
+		if err := writeSQLColumnarBlockBytes(writer, payload); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func readSQLColumnarBlockStreamHeader(reader *bufio.Reader) ([]SQLRowBinaryColumn, int, error) {
+func normalizeSQLColumnarBlockStreamOptions(options SQLColumnarBlockStreamOptions) (SQLColumnarBlockStreamOptions, error) {
+	switch options.Compression {
+	case SQLColumnarBlockStreamCompressionAuto, SQLColumnarBlockStreamCompressionFlate:
+		if options.CompressionLevel == 0 {
+			options.CompressionLevel = flate.BestSpeed
+		}
+		if options.CompressionLevel < flate.HuffmanOnly || options.CompressionLevel > flate.BestCompression {
+			return options, fmt.Errorf("SQL columnar block stream compression level %d is outside %d..%d", options.CompressionLevel, flate.HuffmanOnly, flate.BestCompression)
+		}
+	case SQLColumnarBlockStreamCompressionNone:
+	default:
+		return options, fmt.Errorf("SQL columnar block stream compression mode %d is unsupported", options.Compression)
+	}
+	return options, nil
+}
+
+func encodeSQLColumnarBlockPayload(raw []byte, options SQLColumnarBlockStreamOptions) (byte, []byte, error) {
+	if options.Compression == SQLColumnarBlockStreamCompressionNone {
+		return sqlColumnarBlockEncodingRaw, raw, nil
+	}
+	var compressed bytes.Buffer
+	compressor, err := flate.NewWriter(&compressed, options.CompressionLevel)
+	if err != nil {
+		return 0, nil, err
+	}
+	if _, err := compressor.Write(raw); err != nil {
+		_ = compressor.Close()
+		return 0, nil, err
+	}
+	if err := compressor.Close(); err != nil {
+		return 0, nil, err
+	}
+	if options.Compression == SQLColumnarBlockStreamCompressionAuto && compressed.Len() >= len(raw) {
+		return sqlColumnarBlockEncodingRaw, raw, nil
+	}
+	return sqlColumnarBlockEncodingFlate, compressed.Bytes(), nil
+}
+
+func decodeSQLColumnarBlockPayload(payload []byte, encoding byte, maxBytes uint64) ([]byte, error) {
+	switch encoding {
+	case sqlColumnarBlockEncodingRaw:
+		if uint64(len(payload)) > maxBytes {
+			return nil, fmt.Errorf("raw payload exceeds %d bytes", maxBytes)
+		}
+		return payload, nil
+	case sqlColumnarBlockEncodingFlate:
+		decompressor := flate.NewReader(bytes.NewReader(payload))
+		decoded, readErr := io.ReadAll(io.LimitReader(decompressor, int64(maxBytes)+1))
+		closeErr := decompressor.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("read compressed payload: %w", readErr)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("close compressed payload: %w", closeErr)
+		}
+		if uint64(len(decoded)) > maxBytes {
+			return nil, fmt.Errorf("decompressed payload exceeds %d bytes", maxBytes)
+		}
+		return decoded, nil
+	default:
+		return nil, fmt.Errorf("unsupported payload encoding %d", encoding)
+	}
+}
+
+func readSQLColumnarBlockStreamHeader(reader *bufio.Reader) ([]SQLRowBinaryColumn, int, int, error) {
 	var magic [len(sqlColumnarBlockStreamMagic)]byte
 	if _, err := io.ReadFull(reader, magic[:]); err != nil {
-		return nil, 0, fmt.Errorf("read SQL columnar block stream magic: %w", err)
+		return nil, 0, 0, fmt.Errorf("read SQL columnar block stream magic: %w", err)
 	}
 	if magic != sqlColumnarBlockStreamMagic {
-		return nil, 0, fmt.Errorf("invalid SQL columnar block stream magic")
+		return nil, 0, 0, fmt.Errorf("invalid SQL columnar block stream magic")
 	}
 	headerLength, err := binary.ReadUvarint(reader)
 	if err != nil {
-		return nil, 0, fmt.Errorf("read SQL columnar block stream header length: %w", err)
+		return nil, 0, 0, fmt.Errorf("read SQL columnar block stream header length: %w", err)
 	}
 	if headerLength > maxSQLRowBinaryStreamHeader {
-		return nil, 0, fmt.Errorf("SQL columnar block stream header length %d exceeds limit", headerLength)
+		return nil, 0, 0, fmt.Errorf("SQL columnar block stream header length %d exceeds limit", headerLength)
 	}
 	headerData := make([]byte, int(headerLength))
 	if _, err := io.ReadFull(reader, headerData); err != nil {
-		return nil, 0, fmt.Errorf("read SQL columnar block stream header: %w", err)
+		return nil, 0, 0, fmt.Errorf("read SQL columnar block stream header: %w", err)
 	}
 	var header SQLColumnarBlockStreamHeader
 	if err := json.Unmarshal(headerData, &header); err != nil {
-		return nil, 0, fmt.Errorf("decode SQL columnar block stream header: %w", err)
+		return nil, 0, 0, fmt.Errorf("decode SQL columnar block stream header: %w", err)
 	}
-	if header.Format != sqlColumnarBlockStreamFormat || header.Version != sqlColumnarBlockStreamVersion {
-		return nil, 0, fmt.Errorf("unsupported SQL columnar block stream format %q version %d", header.Format, header.Version)
+	if header.Format != sqlColumnarBlockStreamFormat || (header.Version != sqlColumnarBlockStreamLegacyVersion && header.Version != sqlColumnarBlockStreamVersion) {
+		return nil, 0, 0, fmt.Errorf("unsupported SQL columnar block stream format %q version %d", header.Format, header.Version)
 	}
 	if header.BlockRows <= 0 || header.BlockRows > sqlColumnarBlockStreamMaxRows {
-		return nil, 0, fmt.Errorf("SQL columnar block stream row limit %d is outside 1..%d", header.BlockRows, sqlColumnarBlockStreamMaxRows)
+		return nil, 0, 0, fmt.Errorf("SQL columnar block stream row limit %d is outside 1..%d", header.BlockRows, sqlColumnarBlockStreamMaxRows)
 	}
 	columns := make([]SQLRowBinaryColumn, len(header.Columns))
 	for index, column := range header.Columns {
@@ -608,9 +763,9 @@ func readSQLColumnarBlockStreamHeader(reader *bufio.Reader) ([]SQLRowBinaryColum
 		}
 	}
 	if err := validateSQLRowBinaryStreamColumns(columns); err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
-	return columns, header.BlockRows, nil
+	return columns, header.BlockRows, header.Version, nil
 }
 
 func readSQLColumnarBlockUvarint(reader *bufio.Reader, label string) (uint64, error) {

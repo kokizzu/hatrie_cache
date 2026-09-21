@@ -24562,6 +24562,13 @@ push-tt028-upsert:
 inspect-open-ideas:
 	bash scripts/inspect-open-ideas.sh OPEN
 
+
+test-ch046-compression:
+	bash scripts/test-ch046-compression.sh
+
+benchmark-ch046-before:
+	bash scripts/benchmark-ch046-before.sh
+
 test-tt021-mutable:
 	bash scripts/test-tt021-mutable.sh
 
@@ -24597,3 +24604,37 @@ commit-tt021-mutable:
 
 push-tt021-mutable:
 	bash scripts/push-tt021-mutable.sh
+
+.PHONY: format-ch046-compression
+
+format-ch046-compression:
+	bash scripts/format-ch046-compression.sh
+
+.PHONY: benchmark-ch046-after
+
+benchmark-ch046-after:
+	bash scripts/benchmark-ch046-after.sh
+
+.PHONY: test-ch046-package race-ch046-compression vet-ch046-compression review-ch046-compression stage-ch046-compression commit-ch046-compression push-ch046-compression
+
+
+test-ch046-package:
+	bash scripts/test-ch046-package.sh
+
+race-ch046-compression:
+	bash scripts/race-ch046-compression.sh
+
+vet-ch046-compression:
+	bash scripts/vet-ch046-compression.sh
+
+review-ch046-compression:
+	bash scripts/review-ch046-compression.sh
+
+stage-ch046-compression:
+	bash scripts/stage-ch046-compression.sh
+
+commit-ch046-compression:
+	bash scripts/commit-ch046-compression.sh
+
+push-ch046-compression:
+	bash scripts/push-ch046-compression.sh
