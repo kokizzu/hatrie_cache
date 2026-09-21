@@ -18,6 +18,7 @@ var (
 	ErrMaterializedSourceFunctionalIndexDependenciesRequired = errors.New("hatSchema: materialized source functional index dependencies are required")
 	ErrMaterializedSourceFunctionalIndexEvaluatorRequired    = errors.New("hatSchema: materialized source functional index evaluator is required")
 	ErrMaterializedSourceFunctionalIndexNameConflict         = errors.New("hatSchema: materialized source functional index name conflicts with an existing index")
+	ErrMaterializedSourceUniqueIndexViolation                = errors.New("hatSchema: materialized source unique index violation")
 )
 
 type GeneratedValue func(Row) (interface{}, error)
@@ -164,6 +165,7 @@ type MaterializedSource struct {
 	rows              []Row
 	indexes           map[string]map[string][]int
 	indexedFields     map[string]struct{}
+	uniqueFields      map[string]struct{}
 	coveringIndexes   map[string]*materializedCoveringIndex
 	functionalIndexes map[string]*materializedFunctionalIndex
 	indexStatsCache   map[string]hatSql.JSONIndexStats
@@ -182,6 +184,7 @@ func NewMaterializedSource(columns []DerivedColumn) *MaterializedSource {
 		nextID:            map[string]int64{},
 		indexes:           map[string]map[string][]int{},
 		indexedFields:     indexedFields,
+		uniqueFields:      map[string]struct{}{},
 		coveringIndexes:   map[string]*materializedCoveringIndex{},
 		functionalIndexes: map[string]*materializedFunctionalIndex{},
 	}
@@ -232,6 +235,16 @@ func (source *MaterializedSource) Insert(row Row) (Row, error) {
 				return nil, fmt.Errorf("hatSchema: evaluate functional index %q: %w", name, err)
 			}
 			functionalKeys[name] = materializedIndexKey(value)
+		}
+	}
+	for field := range source.uniqueFields {
+		value := materialized[field]
+		if value == nil {
+			continue
+		}
+		key := materializedIndexKey(value)
+		if len(source.indexes[field][key]) > 0 {
+			return nil, fmt.Errorf("%w: field %q", ErrMaterializedSourceUniqueIndexViolation, field)
 		}
 	}
 	position := len(source.rows)
@@ -532,6 +545,64 @@ func (source *MaterializedSource) BuildSecondaryIndex(field string) (SecondaryIn
 		}
 		source.indexes[field] = index
 		source.indexedFields[field] = struct{}{}
+		source.indexStatsCache = nil
+		source.mu.Unlock()
+		report.Rows = len(rows)
+		return report, nil
+	}
+}
+
+// BuildUniqueIndex validates and atomically installs a maintained equality
+// index that rejects duplicate non-NULL values on later inserts. Existing
+// rows are scanned outside the source lock; a concurrent insert causes a
+// generation-checked retry, and duplicate validation never publishes a
+// partial index.
+func (source *MaterializedSource) BuildUniqueIndex(field string) (SecondaryIndexBuildReport, error) {
+	if source == nil {
+		return SecondaryIndexBuildReport{}, ErrMaterializedSourceNil
+	}
+	field = strings.TrimSpace(field)
+	if field == "" {
+		return SecondaryIndexBuildReport{}, ErrMaterializedSourceColumnRequired
+	}
+	report := SecondaryIndexBuildReport{Field: field}
+	for {
+		source.mu.RLock()
+		if !source.hasColumnLocked(field) {
+			source.mu.RUnlock()
+			return SecondaryIndexBuildReport{}, fmt.Errorf("%w: %s", ErrMaterializedSourceColumnUnknown, field)
+		}
+		generation := source.generation
+		rows := append([]Row(nil), source.rows...)
+		source.mu.RUnlock()
+
+		index := make(map[string][]int, len(rows))
+		for position, row := range rows {
+			key := materializedIndexKey(row[field])
+			if row[field] != nil && len(index[key]) > 0 {
+				return SecondaryIndexBuildReport{}, fmt.Errorf("%w: field %q", ErrMaterializedSourceUniqueIndexViolation, field)
+			}
+			index[key] = append(index[key], position)
+		}
+		report.Attempts++
+
+		source.mu.Lock()
+		if source.generation != generation {
+			source.mu.Unlock()
+			continue
+		}
+		if source.indexes == nil {
+			source.indexes = make(map[string]map[string][]int)
+		}
+		if source.indexedFields == nil {
+			source.indexedFields = make(map[string]struct{})
+		}
+		if source.uniqueFields == nil {
+			source.uniqueFields = make(map[string]struct{})
+		}
+		source.indexes[field] = index
+		source.indexedFields[field] = struct{}{}
+		source.uniqueFields[field] = struct{}{}
 		source.indexStatsCache = nil
 		source.mu.Unlock()
 		report.Rows = len(rows)

@@ -35217,3 +35217,26 @@ The existing top-level `$.country` control retained the same allocation counts
 after the planner generalization: 7,934 allocs/op at 1,024 rows and 77,050
 allocs/op at 10,000 rows. Latency samples overlapped across runs, so no
 separate top-level speedup is claimed.
+
+<a id="tt-025-online-uniqueness-validation"></a>
+## TT-025 Online Uniqueness Validation
+
+Command: `make benchmark-tt025-online-uniqueness`.
+
+The build comparison uses the same 10,000-row, 10,000-distinct-key fixture for
+ordinary and unique posting-map builds. The insert comparison seeds 1,024 rows
+and resets outside the timed region every 1,024 successful inserts. Five
+`-benchmem` samples ran on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | --- | ---: | ---: | ---: | --- |
+| Ordinary index build, unique-key fixture | 2,649,969; 2,912,256; 3,048,331; 2,977,528; 2,923,835 | 2,923,835 | 1,181,935 | 20,036 | baseline for this matched fixture |
+| Unique index build, same fixture | 2,589,539; 2,358,118; 2,468,725; 2,632,105; 2,566,790 | 2,566,790 | 1,181,925 | 20,036 | 1.14x lower measured CPU; run variance means no speedup claim |
+| Ordinary indexed insert | 1,750; 1,669; 1,723; 1,657; 1,768 | 1,723 | 956 | 10 | baseline |
+| Unique indexed insert | 1,925; 1,914; 1,982; 1,811; 1,682 | 1,914 | 979 | 11 | 1.11x slower; +23 B and +1 allocation |
+
+The ordinary 10k-row control from the same command measured 2,256,655 ns/op,
+1,291,628 B/op, and 10,611 allocs/op on its 64-region fixture. Unique-index
+write cost is intentional and opt-in; the feature's value is correctness and
+online validation, not a query-speed optimization. See
+[TT025_ONLINE_UNIQUENESS.md](TT025_ONLINE_UNIQUENESS.md).

@@ -162,7 +162,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-022 | BITSET index | Adopted by the existing generic `hatDataStructure.BitmapIndex[K]` RoaringBitmap-backed API (`Add`, `Remove`, `Contains`, `Rows`, `Visit`, `Union`, and `Intersect`); SQL planner wiring remains caller-owned. | Medium |
 | TT-023 | HASH equality index | Implemented as a zero-allocation raw-string fast path for homogeneous ordinary SQL JSON field equality indexes; mixed-type values retain the existing typed key encoding. | Low |
 | TT-024 | Full-text phrase/position index | `CONTAINS_PREFIX` now uses an opt-in sorted token-key sidecar; token positions and phrase search remain absent. | High |
-| TT-025 | Online uniqueness validation | Unique index creation has no staged validation before atomic publication. | Medium |
+| TT-025 | Online uniqueness validation | Adopted as opt-in `MaterializedSource.BuildUniqueIndex`: duplicate non-`NULL` keys are validated before generation-guarded publication, later duplicates are rejected atomically, and multiple `NULL` values remain allowed. See [TT025_ONLINE_UNIQUENESS.md](TT025_ONLINE_UNIQUENESS.md) and [BENCHMARK.md](BENCHMARK.md#tt-025-online-uniqueness-validation). | Medium |
 | TT-026 | Versioned tuple format | Implemented as opt-in `hatDataStructure.VersionedTuple` schema validation and bounded HTV1 envelope; existing unversioned tuple caches remain compatible. | High |
 | TT-027 | Generated columns | No write-maintained expression columns with dependency validation. | Medium |
 | TT-028 | Upsert conflict handlers | Public mutation commands lack declarative merge-on-conflict callbacks or policies. | Medium |
