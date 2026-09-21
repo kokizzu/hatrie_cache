@@ -62,6 +62,53 @@ func TestSQLArrayJoinExplainPlan(t *testing.T) {
 	t.Fatalf("plan = %#v, want ARRAY JOIN tags AS tag", result.Plan)
 }
 
+func TestSQLLeftArrayJoinPreservesRowsForEmptyArrays(t *testing.T) {
+	rows := []Row{
+		{"id": int64(1), "tags": []interface{}{"a", "b"}},
+		{"id": int64(2), "tags": []interface{}{}},
+		{"id": int64(3), "tags": nil},
+	}
+	result, err := ExecuteSQLQuery(`FROM CACHE('items') LEFT ARRAY JOIN tags AS tag SELECT id, tag`, SourceResolverFunc(func(string, string) ([]Row, error) {
+		return rows, nil
+	}))
+	if err != nil {
+		t.Fatalf("left array join: %v", err)
+	}
+	want := []struct {
+		id  int64
+		tag interface{}
+	}{
+		{id: 1, tag: "a"},
+		{id: 1, tag: "b"},
+		{id: 2, tag: nil},
+		{id: 3, tag: nil},
+	}
+	if len(result.Rows) != len(want) {
+		t.Fatalf("left array join rows = %#v, want %d rows", result.Rows, len(want))
+	}
+	for index, expected := range want {
+		if got, ok := result.Rows[index]["id"].(int64); !ok || got != expected.id {
+			t.Fatalf("row %d id = %#v, want %d", index, result.Rows[index]["id"], expected.id)
+		}
+		if got := result.Rows[index]["tag"]; got != expected.tag {
+			t.Fatalf("row %d tag = %#v, want %#v", index, got, expected.tag)
+		}
+	}
+}
+
+func TestSQLLeftArrayJoinExplainPlan(t *testing.T) {
+	result, err := ExecuteSQLQuery(`EXPLAIN FROM CACHE('items') LEFT ARRAY JOIN tags AS tag SELECT id, tag`, nil)
+	if err != nil {
+		t.Fatalf("left array join explain: %v", err)
+	}
+	for _, step := range result.Plan {
+		if step.Node == "LEFT ARRAY JOIN" && step.Detail == "tags AS tag" {
+			return
+		}
+	}
+	t.Fatalf("plan = %#v, want LEFT ARRAY JOIN tags AS tag", result.Plan)
+}
+
 func BenchmarkSQLArrayJoin(b *testing.B) {
 	rows := make([]Row, 1024)
 	for index := range rows {

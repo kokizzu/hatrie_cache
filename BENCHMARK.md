@@ -1,5 +1,34 @@
 # Benchmark
 
+## CH-037 Left Array Join
+
+Exact 2,048-row `hatSql` benchmark, five `-benchmem` samples per path. The
+legacy path normalizes empty arrays to `[NULL]` and uses ordinary `ARRAY JOIN`
+so it produces the same rows as the new left-preserving syntax.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Parent legacy emulation | 13,117,353 | 15,957,277 | 95,265 | 1.000x |
+| `LEFT ARRAY JOIN` | 13,069,621 | 15,957,290 | 95,265 | 1.004x faster |
+
+### Raw samples
+
+```text
+before BenchmarkCH037LeftArrayJoinLegacy:
+13117353 ns/op 15957277 B/op 95265 allocs/op
+13038771 ns/op 15957285 B/op 95265 allocs/op
+13235512 ns/op 15957271 B/op 95265 allocs/op
+13485472 ns/op 15957358 B/op 95266 allocs/op
+12382308 ns/op 15957260 B/op 95265 allocs/op
+
+after BenchmarkCH037LeftArrayJoin:
+13476934 ns/op 15957297 B/op 95265 allocs/op
+12985809 ns/op 15957284 B/op 95265 allocs/op
+13069621 ns/op 15957283 B/op 95265 allocs/op
+13172359 ns/op 15957291 B/op 95265 allocs/op
+12759073 ns/op 15957290 B/op 95265 allocs/op
+```
+
 ## C245 Vertical TTL Deletion
 
 Five 200 ms samples on Linux amd64, AMD Ryzen 9 5950X, with 65,536 rows.

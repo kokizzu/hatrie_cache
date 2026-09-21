@@ -24487,3 +24487,42 @@ commit-ch042-storage-sample:
 .PHONY: push-ch042-storage-sample
 push-ch042-storage-sample:
 	bash scripts/push-ch042-storage-sample.sh
+.PHONY: test-ch037-left-array-join
+test-ch037-left-array-join:
+	bash scripts/test-ch037-left-array-join.sh
+
+.PHONY: format-ch037-left-array-join
+format-ch037-left-array-join:
+	bash scripts/format-ch037-left-array-join.sh
+
+.PHONY: benchmark-ch037-left-array-join-before
+benchmark-ch037-left-array-join-before:
+	bash scripts/benchmark-ch037-left-array-join-before.sh
+
+.PHONY: benchmark-ch037-left-array-join
+benchmark-ch037-left-array-join:
+	bash scripts/benchmark-ch037-left-array-join.sh
+
+.PHONY: test-ch037-sql-package
+test-ch037-sql-package:
+	bash scripts/test-ch037-sql-package.sh
+
+.PHONY: race-ch037-left-array-join
+race-ch037-left-array-join:
+	bash scripts/race-ch037-left-array-join.sh
+
+.PHONY: vet-ch037-left-array-join
+vet-ch037-left-array-join:
+	bash scripts/vet-ch037-left-array-join.sh
+
+.PHONY: stage-ch037-left-array-join
+stage-ch037-left-array-join:
+	bash scripts/stage-ch037-left-array-join.sh
+
+.PHONY: commit-ch037-left-array-join
+commit-ch037-left-array-join:
+	bash scripts/commit-ch037-left-array-join.sh
+
+.PHONY: push-ch037-left-array-join
+push-ch037-left-array-join:
+	bash scripts/push-ch037-left-array-join.sh
