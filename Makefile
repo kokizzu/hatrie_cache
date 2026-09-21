@@ -25658,3 +25658,22 @@ commit-m213-consolidation-audit:
 .PHONY: push-m213-consolidation-audit
 push-m213-consolidation-audit:
 	bash scripts/push-m213-consolidation-audit.sh
+
+.PHONY: test-m214-arrangement-reuse-audit
+test-m214-arrangement-reuse-audit:
+	bash scripts/test-m214-arrangement-reuse-audit.sh
+
+.PHONY: benchmark-m214-arrangement-reuse-audit
+benchmark-m214-arrangement-reuse-audit:
+	bash scripts/benchmark-m214-arrangement-reuse-audit.sh
+.PHONY: stage-m214-arrangement-reuse-audit
+stage-m214-arrangement-reuse-audit:
+	bash scripts/stage-m214-arrangement-reuse-audit.sh
+
+.PHONY: commit-m214-arrangement-reuse-audit
+commit-m214-arrangement-reuse-audit:
+	bash scripts/commit-m214-arrangement-reuse-audit.sh
+
+.PHONY: push-m214-arrangement-reuse-audit
+push-m214-arrangement-reuse-audit:
+	bash scripts/push-m214-arrangement-reuse-audit.sh

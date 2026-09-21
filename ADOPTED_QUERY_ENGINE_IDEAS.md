@@ -1090,3 +1090,13 @@ key, and M208 folds batches defensively in the downstream changefeed adapters.
 An additional enqueue fold was measured and rejected because it added roughly
 680x CPU and 6,967 B/196 allocations for a 32-delta batch. See
 [M213_EQUAL_UPDATE_CONSOLIDATION.md](M213_EQUAL_UPDATE_CONSOLIDATION.md).
+
+## M214: Arrangement Reuse Audit
+
+M214 is already covered by compiled arrangement workload reuse, bounded
+canonical compiled-plan caching, and explicit lease-based typed-table
+arrangement registries. The focused tests passed; the existing paths measured
+up to 1.44x faster for reused arrangement workloads and 3.12x faster for
+equivalent compiled plans. No process-wide registry was added because table
+lifecycle, invalidation, and checkpoint ownership must remain explicit. See
+[M214_ARRANGEMENT_REUSE_AUDIT.md](M214_ARRANGEMENT_REUSE_AUDIT.md).

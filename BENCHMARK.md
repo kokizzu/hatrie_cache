@@ -36067,3 +36067,20 @@ The generated query path already groups equal rows, and M208's downstream
 adapters already fold defensive inputs. The extra enqueue fold was therefore
 rolled back. Raw decision details are in
 [M213_EQUAL_UPDATE_CONSOLIDATION.md](M213_EQUAL_UPDATE_CONSOLIDATION.md).
+
+## M214 Arrangement Reuse Audit
+
+Command: `make benchmark-m214-arrangement-reuse-audit`
+
+Five `-benchmem` samples ran on Linux amd64 / AMD Ryzen 9 5950X.
+
+| Workload | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Compiled arrangement workload reuse | 5,237 | 4,272 | 42 | reuse comparison baseline |
+| Recomputed arrangement workload | 7,560 | 4,920 | 62 | reuse 1.44x faster; 13.2% lower bytes; 32.3% fewer allocations |
+| Equivalent plan compile without canonical cache | 660,050 | 477,830 | 2,079 | compile baseline |
+| Equivalent plan compile with canonical cache | 211,567 | 176,476 | 597 | 3.12x faster; 2.71x lower bytes; 3.48x fewer allocations |
+| Exact compiled-plan cache hit | 25.96 | 0 | 0 | allocation-free |
+
+The implementation and decision rationale are recorded in
+[M214_ARRANGEMENT_REUSE_AUDIT.md](M214_ARRANGEMENT_REUSE_AUDIT.md).
