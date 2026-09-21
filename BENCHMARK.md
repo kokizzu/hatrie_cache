@@ -35258,3 +35258,25 @@ The ordinary 10k-row control from the same command measured 2,256,655 ns/op,
 write cost is intentional and opt-in; the feature's value is correctness and
 online validation, not a query-speed optimization. See
 [TT025_ONLINE_UNIQUENESS.md](TT025_ONLINE_UNIQUENESS.md).
+
+<a id="ch-024-detach-and-attach-parts"></a>
+## CH-024 Detach/Attach Parts
+
+Command: `make benchmark-ch024-part-catalog`.
+
+Three `-benchmem` samples ran on Linux/amd64 with an AMD Ryzen 9 5950X. The
+lifecycle rows perform the same six attach/detach/quarantine transitions; the
+map row is a plain-map control and the catalog row adds verification, bounded
+state, generation tracking, and copy-safe metadata.
+
+| Operation | Raw ns/op samples | Median B/op | Median allocs/op | Relative result |
+| --- | --- | ---: | ---: | --- |
+| Six-transition plain-map control | 156.5; 149.3; 155.1 | 0 | 0 | baseline |
+| Six-transition `PartCatalog` | 359.1; 360.0; 356.3 | 0 | 0 | about 2.4x slower; safety/rollback boundary |
+| 1 MiB read-all checksum verification | 1,119,488; 1,149,481; 1,204,141 | 2,227,982 | 24 | baseline; retains the payload temporarily |
+| 1 MiB streaming checksum verification | 572,196; 566,783; 564,155 | 33,184 | 5 | about 2x faster and 67x lower transient bytes |
+
+The catalog is deliberately opt-in and is not intended for hot lookups. The
+streaming verifier is the measured efficiency improvement: it checks a file
+without allocating a second full-payload buffer and preserves the file offset.
+See [CH024_DETACH_ATTACH_PARTS.md](CH024_DETACH_ATTACH_PARTS.md).

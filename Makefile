@@ -24287,3 +24287,28 @@ commit-ch047-csv-parallel:
 
 push-ch047-csv-parallel:
 	@bash scripts/push-ch047-csv-parallel.sh
+
+
+format-ch024-part-catalog:
+	@bash scripts/format-ch024-part-catalog.sh
+
+test-ch024-part-catalog:
+	@bash scripts/test-ch024-part-catalog.sh
+
+test-ch024-package:
+	@bash scripts/test-ch024-package.sh
+
+benchmark-ch024-part-catalog:
+	@bash scripts/benchmark-ch024-part-catalog.sh
+
+race-ch024-part-catalog:
+	@bash scripts/race-ch024-part-catalog.sh
+
+stage-ch024-part-catalog:
+	@bash scripts/stage-ch024-part-catalog.sh
+
+commit-ch024-part-catalog:
+	@bash scripts/commit-ch024-part-catalog.sh
+
+push-ch024-part-catalog:
+	@bash scripts/push-ch024-part-catalog.sh

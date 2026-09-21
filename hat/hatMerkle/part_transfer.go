@@ -93,6 +93,46 @@ func CopyImmutablePartFile(dst io.Writer, src *os.File, checksum PartChecksum) (
 	return written, nil
 }
 
+// VerifyImmutablePartFile verifies the remaining bytes in an immutable part
+// file against checksum without retaining the payload. The file offset is
+// preserved, so callers can safely reuse an open descriptor after checking it.
+// The caller must ensure that the file is not modified during verification.
+func VerifyImmutablePartFile(src *os.File, checksum PartChecksum) (int64, error) {
+	if src == nil {
+		return 0, ErrPartTransferEndpoint
+	}
+	if checksum.Size > math.MaxInt64 {
+		return 0, fmt.Errorf("%w: %d bytes exceed the supported stream size", ErrPartTransferSize, checksum.Size)
+	}
+	info, err := src.Stat()
+	if err != nil {
+		return 0, err
+	}
+	offset, err := src.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return 0, err
+	}
+	if offset < 0 || offset > info.Size() {
+		return 0, fmt.Errorf("%w: file offset %d is outside file size %d", ErrPartTransferSize, offset, info.Size())
+	}
+	remaining := info.Size() - offset
+	if remaining != int64(checksum.Size) {
+		return 0, fmt.Errorf("%w: file has %d remaining bytes, expected %d", ErrPartTransferSize, remaining, checksum.Size)
+	}
+	digest := sha256.New()
+	written, err := io.Copy(digest, io.NewSectionReader(src, offset, int64(checksum.Size)))
+	if err != nil {
+		return written, err
+	}
+	if uint64(written) != checksum.Size {
+		return written, fmt.Errorf("%w: verified %d bytes, expected %d", ErrPartTransferSize, written, checksum.Size)
+	}
+	if !bytesEqualDigest(digest.Sum(nil), checksum.Digest) {
+		return written, ErrInvalidPartChecksum
+	}
+	return written, nil
+}
+
 func bytesEqualDigest(got []byte, want [sha256.Size]byte) bool {
 	if len(got) != len(want) {
 		return false
