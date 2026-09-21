@@ -23812,3 +23812,35 @@ commit-mz049-snapshot-export:
 .PHONY: push-mz049-snapshot-export
 push-mz049-snapshot-export:
 	bash scripts/push-mz049-snapshot-export.sh
+
+
+.PHONY: benchmark-tt037-audit-redaction
+benchmark-tt037-audit-redaction:
+	bash scripts/benchmark-tt037-audit-redaction.sh
+
+.PHONY: test-tt037-audit-redaction
+test-tt037-audit-redaction:
+	bash scripts/test-tt037-audit-redaction.sh
+
+.PHONY: format-tt037-audit-redaction
+format-tt037-audit-redaction:
+	bash scripts/format-tt037-audit-redaction.sh
+
+.PHONY: race-tt037-audit-redaction
+race-tt037-audit-redaction:
+	bash scripts/race-tt037-audit-redaction.sh
+
+.PHONY: verify-tt037-audit-redaction
+verify-tt037-audit-redaction:
+	bash scripts/verify-tt037-audit-redaction.sh
+.PHONY: stage-tt037-audit-redaction
+stage-tt037-audit-redaction:
+	@bash scripts/stage-tt037-audit-redaction.sh
+
+.PHONY: commit-tt037-audit-redaction
+commit-tt037-audit-redaction:
+	@bash scripts/commit-tt037-audit-redaction.sh
+
+.PHONY: push-tt037-audit-redaction
+push-tt037-audit-redaction:
+	@bash scripts/push-tt037-audit-redaction.sh

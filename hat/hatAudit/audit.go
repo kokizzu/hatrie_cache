@@ -51,6 +51,11 @@ func (sink AuditSinkFunc) WriteAuditEvent(event AuditEvent) error {
 type AuditLoggerOptions struct {
 	SuccessSampleRate float64
 	Sinks             []AuditSink
+	// RedactSensitive removes command keys, messages, URL query strings, and
+	// arbitrary detail payloads before retention, file writes, or sink export.
+	// The default is false for compatibility; enable it for security-sensitive
+	// audit streams.
+	RedactSensitive bool
 }
 
 type AuditLogger struct {
@@ -64,6 +69,7 @@ type AuditLogger struct {
 	successSampleRate    float64
 	sampleSequence       uint64
 	sampledSuccessEvents uint64
+	redactSensitive      bool
 }
 
 const MaxRecentAuditEvents = 128
@@ -83,11 +89,25 @@ func NewAuditLoggerWithOptions(writer io.Writer, options AuditLoggerOptions) (*A
 		now:               time.Now,
 		sinks:             append([]AuditSink(nil), options.Sinks...),
 		successSampleRate: options.SuccessSampleRate,
+		redactSensitive:   options.RedactSensitive,
 	}, nil
+}
+
+// NewRedactedAuditLogger creates an audit logger that removes sensitive
+// command metadata before it reaches any retained or exported representation.
+func NewRedactedAuditLogger(writer io.Writer) *AuditLogger {
+	logger, _ := NewAuditLoggerWithOptions(writer, AuditLoggerOptions{RedactSensitive: true})
+	return logger
 }
 
 func OpenAuditLogger(path string) (*AuditLogger, error) {
 	return OpenAuditLoggerWithOptions(path, AuditLoggerOptions{})
+}
+
+// OpenRedactedAuditLogger opens a mode-0600 append-only audit log with
+// sensitive command metadata redacted before it is persisted.
+func OpenRedactedAuditLogger(path string) (*AuditLogger, error) {
+	return OpenAuditLoggerWithOptions(path, AuditLoggerOptions{RedactSensitive: true})
 }
 
 // OpenAuditLoggerWithOptions opens a mode-0600 append-only audit log with
@@ -119,6 +139,9 @@ func (logger *AuditLogger) Log(event AuditEvent) error {
 		logger.sampledSuccessEvents++
 		return nil
 	}
+	if logger.redactSensitive {
+		event = RedactAuditEvent(event)
+	}
 	if event.Time == "" {
 		event.Time = logger.now().UTC().Format(time.RFC3339Nano)
 	}
@@ -139,6 +162,32 @@ func (logger *AuditLogger) Log(event AuditEvent) error {
 		}
 	}
 	return firstErr
+}
+
+// AuditRedactedValue is used for non-empty fields removed by RedactAuditEvent.
+const AuditRedactedValue = "[REDACTED]"
+
+// RedactAuditEvent returns a copy of event with sensitive command metadata
+// removed. It preserves operational dimensions such as action, command,
+// status, and remote address, while dropping keys, messages, URL query data,
+// and arbitrary details that may contain credentials or payloads.
+func RedactAuditEvent(event AuditEvent) AuditEvent {
+	if event.Key != "" {
+		event.Key = AuditRedactedValue
+	}
+	if event.Message != "" {
+		event.Message = AuditRedactedValue
+	}
+	if event.Path != "" {
+		if query := strings.IndexByte(event.Path, '?'); query >= 0 {
+			event.Path = event.Path[:query]
+		}
+		if fragment := strings.IndexByte(event.Path, '#'); fragment >= 0 {
+			event.Path = event.Path[:fragment]
+		}
+	}
+	event.Details = nil
+	return event
 }
 
 func (logger *AuditLogger) appendRecent(event AuditEvent) {

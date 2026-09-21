@@ -174,7 +174,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-034 | Cooperative task cancellation | Background fibers do not share a standard cancellation token and drain state. | Low |
 | TT-035 | Per-request deadlines | Command APIs lack a consistent deadline propagated through storage and replication. | Low |
 | TT-036 | Storage `box.stat` equivalent | Partially adopted: `CompactionScheduler.Stats()` adds low-overhead maintenance queue and outcome counters; storage-engine operation, page, cache, and WAL counters remain provider-owned. | Low |
-| TT-037 | Audit log | No append-only operator/security audit stream with redacted command metadata. | Medium |
+| TT-037 | Audit log | Implemented as opt-in `hatAudit` redaction applied before recent retention, JSONL persistence, and sink export; existing lossless behavior remains the default. See [TT037_AUDIT_REDACTION.md](TT037_AUDIT_REDACTION.md) and [BENCHMARK.md](BENCHMARK.md#tt-037-audit-metadata-redaction). | Medium |
 | TT-038 | Roles and grants for commands | Command access is not modeled as a per-operation role/privilege matrix. | Medium |
 | TT-039 | Transparent credential rotation | Authentication credentials cannot rotate with overlapping validity and no restart. | Medium |
 | TT-040 | Space changefeed | Implemented as an opt-in `CommandJournal.SubscribeSpace` stream that replays and follows committed records for one exact logical space key while preserving global journal sequences. | High |

@@ -34914,3 +34914,36 @@ Median comparison:
 The resumable path is opt-in because its durability and retry guarantee costs
 about 4.04x CPU time, 2.30x allocation bytes, and 2x payload I/O in this
 workload.
+## TT-037 Audit Metadata Redaction
+
+Command: `make benchmark-tt037-audit-redaction`
+
+Five 500 ms samples on Linux/amd64, AMD Ryzen 9 5950X, with no file writer.
+The redacted path removes keys, messages, URL query/fragment data, and detail
+payloads before the event enters the logger's bounded recent ring.
+
+Raw result:
+
+```text
+BenchmarkAuditLoggerDefaultLog-32          3662008  154.7 ns/op  32 B/op  1 allocs/op
+BenchmarkAuditLoggerDefaultLog-32          4156777  153.9 ns/op  32 B/op  1 allocs/op
+BenchmarkAuditLoggerDefaultLog-32          3947732  161.7 ns/op  32 B/op  1 allocs/op
+BenchmarkAuditLoggerDefaultLog-32          3518199  175.7 ns/op  32 B/op  1 allocs/op
+BenchmarkAuditLoggerDefaultLog-32          3768148  160.6 ns/op  32 B/op  1 allocs/op
+BenchmarkTT037AuditLoggerRedactedLog-32    3408345  169.5 ns/op  32 B/op  1 allocs/op
+BenchmarkTT037AuditLoggerRedactedLog-32    3138667  161.4 ns/op  32 B/op  1 allocs/op
+BenchmarkTT037AuditLoggerRedactedLog-32    3926216  172.4 ns/op  32 B/op  1 allocs/op
+BenchmarkTT037AuditLoggerRedactedLog-32    3825441  171.9 ns/op  32 B/op  1 allocs/op
+BenchmarkTT037AuditLoggerRedactedLog-32    3517515  173.0 ns/op  32 B/op  1 allocs/op
+```
+
+Median comparison:
+
+| Path | Median time | Memory | Allocations | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Existing logger | 160.6 ns/op | 32 B/op | 1 | 1.00x |
+| Redacted logger | 171.9 ns/op | 32 B/op | 1 | 1.07x |
+
+The secure path adds about 7% CPU in this workload without increasing
+allocation bytes or allocation count. It is opt-in so existing consumers keep
+lossless metadata behavior.
