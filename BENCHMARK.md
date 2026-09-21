@@ -35670,3 +35670,20 @@ Five `-benchmem` samples on Linux amd64, AMD Ryzen 9 5950X:
 The reused path constructs the plan once outside the measured loop; the
 rebuild path includes plan construction and row adaptation for every row. Both
 paths allocate the adapted output row. See [MZ016_SCHEMA_EVOLUTION.md](MZ016_SCHEMA_EVOLUTION.md) for raw samples, semantics, and test status.
+
+# TT-007: Snapshot-plus-WAL Join
+
+This benchmark measures 128 appends per bounded batch, resetting both modes
+before compaction can occur. The joined mode has one active snapshot lease;
+the control has no lease. Five `-benchmem` samples ran on Linux amd64 with an
+AMD Ryzen 9 5950X.
+
+| Path | Raw ns/op samples | Median ns/op | B/op | allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| No active join | 654.7, 670.0, 651.0, 665.6, 687.7 | 665.6 | 446 | 8 | 1.00x |
+| One active join | 703.5, 684.3, 666.3, 664.4, 677.3 | 677.3 | 446 | 8 | 1.02x, 1.8% slower |
+
+The lease adds a small append-path cost while active and no measured heap or
+allocation increase. Its value is correctness under snapshot transfer: when
+the configured journal bound would evict a required delta, the writer gets
+bounded backpressure rather than a join that can restore incomplete state.

@@ -24826,3 +24826,51 @@ commit-mz009-validity-index:
 .PHONY: push-mz009-validity-index
 push-mz009-validity-index:
 	bash scripts/push-mz009-validity-index.sh
+
+.PHONY: format-tt007-snapshot-wal-join
+format-tt007-snapshot-wal-join:
+	bash scripts/tt007-snapshot-wal-join.sh format
+
+.PHONY: test-tt007-snapshot-wal-join
+test-tt007-snapshot-wal-join:
+	bash scripts/tt007-snapshot-wal-join.sh test
+
+.PHONY: test-tt007-snapshot-wal-join-package
+test-tt007-snapshot-wal-join-package:
+	bash scripts/tt007-snapshot-wal-join.sh package
+
+.PHONY: race-tt007-snapshot-wal-join
+race-tt007-snapshot-wal-join:
+	bash scripts/tt007-snapshot-wal-join.sh race
+
+.PHONY: race-tt007-snapshot-wal-join-package
+race-tt007-snapshot-wal-join-package:
+	bash scripts/tt007-snapshot-wal-join.sh race-package
+
+.PHONY: benchmark-tt007-snapshot-wal-join
+benchmark-tt007-snapshot-wal-join:
+	bash scripts/tt007-snapshot-wal-join.sh benchmark
+
+.PHONY: review-tt007-snapshot-wal-join
+review-tt007-snapshot-wal-join:
+	bash scripts/tt007-snapshot-wal-join.sh review
+
+.PHONY: vet-tt007-snapshot-wal-join
+vet-tt007-snapshot-wal-join:
+	bash scripts/tt007-snapshot-wal-join.sh vet
+
+.PHONY: verify-tt007-snapshot-wal-join
+verify-tt007-snapshot-wal-join:
+	bash scripts/tt007-snapshot-wal-join.sh verify
+
+.PHONY: stage-tt007-snapshot-wal-join
+stage-tt007-snapshot-wal-join:
+	bash scripts/stage-tt007-snapshot-wal-join.sh
+
+.PHONY: commit-tt007-snapshot-wal-join
+commit-tt007-snapshot-wal-join:
+	bash scripts/commit-tt007-snapshot-wal-join.sh
+
+.PHONY: push-tt007-snapshot-wal-join
+push-tt007-snapshot-wal-join:
+	bash scripts/push-tt007-snapshot-wal-join.sh

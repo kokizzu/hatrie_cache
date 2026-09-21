@@ -26,16 +26,18 @@ const (
 )
 
 var (
-	ErrTupleFieldOperationJournalNil      = errors.New("hatDataStructure: tuple operation journal is nil")
-	ErrTupleFieldOperationJournalOptions  = errors.New("hatDataStructure: tuple operation journal options are invalid")
-	ErrTupleFieldOperationJournalInvalid  = errors.New("hatDataStructure: tuple operation is invalid")
-	ErrTupleFieldOperationJournalConflict = errors.New("hatDataStructure: tuple operation ID conflicts")
-	ErrTupleFieldOperationJournalLimit    = errors.New("hatDataStructure: tuple operation journal limit exceeded")
-	ErrTupleFieldOperationJournalGap      = errors.New("hatDataStructure: tuple operation journal history gap")
-	ErrTupleFieldOperationJournalFormat   = errors.New("hatDataStructure: tuple operation journal format is invalid")
-	ErrTupleFieldOperationJournalChecksum = errors.New("hatDataStructure: tuple operation journal checksum mismatch")
-	ErrTupleFieldOperationJournalVersion  = errors.New("hatDataStructure: unsupported tuple operation journal version")
-	ErrTupleFieldOperationJournalPersist  = errors.New("hatDataStructure: tuple operation journal persistence failed")
+	ErrTupleFieldOperationJournalNil          = errors.New("hatDataStructure: tuple operation journal is nil")
+	ErrTupleFieldOperationJournalOptions      = errors.New("hatDataStructure: tuple operation journal options are invalid")
+	ErrTupleFieldOperationJournalInvalid      = errors.New("hatDataStructure: tuple operation is invalid")
+	ErrTupleFieldOperationJournalConflict     = errors.New("hatDataStructure: tuple operation ID conflicts")
+	ErrTupleFieldOperationJournalLimit        = errors.New("hatDataStructure: tuple operation journal limit exceeded")
+	ErrTupleFieldOperationJournalGap          = errors.New("hatDataStructure: tuple operation journal history gap")
+	ErrTupleFieldOperationJournalFormat       = errors.New("hatDataStructure: tuple operation journal format is invalid")
+	ErrTupleFieldOperationJournalChecksum     = errors.New("hatDataStructure: tuple operation journal checksum mismatch")
+	ErrTupleFieldOperationJournalVersion      = errors.New("hatDataStructure: unsupported tuple operation journal version")
+	ErrTupleFieldOperationJournalPersist      = errors.New("hatDataStructure: tuple operation journal persistence failed")
+	ErrTupleFieldOperationJournalJoinSequence = errors.New("hatDataStructure: snapshot join sequence is unavailable")
+	ErrTupleFieldOperationJournalJoinClosed   = errors.New("hatDataStructure: snapshot join is closed")
 )
 
 var tupleFieldOperationJournalCRCTable = crc32.MakeTable(crc32.Castagnoli)
@@ -70,6 +72,16 @@ type TupleFieldOperationJournalSnapshot struct {
 	Records          []TupleFieldOperationRecord
 }
 
+// TupleFieldOperationJournalJoin pins the journal history needed after a
+// snapshot sequence. Close releases the pin and allows normal compaction to
+// resume.
+type TupleFieldOperationJournalJoin struct {
+	journal          *TupleFieldOperationJournal
+	snapshotSequence uint64
+	mu               sync.RWMutex
+	closed           bool
+}
+
 type tupleFieldOperationJournalState struct {
 	nextSequence     uint64
 	compactedThrough uint64
@@ -86,6 +98,7 @@ type TupleFieldOperationJournal struct {
 	maxRecords int
 	maxBytes   int
 	state      tupleFieldOperationJournalState
+	joinPins   map[uint64]int
 }
 
 // NewTupleFieldOperationJournal creates an empty bounded journal.
@@ -100,6 +113,86 @@ func NewTupleFieldOperationJournal(options TupleFieldOperationJournalOptions) (*
 		maxBytes:   options.MaxBytes,
 		state:      tupleFieldOperationJournalState{nextSequence: 1, encodedBytes: tupleFieldOperationJournalFixedBytes},
 	}, nil
+}
+
+// BeginSnapshotJoin pins records after snapshotSequence until the returned
+// join is closed. The caller must create a consistent snapshot at exactly
+// snapshotSequence before replaying the returned journal delta.
+func (journal *TupleFieldOperationJournal) BeginSnapshotJoin(snapshotSequence uint64) (*TupleFieldOperationJournalJoin, error) {
+	if journal == nil {
+		return nil, ErrTupleFieldOperationJournalNil
+	}
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+	if snapshotSequence < journal.state.compactedThrough {
+		return nil, ErrTupleFieldOperationJournalGap
+	}
+	latestSequence := journal.state.nextSequence - 1
+	if snapshotSequence > latestSequence {
+		return nil, ErrTupleFieldOperationJournalJoinSequence
+	}
+	if journal.joinPins == nil {
+		journal.joinPins = make(map[uint64]int)
+	}
+	journal.joinPins[snapshotSequence]++
+	return &TupleFieldOperationJournalJoin{
+		journal:          journal,
+		snapshotSequence: snapshotSequence,
+	}, nil
+}
+
+// SnapshotSequence returns the journal sequence represented by the snapshot
+// associated with this join.
+func (join *TupleFieldOperationJournalJoin) SnapshotSequence() uint64 {
+	if join == nil {
+		return 0
+	}
+	return join.snapshotSequence
+}
+
+// Replay returns the retained WAL delta after the join snapshot sequence.
+func (join *TupleFieldOperationJournalJoin) Replay(afterSequence uint64, limit int) ([]TupleFieldOperationRecord, error) {
+	if join == nil {
+		return nil, ErrTupleFieldOperationJournalJoinClosed
+	}
+	join.mu.RLock()
+	defer join.mu.RUnlock()
+	if join.closed {
+		return nil, ErrTupleFieldOperationJournalJoinClosed
+	}
+	if afterSequence < join.snapshotSequence {
+		return nil, ErrTupleFieldOperationJournalJoinSequence
+	}
+	return join.journal.Replay(afterSequence, limit)
+}
+
+// Close releases the join pin. It is safe to call Close more than once.
+func (join *TupleFieldOperationJournalJoin) Close() error {
+	if join == nil {
+		return nil
+	}
+	join.mu.Lock()
+	if join.closed {
+		join.mu.Unlock()
+		return nil
+	}
+	join.closed = true
+	journal := join.journal
+	join.mu.Unlock()
+	if journal == nil {
+		return nil
+	}
+	journal.mu.Lock()
+	if count := journal.joinPins[join.snapshotSequence]; count <= 1 {
+		delete(journal.joinPins, join.snapshotSequence)
+	} else {
+		journal.joinPins[join.snapshotSequence] = count - 1
+	}
+	if len(journal.joinPins) == 0 {
+		journal.joinPins = nil
+	}
+	journal.mu.Unlock()
+	return nil
 }
 
 // OpenTupleFieldOperationJournal opens a path-backed journal or creates an
@@ -182,6 +275,9 @@ func (journal *TupleFieldOperationJournal) Append(operation TupleFieldOperation)
 			return TupleFieldOperationRecord{}, ErrTupleFieldOperationJournalLimit
 		}
 		removed := candidate.records[0]
+		if minimumPinned, pinned := journal.minimumSnapshotJoinSequenceLocked(); pinned && removed.Sequence > minimumPinned {
+			return TupleFieldOperationRecord{}, ErrTupleFieldOperationJournalLimit
+		}
 		candidate.records = candidate.records[1:]
 		candidate.compactedThrough = removed.Sequence
 		removedBytes, sizeErr := tupleFieldOperationRecordSize(removed)
@@ -193,6 +289,18 @@ func (journal *TupleFieldOperationJournal) Append(operation TupleFieldOperation)
 			return TupleFieldOperationRecord{}, ErrTupleFieldOperationJournalLimit
 		}
 	}
+}
+
+func (journal *TupleFieldOperationJournal) minimumSnapshotJoinSequenceLocked() (uint64, bool) {
+	var minimum uint64
+	pinned := false
+	for sequence := range journal.joinPins {
+		if !pinned || sequence < minimum {
+			minimum = sequence
+			pinned = true
+		}
+	}
+	return minimum, pinned
 }
 
 // Snapshot returns a detached view of the retained journal state.

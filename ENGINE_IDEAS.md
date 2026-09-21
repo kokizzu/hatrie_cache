@@ -144,7 +144,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-004 | Synchronous batch replication quorum | Single writes and batches do not provide rollback-free cluster-wide quorum commit. | High |
 | TT-005 | Raft configuration state | No consensus-backed configuration and membership state machine. | High |
 | TT-006 | Hot-standby WAL catch-up | No read-only standby that continuously replays and can be promoted without restore. | High |
-| TT-007 | Snapshot-plus-WAL join | A joining node cannot hydrate from a snapshot and then apply a bounded WAL delta automatically. | High |
+| TT-007 | Snapshot-plus-WAL join | Partially adopted: `TupleFieldOperationJournal.BeginSnapshotJoin` pins the bounded WAL range after a consistent snapshot sequence, replays the delta, and returns backpressure instead of compacting required records; snapshot transport, authentication, and store-wide bootstrap remain caller-owned. See [TT007_SNAPSHOT_WAL_JOIN.md](TT007_SNAPSHOT_WAL_JOIN.md) and [BENCHMARK.md](BENCHMARK.md#tt-007-snapshot-plus-wal-join). | High |
 | TT-008 | Incremental snapshot chains | Snapshots are not content-addressed deltas with a verified parent chain. | Medium |
 | TT-009 | Backup manifest checksums | Implemented: backup manifests record per-file sizes and SHA-256 hashes, and restore/doctor verification checks them before publication. | Low |
 | TT-010 | Selective space backup | Partially adopted: snapshot bundles accept explicit logical key-prefix scope and record it in the manifest; Pebble checkpoint and incremental repository backups remain full-store only. | Medium |
