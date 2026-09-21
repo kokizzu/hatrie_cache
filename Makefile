@@ -25402,3 +25402,37 @@ commit-c241-backup-chunk-dedup:
 .PHONY: push-c241-backup-chunk-dedup
 push-c241-backup-chunk-dedup:
 	bash scripts/push-c241-backup-chunk-dedup.sh
+.PHONY: benchmark-m206-upsert-envelope-baseline
+benchmark-m206-upsert-envelope-baseline:
+	bash scripts/benchmark-m206-upsert-envelope-baseline.sh
+.PHONY: test-m206-upsert-envelope
+test-m206-upsert-envelope:
+	bash scripts/test-m206-upsert-envelope.sh
+.PHONY: format-m206-upsert-envelope
+format-m206-upsert-envelope:
+	bash scripts/format-m206-upsert-envelope.sh
+.PHONY: benchmark-m206-upsert-envelope
+benchmark-m206-upsert-envelope:
+	bash scripts/benchmark-m206-upsert-envelope.sh
+.PHONY: test-m206-upsert-envelope-package
+test-m206-upsert-envelope-package:
+	bash scripts/test-m206-upsert-envelope-package.sh
+
+.PHONY: race-m206-upsert-envelope
+race-m206-upsert-envelope:
+	bash scripts/race-m206-upsert-envelope.sh
+
+.PHONY: vet-m206-upsert-envelope
+vet-m206-upsert-envelope:
+	bash scripts/vet-m206-upsert-envelope.sh
+.PHONY: stage-m206-upsert-envelope
+stage-m206-upsert-envelope:
+	bash scripts/stage-m206-upsert-envelope.sh
+
+.PHONY: commit-m206-upsert-envelope
+commit-m206-upsert-envelope:
+	bash scripts/commit-m206-upsert-envelope.sh
+
+.PHONY: push-m206-upsert-envelope
+push-m206-upsert-envelope:
+	bash scripts/push-m206-upsert-envelope.sh

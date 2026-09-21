@@ -35962,3 +35962,15 @@ The chunked path uses about 2x as many allocations for per-chunk object
 checking, but about 3.2x fewer allocated bytes in this workload. Full raw
 samples and the `-1` legacy fallback are documented in
 [`C241_INCREMENTAL_BACKUP_CHUNK_DEDUP.md`](C241_INCREMENTAL_BACKUP_CHUNK_DEDUP.md).
+### Materialize MZ-016: Keyed Upsert Envelopes
+
+`hatSql.UpsertChangefeed` was measured against the existing Debezium
+before/after adapter on the same one-key update workload. Five two-second
+samples on Linux amd64 / AMD Ryzen 9 5950X produced these medians:
+
+| Adapter | Median ns/op | B/op | Allocs/op | Relative latency | Relative bytes | Relative allocations |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Debezium before/after baseline | 4097 | 2726 | 28 | 1.00x | 1.00x | 1.00x |
+| M206 upsert envelope | 3596 | 2293 | 26 | 1.14x faster | 1.19x lower | 1.08x fewer |
+
+Raw samples and semantics are recorded in [M206_UPSERT_ENVELOPES.md](M206_UPSERT_ENVELOPES.md).
