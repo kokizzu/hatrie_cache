@@ -6,6 +6,8 @@ grep -Fq '| CH-037 | `ARRAY JOIN` | Adopted for direct row-source arrays with op
 grep -Fq '| CH-014 | Uncompressed hot-data cache | Adopted as the opt-in `TypedTableColumnarCacheOptions.DecompressedBlockCache`:' ENGINE_IDEAS.md
 grep -Fq '| CH-017 | Async-insert deduplication | Adopted through the journal-backed idempotency ledger:' ENGINE_IDEAS.md
 grep -Fq '| MZ-026 | Dictionary arrangement compression | Partially adopted as opt-in `DictionaryEncodeGroups` for typed aggregates' ENGINE_IDEAS.md
+grep -Fq '| TT-038 | Roles and grants for commands | Adopted through opt-in `hatAuth.Policy` roles/rules:' ENGINE_IDEAS.md
+grep -Fq '| TT-039 | Transparent credential rotation | Adopted through current/previous auth tokens' ENGINE_IDEAS.md
 
 test ! -e scripts/inspect-next-open-candidates.sh
 test ! -e scripts/inspect-ch016-insert-paths.sh
@@ -15,5 +17,6 @@ test ! -e scripts/inspect-mz026-dictionary-compression.sh
 test ! -e scripts/inspect-ch017-insert-dedup.sh
 test ! -e scripts/inspect-mz028-adaptive-compaction.sh
 test ! -e scripts/inspect-mz028-test-process.sh
+test ! -e scripts/inspect-tt038-roles-grants.sh
 
 printf '%s\n' 'ledger corrections verified'
