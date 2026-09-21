@@ -48,16 +48,16 @@ operator control remain the preferred deployment model.
 - [x] C216 Dictionary layout selection based on key cardinality and lookup shape; see [C216_COLUMNAR_DICTIONARY_SHAPES.md](C216_COLUMNAR_DICTIONARY_SHAPES.md).
 - [x] C217 Time-series `WITH FILL` gap generation over ordered results; see [WITH_FILL.md](WITH_FILL.md).
 - [x] C218 Interpolation policies for filled time-series values; see [C218_WITH_FILL_INTERPOLATION.md](C218_WITH_FILL_INTERPOLATION.md).
-- [ ] C219 Per-group `LIMIT BY` execution with bounded memory.
+- [x] C219 Per-group `LIMIT BY` execution with bounded memory; see [SQL_LIMIT_BY.md](SQL_LIMIT_BY.md) and [BENCHMARK.md#c219-limit-by](BENCHMARK.md#c219-limit-by).
 - [x] C220 Post-window `QUALIFY` filtering over projected window rows; selected window aliases are evaluated before `DISTINCT`, `ORDER BY`, and `LIMIT`; see [C220_QUALIFY.md](C220_QUALIFY.md).
-- [ ] C221 `WITH TIES` limit semantics for deterministic boundary results.
+- [x] C221 `WITH TIES` limit semantics for deterministic boundary results; see [LIMIT_WITH_TIES.md](LIMIT_WITH_TIES.md).
 - [x] C222 Approximate top-K aggregation with mergeable bounded state; importable `hatCache.TopK.Merge`, HAG1 aggregate-state round trips, and `HatTrie.MergeTopK` provide bounded partition-state union without changing existing command defaults. SQL planner integration remains open.
 - [x] C223 Mergeable approximate distinct and quantile aggregate states; importable HLL, Count-Min, and TDigest states support validated partition merges and compact transfer. SQL aggregate `State`/`Merge` syntax remains open.
 - [x] C223a Mergeable HyperLogLog partial state; `HyperLogLog.Merge` combines same-precision partition states with per-register maxima, supports zero-value receiver adoption, and rejects invalid or mismatched states without mutation. SQL `State`/`Merge` syntax remains open under C223.
 - [x] C223b Compact mergeable TDigest aggregate state; fixed-width centroid payloads use HAG1 framing, validate compression/count/order/finite values, and support atomic merge-from-wire without changing existing defaults. An existing large-input centroid-bound mismatch remains a separate compaction task.
 - [x] C223b Mergeable Count-Min Sketch partial state; exported `CountMinSketch` snapshots merge same-shape counter matrices with saturating addition, and `HatTrie.MergeCountMinSketch` imports an owned state without changing existing command defaults. SQL `State`/`Merge` syntax remains open under C223.
 - [x] C223c Versioned partial aggregate envelopes; importable HLL and Count-Min state APIs now use bounded, checksummed HAG1 frames with compact raw-register/counter payloads, explicit kind/version metadata, and strict decoder validation. SQL `State`/`Merge` integration remains open under C223.
-- [ ] C224 `argMax` and `argMin` aggregate states with deterministic tie handling.
+- [x] C224 `argMax` and `argMin` aggregate states with deterministic tie handling; see [SQL_ARG_EXTREME.md](SQL_ARG_EXTREME.md).
 - [ ] C225 Incremental window-frame state for repeated ordered windows.
 - [ ] C226 Grace-hash join spilling with bounded disk runs.
 - [x] C227 External aggregation spilling with merge-time memory limits; `SQLQueryOptions.MaxGroupMergeBytes` bounds the decoded spill-reader frontier, stays off by default, and cleans temporary files on rejection. See [C227_GROUP_MERGE_BUDGET.md](C227_GROUP_MERGE_BUDGET.md) and [BENCHMARK.md#c227-external-group-merge-memory-budget](BENCHMARK.md#c227-external-group-merge-memory-budget).

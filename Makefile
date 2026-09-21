@@ -23248,6 +23248,22 @@ audit-hatrie-tmp:
 stage-t042-rejection:
 	bash scripts/stage-t042-rejection.sh
 
+.PHONY: inspect-inspiration-ledgers
+
+inspect-inspiration-ledgers:
+	bash scripts/inspect-inspiration-ledgers.sh
+
+.PHONY: stage-inspiration-ledger commit-inspiration-ledger push-inspiration-ledger
+
+stage-inspiration-ledger:
+	bash scripts/stage-inspiration-ledger.sh
+
+commit-inspiration-ledger:
+	bash scripts/commit-inspiration-ledger.sh
+
+push-inspiration-ledger:
+	bash scripts/push-inspiration-ledger.sh
+
 .PHONY: format-mz016-schema-evolution test-mz016-schema-evolution test-mz016-schema-evolution-package benchmark-mz016-schema-evolution race-mz016-schema-evolution vet-mz016-schema-evolution verify-mz016-schema-evolution
 format-mz016-schema-evolution:
 	bash scripts/mz016-schema-evolution.sh format

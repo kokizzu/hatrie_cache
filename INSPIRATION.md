@@ -694,11 +694,14 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T039 Restore validation across all supported data types.
 - [x] T040 Configurable WAL retention policy with disk budget.
 - [x] T041 WAL segment compression and independent verification.
-- [ ] T042 Recovery-time parallel replay. Bounded single-key parallel replay
+- [-] T042 Recovery-time parallel replay. Bounded single-key parallel replay
   candidates were tested and rolled back: the 10,000-entry benchmark was
   1.25x slower with 1.45x more heap, and a current 256-entry plain-string
   lane was 1.74x slower with 1.21x more heap than serial replay; see the
   rejected results in [BENCHMARK.md](BENCHMARK.md#rejected-recovery-time-parallel-replay).
+  A partitioned replay experiment was also rejected after measuring 1.89x
+  slower execution, 4.34x more allocated bytes, and 90 additional
+  allocations/op; see [T042_PARALLEL_REPLAY_REJECTION.md](T042_PARALLEL_REPLAY_REJECTION.md).
 - [x] T042a Recovery replay mutation fast path - scalar durable mutations avoid constructing public command responses; unsupported commands keep the existing dispatcher (see [JOURNAL_REPLAY.md](JOURNAL_REPLAY.md)).
 - [x] T042b Single-pass ordinary journal replay metadata. The journal caches its validated tail and compaction boundary during open, checkpoint, and compaction, so default replay avoids rescanning the same metadata; progress-enabled replay keeps its counting scan.
 - [x] T043 Recovery replay progress and ETA metrics.
