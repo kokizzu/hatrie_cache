@@ -23239,6 +23239,39 @@ push-tu33-function-grants:
 audit-hatrie-tmp:
 	bash scripts/audit-hatrie-tmp.sh
 
+.PHONY: format-c245
+format-c245:
+	bash scripts/format-c245.sh
+
+.PHONY: test-c245
+test-c245:
+	bash scripts/test-c245.sh
+
+
+.PHONY: race-c245
+race-c245:
+	bash scripts/race-c245.sh
+
+.PHONY: benchmark-c245
+benchmark-c245:
+	bash scripts/benchmark-c245.sh
+
+.PHONY: stage-c245-filesystem-cache-admission
+stage-c245-filesystem-cache-admission:
+	bash scripts/stage-c245-filesystem-cache-admission.sh
+
+.PHONY: commit-c245-filesystem-cache-admission
+commit-c245-filesystem-cache-admission:
+	bash scripts/commit-c245-filesystem-cache-admission.sh
+
+.PHONY: push-c245-filesystem-cache-admission
+push-c245-filesystem-cache-admission:
+	bash scripts/push-c245-filesystem-cache-admission.sh
+
+.PHONY: inspect-c245-docs
+inspect-c245-docs:
+	bash scripts/inspect-c245-docs.sh
+
 .PHONY: stage-c243-remote-part-cache
 stage-c243-remote-part-cache:
 	bash scripts/stage-c243-remote-part-cache.sh

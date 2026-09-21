@@ -24691,6 +24691,61 @@ BenchmarkRemotePartCache/pinned-acquire-release-32     11313973 103.2 ns/op  64 
 ```
 ```
 
+## CH-015 Filesystem Cache Admission
+
+This benchmark compares the unchanged eager remote-part cache with the
+opt-in frequency admission gate. It ran on Linux/amd64 with an AMD Ryzen 9
+5950X, five samples, and `-benchmem`. The cold sub-benchmark uses a one-byte
+cache budget for a 64 KiB part, forcing the loaded part to remain uncached.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Improvement / cost |
+| --- | ---: | ---: | ---: | --- |
+| Existing default warm hit after C245 | 64.86 | 0 | 0 | 1.01x versus pre-C245 65.57 ns/op; within normal run variation |
+| `MinAccesses: 2` warm hit | 61.39 | 0 | 0 | Allocation-free; 1.06x in this run, not treated as a guaranteed CPU gain |
+| Cold eager admission | 9,263 | 65,712 | 3 | Control |
+| Cold `MinAccesses: 2` admission | 10,143 | 65,713 | 3 | 1.095x CPU cost; one extra byte in this uncached path |
+
+The retained-memory correctness test loaded 32 unique 3-byte parts once. The
+eager cache retained 32 entries and 96 data bytes; the frequency cache retained
+0 entries and 0 data bytes. Candidate metadata remains bounded and does not
+retain the part payloads. The feature is opt-in, so the default path has no
+new allocation or retained-memory cost.
+
+### Raw C245 samples
+
+```text
+Pre-C245 BenchmarkC243RemotePartCacheHit (five runs):
+65.54 ns/op  0 B/op  0 allocs/op
+65.92 ns/op  0 B/op  0 allocs/op
+65.57 ns/op  0 B/op  0 allocs/op
+65.56 ns/op  0 B/op  0 allocs/op
+68.32 ns/op  0 B/op  0 allocs/op
+
+BenchmarkC243RemotePartCacheHit-32                 4564213  64.75 ns/op  0 B/op  0 allocs/op
+BenchmarkC243RemotePartCacheHit-32                 4459216  64.75 ns/op  0 B/op  0 allocs/op
+BenchmarkC243RemotePartCacheHit-32                 4621596  65.26 ns/op  0 B/op  0 allocs/op
+BenchmarkC243RemotePartCacheHit-32                 4609028  65.00 ns/op  0 B/op  0 allocs/op
+BenchmarkC243RemotePartCacheHit-32                 4637025  64.86 ns/op  0 B/op  0 allocs/op
+
+BenchmarkC245RemotePartCacheAdmissionWarmHit-32    4902502  61.18 ns/op  0 B/op  0 allocs/op
+BenchmarkC245RemotePartCacheAdmissionWarmHit-32    4864922  61.13 ns/op  0 B/op  0 allocs/op
+BenchmarkC245RemotePartCacheAdmissionWarmHit-32    4905524  61.39 ns/op  0 B/op  0 allocs/op
+BenchmarkC245RemotePartCacheAdmissionWarmHit-32    4683591  71.53 ns/op  0 B/op  0 allocs/op
+BenchmarkC245RemotePartCacheAdmissionWarmHit-32    4296172  63.62 ns/op  0 B/op  0 allocs/op
+
+BenchmarkC245RemotePartCacheCold/eager-32          33374  9263 ns/op  65712 B/op  3 allocs/op
+BenchmarkC245RemotePartCacheCold/eager-32          34358  9132 ns/op  65712 B/op  3 allocs/op
+BenchmarkC245RemotePartCacheCold/eager-32          31971  9506 ns/op  65712 B/op  3 allocs/op
+BenchmarkC245RemotePartCacheCold/eager-32          36170  8892 ns/op  65713 B/op  3 allocs/op
+BenchmarkC245RemotePartCacheCold/eager-32          38348  9567 ns/op  65713 B/op  3 allocs/op
+
+BenchmarkC245RemotePartCacheCold/frequency-32      28874 10143 ns/op  65713 B/op  3 allocs/op
+BenchmarkC245RemotePartCacheCold/frequency-32      29511 10025 ns/op  65713 B/op  3 allocs/op
+BenchmarkC245RemotePartCacheCold/frequency-32      21969 11925 ns/op  65713 B/op  3 allocs/op
+BenchmarkC245RemotePartCacheCold/frequency-32      25208 11747 ns/op  65713 B/op  3 allocs/op
+BenchmarkC245RemotePartCacheCold/frequency-32      35701  9220 ns/op  65714 B/op  3 allocs/op
+```
+
 ## CH-039 Automatic Distinct State Selection
 
 This benchmark compares the existing HyperLogLog distinct aggregate with

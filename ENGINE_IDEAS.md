@@ -42,7 +42,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-013 | Query condition cache | No cache of reusable predicate outcomes for stable part/key conditions. | Medium |
 | CH-014 | Uncompressed hot-data cache | No cache that stores decoded hot ranges while preserving compressed storage. | Medium |
 | CH-014b | Mutation dependency graph with resumable progress | Make overlapping maintenance mutations safe to schedule without re-running completed prerequisites; reverse dependency metadata enables targeted ready polling and restart after checkpoint restore. | Medium |
-| CH-015 | Filesystem cache admission | No admission/eviction policy for deciding which persistent ranges deserve RAM. | Medium |
+| CH-015 | Filesystem cache admission | Adopted as opt-in `RemotePartCacheOptions.MinAccesses`; zero preserves eager admission, while positive thresholds suppress one-hit retention with bounded candidate metadata. See [CH015_FILESYSTEM_CACHE_ADMISSION.md](CH015_FILESYSTEM_CACHE_ADMISSION.md). | Medium |
 | CH-016 | Asynchronous insert queue | Writes cannot be acknowledged before bounded background batching. | Medium |
 | CH-017 | Async-insert deduplication | No idempotency token ledger for safely retrying queued inserts. | Medium |
 | CH-018 | Insert quorum | No write acknowledgement policy requiring a configured replica quorum. | High |

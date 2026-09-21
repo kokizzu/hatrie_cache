@@ -20,6 +20,8 @@ var (
 // caller supplies only a byte budget.
 const DefaultRemotePartCacheMaxEntries = 1024
 
+const maxRemotePartCacheAdmissionEntries = 1 << 20
+
 // DefaultRemotePartPrefetchConcurrency bounds concurrent remote reads when a
 // caller leaves MaxConcurrent at zero.
 const DefaultRemotePartPrefetchConcurrency = 2
@@ -30,6 +32,9 @@ const DefaultRemotePartPrefetchConcurrency = 2
 type RemotePartCacheOptions struct {
 	MaxBytes   uint64
 	MaxEntries int
+	// MinAccesses enables frequency admission when positive. Zero preserves
+	// the legacy eager-admission behavior.
+	MinAccesses uint64
 }
 
 // RemotePartPrefetchOptions controls one explicit bounded read-ahead pass.
@@ -46,13 +51,14 @@ type RemotePartCacheLoader func(context.Context, RemotePartReference) ([]byte, e
 
 // RemotePartCacheStats is a point-in-time cache accounting snapshot.
 type RemotePartCacheStats struct {
-	Entries   int
-	Bytes     uint64
-	Hits      uint64
-	Misses    uint64
-	Loads     uint64
-	Evictions uint64
-	Uncached  uint64
+	Entries    int
+	Bytes      uint64
+	Hits       uint64
+	Misses     uint64
+	Loads      uint64
+	Admissions uint64
+	Evictions  uint64
+	Uncached   uint64
 }
 
 type remotePartCacheKey struct {
@@ -74,20 +80,29 @@ type remotePartCacheLoad struct {
 	data  []byte
 	entry *remotePartCacheEntry
 	err   error
+	admit bool
+}
+
+type remotePartCacheCandidate struct {
+	accesses uint64
+	lastUse  uint64
 }
 
 // RemotePartCache stores immutable remote parts with a bounded byte budget.
 // Higher-priority entries survive eviction ahead of lower-priority entries;
 // pinned entries are never evicted until all their handles are released.
 type RemotePartCache struct {
-	mu         sync.Mutex
-	maxBytes   uint64
-	maxEntries int
-	bytes      uint64
-	clock      uint64
-	entries    map[remotePartCacheKey]*remotePartCacheEntry
-	loading    map[remotePartCacheKey]*remotePartCacheLoad
-	stats      RemotePartCacheStats
+	mu             sync.Mutex
+	maxBytes       uint64
+	maxEntries     int
+	minAccesses    uint64
+	candidateLimit int
+	bytes          uint64
+	clock          uint64
+	entries        map[remotePartCacheKey]*remotePartCacheEntry
+	loading        map[remotePartCacheKey]*remotePartCacheLoad
+	candidates     map[remotePartCacheKey]remotePartCacheCandidate
+	stats          RemotePartCacheStats
 }
 
 // RemotePartHandle pins one cached part until Release. The handle's bytes are
@@ -111,11 +126,26 @@ func NewRemotePartCache(options RemotePartCacheOptions) (*RemotePartCache, error
 	if options.MaxEntries == 0 {
 		options.MaxEntries = DefaultRemotePartCacheMaxEntries
 	}
+	candidateLimit := options.MaxEntries
+	if candidateLimit > maxRemotePartCacheAdmissionEntries {
+		candidateLimit = maxRemotePartCacheAdmissionEntries
+	}
+	if candidateLimit > int(^uint(0)>>1)/2 {
+		candidateLimit = int(^uint(0)>>1) / 2
+	}
+	candidateLimit *= 2
+	var candidates map[remotePartCacheKey]remotePartCacheCandidate
+	if options.MinAccesses > 0 {
+		candidates = make(map[remotePartCacheKey]remotePartCacheCandidate)
+	}
 	return &RemotePartCache{
-		maxBytes:   options.MaxBytes,
-		maxEntries: options.MaxEntries,
-		entries:    make(map[remotePartCacheKey]*remotePartCacheEntry),
-		loading:    make(map[remotePartCacheKey]*remotePartCacheLoad),
+		maxBytes:       options.MaxBytes,
+		maxEntries:     options.MaxEntries,
+		minAccesses:    options.MinAccesses,
+		candidateLimit: candidateLimit,
+		entries:        make(map[remotePartCacheKey]*remotePartCacheEntry),
+		loading:        make(map[remotePartCacheKey]*remotePartCacheLoad),
+		candidates:     candidates,
 	}, nil
 }
 
@@ -299,6 +329,7 @@ func (cache *RemotePartCache) Invalidate(reference RemotePartReference) bool {
 		return false
 	}
 	delete(cache.entries, key)
+	delete(cache.candidates, key)
 	cache.bytes -= uint64(len(entry.data))
 	return true
 }
@@ -329,7 +360,11 @@ func (cache *RemotePartCache) load(ctx context.Context, reference RemotePartRefe
 			cache.mu.Unlock()
 			return data, entry, nil
 		}
+		admit := cache.noteAdmissionLocked(key)
 		if current, ok := cache.loading[key]; ok {
+			if admit {
+				current.admit = true
+			}
 			done := current.done
 			cache.mu.Unlock()
 			select {
@@ -345,7 +380,7 @@ func (cache *RemotePartCache) load(ctx context.Context, reference RemotePartRefe
 			}
 			continue
 		}
-		current := &remotePartCacheLoad{done: make(chan struct{})}
+		current := &remotePartCacheLoad{done: make(chan struct{}), admit: admit}
 		cache.loading[key] = current
 		cache.stats.Misses++
 		cache.stats.Loads++
@@ -364,7 +399,7 @@ func (cache *RemotePartCache) load(ctx context.Context, reference RemotePartRefe
 		if loadErr == nil {
 			owned = append([]byte(nil), data...)
 			cache.mu.Lock()
-			if cache.makeRoomLocked(uint64(len(owned))) {
+			if current.admit && cache.makeRoomLocked(uint64(len(owned))) {
 				cache.clock++
 				entry = &remotePartCacheEntry{
 					key:      key,
@@ -377,6 +412,7 @@ func (cache *RemotePartCache) load(ctx context.Context, reference RemotePartRefe
 				}
 				cache.entries[key] = entry
 				cache.bytes += uint64(len(owned))
+				cache.stats.Admissions++
 			} else {
 				cache.stats.Uncached++
 			}
@@ -385,6 +421,9 @@ func (cache *RemotePartCache) load(ctx context.Context, reference RemotePartRefe
 
 		cache.mu.Lock()
 		delete(cache.loading, key)
+		if loadErr != nil {
+			delete(cache.candidates, key)
+		}
 		current.data = owned
 		current.entry = entry
 		current.err = loadErr
@@ -394,6 +433,41 @@ func (cache *RemotePartCache) load(ctx context.Context, reference RemotePartRefe
 			return nil, nil, loadErr
 		}
 		return owned, entry, nil
+	}
+}
+
+func (cache *RemotePartCache) noteAdmissionLocked(key remotePartCacheKey) bool {
+	if cache.minAccesses == 0 {
+		return true
+	}
+	cache.clock++
+	candidate := cache.candidates[key]
+	if candidate.accesses < ^uint64(0) {
+		candidate.accesses++
+	}
+	candidate.lastUse = cache.clock
+	if candidate.accesses >= cache.minAccesses {
+		delete(cache.candidates, key)
+		return true
+	}
+	cache.candidates[key] = candidate
+	cache.pruneAdmissionCandidatesLocked()
+	return false
+}
+
+func (cache *RemotePartCache) pruneAdmissionCandidatesLocked() {
+	for len(cache.candidates) > cache.candidateLimit {
+		var oldestKey remotePartCacheKey
+		var oldestUse uint64
+		first := true
+		for key, candidate := range cache.candidates {
+			if first || candidate.lastUse < oldestUse {
+				oldestKey = key
+				oldestUse = candidate.lastUse
+				first = false
+			}
+		}
+		delete(cache.candidates, oldestKey)
 	}
 }
 

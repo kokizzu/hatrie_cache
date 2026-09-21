@@ -3,6 +3,7 @@
 ## Recently Adopted
 
 | Source | Idea | Status | Evidence |
+| ClickHouse | Filesystem cache admission | Adopted as an opt-in frequency gate for remote immutable parts | `RemotePartCacheOptions.MinAccesses` preserves eager admission at `0`, suppresses one-hit RAM retention at positive thresholds, counts concurrent single-flight accesses, and bounds candidate metadata. See [CH015_FILESYSTEM_CACHE_ADMISSION.md](CH015_FILESYSTEM_CACHE_ADMISSION.md) and [BENCHMARK.md#ch-015-filesystem-cache-admission](BENCHMARK.md#ch-015-filesystem-cache-admission). |
 | Materialize | Dataflow operator placement constraints by failure domain | Adopted | Deterministic, bounded opt-in planner in `hatPipeline.PlanDataflowOperatorPlacement`; see [MZ036_DATAFLOW_OPERATOR_PLACEMENT.md](MZ036_DATAFLOW_OPERATOR_PLACEMENT.md) and [BENCHMARK.md](BENCHMARK.md#mz-036-dataflow-operator-placement). |
 | Materialize | Dynamic dataflow worker scaling | Adopted | Bounded opt-in `hatPipeline.ResizablePipeline` with runtime stage resize, backpressure, and cancellation; see [MZ038_DYNAMIC_DATAFLOW_WORKER_SCALING.md](MZ038_DYNAMIC_DATAFLOW_WORKER_SCALING.md) and [BENCHMARK.md](BENCHMARK.md#mz-038-dynamic-dataflow-worker-scaling). |
 | Materialize | Costed dataflow explanation | Adopted as an explicit opt-in SQL explain mode | `EXPLAIN COST` adds bounded heuristic operator CPU and memory estimates without reading sources or changing ordinary execution; see [MZ044_COSTED_EXPLAIN.md](MZ044_COSTED_EXPLAIN.md) and [BENCHMARK.md](BENCHMARK.md#mz-044-costed-sql-explain). |
