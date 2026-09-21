@@ -1039,3 +1039,11 @@ participating threads. `CPUTimeCheckEvery` defaults to 64 checkpoints to bound
 syscall overhead; strict every-checkpoint sampling remains configurable. Other
 platforms fail explicitly with `ErrSQLCPUTimeUnsupported` rather than treating
 wall time as CPU time. See [C233_CPU_TIME_BUDGET.md](C233_CPU_TIME_BUDGET.md).
+## M208: Differential Multiplicity Folding
+
+Adopted the differential-dataflow style of combining repeated row updates by
+signed multiplicity before applying a query subscription batch. The
+implementation preserves stable order, drops zero net changes, checks integer
+overflow, and keeps the existing adapter multiplicity validation. See
+`M208_DIFFERENTIAL_MULTIPLICITY_FOLDING.md` for correctness and benchmark
+results.

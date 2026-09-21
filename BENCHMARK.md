@@ -35974,3 +35974,16 @@ samples on Linux amd64 / AMD Ryzen 9 5950X produced these medians:
 | M206 upsert envelope | 3596 | 2293 | 26 | 1.14x faster | 1.19x lower | 1.08x fewer |
 
 Raw samples and semantics are recorded in [M206_UPSERT_ENVELOPES.md](M206_UPSERT_ENVELOPES.md).
+## M208 Differential Multiplicity Folding
+
+Command: `make benchmark-m208-differential-folding`
+
+Linux amd64, AMD Ryzen 9 5950X, five samples, `-benchtime=2s`.
+
+| Feature path | Median ns/op | B/op | allocs/op | Improvement vs sort baseline |
+| --- | ---: | ---: | ---: | ---: |
+| Sort baseline | 5751509 | ~1435600 | 49410 | 1.00x |
+| Hash differential fold | 2450988 | 942840 | 24956 | 2.35x faster, 1.52x lower bytes, 1.98x fewer allocations |
+
+Raw samples and the integrated adapter comparison are recorded in
+`M208_DIFFERENTIAL_MULTIPLICITY_FOLDING.md`.

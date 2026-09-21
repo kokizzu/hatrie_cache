@@ -25436,3 +25436,36 @@ commit-m206-upsert-envelope:
 .PHONY: push-m206-upsert-envelope
 push-m206-upsert-envelope:
 	bash scripts/push-m206-upsert-envelope.sh
+.PHONY: stage-m208-differential-folding
+stage-m208-differential-folding:
+	bash scripts/stage-m208-differential-folding.sh
+
+.PHONY: commit-m208-differential-folding
+commit-m208-differential-folding:
+	bash scripts/commit-m208-differential-folding.sh
+
+.PHONY: push-m208-differential-folding
+push-m208-differential-folding:
+	bash scripts/push-m208-differential-folding.sh
+.PHONY: benchmark-m208-differential-folding-baseline
+benchmark-m208-differential-folding-baseline:
+	bash scripts/benchmark-m208-differential-folding-baseline.sh
+.PHONY: format-m208-differential-folding
+format-m208-differential-folding:
+	bash scripts/format-m208-differential-folding.sh
+.PHONY: test-m208-differential-folding
+test-m208-differential-folding:
+	bash scripts/test-m208-differential-folding.sh
+.PHONY: benchmark-m208-differential-folding
+benchmark-m208-differential-folding:
+	bash scripts/benchmark-m208-differential-folding.sh
+.PHONY: test-m208-changefeeds
+test-m208-changefeeds:
+	bash scripts/test-m208-changefeeds.sh
+.PHONY: race-m208-differential-folding
+race-m208-differential-folding:
+	bash scripts/race-m208-differential-folding.sh
+
+.PHONY: vet-m208-differential-folding
+vet-m208-differential-folding:
+	bash scripts/vet-m208-differential-folding.sh

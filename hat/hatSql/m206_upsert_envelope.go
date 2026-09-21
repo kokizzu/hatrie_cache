@@ -80,6 +80,11 @@ func (feed *UpsertChangefeed) Apply(batch QuerySubscriptionDeltaBatch) ([]Upsert
 	if batch.Progress {
 		return nil, nil
 	}
+	folded, err := foldQuerySubscriptionDeltaBatch(batch, false)
+	if err != nil {
+		return nil, err
+	}
+	batch = folded
 	if !feed.initialized {
 		rows, order, err := feed.initialRows(batch.Deltas)
 		if err != nil {

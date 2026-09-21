@@ -203,3 +203,6 @@ paired measurements in [BENCHMARK.md](BENCHMARK.md#c204-projection-idempotency-m
 - Implementation: `hat/hatSql/ch234_stage_profiler.go` and
   `hat/hatSql/ch234_stage_profiler_test.go`.
 - Benchmark and tradeoff: `C234_QUERY_STAGE_PROFILER.md`.
+## M208 Status
+
+- [x] Differential multiplicity folding for insert/delete update streams.
