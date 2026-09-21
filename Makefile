@@ -24922,3 +24922,28 @@ commit-tt005-raft-configuration:
 .PHONY: push-tt005-raft-configuration
 push-tt005-raft-configuration:
 	bash scripts/push-tt005-raft-configuration.sh
+.PHONY: format-tt006-hot-standby test-tt006-hot-standby test-tt006-hot-standby-package race-tt006-hot-standby race-tt006-hot-standby-package benchmark-tt006-hot-standby vet-tt006-hot-standby verify-tt006-hot-standby stage-tt006-hot-standby review-tt006-hot-standby commit-tt006-hot-standby push-tt006-hot-standby
+format-tt006-hot-standby:
+	bash scripts/tt006-hot-standby.sh format
+test-tt006-hot-standby:
+	bash scripts/tt006-hot-standby.sh test
+test-tt006-hot-standby-package:
+	bash scripts/tt006-hot-standby.sh package
+race-tt006-hot-standby:
+	bash scripts/tt006-hot-standby.sh race
+race-tt006-hot-standby-package:
+	bash scripts/tt006-hot-standby.sh race-package
+benchmark-tt006-hot-standby:
+	bash scripts/tt006-hot-standby.sh benchmark
+vet-tt006-hot-standby:
+	bash scripts/tt006-hot-standby.sh vet
+verify-tt006-hot-standby:
+	bash scripts/tt006-hot-standby.sh verify
+stage-tt006-hot-standby:
+	bash scripts/stage-tt006-hot-standby.sh
+review-tt006-hot-standby:
+	bash scripts/review-tt006-hot-standby.sh
+commit-tt006-hot-standby:
+	bash scripts/commit-tt006-hot-standby.sh
+push-tt006-hot-standby:
+	bash scripts/push-tt006-hot-standby.sh

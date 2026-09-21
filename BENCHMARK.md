@@ -35688,6 +35688,24 @@ ordinary data writes. The safety tradeoff is explicit: a transition remains
 pending until both configurations acknowledge it, preventing a partial
 membership change from being treated as committed.
 
+# TT-006: Hot-Standby WAL Catch-Up
+
+Five `-benchmem` samples ran on Linux amd64 with an AMD Ryzen 9 5950X. The
+baseline is raw local integer bookkeeping; the validated path includes a
+detached state snapshot plus locked, fenced head and batch transitions.
+
+| Path | Raw ns/op samples | Median ns/op | B/op | allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Raw local bookkeeping | 0.5635, 0.5432, 0.5593, 0.5447, 0.5488 | 0.5488 | 0 | 0 | 1.00x |
+| Validated hot-standby replay | 66.66, 66.97, 63.26, 65.48, 62.63 | 65.48 | 0 | 0 | 119.3x slower |
+
+This is a control-plane safety-cost comparison, not an equivalent-correctness
+claim: the baseline has no synchronization, fencing, gap rejection, or
+promotion checks. The validated path remains allocation-free and is opt-in;
+existing data writes and network paths do not call it. See
+[TT006_HOT_STANDBY_WAL_CATCHUP.md](TT006_HOT_STANDBY_WAL_CATCHUP.md) for the
+lifecycle, limits, and security invariants.
+
 # TT-007: Snapshot-plus-WAL Join
 
 This benchmark measures 128 appends per bounded batch, resetting both modes
