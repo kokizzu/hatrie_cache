@@ -4863,3 +4863,8 @@ The opt-in `hatReplication.SpaceChangefeed` primitive provides bounded
 per-space change events with schema identity, replay checkpoints, and explicit
 subscriber overflow. It is importable and does not start a server or change
 existing journal/SQL defaults. See [TU39_SPACE_CHANGEFEED.md](TU39_SPACE_CHANGEFEED.md).
+- Opt-in Materialize-style frontier-aware cancellation is available through
+  [`hatPipeline.NewFrontierCancellation`](MZ046_FRONTIER_CANCELLATION.md); it
+  cancels a caller-provided query or pipeline context at a named freshness
+  frontier and keeps default execution unchanged. See the measured tradeoff in
+  [BENCHMARK.md](BENCHMARK.md#mz-046-frontier-aware-cancellation).

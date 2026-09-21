@@ -34992,3 +34992,51 @@ Median comparison:
 The branch API adds bounded branch-log state and approximately 64 B/op plus one
 allocation during branch creation for this workload; it does not add overhead
 to normal journal writes.
+
+## MZ-046 Frontier-Aware Cancellation
+
+Command: `make benchmark-mz046-frontier-cancellation`
+
+Five 500 ms samples on Linux/amd64, AMD Ryzen 9 5950X with `-cpu=1`. The
+active-path comparison creates a registry, waits for one frontier advancement,
+and then waits for cancellation. The baseline uses `context.WithCancelCause`
+so the cancellation-cause work is included on both sides.
+
+Raw result:
+
+```text
+BenchmarkMZ046ManualWaitAndCancel  1083549  1115 ns/op  680 B/op  12 allocs/op
+BenchmarkMZ046ManualWaitAndCancel  1000000  1134 ns/op  680 B/op  12 allocs/op
+BenchmarkMZ046ManualWaitAndCancel  1000000  1032 ns/op  680 B/op  12 allocs/op
+BenchmarkMZ046ManualWaitAndCancel  1228924  1017 ns/op  680 B/op  12 allocs/op
+BenchmarkMZ046ManualWaitAndCancel   974211  1062 ns/op  680 B/op  12 allocs/op
+BenchmarkMZ046ManualWaitAndCancelCause  1337811  917.3 ns/op  680 B/op  12 allocs/op
+BenchmarkMZ046ManualWaitAndCancelCause  1225210  985.3 ns/op  680 B/op  12 allocs/op
+BenchmarkMZ046ManualWaitAndCancelCause  1000000  1048 ns/op  680 B/op  12 allocs/op
+BenchmarkMZ046ManualWaitAndCancelCause  1323705  899.3 ns/op  680 B/op  12 allocs/op
+BenchmarkMZ046ManualWaitAndCancelCause  1209988  976.2 ns/op  680 B/op  12 allocs/op
+BenchmarkMZ046FrontierCancellation   992490  1150 ns/op  672 B/op  9 allocs/op
+BenchmarkMZ046FrontierCancellation  1000000  1122 ns/op  672 B/op  9 allocs/op
+BenchmarkMZ046FrontierCancellation   975072  1231 ns/op  672 B/op  9 allocs/op
+BenchmarkMZ046FrontierCancellation   947010  1173 ns/op  672 B/op  9 allocs/op
+BenchmarkMZ046FrontierCancellation  1000000  1165 ns/op  672 B/op  9 allocs/op
+BenchmarkMZ046FrontierCancellationAlreadyReached  4598652  232.5 ns/op  160 B/op  3 allocs/op
+BenchmarkMZ046FrontierCancellationAlreadyReached  5100136  251.3 ns/op  160 B/op  3 allocs/op
+BenchmarkMZ046FrontierCancellationAlreadyReached  5194341  215.7 ns/op  160 B/op  3 allocs/op
+BenchmarkMZ046FrontierCancellationAlreadyReached  4979216  236.0 ns/op  160 B/op  3 allocs/op
+BenchmarkMZ046FrontierCancellationAlreadyReached  5593521  238.3 ns/op  160 B/op  3 allocs/op
+```
+
+Median comparison:
+
+| Path | Median time | Memory | Allocations | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Manual `WaitUntil` + cause-aware context | 976.2 ns/op | 680 B/op | 12 | 1.00x |
+| `FrontierCancellation` | 1,064 ns/op | 672 B/op | 9 | 1.09x |
+| Already-reached fast path | 238.3 ns/op | 160 B/op | 3 | n/a |
+
+The active watcher costs 9% CPU in this controlled microbenchmark, reduces
+allocation bytes by 1.2%, and reduces allocations by 25%. It is opt-in because
+an active watcher uses one goroutine per guarded operation; callers should
+close it when the operation finishes before the frontier does. See
+[MZ046_FRONTIER_CANCELLATION.md](MZ046_FRONTIER_CANCELLATION.md).

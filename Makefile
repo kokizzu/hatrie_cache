@@ -23883,3 +23883,27 @@ race-mz050-timeline-branch:
 .PHONY: verify-mz050-timeline-branch
 verify-mz050-timeline-branch:
 	@bash scripts/verify-mz050-timeline-branch.sh
+benchmark-mz046-frontier-cancellation-baseline:
+	bash ./scripts/run-mz046-frontier-cancellation-benchmark.sh baseline
+test-mz046-frontier-cancellation:
+	bash ./scripts/test-mz046-frontier-cancellation.sh
+benchmark-mz046-frontier-cancellation:
+	bash ./scripts/run-mz046-frontier-cancellation-benchmark.sh final
+format-mz046-frontier-cancellation:
+	bash ./scripts/format-mz046-frontier-cancellation.sh
+
+race-mz046-frontier-cancellation:
+	bash ./scripts/race-mz046-frontier-cancellation.sh
+verify-mz046-frontier-cancellation:
+	bash ./scripts/verify-mz046-frontier-cancellation.sh
+review-mz046-frontier-cancellation:
+	bash ./scripts/review-mz046-frontier-cancellation.sh
+
+stage-mz046-frontier-cancellation:
+	bash ./scripts/stage-mz046-frontier-cancellation.sh
+
+commit-mz046-frontier-cancellation:
+	bash ./scripts/commit-mz046-frontier-cancellation.sh
+
+push-mz046-frontier-cancellation:
+	bash ./scripts/push-mz046-frontier-cancellation.sh
