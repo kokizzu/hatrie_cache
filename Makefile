@@ -24731,3 +24731,39 @@ commit-mz045-arrangement-workload:
 
 push-mz045-arrangement-workload:
 	bash scripts/push-mz045-arrangement-workload.sh
+
+.PHONY: format-ch041-grouping-id
+format-ch041-grouping-id:
+	bash scripts/ch041-grouping-id.sh format
+
+.PHONY: test-ch041-grouping-id
+test-ch041-grouping-id:
+	bash scripts/ch041-grouping-id.sh test
+
+.PHONY: benchmark-ch041-grouping-id
+benchmark-ch041-grouping-id:
+	bash scripts/ch041-grouping-id.sh benchmark
+
+.PHONY: race-ch041-grouping-id
+race-ch041-grouping-id:
+	bash scripts/ch041-grouping-id.sh race
+
+.PHONY: vet-ch041-grouping-id
+vet-ch041-grouping-id:
+	bash scripts/ch041-grouping-id.sh vet
+
+.PHONY: verify-ch041-grouping-id
+verify-ch041-grouping-id:
+	bash scripts/ch041-grouping-id.sh verify
+
+.PHONY: stage-ch041-grouping-id
+stage-ch041-grouping-id:
+	bash scripts/stage-ch041-grouping-id.sh
+
+.PHONY: commit-ch041-grouping-id
+commit-ch041-grouping-id:
+	bash scripts/commit-ch041-grouping-id.sh
+
+.PHONY: push-ch041-grouping-id
+push-ch041-grouping-id:
+	bash scripts/push-ch041-grouping-id.sh

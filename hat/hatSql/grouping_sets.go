@@ -6,6 +6,7 @@ import (
 )
 
 const maxSQLCubeDimensions = 12
+const maxSQLGroupingIDArguments = 63
 
 func (p *sqlQueryParser) parseSQLGroupingClause() ([]sqlExpr, [][]sqlExpr, []sqlExpr, error) {
 	if p.keyword("ROLLUP") {
@@ -149,13 +150,33 @@ func sqlRewriteGroupingIdentifiers(query *sqlQuery, groupingSet, dimensions []sq
 		}
 	}
 	if sqlExprHasGroupingIdentifier(query.where) || sqlExprHasGroupingIdentifier(query.prewhere) {
-		return fmt.Errorf("GROUPING is only valid in SELECT, HAVING, ORDER BY, or LIMIT BY")
+		return fmt.Errorf("GROUPING and GROUPING_ID are only valid in SELECT, HAVING, ORDER BY, or LIMIT BY")
 	}
 	return nil
 }
 
 func sqlRewriteGroupingIdentifierExpr(expr *sqlExpr, groupingSet, dimensions []sqlExpr) error {
 	if expr == nil {
+		return nil
+	}
+	if expr.kind == "func" && strings.EqualFold(expr.name, "GROUPING_ID") {
+		if len(expr.args) == 0 {
+			return fmt.Errorf("GROUPING_ID expects at least one grouping expression")
+		}
+		if len(expr.args) > maxSQLGroupingIDArguments {
+			return fmt.Errorf("GROUPING_ID supports at most %d grouping expressions", maxSQLGroupingIDArguments)
+		}
+		value := int64(0)
+		for index, argument := range expr.args {
+			if !sqlGroupingSetContains(dimensions, argument) {
+				return fmt.Errorf("GROUPING_ID argument must be a grouping expression")
+			}
+			if !sqlGroupingSetContains(groupingSet, argument) {
+				bit := uint(len(expr.args) - index - 1)
+				value |= int64(1) << bit
+			}
+		}
+		*expr = sqlExpr{kind: "literal", value: value}
 		return nil
 	}
 	if expr.kind == "func" && strings.EqualFold(expr.name, "GROUPING") {
@@ -210,7 +231,7 @@ func sqlRewriteGroupingIdentifierExpr(expr *sqlExpr, groupingSet, dimensions []s
 }
 
 func sqlExprHasGroupingIdentifier(expr sqlExpr) bool {
-	if expr.kind == "func" && strings.EqualFold(expr.name, "GROUPING") {
+	if expr.kind == "func" && (strings.EqualFold(expr.name, "GROUPING") || strings.EqualFold(expr.name, "GROUPING_ID")) {
 		return true
 	}
 	if expr.left != nil && sqlExprHasGroupingIdentifier(*expr.left) || expr.right != nil && sqlExprHasGroupingIdentifier(*expr.right) {

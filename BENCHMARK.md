@@ -35628,3 +35628,19 @@ The compiled path also uses 13% less heap and 32% fewer allocations per
 repeated explain. The one-time compile step now pays the workload preparation
 cost; parameter-bound clones clear the cache before rewrite so correctness is
 preserved.
+
+# CH-041: Multi-Argument GROUPING_ID
+
+This benchmark compares native `GROUPING_ID(region, product)` with the
+equivalent composed expression `GROUPING(region) * 2 + GROUPING(product)`.
+Both execute the same two-dimension `CUBE` workload and produce eight rows.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | ---: |
+| Composed control | 72,670 | 52,740 | 440 | 1.00x |
+| Native `GROUPING_ID` | 69,263 | 42,407 | 408 | 1.05x faster, 1.24x lower heap, 1.08x fewer allocations |
+
+The native function folds once during grouping-set expansion, while the
+composed control retains arithmetic expression nodes in every expanded branch.
+This does not remove the existing branch expansion cost; native one-pass
+grouping remains a separate open improvement.

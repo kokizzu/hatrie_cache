@@ -141,6 +141,65 @@ GROUP BY ROLLUP (src.region)`, nil)
 	}
 }
 
+func TestSQLGroupingIDMultipleArguments(t *testing.T) {
+	result, err := ExecuteSQLQuery(`
+FROM VALUES
+  ('east', 'a', 10),
+  ('east', 'b', 20),
+  ('west', 'a', 30)
+AS src(region, product, amount)
+SELECT src.region AS region,
+       src.product AS product,
+       GROUPING_ID(src.region, src.product) AS grouping_id,
+       SUM(src.amount) AS total
+GROUP BY CUBE (src.region, src.product)`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[string]int64{
+		"east/a":      0,
+		"east/b":      0,
+		"west/a":      0,
+		"east/<nil>":  1,
+		"west/<nil>":  1,
+		"<nil>/a":     2,
+		"<nil>/b":     2,
+		"<nil>/<nil>": 3,
+	}
+	if len(result.Rows) != len(want) {
+		t.Fatalf("rows = %d, want %d: %#v", len(result.Rows), len(want), result.Rows)
+	}
+	for _, row := range result.Rows {
+		key := fmt.Sprintf("%v/%v", row["region"], row["product"])
+		got, ok := want[key]
+		if !ok {
+			t.Fatalf("unexpected grouping row %q: %#v", key, row)
+		}
+		groupingID, groupingIDOK := sqlGroupingIdentifierInteger(row["grouping_id"])
+		if !groupingIDOK || groupingID != got {
+			t.Errorf("row %q grouping_id = %#v, want %d", key, row["grouping_id"], got)
+		}
+		delete(want, key)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing grouping rows: %#v", want)
+	}
+}
+
+func TestSQLGroupingIDValidation(t *testing.T) {
+	for _, query := range []string{
+		`FROM VALUES ('east', 1) AS src(region, amount) SELECT GROUPING_ID() GROUP BY ROLLUP (src.region)`,
+		`FROM VALUES ('east', 1) AS src(region, amount) SELECT GROUPING_ID(src.missing, src.region) GROUP BY ROLLUP (src.region)`,
+		`FROM VALUES ('east', 1) AS src(region, amount) SELECT GROUPING_ID(src.region, src.amount) GROUP BY ROLLUP (src.region)`,
+	} {
+		_, err := ExecuteSQLQuery(query, nil)
+		if err == nil || !strings.Contains(err.Error(), "GROUPING_ID") {
+			t.Fatalf("query error = %v, want GROUPING_ID validation error", err)
+		}
+	}
+}
+
 func TestSQLGroupingIdentifierOrdinaryGroupDefaultsToZero(t *testing.T) {
 	result, err := ExecuteSQLQuery(`
 FROM VALUES ('east', 1), ('east', 2) AS src(region, amount)
