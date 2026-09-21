@@ -132,7 +132,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | MZ-047 | Session compute routing | Client sessions cannot choose a named compute cluster for an operation. | Medium |
 | MZ-048 | Connector secret rotation | Source/sink credentials cannot rotate without stopping the maintained dataflow. | Medium |
 | MZ-049 | Exactly-once snapshot export | Implemented as opt-in `CommandJournal.WriteSnapshotWithResumableExport`: an immutable manifest-bound source, fsynced prefix checkpoints, tail truncation, and atomic publication prevent duplicate bytes after interruption. See [MZ049_SNAPSHOT_EXPORT.md](MZ049_SNAPSHOT_EXPORT.md) and [BENCHMARK.md](BENCHMARK.md#mz-049-exactly-once-snapshot-export). | High |
-| MZ-050 | Timeline branching and replay | There is no isolated branch of maintained state for deterministic what-if replay. | High |
+| MZ-050 | Timeline branching and replay | Implemented as `hatCache.CommandJournal.BranchAt`: an isolated in-memory branch can apply successful what-if commands and replay the branch into an empty trie without mutating the source journal or trie. See [MZ050_TIMELINE_BRANCH.md](MZ050_TIMELINE_BRANCH.md) and [BENCHMARK.md](BENCHMARK.md#mz-050-timeline-branching-and-replay). | High |
 
 ## Tarantool candidates
 

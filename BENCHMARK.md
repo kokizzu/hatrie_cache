@@ -34947,3 +34947,48 @@ Median comparison:
 The secure path adds about 7% CPU in this workload without increasing
 allocation bytes or allocation count. It is opt-in so existing consumers keep
 lossless metadata behavior.
+
+## MZ-050 Timeline Branching And Replay
+
+Command: `make benchmark-mz050-timeline-branch`
+
+Five 500 ms samples on Linux/amd64, AMD Ryzen 9 5950X, with a 128-command
+journal prefix.
+
+Raw result:
+
+```text
+BenchmarkMZ050ManualReplay-32          2310  257848 ns/op  42830 B/op  663 allocs/op
+BenchmarkMZ050ManualReplay-32          2617  278232 ns/op  42827 B/op  663 allocs/op
+BenchmarkMZ050ManualReplay-32          1314  398461 ns/op  42826 B/op  663 allocs/op
+BenchmarkMZ050ManualReplay-32          1636  409254 ns/op  42826 B/op  663 allocs/op
+BenchmarkMZ050ManualReplay-32          1688  393878 ns/op  42826 B/op  663 allocs/op
+BenchmarkMZ050BranchAt-32              1695  426573 ns/op  42890 B/op  664 allocs/op
+BenchmarkMZ050BranchAt-32              1531  431629 ns/op  42890 B/op  664 allocs/op
+BenchmarkMZ050BranchAt-32              1472  448468 ns/op  42898 B/op  664 allocs/op
+BenchmarkMZ050BranchAt-32              1687  396523 ns/op  42890 B/op  664 allocs/op
+BenchmarkMZ050BranchAt-32              1495  490081 ns/op  42890 B/op  664 allocs/op
+BenchmarkMZ050ManualBranchReplay-32    1299  398937 ns/op  42826 B/op  663 allocs/op
+BenchmarkMZ050ManualBranchReplay-32    1822  461358 ns/op  42826 B/op  663 allocs/op
+BenchmarkMZ050ManualBranchReplay-32    1252  456900 ns/op  42826 B/op  663 allocs/op
+BenchmarkMZ050ManualBranchReplay-32    1480  435949 ns/op  42826 B/op  663 allocs/op
+BenchmarkMZ050ManualBranchReplay-32    1773  418157 ns/op  42827 B/op  663 allocs/op
+BenchmarkMZ050BranchReplayInto-32      1891  401009 ns/op  43050 B/op  664 allocs/op
+BenchmarkMZ050BranchReplayInto-32      1821  441277 ns/op  43051 B/op  664 allocs/op
+BenchmarkMZ050BranchReplayInto-32      1780  364972 ns/op  43050 B/op  664 allocs/op
+BenchmarkMZ050BranchReplayInto-32      1646  351045 ns/op  43049 B/op  664 allocs/op
+BenchmarkMZ050BranchReplayInto-32      1519  344514 ns/op  43049 B/op  664 allocs/op
+```
+
+Median comparison:
+
+| Path | Median time | Memory | Allocations | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Manual replay | 393878 ns/op | 42826 B/op | 663 | 1.00x |
+| `BranchAt` | 431629 ns/op | 42890 B/op | 664 | 1.10x |
+| Manual replay plus hypothetical command | 435949 ns/op | 42826 B/op | 663 | 1.00x |
+| `ReplayInto` | 364972 ns/op | 43050 B/op | 664 | 0.84x |
+
+The branch API adds bounded branch-log state and approximately 64 B/op plus one
+allocation during branch creation for this workload; it does not add overhead
+to normal journal writes.

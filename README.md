@@ -249,6 +249,7 @@ security guidance before exposing it on a network.
 - SQL window frame exclusion: [SQL window frame exclusion](SQL_WINDOW_FRAME_EXCLUSION.md)
 - ClickHouse-inspired bounded remote-part cache: [REMOTE_PART_CACHE.md](REMOTE_PART_CACHE.md); C243 details: [C243_REMOTE_PART_CACHE.md](C243_REMOTE_PART_CACHE.md); C244 local reuse validation: [C244_LOCAL_CACHE_REUSE.md](C244_LOCAL_CACHE_REUSE.md); C245 frequency admission: [CH015_FILESYSTEM_CACHE_ADMISSION.md](CH015_FILESYSTEM_CACHE_ADMISSION.md)
 - Tarantool-inspired opt-in redacted audit output: [TT037_AUDIT_REDACTION.md](TT037_AUDIT_REDACTION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#tt-037-audit-metadata-redaction)
+- Materialize-inspired isolated what-if journal timelines: [MZ050_TIMELINE_BRANCH.md](MZ050_TIMELINE_BRANCH.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-050-timeline-branching-and-replay)
 - ClickHouse-inspired bounded remote-part prefetch: [REMOTE_PART_PREFETCH.md](REMOTE_PART_PREFETCH.md)
 - ClickHouse-inspired typed IPv4/IPv6 values and fixed-width RowBinary codecs: [SQL_IP_TYPES.md](SQL_IP_TYPES.md)
 - ClickHouse-inspired compact schema-aware Enum8/Enum16 RowBinary values: [SQL_ENUM_TYPES.md](SQL_ENUM_TYPES.md)
