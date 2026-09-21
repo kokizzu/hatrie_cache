@@ -35280,3 +35280,26 @@ The catalog is deliberately opt-in and is not intended for hot lookups. The
 streaming verifier is the measured efficiency improvement: it checks a file
 without allocating a second full-payload buffer and preserves the file offset.
 See [CH024_DETACH_ATTACH_PARTS.md](CH024_DETACH_ATTACH_PARTS.md).
+
+<a id="ch-019-replica-part-consistency-planning"></a>
+## CH-019 Replica-Part Consistency Planning
+
+Command: `make benchmark-ch019-replica-repair`.
+
+The planner compares two bounded, verified part inventories using copied and
+sorted metadata, a linear merge, deterministic action ordering, and generation
+fencing. It is compared with a straightforward map-based diff. The benchmark
+does not include file transfer or checksum I/O.
+
+Machine: AMD Ryzen 9 5950X, Linux amd64, three samples, 1,024 equal parts.
+
+| Implementation | Samples (ns/op) | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: | ---: |
+| `BuildReplicaPartRepairPlan` | 157,439; 154,595; 150,717 | 154,595 | 213,360 | 8 |
+| Map baseline | 317,670; 344,576; 304,511 | 317,670 | 524,449 | 10 |
+
+Relative to the map baseline, the planner is approximately 2.1x faster, uses
+59% less transient memory, and uses 20% fewer allocations. The planner's
+metadata copies and sorting are required for input immutability and stable
+repair plans; transport, verification, attach, and quarantine side effects
+remain caller-owned. See [CH019_REPLICA_PART_CHECKS.md](CH019_REPLICA_PART_CHECKS.md).

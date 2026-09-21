@@ -4901,3 +4901,11 @@ existing journal/SQL defaults. See [TU39_SPACE_CHANGEFEED.md](TU39_SPACE_CHANGEF
   and the measurements in [BENCHMARK.md](BENCHMARK.md#mz-047-session-compute-routing).
 - Materialize-inspired MZ-048 connector secret rotation is available through the opt-in `hatPipeline.ConnectorCredentialRotator`; see [MZ048_CONNECTOR_SECRET_ROTATION.md](MZ048_CONNECTOR_SECRET_ROTATION.md) and the [benchmark entry](BENCHMARK.md#mz-048-connector-secret-rotation).
 - ClickHouse-inspired CH-014b mutation readiness uses indexed reverse dependencies and a deterministic ready queue, avoiding allocation-heavy empty polls while preserving snapshot and queue formats. See [CH014B_MUTATION_DEPENDENCY_READY.md](CH014B_MUTATION_DEPENDENCY_READY.md) and the [benchmark entry](BENCHMARK.md#ch-014b-mutation-dependency-ready-queue).
+
+## Replica-Part Consistency Planning
+
+Opt-in replica consistency planning compares verified immutable-part manifests
+and emits deterministic copy, replace, or quarantine actions without performing
+network or destructive storage operations. Use
+[CH019_REPLICA_PART_CHECKS.md](CH019_REPLICA_PART_CHECKS.md) for the API,
+safety bounds, and measured comparison in [BENCHMARK.md](BENCHMARK.md#ch-019-replica-part-consistency-planning).

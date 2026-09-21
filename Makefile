@@ -24312,3 +24312,34 @@ commit-ch024-part-catalog:
 
 push-ch024-part-catalog:
 	@bash scripts/push-ch024-part-catalog.sh
+
+inspect-ch019-replication:
+	@bash scripts/inspect-ch019-replication.sh
+.PHONY: format-ch019-replica-repair test-ch019-replica-repair test-ch019-replication-package benchmark-ch019-replica-repair race-ch019-replica-repair review-ch019 stage-ch019 commit-ch019 push-ch019
+
+format-ch019-replica-repair:
+	bash ./scripts/format-ch019-replica-repair.sh
+
+test-ch019-replica-repair:
+	bash ./scripts/test-ch019-replica-repair.sh
+
+test-ch019-replication-package:
+	bash ./scripts/test-ch019-replication-package.sh
+
+benchmark-ch019-replica-repair:
+	bash ./scripts/benchmark-ch019-replica-repair.sh
+
+race-ch019-replica-repair:
+	bash ./scripts/race-ch019-replica-repair.sh
+
+review-ch019:
+	bash ./scripts/review-ch019.sh
+
+stage-ch019:
+	bash ./scripts/stage-ch019.sh
+
+commit-ch019:
+	bash ./scripts/commit-ch019.sh
+
+push-ch019:
+	bash ./scripts/push-ch019.sh

@@ -46,7 +46,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-016 | Asynchronous insert queue | Partially adopted as the opt-in bounded `AsyncInsertBuffer`: journaled writes batch in a background worker with bounded capacity, flush/close futures, queue stats, registry monitoring, and idempotency gating; automatic SQL `INSERT` grammar integration remains caller-owned. | Medium |
 | CH-017 | Async-insert deduplication | Adopted through the journal-backed idempotency ledger: async inserts reuse durable duplicate responses, reject token conflicts, survive journal replay, and remain opt-in with SQL `INSERT` grammar integration caller-owned. | Medium |
 | CH-018 | Insert quorum | No write acknowledgement policy requiring a configured replica quorum. | High |
-| CH-019 | Replicated-part checks | No per-part checksums and replica consistency repair workflow. | High |
+| CH-019 | Replicated-part checks | Adopted as a bounded, deterministic `hatReplication.BuildReplicaPartRepairPlan` over verified `hatMerkle.PartCatalogEntry` manifests; copy, replace, and quarantine actions are generation-fenced and transport/destruction remain caller-owned. See [CH019_REPLICA_PART_CHECKS.md](CH019_REPLICA_PART_CHECKS.md). | High |
 | CH-020 | Zero-copy part sharing | No remote part registration that avoids copying immutable storage between replicas. | High |
 | CH-021 | Object-storage tiering | No hot/local and cold/object-storage tier with transparent reads. | High |
 | CH-022 | Incremental part backup | Adopted as content-addressed object storage with manifest-level changed-object accounting and an optional durable `BackupManifestCatalog` for incremental chain planning; retention execution remains caller-managed. | Medium |
