@@ -4876,3 +4876,4 @@ existing journal/SQL defaults. See [TU39_SPACE_CHANGEFEED.md](TU39_SPACE_CHANGEF
   existing path. See [MZ047_SESSION_COMPUTE_ROUTING.md](MZ047_SESSION_COMPUTE_ROUTING.md)
   and the measurements in [BENCHMARK.md](BENCHMARK.md#mz-047-session-compute-routing).
 - Materialize-inspired MZ-048 connector secret rotation is available through the opt-in `hatPipeline.ConnectorCredentialRotator`; see [MZ048_CONNECTOR_SECRET_ROTATION.md](MZ048_CONNECTOR_SECRET_ROTATION.md) and the [benchmark entry](BENCHMARK.md#mz-048-connector-secret-rotation).
+- ClickHouse-inspired CH-014b mutation readiness uses indexed reverse dependencies and a deterministic ready queue, avoiding allocation-heavy empty polls while preserving snapshot and queue formats. See [CH014B_MUTATION_DEPENDENCY_READY.md](CH014B_MUTATION_DEPENDENCY_READY.md) and the [benchmark entry](BENCHMARK.md#ch-014b-mutation-dependency-ready-queue).

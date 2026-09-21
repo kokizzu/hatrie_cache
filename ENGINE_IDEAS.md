@@ -41,7 +41,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-012 | Projection advisor | Partially adopted: opt-in `CostBasedRecommendations` compares bounded observed average latency with caller-supplied projection-hit, build, and refresh costs using saturating arithmetic; automatic workload forecasting, planner wiring, and persistent advisor state remain open. | Medium |
 | CH-013 | Query condition cache | Adopted in the existing opt-in `SQLQueryConditionCache`: versioned columnar predicate matches use bounded LRU state, skip unversioned or drifting sources, and preserve exact SQL rows. | Medium |
 | CH-014 | Uncompressed hot-data cache | No cache that stores decoded hot ranges while preserving compressed storage. | Medium |
-| CH-014b | Mutation dependency graph with resumable progress | Make overlapping maintenance mutations safe to schedule without re-running completed prerequisites; reverse dependency metadata enables targeted ready polling and restart after checkpoint restore. | Medium |
+| CH-014b | Mutation dependency graph with resumable progress | Implemented as an in-memory reverse dependency index plus deterministic ready min-heap; empty polls avoid graph-wide scans and allocations, while snapshot/WAL formats remain compatible. See [CH014B_MUTATION_DEPENDENCY_READY.md](CH014B_MUTATION_DEPENDENCY_READY.md). | Medium |
 | CH-015 | Filesystem cache admission | Adopted as opt-in `RemotePartCacheOptions.MinAccesses`; zero preserves eager admission, while positive thresholds suppress one-hit retention with bounded candidate metadata. See [CH015_FILESYSTEM_CACHE_ADMISSION.md](CH015_FILESYSTEM_CACHE_ADMISSION.md). | Medium |
 | CH-016 | Asynchronous insert queue | Writes cannot be acknowledged before bounded background batching. | Medium |
 | CH-017 | Async-insert deduplication | No idempotency token ledger for safely retrying queued inserts. | Medium |
@@ -159,7 +159,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-019 | Covering secondary indexes | Secondary postings cannot retain selected payload fields to avoid primary lookups. | Medium |
 | TT-020 | Generic multi-part TREE ranges | Implemented as the allocation-free `OrderedIndex.Range` API, which binary-searches inclusive composite bounds and iterates only the bounded subslice; callers can express a partial-key prefix with the smallest and largest suffix values. | Medium |
 | TT-021 | RTREE spatial index | Adopted as the opt-in immutable `hatDataStructure.PackedRTree[T]` bounding-box API; mutable updates, SQL planner wiring, and persistence remain open. | High |
-| TT-022 | BITSET index | No bitmap index for low-cardinality integer membership. | Medium |
+| TT-022 | BITSET index | Adopted by the existing generic `hatDataStructure.BitmapIndex[K]` RoaringBitmap-backed API (`Add`, `Remove`, `Contains`, `Rows`, `Visit`, `Union`, and `Intersect`); SQL planner wiring remains caller-owned. | Medium |
 | TT-023 | HASH equality index | Implemented as a zero-allocation raw-string fast path for homogeneous ordinary SQL JSON field equality indexes; mixed-type values retain the existing typed key encoding. | Low |
 | TT-024 | Full-text phrase/position index | `CONTAINS_PREFIX` now uses an opt-in sorted token-key sidecar; token positions and phrase search remain absent. | High |
 | TT-025 | Online uniqueness validation | Unique index creation has no staged validation before atomic publication. | Medium |

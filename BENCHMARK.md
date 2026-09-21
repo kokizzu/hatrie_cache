@@ -35130,3 +35130,22 @@ BenchmarkTT003RouteCacheLookup   100000000 12.08 ns/op  0 B/op  0 allocs/op
 
 The opt-in cache trades a small lookup overhead for generation fencing and
 health-aware invalidation; see [TT003_FAILOVER_ROUTE_CACHE.md](TT003_FAILOVER_ROUTE_CACHE.md).
+
+## CH-014b mutation dependency ready queue
+
+Commands: `make benchmark-ch014b-mutation-dependency-graph-baseline` and
+`make benchmark-ch014b-mutation-dependency-graph`.
+
+The workload contains 4,096 blocked tasks and repeatedly polls
+`ClaimReady(1)` while no task is eligible. Both paths use `-cpu=1` and five
+benchmark samples; the baseline is a same-fixture legacy full-scan control.
+
+| Path | Median ns/op | B/op | allocs/op | Relative time |
+| --- | ---: | ---: | ---: | ---: |
+| Legacy full scan control | 156,676 | 73,728 | 1 | 18,954x slower |
+| Reverse index + ready heap | 8.266 | 0 | 0 | 1.00x |
+
+The ready queue removes 73,728 bytes and one allocation from this empty-poll
+path. It adds reverse-edge and heap metadata and `O(log R)` ready-index work to
+task updates; see [CH014B_MUTATION_DEPENDENCY_READY.md](CH014B_MUTATION_DEPENDENCY_READY.md)
+for raw samples and scope.

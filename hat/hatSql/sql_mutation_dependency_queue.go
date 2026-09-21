@@ -420,6 +420,7 @@ func rollbackSQLMutationDependencyGraphClaims(graph *SQLMutationDependencyGraph,
 		task := graph.tasks[record.ID]
 		task.State = SQLMutationTaskPending
 		task.Attempt = record.Attempt - 1
+		graph.enqueueReadyLocked(record.ID)
 	}
 	return cause
 }

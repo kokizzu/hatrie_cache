@@ -24043,3 +24043,31 @@ commit-tt003-route-cache:
 .PHONY: push-tt003-route-cache
 push-tt003-route-cache:
 	bash ./scripts/push-tt003-route-cache.sh
+benchmark-ch014b-mutation-dependency-graph-baseline:
+	bash ./scripts/benchmark-ch014b-mutation-dependency-graph-baseline.sh
+
+test-ch014b-mutation-dependency-graph:
+	bash ./scripts/test-ch014b-mutation-dependency-graph.sh
+
+benchmark-ch014b-mutation-dependency-graph:
+	bash ./scripts/benchmark-ch014b-mutation-dependency-graph.sh
+
+format-ch014b-mutation-dependency-graph:
+	bash ./scripts/format-ch014b-mutation-dependency-graph.sh
+
+race-ch014b-mutation-dependency-graph:
+	bash ./scripts/race-ch014b-mutation-dependency-graph.sh
+
+verify-ch014b-mutation-dependency-graph:
+	bash ./scripts/verify-ch014b-mutation-dependency-graph.sh
+review-ch014b-mutation-dependency-graph:
+	bash ./scripts/review-ch014b-mutation-dependency-graph.sh
+
+stage-ch014b-mutation-dependency-graph:
+	bash ./scripts/stage-ch014b-mutation-dependency-graph.sh
+
+commit-ch014b-mutation-dependency-graph:
+	bash ./scripts/commit-ch014b-mutation-dependency-graph.sh
+
+push-ch014b-mutation-dependency-graph:
+	bash ./scripts/push-ch014b-mutation-dependency-graph.sh

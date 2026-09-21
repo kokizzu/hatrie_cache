@@ -87,9 +87,12 @@ type SQLMutationDependencyGraphSnapshot struct {
 // of the default SQL executor. Persist Snapshot through Save and call
 // RequeueRunning after recovering from a process that may have lost workers.
 type SQLMutationDependencyGraph struct {
-	mu       sync.RWMutex
-	maxTasks int
-	tasks    map[string]*SQLMutationTaskRecord
+	mu         sync.RWMutex
+	maxTasks   int
+	tasks      map[string]*SQLMutationTaskRecord
+	dependents map[string][]string
+	ready      sqlMutationReadyHeap
+	readySet   map[string]struct{}
 }
 
 // NewSQLMutationDependencyGraph creates an empty graph. A zero maximum uses
@@ -103,8 +106,10 @@ func NewSQLMutationDependencyGraph(maxTasks int) (*SQLMutationDependencyGraph, e
 		maxTasks = DefaultSQLMutationDependencyGraphMaxTasks
 	}
 	return &SQLMutationDependencyGraph{
-		maxTasks: maxTasks,
-		tasks:    make(map[string]*SQLMutationTaskRecord),
+		maxTasks:   maxTasks,
+		tasks:      make(map[string]*SQLMutationTaskRecord),
+		dependents: make(map[string][]string),
+		readySet:   make(map[string]struct{}),
 	}, nil
 }
 
@@ -131,11 +136,16 @@ func (graph *SQLMutationDependencyGraph) Add(task SQLMutationTask) error {
 			return fmt.Errorf("%w: task %q depends on %q", ErrSQLMutationDependencyGraphMissingDependency, id, dependency)
 		}
 	}
+	graph.ensureReadyIndexesLocked()
 	graph.tasks[id] = &SQLMutationTaskRecord{
 		ID:        id,
 		DependsOn: dependencies,
 		State:     SQLMutationTaskPending,
 	}
+	for _, dependency := range dependencies {
+		graph.dependents[dependency] = append(graph.dependents[dependency], id)
+	}
+	graph.enqueueReadyLocked(id)
 	return nil
 }
 
@@ -148,19 +158,20 @@ func (graph *SQLMutationDependencyGraph) ClaimReady(limit int) []SQLMutationTask
 	}
 	graph.mu.Lock()
 	defer graph.mu.Unlock()
-	ids := make([]string, 0, len(graph.tasks))
-	for id, task := range graph.tasks {
-		if task.State == SQLMutationTaskPending && graph.dependenciesCompletedLocked(task) {
-			ids = append(ids, id)
+	if len(graph.ready) == 0 {
+		return nil
+	}
+	capacity := len(graph.ready)
+	if limit > 0 && capacity > limit {
+		capacity = limit
+	}
+	claimed := make([]SQLMutationTaskRecord, 0, capacity)
+	for len(graph.ready) > 0 && (limit <= 0 || len(claimed) < limit) {
+		id := graph.popReadyLocked()
+		task, exists := graph.tasks[id]
+		if !exists || task.State != SQLMutationTaskPending || !graph.dependenciesCompletedLocked(task) {
+			continue
 		}
-	}
-	sort.Strings(ids)
-	if limit > 0 && len(ids) > limit {
-		ids = ids[:limit]
-	}
-	claimed := make([]SQLMutationTaskRecord, 0, len(ids))
-	for _, id := range ids {
-		task := graph.tasks[id]
 		task.State = SQLMutationTaskRunning
 		task.Attempt++
 		claimed = append(claimed, cloneSQLMutationTaskRecord(*task))
@@ -201,6 +212,7 @@ func (graph *SQLMutationDependencyGraph) Retry(id string) error {
 		return fmt.Errorf("%w: cannot retry task %q in state %q", ErrSQLMutationDependencyGraphState, id, task.State)
 	}
 	task.State = SQLMutationTaskPending
+	graph.enqueueReadyLocked(id)
 	return nil
 }
 
@@ -216,6 +228,7 @@ func (graph *SQLMutationDependencyGraph) RequeueRunning() int {
 	for _, task := range graph.tasks {
 		if task.State == SQLMutationTaskRunning {
 			task.State = SQLMutationTaskPending
+			graph.enqueueReadyLocked(task.ID)
 			count++
 		}
 	}
@@ -306,6 +319,7 @@ func (graph *SQLMutationDependencyGraph) Load(reader io.Reader) error {
 		return fmt.Errorf("%w: snapshot has %d tasks, maximum is %d", ErrSQLMutationDependencyGraphCapacity, len(tasks), graph.maxTasks)
 	}
 	graph.tasks = tasks
+	graph.rebuildReadyIndexesLocked()
 	return nil
 }
 
@@ -327,6 +341,11 @@ func (graph *SQLMutationDependencyGraph) finishSQLMutationTask(id string, attemp
 	}
 	task.State = state
 	task.LastError = reason
+	if state == SQLMutationTaskCompleted {
+		for _, dependent := range graph.dependents[id] {
+			graph.enqueueReadyLocked(dependent)
+		}
+	}
 	return nil
 }
 
