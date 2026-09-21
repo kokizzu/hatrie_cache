@@ -25244,3 +25244,23 @@ commit-c225-incremental-window:
 .PHONY: push-c225-incremental-window
 push-c225-incremental-window:
 	bash scripts/push-c225-incremental-window.sh
+
+.PHONY: test-c226-grace-hash-join
+test-c226-grace-hash-join:
+	bash scripts/test-c226-grace-hash-join.sh
+
+.PHONY: race-c226-grace-hash-join
+race-c226-grace-hash-join:
+	bash scripts/race-c226-grace-hash-join.sh
+
+.PHONY: benchmark-c226-grace-hash-join
+benchmark-c226-grace-hash-join:
+	bash scripts/benchmark-c226-grace-hash-join.sh
+
+.PHONY: commit-c226-grace-hash-join
+commit-c226-grace-hash-join:
+	bash scripts/commit-c226-grace-hash-join.sh
+
+.PHONY: push-c226-grace-hash-join
+push-c226-grace-hash-join:
+	bash scripts/push-c226-grace-hash-join.sh

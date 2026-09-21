@@ -35857,3 +35857,20 @@ partitions. The fast path is restricted to the growing unbounded-preceding
 The measurement command is `make benchmark-c225-baseline`; correctness is
 covered by `make test-c225-window-suite`. See
 [`C225_INCREMENTAL_WINDOW.md`](C225_INCREMENTAL_WINDOW.md).
+
+## C226 Grace-Hash Join Spilling
+
+Five `-benchmem` samples ran on Linux amd64 with an AMD Ryzen 9 5950X over the
+existing six-row equality-join policy workload. Spill mode is a bounded-memory
+fallback, not a latency optimization.
+
+| Mode | Median ns/op | Bytes/op | Allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Auto/default in-memory | 21,949 | 18,344 | 116 | 1.00x |
+| Explicit reject budget | 25,611 | 19,064 | 140 | 1.17x |
+| Bounded spill | 5,777,393 | 858,570 | 5,196 | 263.2x |
+
+Correctness and cleanup are covered by `make test-c226-grace-hash-join` and
+`make race-c226-grace-hash-join`; run the raw benchmark with
+`make benchmark-c226-grace-hash-join`. See
+[`C226_GRACE_HASH_JOIN.md`](C226_GRACE_HASH_JOIN.md).
