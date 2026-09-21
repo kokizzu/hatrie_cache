@@ -49,6 +49,11 @@ type BackupBundleOptions struct {
 	// RepositoryRetainBytes is an optional approximate physical-object budget
 	// for incremental backup retention. Zero keeps the existing count-only policy.
 	RepositoryRetainBytes int64
+	// RepositoryChunkSize controls content-addressed chunking for incremental
+	// repositories. Zero uses DefaultBackupRepositoryChunkSize; positive values
+	// choose a custom chunk size; BackupRepositoryChunkingDisabled (-1) keeps
+	// the legacy whole-file object layout.
+	RepositoryChunkSize int64
 }
 
 type BackupPartitionMetadata = hatBackup.PartitionMetadata

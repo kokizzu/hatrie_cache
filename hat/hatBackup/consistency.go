@@ -179,6 +179,40 @@ func validateBundleConsistencyFiles(files []BundleFile) error {
 		if err := validateBundleConsistencyHash(file.SHA256); err != nil {
 			return fmt.Errorf("hatriecache: backup file %s: %w", file.Path, err)
 		}
+		if err := ValidateBundleFileChunks(file); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateBundleFileChunks validates optional content-addressed byte ranges.
+// An empty chunk list preserves the legacy whole-file object layout.
+func ValidateBundleFileChunks(file BundleFile) error {
+	if len(file.Chunks) == 0 {
+		return nil
+	}
+	if file.Size == 0 {
+		return fmt.Errorf("hatriecache: zero-sized backup file %s cannot contain chunks", file.Path)
+	}
+	var offset int64
+	for index, chunk := range file.Chunks {
+		if chunk.Offset != offset {
+			return fmt.Errorf("hatriecache: backup file %s has non-contiguous chunk %d", file.Path, index)
+		}
+		if chunk.Size <= 0 || chunk.Size > file.Size-offset {
+			return fmt.Errorf("hatriecache: backup file %s has invalid chunk %d size", file.Path, index)
+		}
+		if err := validateBundleConsistencyHash(chunk.SHA256); err != nil {
+			return fmt.Errorf("hatriecache: backup file %s chunk %d: %w", file.Path, index, err)
+		}
+		if offset > int64(^uint64(0)>>1)-chunk.Size {
+			return fmt.Errorf("hatriecache: backup file %s chunk offsets overflow", file.Path)
+		}
+		offset += chunk.Size
+	}
+	if offset != file.Size {
+		return fmt.Errorf("hatriecache: backup file %s chunks cover %d bytes, want %d", file.Path, offset, file.Size)
 	}
 	return nil
 }

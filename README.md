@@ -1237,6 +1237,13 @@ bundles, and incremental repositories. See
 [C240_READ_ONLY_BACKUP_ATTACHMENT.md](C240_READ_ONLY_BACKUP_ATTACHMENT.md) for
 the API, cleanup requirement, and benchmark tradeoffs.
 
+Incremental Pebble repositories chunk files larger than 1 MiB by default, so
+unchanged checkpoint ranges are reused across snapshots. Configure
+`BackupBundleOptions.RepositoryChunkSize` for a custom size, or set it to
+`BackupRepositoryChunkingDisabled` (`-1`) to retain the legacy whole-file
+object layout. See [C241_INCREMENTAL_BACKUP_CHUNK_DEDUP.md](C241_INCREMENTAL_BACKUP_CHUNK_DEDUP.md)
+for restore validation, retention behavior, and measured tradeoffs.
+
 For snapshot+journal deployments:
 
 1. Trigger an online snapshot.

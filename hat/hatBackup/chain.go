@@ -115,14 +115,15 @@ func PlanBackupChain(manifests []BundleManifest, latestID string) (BackupChainPl
 			}
 		}
 		for _, file := range manifest.Files {
-			objectKey := backupObjectIdentity(manifest, file)
-			if previousSize, exists := objectSizes[objectKey]; exists {
-				if previousSize != file.Size {
-					return BackupChainPlan{}, fmt.Errorf("hatriecache: object %q has conflicting sizes", objectKey)
+			for _, object := range backupFileObjects(manifest, file) {
+				if previousSize, exists := objectSizes[object.key]; exists {
+					if previousSize != object.size {
+						return BackupChainPlan{}, fmt.Errorf("hatriecache: object %q has conflicting sizes", object.key)
+					}
+					continue
 				}
-				continue
+				objectSizes[object.key] = object.size
 			}
-			objectSizes[objectKey] = file.Size
 		}
 	}
 	plan.ObjectCount = len(objectSizes)
@@ -175,13 +176,17 @@ func PlanBackupRetention(manifests []BundleManifest, latestID string, retain int
 	allObjectKeys := make(map[string]struct{})
 	for _, input := range manifests {
 		for _, file := range input.Files {
-			allHashes[file.SHA256] = struct{}{}
-			allObjectKeys[backupObjectIdentity(input, file)] = struct{}{}
+			for _, object := range backupFileObjects(input, file) {
+				allHashes[object.hash] = struct{}{}
+				allObjectKeys[object.key] = struct{}{}
+			}
 		}
 		if _, exists := keep[input.BackupID]; exists {
 			for _, file := range input.Files {
-				keepHashes[file.SHA256] = struct{}{}
-				keepObjectKeys[backupObjectIdentity(input, file)] = struct{}{}
+				for _, object := range backupFileObjects(input, file) {
+					keepHashes[object.hash] = struct{}{}
+					keepObjectKeys[object.key] = struct{}{}
+				}
 			}
 		}
 	}
@@ -209,16 +214,37 @@ func PlanBackupRetention(manifests []BundleManifest, latestID string, retain int
 }
 
 func backupObjectIdentity(manifest BundleManifest, file BundleFile) string {
+	return backupObjectIdentityHash(manifest, file.SHA256)
+}
+
+func backupObjectIdentityHash(manifest BundleManifest, hash string) string {
 	if manifest.ObjectLayout == string(ObjectStoreLayoutContentAddressed) {
 		keyID := ""
 		if manifest.Encryption != nil {
 			keyID = manifest.Encryption.KeyID
 		}
-		if objectKey, err := contentObjectRelative(file.SHA256, keyID); err == nil {
+		if objectKey, err := contentObjectRelative(hash, keyID); err == nil {
 			return objectKey
 		}
 	}
-	return file.SHA256
+	return hash
+}
+
+type backupFileObject struct {
+	hash string
+	key  string
+	size int64
+}
+
+func backupFileObjects(manifest BundleManifest, file BundleFile) []backupFileObject {
+	if len(file.Chunks) == 0 {
+		return []backupFileObject{{hash: file.SHA256, key: backupObjectIdentityHash(manifest, file.SHA256), size: file.Size}}
+	}
+	objects := make([]backupFileObject, 0, len(file.Chunks))
+	for _, chunk := range file.Chunks {
+		objects = append(objects, backupFileObject{hash: chunk.SHA256, key: backupObjectIdentityHash(manifest, chunk.SHA256), size: chunk.Size})
+	}
+	return objects
 }
 
 func validateBackupChainManifest(manifest BundleManifest) error {
@@ -281,12 +307,19 @@ func validateBackupChainFile(file BundleFile) error {
 	if _, err := hex.DecodeString(file.SHA256); err != nil {
 		return fmt.Errorf("backup file %q has an invalid SHA-256", file.Path)
 	}
+	if err := ValidateBundleFileChunks(file); err != nil {
+		return err
+	}
 	return nil
 }
 
 func cloneBackupManifest(input BundleManifest) BundleManifest {
 	output := input
-	output.Files = append([]BundleFile(nil), input.Files...)
+	output.Files = make([]BundleFile, len(input.Files))
+	for index, file := range input.Files {
+		output.Files[index] = file
+		output.Files[index].Chunks = append([]BundleChunk(nil), file.Chunks...)
+	}
 	output.NewObjectHashes = append([]string(nil), input.NewObjectHashes...)
 	output.ReusedObjectHashes = append([]string(nil), input.ReusedObjectHashes...)
 	output.Partition = ClonePartitionMetadata(input.Partition)

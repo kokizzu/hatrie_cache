@@ -35944,3 +35944,21 @@ Correctness and cleanup are covered by `make test-c226-grace-hash-join` and
 `make race-c226-grace-hash-join`; run the raw benchmark with
 `make benchmark-c226-grace-hash-join`. See
 [`C226_GRACE_HASH_JOIN.md`](C226_GRACE_HASH_JOIN.md).
+
+## C241 Incremental Backup Chunk Deduplication
+
+Five `-benchmem` samples compare the legacy whole-file repository object path
+with the default 1 MiB chunk path after an 8 MiB base payload and a 64-byte
+change contained in one chunk. The chunked path rehashes the source but writes
+only the changed chunk; the pooled buffer keeps transient allocation bytes
+bounded.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | New object bytes | Relative |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Legacy whole-file objects | 21,855,699 | 40,456 | 45 | 8,388,608 | 1.00x |
+| Default 1 MiB chunks | 17,694,767 | 12,640 | 94 | 1,048,576 | 1.24x faster, 8.00x lower changed bytes |
+
+The chunked path uses about 2x as many allocations for per-chunk object
+checking, but about 3.2x fewer allocated bytes in this workload. Full raw
+samples and the `-1` legacy fallback are documented in
+[`C241_INCREMENTAL_BACKUP_CHUNK_DEDUP.md`](C241_INCREMENTAL_BACKUP_CHUNK_DEDUP.md).

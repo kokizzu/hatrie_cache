@@ -34,7 +34,16 @@ type PartitionMetadata struct {
 
 // BundleFile records an archived payload's name, size, and checksum.
 type BundleFile struct {
-	Path   string `json:"path"`
+	Path   string        `json:"path"`
+	Size   int64         `json:"size"`
+	SHA256 string        `json:"sha256"`
+	Chunks []BundleChunk `json:"chunks,omitempty"`
+}
+
+// BundleChunk identifies one content-addressed byte range of a bundle file.
+// Chunks are ordered, contiguous, and cover the complete file when present.
+type BundleChunk struct {
+	Offset int64  `json:"offset"`
 	Size   int64  `json:"size"`
 	SHA256 string `json:"sha256"`
 }

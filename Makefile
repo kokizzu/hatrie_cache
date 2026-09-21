@@ -25367,3 +25367,38 @@ commit-c240-backup-attachment:
 .PHONY: push-c240-backup-attachment
 push-c240-backup-attachment:
 	bash scripts/push-c240-backup-attachment.sh
+.PHONY: test-c241-backup-chunk-dedup
+test-c241-backup-chunk-dedup:
+	bash scripts/test-c241-backup-chunk-dedup.sh
+
+.PHONY: benchmark-c241-backup-chunk-dedup-baseline
+benchmark-c241-backup-chunk-dedup-baseline:
+	bash scripts/benchmark-c241-backup-chunk-dedup-baseline.sh
+.PHONY: format-c241-backup-chunk-dedup
+format-c241-backup-chunk-dedup:
+	bash scripts/format-c241-backup-chunk-dedup.sh
+.PHONY: benchmark-c241-backup-chunk-dedup
+benchmark-c241-backup-chunk-dedup:
+	bash scripts/benchmark-c241-backup-chunk-dedup.sh
+.PHONY: test-c241-backup-chunk-dedup-packages
+test-c241-backup-chunk-dedup-packages:
+	bash scripts/test-c241-backup-chunk-dedup-packages.sh
+
+.PHONY: race-c241-backup-chunk-dedup
+race-c241-backup-chunk-dedup:
+	bash scripts/race-c241-backup-chunk-dedup.sh
+
+.PHONY: vet-c241-backup-chunk-dedup
+vet-c241-backup-chunk-dedup:
+	bash scripts/vet-c241-backup-chunk-dedup.sh
+.PHONY: stage-c241-backup-chunk-dedup
+stage-c241-backup-chunk-dedup:
+	bash scripts/stage-c241-backup-chunk-dedup.sh
+
+.PHONY: commit-c241-backup-chunk-dedup
+commit-c241-backup-chunk-dedup:
+	bash scripts/commit-c241-backup-chunk-dedup.sh
+
+.PHONY: push-c241-backup-chunk-dedup
+push-c241-backup-chunk-dedup:
+	bash scripts/push-c241-backup-chunk-dedup.sh

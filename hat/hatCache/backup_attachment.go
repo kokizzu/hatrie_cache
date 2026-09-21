@@ -293,7 +293,11 @@ func (attachment *BackupReadOnlyAttachment) Close() error {
 
 func cloneBackupAttachmentManifest(input BackupBundleManifest) BackupBundleManifest {
 	output := input
-	output.Files = append([]BackupBundleFile(nil), input.Files...)
+	output.Files = make([]BackupBundleFile, len(input.Files))
+	for index, file := range input.Files {
+		output.Files[index] = file
+		output.Files[index].Chunks = append([]hatBackup.BundleChunk(nil), file.Chunks...)
+	}
 	output.KeyPrefixes = append([]string(nil), input.KeyPrefixes...)
 	output.NewObjectHashes = append([]string(nil), input.NewObjectHashes...)
 	output.ReusedObjectHashes = append([]string(nil), input.ReusedObjectHashes...)
