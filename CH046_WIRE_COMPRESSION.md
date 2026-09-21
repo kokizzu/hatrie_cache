@@ -5,7 +5,9 @@
 The columnar stream now supports versioned per-column compression, while the
 existing raw v1 format remains the default. This is deliberate: the benchmark
 shows that Flate saves bandwidth but imposes a large CPU and allocation cost on
-the current Go implementation.
+the current Go implementation. The same v2 framing now also supports explicit
+per-block dictionary encoding for repeated string columns; its measured
+tradeoff is documented in [CH046_NATIVE_WIRE_PROTOCOL.md](CH046_NATIVE_WIRE_PROTOCOL.md).
 
 ## Configuration
 
@@ -38,6 +40,20 @@ Readers accept both v1 and v2 streams. V2 records an encoding byte before each
 column payload. Decompression is limited by the existing 64 MiB block budget,
 and projected-out columns are consumed without decompression.
 
+Dictionary encoding is configured independently:
+
+```go
+SQLColumnarBlockStreamOptions{
+	Dictionary: SQLColumnarBlockStreamDictionaryAuto,
+}
+```
+
+It applies only to `SQLRowBinaryString` columns, keeps output only when it is
+smaller than raw, and falls back to raw v2 for high-cardinality blocks. When
+both dictionary and compression are enabled, a winning dictionary is emitted
+as dictionary v2; columns that do not qualify continue through the configured
+compression path.
+
 ## Benchmark
 
 Environment: AMD Ryzen 9 5950X, Linux amd64, 4,096 rows, three columns, 256
@@ -63,6 +79,6 @@ make benchmark-ch046-before
 make benchmark-ch046-after
 ```
 
-Dictionary encoding remains a separate optimization candidate; it may provide
-better bandwidth reduction with less transient allocation than general-purpose
-Flate and should be benchmarked independently before changing the default.
+Dictionary encoding is available as `SQLColumnarBlockStreamDictionaryAuto`,
+but remains opt-in because its repeated-string benchmark is about 2.07x slower
+to encode and uses 2.88x more allocations for a 2.58x wire-size reduction.

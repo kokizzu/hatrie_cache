@@ -35573,6 +35573,33 @@ BenchmarkCH042StorageAwareSample/storage-aware-32
 The result depends on a storage adapter having a stable sampling strategy and
 an exact full-source cardinality. Adapters that cannot guarantee that return
 `available=false` and preserve the existing behavior.
+# CH-046: Columnar Wire Dictionary Encoding
+
+Dictionary encoding is opt-in through
+`SQLColumnarBlockStreamDictionaryAuto`; raw v1 remains the default. The
+benchmark target is:
+
+```text
+make benchmark-ch046-wire-dictionary
+```
+
+Workload: 4,096 rows, repeated `state` and `region` strings, 256 rows per
+block, five samples per mode on an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | B/op | allocs/op | Wire bytes | CPU vs raw | Wire vs raw |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Raw v1 encode | 471,239 | 351,661 | 196 | 119,216 | 1.00x | 1.00x |
+| Dictionary auto encode | 977,239 | 571,709 | 564 | 46,176 | 2.07x slower | 2.58x smaller |
+| Raw v1 decode | 1,780,874 | 1,804,492 | 28,607 | 119,216 | 1.00x | 1.00x |
+| Dictionary decode | 2,681,900 | 1,765,619 | 28,669 | 46,176 | 1.51x slower | 2.58x smaller |
+
+The high-cardinality fallback measured 411,931 ns/op, 482,753 B/op, and 2,336
+allocs/op versus raw v1 at 212,559 ns/op, 216,887 B/op, and 143 allocs/op. It
+produced only 16 additional wire bytes from v2 framing, so the encoder bounds
+dictionary admission and falls back instead of building an unbounded
+dictionary. The measured bandwidth win is substantial, but the CPU and
+allocation cost is why this remains explicit rather than a new default.
+
 # CH-046: Columnar Wire Compression
 
 The current raw columnar stream remains the default after measurement. See

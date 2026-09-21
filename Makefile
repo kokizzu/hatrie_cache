@@ -23243,6 +23243,8 @@ push-tu33-function-grants:
 audit-hatrie-tmp:
 	bash scripts/audit-hatrie-tmp.sh
 
+
+
 .PHONY: format-t047-cluster-write-commit test-t047-cluster-write-commit test-t047-replication-package benchmark-t047-cluster-write-commit race-t047-cluster-write-commit vet-t047-cluster-write-commit review-t047 stage-t047 commit-t047 push-t047
 
 format-t047-cluster-write-commit:
@@ -24226,11 +24228,17 @@ test-ch046-native-wire-protocol-package:
 test-ch046-native-wire-protocol-cache-package:
 	bash scripts/ch046-native-wire-protocol.sh cache-package
 
+vet-ch046-native-wire-protocol:
+	bash scripts/ch046-native-wire-protocol.sh vet
+
 test-ch046-native-wire-protocol-size:
 	bash scripts/ch046-native-wire-protocol.sh size
 
 benchmark-ch046-native-wire-protocol:
 	bash scripts/ch046-native-wire-protocol.sh benchmark
+
+benchmark-ch046-wire-dictionary:
+	bash scripts/ch046-native-wire-protocol.sh dictionary-benchmark
 
 benchmark-ch046-native-wire-protocol-baseline:
 	bash scripts/ch046-native-wire-protocol.sh baseline

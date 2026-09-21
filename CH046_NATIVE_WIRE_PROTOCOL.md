@@ -34,6 +34,24 @@ if err := writer.Finish(); err != nil {
 }
 ```
 
+For repeated string columns, dictionary encoding is available explicitly:
+
+```go
+writer := hatSql.NewSQLColumnarBlockStreamWriterWithColumnsAndOptions(
+	w,
+	columns,
+	1024,
+	hatSql.SQLColumnarBlockStreamOptions{
+		Dictionary: hatSql.SQLColumnarBlockStreamDictionaryAuto,
+	},
+)
+```
+
+`DictionaryAuto` is applied per block and only to `SQLRowBinaryString`
+columns. It keeps the dictionary payload only when it is smaller than the raw
+column payload; high-cardinality columns fall back to raw v2 payloads. A zero
+options value remains the raw v1 format.
+
 Readers can decode every column or project only the requested fields:
 
 ```go
@@ -67,16 +85,22 @@ cumulative blocks
 cumulative rows
 column count
 repeat for each schema column:
+  v2 encoding byte (raw, Flate, or dictionary)
   column payload length
   column payload
 end frame (0)
 ```
 
-Column payload values reuse the existing SQL RowBinary physical encodings and
-NULL markers. The reader enforces sequential block indexes, cumulative
-progress, schema column count, a 65,536-row block limit, and a 64 MiB total
-payload limit per block. Truncated input, invalid markers, trailing column
-bytes, unknown frames, and inconsistent progress are rejected.
+Version 1 omits the encoding byte and always carries raw SQL RowBinary column
+payloads. Version 2 uses encoding `0` for raw, `1` for bounded Flate, and `2`
+for a string dictionary. Dictionary payloads contain a bounded entry count,
+length-prefixed strings, then one uvarint value ID per non-NULL row; nullable
+columns retain their existing one-byte NULL markers. The reader rejects entry
+counts larger than the block row count, IDs outside the dictionary, invalid
+markers, trailing bytes, and logical decoded data over the 64 MiB block limit.
+The reader enforces sequential block indexes, cumulative progress, schema
+column count, and a 65,536-row block limit. Truncated input, unknown frames,
+and inconsistent progress are rejected.
 
 The default block size is 1,024 rows. The format is deliberately opt-in: a
 full decode/encode path has a small framing and buffering cost, while a
@@ -112,5 +136,25 @@ Projection fixture: the same rows plus a 256-byte payload column; only the
 The columnar stream is therefore not a universal replacement for RowBinary.
 Its measured win is selective decode of wide results. Full-stream encoding is
 slower and has more allocations, so the server does not make it the default.
-The wire size is nearly identical for this uncompressed first version; future
-compression or dictionary work must earn adoption with a separate benchmark.
+
+Dictionary benchmark command:
+
+```text
+make benchmark-ch046-wire-dictionary
+```
+
+Fixture: 4,096 rows, repeated `state` and `region` strings, 256 rows per
+block, five samples per mode on the same AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | B/op | allocs/op | Wire bytes | Tradeoff vs raw |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Raw v1 encode | 471,239 | 351,661 | 196 | 119,216 | baseline |
+| Dictionary auto encode | 977,239 | 571,709 | 564 | 46,176 | 2.07x CPU, 1.63x heap, 2.88x allocs, 2.58x smaller wire |
+| Raw v1 decode | 1,780,874 | 1,804,492 | 28,607 | 119,216 | baseline |
+| Dictionary decode | 2,681,900 | 1,765,619 | 28,669 | 46,176 | 1.51x CPU, 2.2% lower heap, 0.22% more allocs |
+
+The high-cardinality control falls back to raw v2: median encode is 411,931
+ns/op, 482,753 B/op, and 2,336 allocs/op versus raw v1 at 212,559 ns/op,
+216,887 B/op, and 143 allocs/op. Its wire output is only 16 bytes larger from
+v2 framing. This is why dictionary encoding is explicit and why admission is
+bounded to low-cardinality blocks rather than being the default.

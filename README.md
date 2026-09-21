@@ -12,7 +12,7 @@ security guidance before exposing it on a network.
 - Opt-in Tarantool-style health-aware failover route caching with generation fencing: [TT003_FAILOVER_ROUTE_CACHE.md](TT003_FAILOVER_ROUTE_CACHE.md), with lookup measurements in [BENCHMARK.md](BENCHMARK.md#tt-003-failover-route-cache).
 - New to the cache commands and value types: [DATA_STRUCTURE.md](DATA_STRUCTURE.md)
 - ClickHouse-style SQL RowBinary streaming export and bounded bulk import: [CH050_SQL_ROW_BINARY_STREAM.md](CH050_SQL_ROW_BINARY_STREAM.md)
-- Opt-in ClickHouse-style typed columnar SQL block streaming with projection decoding: [CH046_NATIVE_WIRE_PROTOCOL.md](CH046_NATIVE_WIRE_PROTOCOL.md)
+- Opt-in ClickHouse-style typed columnar SQL block streaming with projection decoding and bounded repeated-string dictionary encoding: [CH046_NATIVE_WIRE_PROTOCOL.md](CH046_NATIVE_WIRE_PROTOCOL.md), with compression/dictionary tradeoffs in [CH046_WIRE_COMPRESSION.md](CH046_WIRE_COMPRESSION.md)
 - New to the SQL interface: [SQL.md](SQL.md)
 - Opt-in Materialize-style SQL result subscriptions with automatic `CACHE(...)` dependency discovery: [MZ010_SQL_SUBSCRIPTIONS.md](MZ010_SQL_SUBSCRIPTIONS.md), with registration cost measurements in [BENCHMARK.md#mz-010-sql-result-subscription-entrypoints](BENCHMARK.md#mz-010-sql-result-subscription-entrypoints)
 - Opt-in ClickHouse-style `FINAL` read reconciliation for replacing and collapsing source rows: [CH004_FINAL_READ.md](CH004_FINAL_READ.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-004-final-read-semantics)
