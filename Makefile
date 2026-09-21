@@ -23280,6 +23280,18 @@ commit-ch239-compaction-metrics:
 push-ch239-compaction-metrics:
 	bash scripts/push-ch239-compaction-metrics.sh
 
+verify-chu49-focused:
+	bash scripts/verify-chu49-focused.sh
+
+stage-chu49-reconcile:
+	bash scripts/stage-chu49-reconcile.sh
+
+commit-chu49-reconcile:
+	bash scripts/commit-chu49-reconcile.sh
+
+push-chu49-reconcile:
+	bash scripts/push-chu49-reconcile.sh
+
 test-ch237-projection-explain:
 	bash scripts/test-ch237-projection-explain.sh
 

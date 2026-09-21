@@ -99,5 +99,9 @@ make race-chu49-c203
 make vet-chu49-c203
 ```
 
+The focused feature-only verification target is `make verify-chu49-focused`.
+The broader package targets also exercise unrelated SQL and checkpoint suites;
+their current baseline failures are not caused by this diagnostic path.
+
 The benchmark and raw samples are recorded in
 [BENCHMARK.md](BENCHMARK.md#ch-u49-skip-index-explain-diagnostics).
