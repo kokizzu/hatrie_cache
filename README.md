@@ -4543,6 +4543,11 @@ Background compaction can optionally pace estimated read/write bytes with
 `CompactionSchedulerOptions.MaxIOBytesPerSecond` and `ScheduleWithIO`; the
 default remains off. See [CHU28_DISK_IO_THROTTLING.md](CHU28_DISK_IO_THROTTLING.md)
 and the [CH-U28 benchmark](BENCHMARK.md#ch-u28-disk-io-merge-throttling).
+Compaction ordering can also be selected explicitly with
+`CompactionSchedulerOptions.SelectionPolicy`: the default priority order is
+unchanged, while size-tiered and time-aware policies are available for callers
+that need them. See [CH026_COMPACTION_SELECTORS.md](CH026_COMPACTION_SELECTORS.md)
+and the [CH-026 benchmark](BENCHMARK.md#ch-026-compaction-selector-policies).
 Opt-in query profiling can also retain bounded per-operator allocation, peak,
 and retained-byte aggregates with `SQLQueryProfiler.RecordMemory`; see
 [CHU26_OPERATOR_MEMORY_PROFILES.md](CHU26_OPERATOR_MEMORY_PROFILES.md) and the

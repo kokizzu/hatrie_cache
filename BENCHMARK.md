@@ -35391,3 +35391,37 @@ restart boundaries; no default command, query, or replication path is changed.
 The CRC detects accidental corruption, not malicious modification; callers
 must authenticate checkpoint storage or transport when required. See
 [SCHEMA_ROLLOUT.md](SCHEMA_ROLLOUT.md).
+<a id="ch-026-compaction-selector-policies"></a>
+## CH-026 Compaction Selector Policies
+
+This benchmark compares the three `CompactionScheduler` selection policies on
+the same 64-task prioritized workload. Each sample creates a scheduler with
+`MaxConcurrent: 4`, queues 64 no-op tasks with deterministic estimated sizes,
+and drains the queue. Five samples were run with
+`make benchmark-ch026-compaction-selector` on Linux/amd64, AMD Ryzen 9 5950X.
+
+```text
+BenchmarkCH026CompactionSelector/priority-32
+56,588 57,244 57,391 55,762 52,219 ns/op
+29,164 29,162 29,161 29,161 29,160 B/op
+36 36 36 36 36 allocs/op
+BenchmarkCH026CompactionSelector/size-tiered-32
+50,390 60,492 57,420 57,577 55,983 ns/op
+29,161 29,161 29,160 29,160 29,160 B/op
+36 36 36 36 36 allocs/op
+BenchmarkCH026CompactionSelector/time-aware-32
+57,025 58,756 57,115 56,843 57,206 ns/op
+29,160 29,160 29,161 29,160 29,160 B/op
+36 36 36 36 36 allocs/op
+```
+
+| Policy | Median ns/op | Median B/op | Median allocs/op | Relative to default |
+| --- | ---: | ---: | ---: | ---: |
+| Priority (default) | 56,588 | 29,162 | 36 | 1.000x |
+| Size-tiered | 57,420 | 29,161 | 36 | 1.015x slower |
+| Time-aware | 57,115 | 29,160 | 36 | 1.009x slower |
+
+This is an ordering-policy measurement, not a claim that one policy improves
+every storage workload. The opt-in policies add a small CPU cost in this
+workload and no measured allocation or byte increase; the default path and
+ordering remain unchanged.

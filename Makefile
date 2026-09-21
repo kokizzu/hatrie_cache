@@ -24408,3 +24408,38 @@ commit-c154-checkpoint:
 .PHONY: push-c154-checkpoint
 push-c154-checkpoint:
 	bash scripts/push-c154-checkpoint.sh
+.PHONY: test-ch026-compaction-selector
+test-ch026-compaction-selector:
+	bash scripts/test-ch026-compaction-selector.sh
+
+.PHONY: format-ch026-compaction-selector
+format-ch026-compaction-selector:
+	bash scripts/format-ch026-compaction-selector.sh
+
+.PHONY: benchmark-ch026-compaction-selector
+benchmark-ch026-compaction-selector:
+	bash scripts/benchmark-ch026-compaction-selector.sh
+
+.PHONY: test-ch026-compaction-package
+test-ch026-compaction-package:
+	bash scripts/test-ch026-compaction-package.sh
+
+.PHONY: race-ch026-compaction-selector
+race-ch026-compaction-selector:
+	bash scripts/race-ch026-compaction-selector.sh
+
+.PHONY: vet-ch026-compaction-selector
+vet-ch026-compaction-selector:
+	bash scripts/vet-ch026-compaction-selector.sh
+
+.PHONY: stage-ch026-compaction-selector
+stage-ch026-compaction-selector:
+	bash scripts/stage-ch026-compaction-selector.sh
+
+.PHONY: commit-ch026-compaction-selector
+commit-ch026-compaction-selector:
+	bash scripts/commit-ch026-compaction-selector.sh
+
+.PHONY: push-ch026-compaction-selector
+push-ch026-compaction-selector:
+	bash scripts/push-ch026-compaction-selector.sh

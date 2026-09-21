@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/bits"
 	"sort"
 	"strings"
 	"sync"
@@ -20,6 +21,21 @@ var (
 	ErrCompactionTaskInvalid = errors.New("hatriecache: compaction task is invalid")
 )
 
+// CompactionSelectionPolicy controls how explicitly prioritized compaction
+// tasks are ordered when more than one task is ready to run.
+type CompactionSelectionPolicy uint8
+
+const (
+	// CompactionSelectionPriority preserves the historical priority-first
+	// ordering and is the zero-value default.
+	CompactionSelectionPriority CompactionSelectionPolicy = iota
+	// CompactionSelectionSizeTiered groups tasks by estimated size before
+	// applying priority and deterministic tie breakers.
+	CompactionSelectionSizeTiered
+	// CompactionSelectionTimeAware prefers tasks that have waited longer.
+	CompactionSelectionTimeAware
+)
+
 // DefaultCompactionSchedulerMaxConcurrent keeps maintenance serialized unless
 // a caller explicitly opts into parallel compaction.
 const DefaultCompactionSchedulerMaxConcurrent = 1
@@ -29,6 +45,7 @@ const DefaultCompactionSchedulerMaxConcurrent = 1
 type CompactionSchedulerOptions struct {
 	MaxConcurrent       int
 	MaxIOBytesPerSecond uint64
+	SelectionPolicy     CompactionSelectionPolicy
 }
 
 // CompactionRun summarizes one drain of the currently queued compaction jobs.
@@ -49,8 +66,10 @@ type compactionPendingTask struct {
 }
 
 type compactionPriorityTask struct {
-	priority int
-	run      func(context.Context) error
+	priority       int
+	run            func(context.Context) error
+	estimatedBytes uint64
+	enqueuedAt     time.Time
 }
 
 // CompactionScheduler coalesces compaction requests by task name and bounds
@@ -62,6 +81,7 @@ type CompactionScheduler struct {
 	mu    sync.Mutex
 
 	maxConcurrent   int
+	selectionPolicy CompactionSelectionPolicy
 	pending         map[string]compactionPendingTask
 	priorityPending map[string]compactionPriorityTask
 	running         map[string]struct{}
@@ -77,18 +97,19 @@ type CompactionScheduler struct {
 // NewCompactionScheduler validates and creates a compaction scheduler. A zero
 // MaxConcurrent selects DefaultCompactionSchedulerMaxConcurrent.
 func NewCompactionScheduler(options CompactionSchedulerOptions) (*CompactionScheduler, error) {
-	if options.MaxConcurrent < 0 {
+	if options.MaxConcurrent < 0 || options.SelectionPolicy > CompactionSelectionTimeAware {
 		return nil, ErrCompactionSchedulerOptionsInvalid
 	}
 	if options.MaxConcurrent == 0 {
 		options.MaxConcurrent = DefaultCompactionSchedulerMaxConcurrent
 	}
 	return &CompactionScheduler{
-		maxConcurrent: options.MaxConcurrent,
-		pending:       make(map[string]compactionPendingTask),
-		running:       make(map[string]struct{}),
-		now:           time.Now,
-		ioState:       newCompactionSchedulerIOState(options.MaxIOBytesPerSecond),
+		maxConcurrent:   options.MaxConcurrent,
+		selectionPolicy: options.SelectionPolicy,
+		pending:         make(map[string]compactionPendingTask),
+		running:         make(map[string]struct{}),
+		now:             time.Now,
+		ioState:         newCompactionSchedulerIOState(options.MaxIOBytesPerSecond),
 	}, nil
 }
 
@@ -117,16 +138,24 @@ func (scheduler *CompactionScheduler) schedule(name string, ioBytes uint64, run 
 	scheduler.mu.Lock()
 	defer scheduler.mu.Unlock()
 	if scheduler.priorityPending != nil {
-		if _, exists := scheduler.priorityPending[name]; exists {
+		if _, exists := scheduler.running[name]; exists {
 			return false, nil
 		}
-		if _, exists := scheduler.running[name]; exists {
+		if pending, exists := scheduler.priorityPending[name]; exists {
+			if ioBytes > pending.estimatedBytes {
+				pending.estimatedBytes = ioBytes
+				scheduler.priorityPending[name] = pending
+			}
 			return false, nil
 		}
 		if scheduler.oldestPending.IsZero() {
 			scheduler.oldestPending = scheduler.now()
 		}
-		scheduler.priorityPending[name] = compactionPriorityTask{run: run}
+		scheduler.priorityPending[name] = compactionPriorityTask{
+			run:            run,
+			estimatedBytes: ioBytes,
+			enqueuedAt:     scheduler.now(),
+		}
 		scheduler.setIOEstimateLocked(name, ioBytes)
 		return true, nil
 	}
@@ -177,8 +206,16 @@ func (scheduler *CompactionScheduler) scheduleWithPriority(name string, priority
 	defer scheduler.mu.Unlock()
 	if scheduler.priorityPending == nil {
 		scheduler.priorityPending = make(map[string]compactionPriorityTask, len(scheduler.pending)+1)
+		queuedAt := scheduler.oldestPending
+		if queuedAt.IsZero() {
+			queuedAt = scheduler.now()
+		}
 		for pendingName, pending := range scheduler.pending {
-			scheduler.priorityPending[pendingName] = compactionPriorityTask{run: pending.run}
+			scheduler.priorityPending[pendingName] = compactionPriorityTask{
+				run:            pending.run,
+				estimatedBytes: scheduler.ioEstimateLocked(pendingName),
+				enqueuedAt:     queuedAt,
+			}
 		}
 		scheduler.pending = nil
 	}
@@ -189,6 +226,9 @@ func (scheduler *CompactionScheduler) scheduleWithPriority(name string, priority
 		if priority > pending.priority {
 			pending.priority = priority
 		}
+		if ioBytes > pending.estimatedBytes {
+			pending.estimatedBytes = ioBytes
+		}
 		scheduler.priorityPending[name] = pending
 		scheduler.setIOEstimateLocked(name, ioBytes)
 		return false, nil
@@ -196,7 +236,12 @@ func (scheduler *CompactionScheduler) scheduleWithPriority(name string, priority
 	if scheduler.oldestPending.IsZero() {
 		scheduler.oldestPending = scheduler.now()
 	}
-	scheduler.priorityPending[name] = compactionPriorityTask{priority: priority, run: run}
+	scheduler.priorityPending[name] = compactionPriorityTask{
+		priority:       priority,
+		run:            run,
+		estimatedBytes: ioBytes,
+		enqueuedAt:     scheduler.now(),
+	}
 	scheduler.setIOEstimateLocked(name, ioBytes)
 	return true, nil
 }
@@ -244,13 +289,15 @@ func (scheduler *CompactionScheduler) Run(ctx context.Context) (CompactionRun, e
 	}
 	if prioritized {
 		scheduler.mu.Lock()
+		selectionPolicy := scheduler.selectionPolicy
 		sort.Slice(tasks, func(left, right int) bool {
-			leftPriority := scheduler.priorityPending[tasks[left].name].priority
-			rightPriority := scheduler.priorityPending[tasks[right].name].priority
-			if leftPriority != rightPriority {
-				return leftPriority > rightPriority
-			}
-			return tasks[left].name < tasks[right].name
+			return compactionPriorityTaskBefore(
+				scheduler.priorityPending[tasks[left].name],
+				scheduler.priorityPending[tasks[right].name],
+				tasks[left].name,
+				tasks[right].name,
+				selectionPolicy,
+			)
 		})
 		scheduler.mu.Unlock()
 	} else {
@@ -326,6 +373,68 @@ func (scheduler *CompactionScheduler) Run(ctx context.Context) (CompactionRun, e
 		return result, errors.Join(failures...)
 	}
 	return result, nil
+}
+
+func compactionPriorityTaskBefore(left, right compactionPriorityTask, leftName, rightName string, policy CompactionSelectionPolicy) bool {
+	switch policy {
+	case CompactionSelectionSizeTiered:
+		leftTier := compactionSizeTier(left.estimatedBytes)
+		rightTier := compactionSizeTier(right.estimatedBytes)
+		if leftTier != rightTier {
+			return leftTier < rightTier
+		}
+		if left.estimatedBytes != right.estimatedBytes {
+			return compactionEstimatedBytesBefore(left.estimatedBytes, right.estimatedBytes)
+		}
+		if left.priority != right.priority {
+			return left.priority > right.priority
+		}
+		if !left.enqueuedAt.Equal(right.enqueuedAt) {
+			return compactionEnqueuedBefore(left.enqueuedAt, right.enqueuedAt)
+		}
+	case CompactionSelectionTimeAware:
+		if !left.enqueuedAt.Equal(right.enqueuedAt) {
+			return compactionEnqueuedBefore(left.enqueuedAt, right.enqueuedAt)
+		}
+		if left.priority != right.priority {
+			return left.priority > right.priority
+		}
+		if left.estimatedBytes != right.estimatedBytes {
+			return compactionEstimatedBytesBefore(left.estimatedBytes, right.estimatedBytes)
+		}
+	default:
+		if left.priority != right.priority {
+			return left.priority > right.priority
+		}
+	}
+	return leftName < rightName
+}
+
+func compactionSizeTier(estimatedBytes uint64) int {
+	if estimatedBytes == 0 {
+		return int(^uint(0) >> 1)
+	}
+	return bits.Len64(estimatedBytes)
+}
+
+func compactionEstimatedBytesBefore(left, right uint64) bool {
+	if left == 0 {
+		return false
+	}
+	if right == 0 {
+		return true
+	}
+	return left < right
+}
+
+func compactionEnqueuedBefore(left, right time.Time) bool {
+	if left.IsZero() {
+		return false
+	}
+	if right.IsZero() {
+		return true
+	}
+	return left.Before(right)
 }
 
 func (scheduler *CompactionScheduler) finishSingle(task compactionTask, err error) (CompactionRun, error) {
@@ -435,6 +544,13 @@ func (scheduler *CompactionScheduler) ioEstimate(name string) uint64 {
 	}
 	scheduler.mu.Lock()
 	defer scheduler.mu.Unlock()
+	return scheduler.ioEstimateLocked(name)
+}
+
+func (scheduler *CompactionScheduler) ioEstimateLocked(name string) uint64 {
+	if scheduler == nil || scheduler.ioState == nil || scheduler.ioState.estimates == nil {
+		return 0
+	}
 	return scheduler.ioState.estimates[name]
 }
 
