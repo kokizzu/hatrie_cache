@@ -81,14 +81,17 @@ type CompactionArrangementDiagnostics struct {
 }
 
 type compactionDiagnosticsEntry struct {
-	arrangement           string
-	totalObservations     uint64
-	successfulCompactions uint64
-	failedCompactions     uint64
-	last                  CompactionSample
-	history               []CompactionSample
-	nextHistoryIndex      int
-	historyCount          int
+	arrangement                string
+	totalObservations          uint64
+	successfulCompactions      uint64
+	failedCompactions          uint64
+	totalInputBytes            uint64
+	totalOutputBytes           uint64
+	currentCompactionDebtBytes uint64
+	last                       CompactionSample
+	history                    []CompactionSample
+	nextHistoryIndex           int
+	historyCount               int
 }
 
 // CompactionDiagnostics is an opt-in bounded registry of per-arrangement
@@ -198,6 +201,9 @@ func (diagnostics *CompactionDiagnostics) Record(observation CompactionObservati
 	}
 	entry.last = sample
 	entry.totalObservations = saturatingCompactionDiagnosticsIncrement(entry.totalObservations)
+	entry.totalInputBytes = saturatingCompactionDiagnosticsAdd(entry.totalInputBytes, observation.InputBytes)
+	entry.totalOutputBytes = saturatingCompactionDiagnosticsAdd(entry.totalOutputBytes, observation.OutputBytes)
+	entry.currentCompactionDebtBytes = observation.CompactionDebtBytes
 	if observation.Outcome == CompactionSucceeded {
 		entry.successfulCompactions = saturatingCompactionDiagnosticsIncrement(entry.successfulCompactions)
 	} else {
@@ -302,8 +308,12 @@ func (diagnostics *CompactionDiagnostics) copyHistory(entry *compactionDiagnosti
 }
 
 func saturatingCompactionDiagnosticsIncrement(value uint64) uint64 {
-	if value == ^uint64(0) {
-		return value
+	return saturatingCompactionDiagnosticsAdd(value, 1)
+}
+
+func saturatingCompactionDiagnosticsAdd(left, right uint64) uint64 {
+	if ^uint64(0)-left < right {
+		return ^uint64(0)
 	}
-	return value + 1
+	return left + right
 }

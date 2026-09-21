@@ -72,7 +72,7 @@ operator control remain the preferred deployment model.
 - [ ] C236 Explain output for data-skipping-index decisions and rejected marks.
 - [x] C237 Explain output for projection selection and estimated I/O cost. See [CH237_PROJECTION_EXPLAIN.md](CH237_PROJECTION_EXPLAIN.md) and [BENCHMARK.md#c237-projection-selection-explain-output](BENCHMARK.md#c237-projection-selection-explain-output).
 - [x] C238 Mutation queue progress with rows remaining and elapsed estimates. Already implemented under C036: `CommandJournal` and `ReplicationOutboxStore` expose durable replay progress and ETA through `ReplayWithProgress`. See [REPLAY_PROGRESS.md](REPLAY_PROGRESS.md) and [BENCHMARK.md](BENCHMARK.md#c036-durable-mutation-queue).
-- [ ] C239 Part-merge backlog, amplification, and age metrics.
+- [x] C239 Part-merge backlog, amplification, and age metrics. `hatStorage.SnapshotCompactionMetrics` combines scheduler backlog/age and bounded cumulative compaction byte diagnostics without allocations. See [C239_COMPACTION_METRICS.md](C239_COMPACTION_METRICS.md) and [BENCHMARK.md#c239-compaction-metrics-snapshot](BENCHMARK.md#c239-compaction-metrics-snapshot).
 - [ ] C240 Read-only backup database attachment for querying backup parts in place.
 - [ ] C241 Incremental backup chunk deduplication across snapshots.
 - [x] C242 Parallel restore of independent parts with bounded concurrency. See [C242_PARALLEL_RESTORE.md](C242_PARALLEL_RESTORE.md) and [BENCHMARK.md](BENCHMARK.md#c242-bounded-parallel-restore).

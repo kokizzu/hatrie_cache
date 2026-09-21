@@ -23224,6 +23224,28 @@ versus the `12.54 ns/op` baseline, so it was removed. The accepted design
 keeps age calculation off `Stats()` and exposes timestamps through the separate
 `Ages()` snapshot.
 
+## C239 Compaction Metrics Snapshot
+
+Workload: `make benchmark-ch239-compaction-metrics` with five `-count=5`
+samples on Linux/amd64 and an AMD Ryzen 9 5950X. The fixture contains 64
+queued tasks and four registered arrangements. The legacy control materializes
+`Stats()`, `Ages()`, and `CompactionDiagnostics.Snapshot()`; the allocation-free
+control uses `Summary()`; the final path calls `SnapshotCompactionMetrics`.
+
+| Path | Samples (ns/op) | Median ns/op | B/op | Allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Legacy history materialization | 850.3, 845.6, 706.4, 1034, 818.3 | 845.6 | 832 | 6 |
+| Existing allocation-free composition | 113.8, 105.9, 108.0, 105.4, 131.3 | 108.0 | 0 | 0 |
+| Unified snapshot | 100.2, 101.3, 102.6, 98.95, 99.34 | 100.2 | 0 | 0 |
+
+The unified snapshot is `8.44x` faster than the legacy path and removes 832
+B/op and six allocations. Against the already allocation-free composition it
+is `1.08x` faster. It adds three cumulative `uint64` counters per registered
+arrangement, 24 bytes before alignment, and remains an explicit monitoring API
+rather than an always-on foreground path. Full semantics and the
+cumulative-history correctness test are in
+[C239_COMPACTION_METRICS.md](C239_COMPACTION_METRICS.md).
+
 ## TT-046 Per-Structure Memory Accounting
 
 This diagnostic feature exposes the native trie and each typed backing pool via

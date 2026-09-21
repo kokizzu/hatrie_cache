@@ -23253,6 +23253,33 @@ stage-t042-rejection:
 inspect-inspiration-ledgers:
 	bash scripts/inspect-inspiration-ledgers.sh
 
+test-ch239-compaction-metrics:
+	bash scripts/test-ch239-compaction-metrics.sh
+
+test-ch239-package:
+	bash scripts/test-ch239-package.sh
+
+race-ch239-compaction-metrics:
+	bash scripts/race-ch239-compaction-metrics.sh
+
+vet-ch239-compaction-metrics:
+	bash scripts/vet-ch239-compaction-metrics.sh
+
+format-ch239-compaction-metrics:
+	bash scripts/format-ch239-compaction-metrics.sh
+
+benchmark-ch239-compaction-metrics:
+	bash scripts/benchmark-ch239-compaction-metrics.sh
+
+stage-ch239-compaction-metrics:
+	bash scripts/stage-ch239-compaction-metrics.sh
+
+commit-ch239-compaction-metrics:
+	bash scripts/commit-ch239-compaction-metrics.sh
+
+push-ch239-compaction-metrics:
+	bash scripts/push-ch239-compaction-metrics.sh
+
 test-ch237-projection-explain:
 	bash scripts/test-ch237-projection-explain.sh
 
