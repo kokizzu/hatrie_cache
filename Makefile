@@ -24003,3 +24003,43 @@ commit-cleanup-go-build:
 .PHONY: push-cleanup-go-build
 push-cleanup-go-build:
 	bash ./scripts/push-cleanup-go-build.sh
+
+.PHONY: benchmark-tt003-route-cache-baseline
+benchmark-tt003-route-cache-baseline:
+	bash ./scripts/benchmark-tt003-route-cache-baseline.sh
+
+.PHONY: test-tt003-route-cache
+test-tt003-route-cache:
+	bash ./scripts/test-tt003-route-cache.sh
+
+.PHONY: benchmark-tt003-route-cache
+benchmark-tt003-route-cache:
+	bash ./scripts/benchmark-tt003-route-cache.sh
+
+.PHONY: format-tt003-route-cache
+format-tt003-route-cache:
+	bash ./scripts/format-tt003-route-cache.sh
+
+.PHONY: race-tt003-route-cache
+race-tt003-route-cache:
+	bash ./scripts/race-tt003-route-cache.sh
+
+.PHONY: verify-tt003-route-cache
+verify-tt003-route-cache:
+	bash ./scripts/verify-tt003-route-cache.sh
+
+.PHONY: review-tt003-route-cache
+review-tt003-route-cache:
+	bash ./scripts/review-tt003-route-cache.sh
+
+.PHONY: stage-tt003-route-cache
+stage-tt003-route-cache:
+	bash ./scripts/stage-tt003-route-cache.sh
+
+.PHONY: commit-tt003-route-cache
+commit-tt003-route-cache:
+	bash ./scripts/commit-tt003-route-cache.sh
+
+.PHONY: push-tt003-route-cache
+push-tt003-route-cache:
+	bash ./scripts/push-tt003-route-cache.sh

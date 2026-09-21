@@ -35103,3 +35103,30 @@ BenchmarkMZ048InPlaceRotation      39126038  29.97 ns/op  0 B/op  0 allocs/op
 The measured control-plane operation is about 5.1x faster with no allocation
 increase. Connector network/authentication work is outside this microbenchmark;
 see [MZ048_CONNECTOR_SECRET_ROTATION.md](MZ048_CONNECTOR_SECRET_ROTATION.md).
+## TT-003 failover route cache
+
+Command: `make benchmark-tt003-route-cache-baseline` and
+`make benchmark-tt003-route-cache`.
+
+Raw five-run output on AMD Ryzen 9 5950X, `-cpu=1`, with 16 healthy routes:
+
+```text
+BenchmarkTT003ExistingRouteScan  155299695  7.999 ns/op  0 B/op  0 allocs/op
+BenchmarkTT003ExistingRouteScan  151552034  7.070 ns/op  0 B/op  0 allocs/op
+BenchmarkTT003ExistingRouteScan  167276692  7.632 ns/op  0 B/op  0 allocs/op
+BenchmarkTT003ExistingRouteScan  151773074  8.046 ns/op  0 B/op  0 allocs/op
+BenchmarkTT003ExistingRouteScan  154596855  7.868 ns/op  0 B/op  0 allocs/op
+BenchmarkTT003RouteCacheLookup   100000000 12.87 ns/op  0 B/op  0 allocs/op
+BenchmarkTT003RouteCacheLookup   100000000 12.44 ns/op  0 B/op  0 allocs/op
+BenchmarkTT003RouteCacheLookup   100000000 12.02 ns/op  0 B/op  0 allocs/op
+BenchmarkTT003RouteCacheLookup   100000000 12.35 ns/op  0 B/op  0 allocs/op
+BenchmarkTT003RouteCacheLookup   100000000 12.08 ns/op  0 B/op  0 allocs/op
+```
+
+| Path | Median ns/op | B/op | allocs/op | Relative time |
+| --- | ---: | ---: | ---: | ---: |
+| Existing caller-side scan | 7.868 | 0 | 0 | 1.00x |
+| Atomic route-cache lookup | 12.35 | 0 | 0 | 1.57x slower |
+
+The opt-in cache trades a small lookup overhead for generation fencing and
+health-aware invalidation; see [TT003_FAILOVER_ROUTE_CACHE.md](TT003_FAILOVER_ROUTE_CACHE.md).

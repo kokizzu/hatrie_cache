@@ -9,6 +9,7 @@ security guidance before exposing it on a network.
 ## Start Here
 
 - Clean finished generic Go build temp directories with `make cleanup-go-build-preview` followed by `make cleanup-go-build`; active Hatrie worktrees are never selected.
+- Opt-in Tarantool-style health-aware failover route caching with generation fencing: [TT003_FAILOVER_ROUTE_CACHE.md](TT003_FAILOVER_ROUTE_CACHE.md), with lookup measurements in [BENCHMARK.md](BENCHMARK.md#tt-003-failover-route-cache).
 - New to the cache commands and value types: [DATA_STRUCTURE.md](DATA_STRUCTURE.md)
 - ClickHouse-style SQL RowBinary streaming export and bounded bulk import: [CH050_SQL_ROW_BINARY_STREAM.md](CH050_SQL_ROW_BINARY_STREAM.md)
 - New to the SQL interface: [SQL.md](SQL.md)

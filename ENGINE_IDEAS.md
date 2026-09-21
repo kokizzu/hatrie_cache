@@ -39,7 +39,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-010 | Materialized/default columns | Partially adopted: `TypedTableColumn.GeneratedMode` adds explicit materialized/default write semantics, cached dependency ordering, and schema validation; SQL expression parsing, DDL wiring, and persistence remain caller-owned. | Medium |
 | CH-011 | General projection DDL | Partially adopted: `SQLSession` supports session-local `CREATE`, `DROP`, and explicit `REFRESH PROJECTION` backed by source-version-guarded materialized snapshots; durable table-bound metadata, automatic source notifications, and cross-node coordination remain open. | High |
 | CH-012 | Projection advisor | Partially adopted: opt-in `CostBasedRecommendations` compares bounded observed average latency with caller-supplied projection-hit, build, and refresh costs using saturating arithmetic; automatic workload forecasting, planner wiring, and persistent advisor state remain open. | Medium |
-| CH-013 | Query condition cache | No cache of reusable predicate outcomes for stable part/key conditions. | Medium |
+| CH-013 | Query condition cache | Adopted in the existing opt-in `SQLQueryConditionCache`: versioned columnar predicate matches use bounded LRU state, skip unversioned or drifting sources, and preserve exact SQL rows. | Medium |
 | CH-014 | Uncompressed hot-data cache | No cache that stores decoded hot ranges while preserving compressed storage. | Medium |
 | CH-014b | Mutation dependency graph with resumable progress | Make overlapping maintenance mutations safe to schedule without re-running completed prerequisites; reverse dependency metadata enables targeted ready polling and restart after checkpoint restore. | Medium |
 | CH-015 | Filesystem cache admission | Adopted as opt-in `RemotePartCacheOptions.MinAccesses`; zero preserves eager admission, while positive thresholds suppress one-hit retention with bounded candidate metadata. See [CH015_FILESYSTEM_CACHE_ADMISSION.md](CH015_FILESYSTEM_CACHE_ADMISSION.md). | Medium |
@@ -140,7 +140,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | --- | --- | --- | --- |
 | TT-001 | Automatic vshard bucket rebalancing | Partition plans exist, but no automatic data movement and ownership convergence. | High |
 | TT-002 | Bucket ownership consensus | Partition ownership is not committed through a consensus-backed metadata log. | High |
-| TT-003 | Router failover route cache | No client/router route cache with health-aware retry and invalidation. | Medium |
+| TT-003 | Router failover route cache | Adopted as opt-in `hatReplication.FailoverRouteCache` with generation-fenced replacements, stable key routing, atomic lock-free lookups, bounded failure cooldowns, and explicit success/invalidation reporting; dialing, retry, and health inference remain caller-owned. See [TT003_FAILOVER_ROUTE_CACHE.md](TT003_FAILOVER_ROUTE_CACHE.md). | Medium |
 | TT-004 | Synchronous batch replication quorum | Single writes and batches do not provide rollback-free cluster-wide quorum commit. | High |
 | TT-005 | Raft configuration state | No consensus-backed configuration and membership state machine. | High |
 | TT-006 | Hot-standby WAL catch-up | No read-only standby that continuously replays and can be promoted without restore. | High |
