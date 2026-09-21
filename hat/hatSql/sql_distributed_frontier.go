@@ -118,6 +118,9 @@ func BeginSQLDistributedFrontierSnapshot(ctx context.Context, provider SQLFronti
 	if _, err := coordinator.WaitForFrontier(ctx, frontier); err != nil {
 		return nil, nil, err
 	}
+	if err := validateSQLFrontierBounds(provider, frontier); err != nil {
+		return nil, nil, err
+	}
 	snapshotResolver, release, err := provider.BeginSQLSnapshotAt(ctx, frontier)
 	if err != nil {
 		return nil, nil, err

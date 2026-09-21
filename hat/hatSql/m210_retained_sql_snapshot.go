@@ -37,6 +37,9 @@ func (table *TypedTable) BeginSQLSnapshotAt(ctx context.Context, frontier uint64
 			return nil, nil, err
 		}
 	}
+	if err := validateSQLFrontierBounds(table, frontier); err != nil {
+		return nil, nil, err
+	}
 	snapshot, err := table.SnapshotAt(frontier)
 	if err != nil {
 		return nil, nil, err
@@ -114,6 +117,41 @@ func (registry *TypedTableSQLSnapshotRegistry) ResolveSQLSource(name string, key
 	return table.ResolveSQLSource(name, key)
 }
 
+// SQLFrontierBounds returns the intersection of the retained intervals of all
+// registered tables. A multi-table snapshot is valid only where every table
+// can serve the same logical frontier.
+func (registry *TypedTableSQLSnapshotRegistry) SQLFrontierBounds() (SQLFrontierBounds, error) {
+	if registry == nil {
+		return SQLFrontierBounds{}, ErrTypedTableSQLSnapshotRegistryRequired
+	}
+	registry.mu.RLock()
+	defer registry.mu.RUnlock()
+	return registry.sqlFrontierBoundsLocked()
+}
+
+func (registry *TypedTableSQLSnapshotRegistry) sqlFrontierBoundsLocked() (SQLFrontierBounds, error) {
+	bounds := SQLFrontierBounds{Since: 0, Upper: ^uint64(0)}
+	for _, registration := range registry.order {
+		tableBounds, err := registration.table.SQLFrontierBounds()
+		if err != nil {
+			return SQLFrontierBounds{}, fmt.Errorf("source %s/%s: %w", registration.identity.source, registration.identity.key, err)
+		}
+		if tableBounds.Since > bounds.Since {
+			bounds.Since = tableBounds.Since
+		}
+		if tableBounds.Upper < bounds.Upper {
+			bounds.Upper = tableBounds.Upper
+		}
+	}
+	if len(registry.order) == 0 {
+		return bounds, nil
+	}
+	if bounds.Upper <= bounds.Since {
+		return SQLFrontierBounds{}, fmt.Errorf("%w: registry intersection since=%d upper=%d", ErrSQLFrontierBoundsInvalid, bounds.Since, bounds.Upper)
+	}
+	return bounds, nil
+}
+
 // BeginSQLSnapshotAt captures every registered table at frontier and returns
 // a resolver whose source reads cannot observe later writes. The returned
 // release function is always non-nil for lifecycle symmetry; snapshots own
@@ -129,6 +167,15 @@ func (registry *TypedTableSQLSnapshotRegistry) BeginSQLSnapshotAt(ctx context.Co
 		return nil, nil, err
 	}
 	registry.mu.RLock()
+	bounds, err := registry.sqlFrontierBoundsLocked()
+	if err != nil {
+		registry.mu.RUnlock()
+		return nil, nil, err
+	}
+	if err := validateSQLFrontierBoundsValue(registry, bounds, frontier); err != nil {
+		registry.mu.RUnlock()
+		return nil, nil, err
+	}
 	view := &typedTableSQLSnapshotView{
 		frontier:  frontier,
 		snapshots: make([]typedTableSQLSnapshotEntry, 0, len(registry.order)),

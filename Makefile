@@ -25521,6 +25521,52 @@ verify-m210-retained-sql-snapshot:
 	bash scripts/verify-m210-retained-sql-snapshot.sh
 
 
+.PHONY: test-m211-frontier-bounds
+test-m211-frontier-bounds:
+	bash scripts/test-m211-frontier-bounds.sh
+
+.PHONY: format-m211-frontier-bounds
+format-m211-frontier-bounds:
+	bash scripts/format-m211-frontier-bounds.sh
+
+.PHONY: benchmark-m211-frontier-bounds-baseline
+benchmark-m211-frontier-bounds-baseline:
+	bash scripts/benchmark-m211-frontier-bounds-baseline.sh
+
+.PHONY: benchmark-m211-frontier-bounds
+benchmark-m211-frontier-bounds:
+	bash scripts/benchmark-m211-frontier-bounds.sh
+
+.PHONY: test-m211-frontier-bounds-package
+test-m211-frontier-bounds-package:
+	bash scripts/test-m211-frontier-bounds-package.sh
+
+.PHONY: race-m211-frontier-bounds
+race-m211-frontier-bounds:
+	bash scripts/race-m211-frontier-bounds.sh
+
+.PHONY: vet-m211-frontier-bounds
+vet-m211-frontier-bounds:
+	bash scripts/vet-m211-frontier-bounds.sh
+
+.PHONY: verify-m211-frontier-bounds
+verify-m211-frontier-bounds:
+	bash scripts/verify-m211-frontier-bounds.sh
+
+.PHONY: stage-m211-frontier-bounds
+stage-m211-frontier-bounds:
+	bash scripts/stage-m211-frontier-bounds.sh
+
+.PHONY: commit-m211-frontier-bounds
+commit-m211-frontier-bounds:
+	bash scripts/commit-m211-frontier-bounds.sh
+
+.PHONY: push-m211-frontier-bounds
+push-m211-frontier-bounds:
+	bash scripts/push-m211-frontier-bounds.sh
+
+
+
 
 .PHONY: stage-m210-retained-sql-snapshot
 stage-m210-retained-sql-snapshot:

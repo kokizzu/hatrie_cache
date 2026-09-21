@@ -97,7 +97,7 @@ operator control remain the preferred deployment model.
 - [x] M208 Differential multiplicity folding for insert/delete update streams. See [M208_DIFFERENTIAL_MULTIPLICITY_FOLDING.md](M208_DIFFERENTIAL_MULTIPLICITY_FOLDING.md).
 - [x] M209 Monotone logical timestamp frontiers for read and stream APIs. See [M209_MONOTONE_LOGICAL_TIMESTAMP.md](M209_MONOTONE_LOGICAL_TIMESTAMP.md).
 - [x] M210 Historical `AS OF` reads against retained logical state. See [M210_RETAINED_SQL_SNAPSHOTS.md](M210_RETAINED_SQL_SNAPSHOTS.md) and [BENCHMARK.md#m210-retained-sql-snapshots](BENCHMARK.md#m210-retained-sql-snapshots).
-- [ ] M211 Explicit rejection of reads before `since` or at/after `upper` frontiers.
+- [x] M211 Explicit rejection of reads before `since` or at/after `upper` frontiers. See [M211_SQL_FRONTIER_BOUNDS.md](M211_SQL_FRONTIER_BOUNDS.md) and [BENCHMARK.md#m211-sql-frontier-bounds](BENCHMARK.md#m211-sql-frontier-bounds).
 - [ ] M212 Logical compaction that advances retained history without rewriting live state.
 - [ ] M213 Consolidation of equal updates before forwarding to downstream consumers.
 - [ ] M214 Arrangement reuse across indexes and compatible query plans.

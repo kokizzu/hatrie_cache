@@ -36019,3 +36019,19 @@ The baseline manually calls `SnapshotAt` for the same retained fixtures. M210 is
 an opt-in correctness/capability path; live reads remain unchanged. Raw samples
 and the AS OF contract are recorded in
 [M210_RETAINED_SQL_SNAPSHOTS.md](M210_RETAINED_SQL_SNAPSHOTS.md).
+
+## M211 SQL Frontier Bounds
+
+Commands: `make benchmark-m211-frontier-bounds-baseline` and
+`make benchmark-m211-frontier-bounds`.
+
+Linux/amd64 on AMD Ryzen 9 5950X, five `-count=5` samples:
+
+| Workload | Baseline median | M211 median | M211 B/op | M211 allocs/op | Relative result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Single-table snapshot capture | 14416 ns/op | 14510 ns/op | 18952 | 7 | 1.01x CPU; same bytes/allocs |
+| Bounds validation only | n/a | 2.889 ns/op | 0 | 0 | zero-allocation validation |
+
+M211 is a correctness contract for retained frontier intervals, not a claimed
+hot-path speedup. Details and raw samples are in
+[M211_SQL_FRONTIER_BOUNDS.md](M211_SQL_FRONTIER_BOUNDS.md).

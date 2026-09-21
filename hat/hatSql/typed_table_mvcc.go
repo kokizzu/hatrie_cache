@@ -113,6 +113,24 @@ func (table *TypedTable) SnapshotAt(sequence uint64) (*TypedTableSnapshot, error
 	return snapshot, nil
 }
 
+// SQLFrontierBounds returns the half-open sequence interval that can be
+// opened as a new exact SQL snapshot. The upper frontier is one past the
+// latest committed table sequence.
+func (table *TypedTable) SQLFrontierBounds() (SQLFrontierBounds, error) {
+	if table == nil {
+		return SQLFrontierBounds{}, fmt.Errorf("typed table is nil")
+	}
+	table.mu.RLock()
+	defer table.mu.RUnlock()
+	if table.mvcc == nil {
+		return SQLFrontierBounds{}, ErrTypedTableMVCCDisabled
+	}
+	if table.sequence == ^uint64(0) {
+		return SQLFrontierBounds{}, fmt.Errorf("typed table MVCC sequence has no representable upper frontier")
+	}
+	return SQLFrontierBounds{Since: table.mvcc.compactedThrough, Upper: table.sequence + 1}, nil
+}
+
 // CompactMVCCThrough discards historical links older than sequence from the
 // table's current version chains. Snapshots created before compaction retain
 // their immutable head pointers and remain valid until released by the

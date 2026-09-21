@@ -1062,3 +1062,13 @@ frontier and preserves the existing row/columnar resolver capabilities. A
 requested frontier that is unavailable or compacted fails explicitly rather
 than returning a partial result. See `M210_RETAINED_SQL_SNAPSHOTS.md` for the
 API, semantics, and benchmark tradeoff.
+
+## M211: SQL Frontier Bounds
+
+Adopted an optional half-open `[since, upper)` contract for historical SQL
+providers. Retained typed tables expose compaction-derived bounds, registries
+expose the intersection across tables, and AS OF/frontier entrypoints reject
+out-of-range reads with typed errors before opening a snapshot. Legacy
+providers without the optional capability remain unbounded. See
+`M211_SQL_FRONTIER_BOUNDS.md` for the API and measured zero-allocation
+validation cost.
