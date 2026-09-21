@@ -23243,6 +23243,29 @@ push-tu33-function-grants:
 audit-hatrie-tmp:
 	bash scripts/audit-hatrie-tmp.sh
 
+.PHONY: format-mz016-schema-evolution test-mz016-schema-evolution test-mz016-schema-evolution-package benchmark-mz016-schema-evolution race-mz016-schema-evolution vet-mz016-schema-evolution verify-mz016-schema-evolution
+format-mz016-schema-evolution:
+	bash scripts/mz016-schema-evolution.sh format
+test-mz016-schema-evolution:
+	bash scripts/mz016-schema-evolution.sh test
+test-mz016-schema-evolution-package:
+	bash scripts/mz016-schema-evolution.sh package
+benchmark-mz016-schema-evolution:
+	bash scripts/mz016-schema-evolution.sh benchmark
+race-mz016-schema-evolution:
+	bash scripts/mz016-schema-evolution.sh race
+vet-mz016-schema-evolution:
+	bash scripts/mz016-schema-evolution.sh vet
+verify-mz016-schema-evolution:
+	bash scripts/mz016-schema-evolution.sh verify
+.PHONY: stage-mz016-schema-evolution commit-mz016-schema-evolution push-mz016-schema-evolution
+stage-mz016-schema-evolution:
+	bash scripts/stage-mz016-schema-evolution.sh
+commit-mz016-schema-evolution:
+	bash scripts/commit-mz016-schema-evolution.sh
+push-mz016-schema-evolution:
+	bash scripts/push-mz016-schema-evolution.sh
+
 
 
 .PHONY: format-t047-cluster-write-commit test-t047-cluster-write-commit test-t047-replication-package benchmark-t047-cluster-write-commit race-t047-cluster-write-commit vet-t047-cluster-write-commit review-t047 stage-t047 commit-t047 push-t047

@@ -35658,3 +35658,15 @@ The native function folds once during grouping-set expansion, while the
 composed control retains arithmetic expression nodes in every expanded branch.
 This does not remove the existing branch expansion cost; native one-pass
 grouping remains a separate open improvement.
+# MZ-016: Source Schema Evolution
+
+Five `-benchmem` samples on Linux amd64, AMD Ryzen 9 5950X:
+
+| Path | Median ns/op | B/op | allocs/op | Speedup | Heap reduction | Allocation reduction |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Reused compatibility plan | 300.2 | 336 | 2 | 6.85x | 4.12x | 4.00x |
+| Rebuild plan per row | 2,057 | 1,384 | 8 | 1.00x | 1.00x | 1.00x |
+
+The reused path constructs the plan once outside the measured loop; the
+rebuild path includes plan construction and row adaptation for every row. Both
+paths allocate the adapted output row. See [MZ016_SCHEMA_EVOLUTION.md](MZ016_SCHEMA_EVOLUTION.md) for raw samples, semantics, and test status.
