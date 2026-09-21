@@ -26,7 +26,7 @@ func (dictionary *typedTableSortedArrangementStringDictionary) retain(value stri
 		index := int(code - 1)
 		dictionary.values[index] = value
 		dictionary.counts[index] = 1
-		 dictionary.positions[value] = code
+		dictionary.positions[value] = code
 		return dictionary.values[index]
 	}
 	code = uint32(len(dictionary.values) + 1)
@@ -93,8 +93,39 @@ func (arrangement *TypedTableSortedArrangement) storeValues(values []TypedTableV
 			}
 		}
 		cloned[orderField.index].String = dictionary.retain(value.String)
+		if orderField.dictionaryAdaptive && len(dictionary.positions) > typedTableDictionaryProbeMaxDistinct {
+			arrangement.demoteAdaptiveDictionary(orderIndex)
+			cloned[orderField.index].String = string(append([]byte(nil), cloned[orderField.index].String...))
+		}
 	}
 	return cloned
+}
+
+func (arrangement *TypedTableSortedArrangement) demoteAdaptiveDictionary(orderIndex int) {
+	if arrangement == nil || orderIndex < 0 || orderIndex >= len(arrangement.orderFields) {
+		return
+	}
+	orderField := &arrangement.orderFields[orderIndex]
+	if !orderField.dictionaryAdaptive || !orderField.dictionaryEncoded {
+		return
+	}
+	for key, row := range arrangement.entries {
+		if orderField.index < 0 || orderField.index >= len(row.Values) {
+			continue
+		}
+		value := row.Values[orderField.index]
+		if value.Valid && value.Kind == TypedTableString {
+			value.String = string(append([]byte(nil), value.String...))
+			row.Values[orderField.index] = value
+			arrangement.entries[key] = row
+		}
+	}
+	orderField.dictionaryEncoded = false
+	orderField.dictionaryAdaptive = false
+	arrangement.dictionaries[orderIndex] = nil
+	if orderIndex == 0 {
+		arrangement.dictionary = nil
+	}
 }
 
 func (arrangement *TypedTableSortedArrangement) releaseValues(values []TypedTableValue) {

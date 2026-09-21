@@ -32,34 +32,39 @@ const typedTableSortedArrangementBulkMinimumChanges = 64
 // TypedTableSortedArrangementDefinition configures one ordered typed-table
 // arrangement. NULL and NaN values use NullsFirst; ties are ordered by row key
 // for deterministic results. DictionaryEncoded interns live non-NULL string
-// values in Field and is rejected for non-string fields; it is disabled by
-// default to preserve the existing storage and CPU profile. OrderBy selects
-// an additive composite definition; when it is non-empty, the legacy scalar
-// fields must remain at their zero values.
+// values in Field and is rejected for non-string fields; DictionaryAdaptive
+// selects the same representation only when the initial snapshot is within
+// the bounded low-cardinality admission rule, and demotes if later changes
+// exceed that bound. Both are disabled by default. OrderBy selects an additive
+// composite definition; when it is non-empty, the legacy scalar fields must
+// remain at their zero values.
 type TypedTableSortedArrangementDefinition struct {
-	Field             string
-	Descending        bool
-	NullsFirst        bool
-	DictionaryEncoded bool
-	OrderBy           []TypedTableSortedArrangementOrder
+	Field              string
+	Descending         bool
+	NullsFirst         bool
+	DictionaryEncoded  bool
+	DictionaryAdaptive bool
+	OrderBy            []TypedTableSortedArrangementOrder
 }
 
 // TypedTableSortedArrangementOrder describes one field in a composite ordered
 // arrangement. OrderBy fields are compared from first to last; ties are then
 // ordered by row key for deterministic results.
 type TypedTableSortedArrangementOrder struct {
-	Field             string
-	Descending        bool
-	NullsFirst        bool
-	DictionaryEncoded bool
+	Field              string
+	Descending         bool
+	NullsFirst         bool
+	DictionaryEncoded  bool
+	DictionaryAdaptive bool
 }
 
 type typedTableSortedArrangementOrderField struct {
-	index             int
-	kind              TypedTableKind
-	descending        bool
-	nullsFirst        bool
-	dictionaryEncoded bool
+	index              int
+	kind               TypedTableKind
+	descending         bool
+	nullsFirst         bool
+	dictionaryEncoded  bool
+	dictionaryAdaptive bool
 }
 
 // TypedTableSortedArrangement maintains an ordered row-key vector while
@@ -91,6 +96,7 @@ func NewTypedTableSortedArrangement(table *TypedTable, definition TypedTableSort
 		return nil, err
 	}
 	rows, checkpoint := typedTableSortedArrangementSnapshot(table)
+	typedTableSortedArrangementApplyAdaptiveDictionaryAdmission(orderFields, rows)
 	arrangement := &TypedTableSortedArrangement{
 		field: orderFields[0].index, fieldKind: orderFields[0].kind, columnCount: len(table.columns), definition: definition,
 		entries:   make(map[string]TypedTableMergeJoinInput, len(rows)),
@@ -124,14 +130,15 @@ func typedTableSortedArrangementOrderFields(table *TypedTable, definition TypedT
 		if !found {
 			return nil, fmt.Errorf("%w: %q", ErrTypedTableSortedArrangementField, definition.Field)
 		}
-		if definition.DictionaryEncoded && kind != TypedTableString {
+		if (definition.DictionaryEncoded || definition.DictionaryAdaptive) && kind != TypedTableString {
 			return nil, fmt.Errorf("%w: field %q has kind %d", ErrTypedTableSortedArrangementDictionaryKind, definition.Field, kind)
 		}
 		return []typedTableSortedArrangementOrderField{{
-			index: field, kind: kind, descending: definition.Descending, nullsFirst: definition.NullsFirst, dictionaryEncoded: definition.DictionaryEncoded,
+			index: field, kind: kind, descending: definition.Descending, nullsFirst: definition.NullsFirst,
+			dictionaryEncoded: definition.DictionaryEncoded, dictionaryAdaptive: definition.DictionaryAdaptive && !definition.DictionaryEncoded,
 		}}, nil
 	}
-	if definition.Field != "" || definition.Descending || definition.NullsFirst || definition.DictionaryEncoded {
+	if definition.Field != "" || definition.Descending || definition.NullsFirst || definition.DictionaryEncoded || definition.DictionaryAdaptive {
 		return nil, fmt.Errorf("%w: OrderBy cannot be combined with legacy scalar fields", ErrTypedTableSortedArrangementOrder)
 	}
 	fields := make([]typedTableSortedArrangementOrderField, len(definition.OrderBy))
@@ -144,15 +151,56 @@ func typedTableSortedArrangementOrderFields(table *TypedTable, definition TypedT
 		if _, duplicate := seen[field]; duplicate {
 			return nil, fmt.Errorf("%w: field %q occurs more than once", ErrTypedTableSortedArrangementOrder, order.Field)
 		}
-		if order.DictionaryEncoded && kind != TypedTableString {
+		if (order.DictionaryEncoded || order.DictionaryAdaptive) && kind != TypedTableString {
 			return nil, fmt.Errorf("%w: field %q has kind %d", ErrTypedTableSortedArrangementDictionaryKind, order.Field, kind)
 		}
 		seen[field] = struct{}{}
 		fields[index] = typedTableSortedArrangementOrderField{
-			index: field, kind: kind, descending: order.Descending, nullsFirst: order.NullsFirst, dictionaryEncoded: order.DictionaryEncoded,
+			index: field, kind: kind, descending: order.Descending, nullsFirst: order.NullsFirst,
+			dictionaryEncoded: order.DictionaryEncoded, dictionaryAdaptive: order.DictionaryAdaptive && !order.DictionaryEncoded,
 		}
 	}
 	return fields, nil
+}
+
+func typedTableSortedArrangementApplyAdaptiveDictionaryAdmission(orderFields []typedTableSortedArrangementOrderField, rows map[string][]TypedTableValue) {
+	for index := range orderFields {
+		if !orderFields[index].dictionaryAdaptive {
+			continue
+		}
+		if typedTableSortedArrangementDictionaryAdmitted(rows, orderFields[index].index) {
+			orderFields[index].dictionaryEncoded = true
+			continue
+		}
+		orderFields[index].dictionaryAdaptive = false
+	}
+}
+
+func typedTableSortedArrangementDictionaryAdmitted(rows map[string][]TypedTableValue, field int) bool {
+	if len(rows) == 0 {
+		return false
+	}
+	distinct := make([]string, 0, typedTableDictionaryProbeMaxDistinct)
+	for _, values := range rows {
+		if field < 0 || field >= len(values) || !values[field].Valid || values[field].Kind != TypedTableString {
+			continue
+		}
+		value := values[field].String
+		found := false
+		for _, existing := range distinct {
+			if existing == value {
+				found = true
+				break
+			}
+		}
+		if !found {
+			if len(distinct) == typedTableDictionaryProbeMaxDistinct {
+				return false
+			}
+			distinct = append(distinct, value)
+		}
+	}
+	return len(distinct) > 0 && len(distinct)*typedTableDictionaryProbeDistinctDenominator <= len(rows)
 }
 
 // Apply advances the arrangement through strictly ordered source changes.

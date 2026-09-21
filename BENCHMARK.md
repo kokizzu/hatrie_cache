@@ -1,5 +1,23 @@
 # Benchmark
 
+## MZ-026 Adaptive Dictionary Arrangements
+
+Five samples per case on Linux amd64, AMD Ryzen 9 5950X, building a 4,096-row
+sorted arrangement. Raw and adaptive cases within each cardinality group use
+the same input distribution. `retained_sort_string_bytes` measures only the
+string payload retained by the arrangement.
+
+| Case | Distinct strings | Median ns/op | Median B/op | Median allocs/op | Retained string bytes | Relative CPU |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Raw default | 16 | 5,698,866 | 2,163,458 | 8,267 | 40,960 | 1.00x |
+| Adaptive, admitted | 16 | 5,673,378 | 2,165,793 | 8,284 | 160 | 1.00x, within noise |
+| Raw default | 4,096 | 5,438,584 | 2,163,456 | 8,267 | 40,960 | 1.00x |
+| Adaptive, rejected | 4,096 | 5,335,163 | 2,163,452 | 8,267 | 40,960 | 1.02x, within noise |
+
+The admitted arrangement retains 256x less sort-string payload with about 2.3
+KB/op and 17 extra allocations during construction. The default remains raw.
+Run `make benchmark-mz026-adaptive` for the raw samples.
+
 ## TT-021 Mutable Packed R-Tree
 
 The 10,000-entry update/query and compaction comparison, including raw samples

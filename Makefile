@@ -24617,6 +24617,53 @@ benchmark-ch046-after:
 
 .PHONY: test-ch046-package race-ch046-compression vet-ch046-compression review-ch046-compression stage-ch046-compression commit-ch046-compression push-ch046-compression
 
+.PHONY: inspect-mz026
+
+.PHONY: inspect-mz026-tail
+
+.PHONY: inspect-mz026-dictionary
+
+.PHONY: inspect-mz026-probe
+
+.PHONY: inspect-mz026-bench
+
+.PHONY: test-mz026-adaptive-red benchmark-mz026-before
+
+.PHONY: format-mz026-adaptive
+
+format-mz026-adaptive:
+	bash scripts/format-mz026-adaptive.sh
+
+test-mz026-adaptive:
+	bash scripts/test-mz026-adaptive.sh
+
+test-mz026-package:
+	bash scripts/test-mz026-package.sh
+
+race-mz026-adaptive:
+	bash scripts/race-mz026-adaptive.sh
+
+vet-mz026-adaptive:
+	bash scripts/vet-mz026-adaptive.sh
+
+review-mz026-adaptive:
+	bash scripts/review-mz026-adaptive.sh
+
+status-mz026-adaptive:
+	bash scripts/status-mz026-adaptive.sh
+
+stage-mz026-adaptive:
+	bash scripts/stage-mz026-adaptive.sh
+
+commit-mz026-adaptive:
+	bash scripts/commit-mz026-adaptive.sh
+
+push-mz026-adaptive:
+	bash scripts/push-mz026-adaptive.sh
+
+benchmark-mz026-before:
+	bash scripts/benchmark-mz026-before.sh
+
 
 test-ch046-package:
 	bash scripts/test-ch046-package.sh
@@ -24638,3 +24685,5 @@ commit-ch046-compression:
 
 push-ch046-compression:
 	bash scripts/push-ch046-compression.sh
+benchmark-mz026-adaptive:
+	bash scripts/benchmark-mz026-after.sh
