@@ -23243,6 +23243,11 @@ push-tu33-function-grants:
 audit-hatrie-tmp:
 	bash scripts/audit-hatrie-tmp.sh
 
+.PHONY: stage-t042-rejection
+
+stage-t042-rejection:
+	bash scripts/stage-t042-rejection.sh
+
 .PHONY: format-mz016-schema-evolution test-mz016-schema-evolution test-mz016-schema-evolution-package benchmark-mz016-schema-evolution race-mz016-schema-evolution vet-mz016-schema-evolution verify-mz016-schema-evolution
 format-mz016-schema-evolution:
 	bash scripts/mz016-schema-evolution.sh format
