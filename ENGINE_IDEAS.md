@@ -158,7 +158,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-018 | Page-index residency policy | Page indexes have no explicit memory budget and eviction metrics. | Medium |
 | TT-019 | Covering secondary indexes | Secondary postings cannot retain selected payload fields to avoid primary lookups. | Medium |
 | TT-020 | Generic multi-part TREE ranges | Implemented as the allocation-free `OrderedIndex.Range` API, which binary-searches inclusive composite bounds and iterates only the bounded subslice; callers can express a partial-key prefix with the smallest and largest suffix values. | Medium |
-| TT-021 | RTREE spatial index | No multidimensional geographic index and bounding-box query API exists. | High |
+| TT-021 | RTREE spatial index | Adopted as the opt-in immutable `hatDataStructure.PackedRTree[T]` bounding-box API; mutable updates, SQL planner wiring, and persistence remain open. | High |
 | TT-022 | BITSET index | No bitmap index for low-cardinality integer membership. | Medium |
 | TT-023 | HASH equality index | Implemented as a zero-allocation raw-string fast path for homogeneous ordinary SQL JSON field equality indexes; mixed-type values retain the existing typed key encoding. | Low |
 | TT-024 | Full-text phrase/position index | `CONTAINS_PREFIX` now uses an opt-in sorted token-key sidecar; token positions and phrase search remain absent. | High |

@@ -991,3 +991,13 @@ local cache or cross an untrusted boundary; `Equal` is an allocation-free
 metadata check for repeated reuse. See [C244_LOCAL_CACHE_REUSE.md](C244_LOCAL_CACHE_REUSE.md)
 and [BENCHMARK.md](BENCHMARK.md#c244-local-cache-reuse-validation) for the
 measured validation cost and the fast reuse path.
+
+## TT-021: Packed R-tree Spatial Index
+
+Tarantool-style RTREE support is adopted as the opt-in immutable
+`hatDataStructure.PackedRTree[T]`. It bulk-builds spatially coherent leaves,
+uses compact integer node ranges, validates finite inclusive boxes, copies
+caller input, and provides allocation-free `QueryInto` and `Visit` paths.
+Mutable updates, SQL planner integration, persistence, and replication remain
+deferred. See [TT021_PACKED_RTREE.md](TT021_PACKED_RTREE.md) and
+[BENCHMARK.md](BENCHMARK.md#tt-021-packed-r-tree-spatial-index).

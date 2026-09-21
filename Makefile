@@ -23268,6 +23268,38 @@ commit-c245-filesystem-cache-admission:
 push-c245-filesystem-cache-admission:
 	bash scripts/push-c245-filesystem-cache-admission.sh
 
+.PHONY: format-c246
+format-c246:
+	bash scripts/format-c246.sh
+
+.PHONY: test-c246
+test-c246:
+	bash scripts/test-c246.sh
+
+.PHONY: race-c246
+race-c246:
+	bash scripts/race-c246.sh
+
+.PHONY: benchmark-c246
+benchmark-c246:
+	bash scripts/benchmark-c246.sh
+
+.PHONY: stage-c246-tt021-packed-rtree
+stage-c246-tt021-packed-rtree:
+	bash scripts/stage-c246-tt021-packed-rtree.sh
+
+.PHONY: commit-c246-tt021-packed-rtree
+commit-c246-tt021-packed-rtree:
+	bash scripts/commit-c246-tt021-packed-rtree.sh
+
+.PHONY: push-c246-tt021-packed-rtree
+push-c246-tt021-packed-rtree:
+	bash scripts/push-c246-tt021-packed-rtree.sh
+
+
+
+
+
 .PHONY: inspect-c245-docs
 inspect-c245-docs:
 	bash scripts/inspect-c245-docs.sh

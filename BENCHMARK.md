@@ -34734,6 +34734,52 @@ rows and segment size 64:
 
 Zone-map queries return candidate blocks; callers still verify rows. The
 results depend on clustering and segment size.
+## TT-021 Packed R-tree Spatial Index
+
+Five-run medians on Linux amd64, AMD Ryzen 9 5950X, with 10,000 grid-aligned
+entries and a query returning 100 matches:
+
+| Workload | Median | Memory | Relative result |
+| --- | ---: | ---: | --- |
+| Linear scan baseline | 13,628 ns/op | 0 B/op, 0 allocs/op | 1.00x |
+| Packed tree `QueryInto` | 642.1 ns/op | 0 B/op, 0 allocs/op | 21.22x faster |
+| Packed tree `Visit` | 797.1 ns/op | 0 B/op, 0 allocs/op | 17.09x faster |
+| Packed tree build | 6,156,749 ns/op | 547,523 B/op, 102 allocs/op | build cost, not a query comparison |
+
+The first implementation used the public box intersection method in the
+validated traversal loop. Its medians were 4,066 ns/op for `QueryInto` and
+4,075 ns/op for `Visit`. The internal validated-box fast path reduced those
+to 642.1 ns/op and 797.1 ns/op respectively, with no allocation change.
+
+Raw final output:
+
+```text
+BenchmarkTT021PackedRTreeLinearScan-32  93204 12836 ns/op 0 B/op 0 allocs/op
+BenchmarkTT021PackedRTreeLinearScan-32  87366 12813 ns/op 0 B/op 0 allocs/op
+BenchmarkTT021PackedRTreeLinearScan-32  77847 13628 ns/op 0 B/op 0 allocs/op
+BenchmarkTT021PackedRTreeLinearScan-32  83776 14219 ns/op 0 B/op 0 allocs/op
+BenchmarkTT021PackedRTreeLinearScan-32  93894 13728 ns/op 0 B/op 0 allocs/op
+BenchmarkTT021PackedRTreeBuild-32       204 6156749 ns/op 547523 B/op 102 allocs/op
+BenchmarkTT021PackedRTreeBuild-32       198 5886610 ns/op 547522 B/op 102 allocs/op
+BenchmarkTT021PackedRTreeBuild-32       208 6232708 ns/op 547525 B/op 102 allocs/op
+BenchmarkTT021PackedRTreeBuild-32       213 5899207 ns/op 547522 B/op 102 allocs/op
+BenchmarkTT021PackedRTreeBuild-32       190 6169516 ns/op 547551 B/op 102 allocs/op
+BenchmarkTT021PackedRTreeQueryInto-32 1880956 642.1 ns/op 0 B/op 0 allocs/op
+BenchmarkTT021PackedRTreeQueryInto-32 1881246 618.1 ns/op 0 B/op 0 allocs/op
+BenchmarkTT021PackedRTreeQueryInto-32 1772347 674.3 ns/op 0 B/op 0 allocs/op
+BenchmarkTT021PackedRTreeQueryInto-32 1669950 671.7 ns/op 0 B/op 0 allocs/op
+BenchmarkTT021PackedRTreeQueryInto-32 1707228 637.1 ns/op 0 B/op 0 allocs/op
+BenchmarkTT021PackedRTreeVisit-32    1368847 796.7 ns/op 0 B/op 0 allocs/op
+BenchmarkTT021PackedRTreeVisit-32    1385752 785.1 ns/op 0 B/op 0 allocs/op
+BenchmarkTT021PackedRTreeVisit-32    1370670 834.5 ns/op 0 B/op 0 allocs/op
+BenchmarkTT021PackedRTreeVisit-32    1355083 797.1 ns/op 0 B/op 0 allocs/op
+BenchmarkTT021PackedRTreeVisit-32    1460368 808.0 ns/op 0 B/op 0 allocs/op
+```
+
+The index is immutable and opt-in; the build cost is paid only when the
+indexed set changes. Query memory stays flat when callers reuse destinations
+or use `Visit`.
+
 ## C243: Remote-Part Read-Through Cache
 
 The focused benchmark uses a 64 KiB immutable part and compares the committed
