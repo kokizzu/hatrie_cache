@@ -25646,3 +25646,15 @@ race-m208-differential-folding:
 .PHONY: vet-m208-differential-folding
 vet-m208-differential-folding:
 	bash scripts/vet-m208-differential-folding.sh
+
+.PHONY: stage-m213-consolidation-audit
+stage-m213-consolidation-audit:
+	bash scripts/stage-m213-consolidation-audit.sh
+
+.PHONY: commit-m213-consolidation-audit
+commit-m213-consolidation-audit:
+	bash scripts/commit-m213-consolidation-audit.sh
+
+.PHONY: push-m213-consolidation-audit
+push-m213-consolidation-audit:
+	bash scripts/push-m213-consolidation-audit.sh
