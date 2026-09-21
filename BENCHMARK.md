@@ -35812,3 +35812,16 @@ additional per-stage metrics. Full raw samples and interpretation are in
 | Existing `Record` after C234 | 27.39 ns | 0 | 0 |
 | `RecordStage` | 55.81 ns | 0 | 0 |
 | `StageProfile` with 64 stages | 9.352 us | 5528 | 4 |
+## C233 Per-query CPU-time budget
+
+CPU budgets are opt-in and use Linux thread CPU time at cooperative executor
+checkpoints. The default quantum samples once per 64 checkpoints; strict
+sampling is separately measured. Raw samples and platform behavior are in
+`C233_CPU_TIME_BUDGET.md`.
+
+| Benchmark | Median | Bytes/op | Allocs/op |
+| --- | ---: | ---: | ---: |
+| Existing checkpoint before C233 | 4.414 ns | 0 | 0 |
+| Existing checkpoint after C233 | 3.916 ns | 0 | 0 |
+| CPU budget, default quantum 64 | 19.58 ns | 0 | 0 |
+| CPU budget, every checkpoint | 858.1 ns | 0 | 0 |

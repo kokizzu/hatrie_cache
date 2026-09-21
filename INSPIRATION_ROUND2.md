@@ -66,7 +66,7 @@ operator control remain the preferred deployment model.
 - [ ] C230 Memory-overcommit wait queues before query cancellation.
 - [ ] C231 Workload groups with per-class concurrency and memory budgets.
 - [x] C232 Query-complexity limits for rows, joins, and intermediate results.
-- [ ] C233 Per-query CPU-time budgets with cooperative cancellation.
+- [x] C233 Per-query CPU-time budgets with cooperative cancellation. See [C233_CPU_TIME_BUDGET.md](C233_CPU_TIME_BUDGET.md) and [BENCHMARK.md](BENCHMARK.md#c233-per-query-cpu-time-budget).
 - [x] C234 Query profiler records for stage time, bytes, and allocations. See [C234_QUERY_STAGE_PROFILER.md](C234_QUERY_STAGE_PROFILER.md) and [BENCHMARK.md](BENCHMARK.md#c234-query-stage-profiler).
 - [x] C235 Read/write task profiler aggregation by table part and column; bounded `hatSql.SQLQueryProfiler.RecordPartColumn` with deterministic snapshots and explicit dropped-observation counters. See [CH235_PART_COLUMN_PROFILER.md](CH235_PART_COLUMN_PROFILER.md) and [BENCHMARK.md#c235-part-column-query-profiling](BENCHMARK.md#c235-part-column-query-profiling).
 - [x] C236 Explain output for data-skipping-index decisions and rejected marks. Already implemented under CH-U49 for direct equality probes over selected `CACHE` JSON-path skip indexes; `EXPLAIN ANALYZE` exposes candidate/skipped rows and segments without changing query results. See [CHU49_SKIP_INDEX_EXPLAIN.md](CHU49_SKIP_INDEX_EXPLAIN.md) and [BENCHMARK.md#ch-u49-skip-index-explain-diagnostics](BENCHMARK.md#ch-u49-skip-index-explain-diagnostics).

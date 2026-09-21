@@ -1023,3 +1023,11 @@ logical source/projection bytes, and estimated bytes saved. The implementation
 avoids cloning retained projection rows and does not change normal query
 execution. See [CH237_PROJECTION_EXPLAIN.md](CH237_PROJECTION_EXPLAIN.md) and
 [BENCHMARK.md](BENCHMARK.md#c237-projection-selection-explain-output).
+## C233: Per-Query CPU-Time Budgets
+
+Implemented as opt-in cooperative `SQLQueryOptions.MaxCPUTime`. Linux measures
+user and system CPU using `getrusage(RUSAGE_THREAD)` and aggregates deltas from
+participating threads. `CPUTimeCheckEvery` defaults to 64 checkpoints to bound
+syscall overhead; strict every-checkpoint sampling remains configurable. Other
+platforms fail explicitly with `ErrSQLCPUTimeUnsupported` rather than treating
+wall time as CPU time. See [C233_CPU_TIME_BUDGET.md](C233_CPU_TIME_BUDGET.md).

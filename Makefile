@@ -25129,3 +25129,43 @@ commit-c234-stage-profiler:
 
 push-c234-stage-profiler:
 	bash scripts/push-c234-stage-profiler.sh
+.PHONY: race-c233-cpu-budget vet-c233-cpu-budget
+
+race-c233-cpu-budget:
+	bash scripts/race-c233-cpu-budget.sh
+
+vet-c233-cpu-budget:
+	bash scripts/vet-c233-cpu-budget.sh
+.PHONY: benchmark-c233-baseline
+
+benchmark-c233-baseline:
+	bash scripts/benchmark-c233-baseline.sh
+.PHONY: test-c233-cpu-budget
+
+test-c233-cpu-budget:
+	bash scripts/test-c233-cpu-budget.sh
+.PHONY: format-c233-cpu-budget
+
+format-c233-cpu-budget:
+	bash scripts/format-c233-cpu-budget.sh
+.PHONY: benchmark-c233-cpu-budget
+
+benchmark-c233-cpu-budget:
+	bash scripts/benchmark-c233-cpu-budget.sh
+.PHONY: stage-c233-cpu-budget commit-c233-cpu-budget push-c233-cpu-budget
+
+stage-c233-cpu-budget:
+	bash scripts/stage-c233-cpu-budget.sh
+
+commit-c233-cpu-budget:
+	bash scripts/commit-c233-cpu-budget.sh
+
+push-c233-cpu-budget:
+	bash scripts/push-c233-cpu-budget.sh
+.PHONY: test-c233-package race-c233-package
+
+test-c233-package:
+	bash scripts/test-c233-package.sh
+
+race-c233-package:
+	bash scripts/race-c233-package.sh

@@ -189,6 +189,13 @@ const MaxSQLQueryThreads = 256
 // MaxSQLOperatorYieldEvery bounds the opt-in cooperative fuel quantum.
 const MaxSQLOperatorYieldEvery = 1 << 20
 
+// DefaultSQLCPUTimeCheckEvery samples the OS CPU clock once per this many
+// cooperative checkpoints when a CPU budget is enabled.
+const DefaultSQLCPUTimeCheckEvery = 64
+
+// MaxSQLCPUTimeCheckEvery bounds a caller-selected CPU clock sampling quantum.
+const MaxSQLCPUTimeCheckEvery = 1 << 20
+
 // SQLQueryOptions bounds one query. Zero uses the safe default or disables an
 // optional byte/work budget; Timeout derives a deadline from ctx.
 type SQLQueryOptions struct {
@@ -217,6 +224,14 @@ type SQLQueryOptions struct {
 	// balanced and hot-key joins retain the established map path.
 	RuntimeJoinBloomFilter bool
 	MaxResultBytes         int
+	// MaxCPUTime is an opt-in cooperative CPU-time budget. It measures user and
+	// system CPU consumed by the query's participating OS threads; zero keeps
+	// the existing path disabled. The budget is checked at executor checkpoints
+	// and may be exceeded by a non-cooperative function between checks.
+	MaxCPUTime time.Duration
+	// CPUTimeCheckEvery controls the cooperative CPU-clock sampling quantum.
+	// Zero uses DefaultSQLCPUTimeCheckEvery; one samples every checkpoint.
+	CPUTimeCheckEvery int
 	// Workers enables bounded parallel CPU work for eligible query operators.
 	// Zero keeps the deterministic sequential default.
 	Workers int
@@ -8174,6 +8189,11 @@ type sqlExecutionControl struct {
 	yieldEvery     uint64
 	yieldFuel      atomic.Uint64
 	yields         atomic.Uint64
+	maxCPUTime     time.Duration
+	cpuClock       sqlCPUClock
+	cpuTime        sqlCPUTimeTracker
+	cpuTimeEvery   uint64
+	cpuTimeFuel    atomic.Uint64
 }
 
 // sqlExecutionControlContext preserves the normal context contract while
@@ -8232,11 +8252,14 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if options.MaxRows < 0 || options.MaxIntermediateRows < 0 || options.MaxJoinWork < 0 || options.MaxJoinBytes < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxGroupMergeBytes < 0 || options.MaxGroupKeys < 0 || options.MaxSetBytes < 0 || options.MaxSpillBytes < 0 || options.MaxQuerySpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 || options.Workers < 0 || options.OperatorYieldEvery < 0 {
+	if options.MaxRows < 0 || options.MaxIntermediateRows < 0 || options.MaxJoinWork < 0 || options.MaxJoinBytes < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxGroupMergeBytes < 0 || options.MaxGroupKeys < 0 || options.MaxSetBytes < 0 || options.MaxSpillBytes < 0 || options.MaxQuerySpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.MaxCPUTime < 0 || options.CPUTimeCheckEvery < 0 || options.SlowQueryThreshold < 0 || options.Workers < 0 || options.OperatorYieldEvery < 0 {
 		return nil, func() {}, fmt.Errorf("SQL query budgets cannot be negative")
 	}
 	if options.OperatorYieldEvery > MaxSQLOperatorYieldEvery {
 		return nil, func() {}, fmt.Errorf("SQL operator yield quantum exceeds the maximum %d", MaxSQLOperatorYieldEvery)
+	}
+	if options.CPUTimeCheckEvery > MaxSQLCPUTimeCheckEvery {
+		return nil, func() {}, fmt.Errorf("SQL CPU time check quantum exceeds the maximum %d", MaxSQLCPUTimeCheckEvery)
 	}
 	if !options.JoinOverflowPolicy.valid() {
 		return nil, func() {}, fmt.Errorf("unsupported SQL join overflow policy %q", options.JoinOverflowPolicy)
@@ -8245,7 +8268,16 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 		return nil, func() {}, fmt.Errorf("unsupported SQL collation %q", options.Collation)
 	}
 	newControl := func(controlContext context.Context) *sqlExecutionControl {
-		control := &sqlExecutionControl{ctx: controlContext, maxRows: sqlQueryMaxRows(options), options: options, sources: map[string][]SQLRow{}, operatorMemory: options.OperatorMemoryTracker}
+		control := &sqlExecutionControl{ctx: controlContext, maxRows: sqlQueryMaxRows(options), options: options, sources: map[string][]SQLRow{}, operatorMemory: options.OperatorMemoryTracker, maxCPUTime: options.MaxCPUTime}
+		if options.MaxCPUTime > 0 {
+			control.cpuClock = currentSQLThreadCPUTime
+			every := options.CPUTimeCheckEvery
+			if every == 0 {
+				every = DefaultSQLCPUTimeCheckEvery
+			}
+			control.cpuTimeEvery = uint64(every)
+			control.cpuTimeFuel.Store(1)
+		}
 		if options.MaxQuerySpillBytes > 0 {
 			control.spillQuota = newSQLSpillQuota(options.MaxQuerySpillBytes)
 		}
@@ -8291,6 +8323,11 @@ func (control *sqlExecutionControl) check() error {
 	}
 	if err := control.ctx.Err(); err != nil {
 		return err
+	}
+	if control.maxCPUTime > 0 {
+		if err := control.checkCPUTime(); err != nil {
+			return err
+		}
 	}
 	control.maybeYield()
 	return nil
