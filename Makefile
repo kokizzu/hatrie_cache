@@ -25745,3 +25745,11 @@ commit-m217-materialized-point-lookup:
 .PHONY: push-m217-materialized-point-lookup
 push-m217-materialized-point-lookup:
 	bash scripts/push-m217-materialized-point-lookup.sh
+stage-m217-benchmark-correction:
+	bash scripts/stage-m217-benchmark-correction.sh
+
+commit-m217-benchmark-correction:
+	bash scripts/commit-m217-benchmark-correction.sh
+
+push-m217-benchmark-correction:
+	bash scripts/push-m217-benchmark-correction.sh

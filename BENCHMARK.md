@@ -36124,10 +36124,10 @@ Five `-benchmem` samples ran on Linux amd64 / AMD Ryzen 9 5950X with a
 
 | Workload | Median ns/op | B/op | Allocs/op | Relative result |
 | --- | ---: | ---: | ---: | --- |
-| Full snapshot clone and linear scan | 3,472,293 | 3,441,998 | 20,003 | baseline |
-| Maintained point lookup | 386.9 | 376 | 4 | 8,975x faster; 9,154x lower bytes; 5,001x fewer allocations |
-| Existing materialized refresh | 9,663,401 | 10,330,839 | 60,023 | refresh baseline |
-| Refresh with one maintained point index | 10,827,415 | 11,197,987 | 70,058 | 12.0% slower; 8.4% higher bytes; 16.7% more allocations |
+| Full snapshot clone and linear scan | 3,370,318 | 3,441,998 | 20,003 | baseline |
+| Maintained point lookup | 404.4 | 376 | 4 | 8,334x faster; 9,154x lower bytes; 5,001x fewer allocations |
+| Existing materialized refresh | 8,776,015 | 10,330,792 | 60,021 | refresh baseline |
+| Refresh with one maintained point index | 11,006,357 | 11,197,962 | 70,057 | 25.4% slower; 8.4% higher bytes; 16.7% more allocations |
 
 Details and atomicity coverage are recorded in
 [M217_MATERIALIZED_POINT_LOOKUP.md](M217_MATERIALIZED_POINT_LOOKUP.md).

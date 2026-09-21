@@ -1123,7 +1123,7 @@ but avoids rebuilding and sorting the relation. The 10k-row benchmark measured
 
 Added opt-in point lookup indexes for `MaterializedViews`. They retain complete
 view rows under caller-defined keys, update atomically with refreshes, support
-duplicate keys, and return isolated row copies. A 10k-row probe was 8,975x
+duplicate keys, and return isolated row copies. A 10k-row probe was 8,334x
 faster than cloning and scanning the full snapshot, while indexed refreshes
-cost 12.0% more CPU in the measured workload. See
+cost 25.4% more CPU in the measured workload. See
 [M217_MATERIALIZED_POINT_LOOKUP.md](M217_MATERIALIZED_POINT_LOOKUP.md).
