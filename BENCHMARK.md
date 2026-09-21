@@ -32080,6 +32080,24 @@ and 9 allocations. This is an explicit batch API; ordinary streaming and CSV
 imports remain unchanged. Raw samples and the framing rationale are in
 [CH047_PARALLEL_FORMAT_PARSING.md](CH047_PARALLEL_FORMAT_PARSING.md).
 
+<a id="ch-047-csv-parallel-format-parsing"></a>
+## CH-047: Parallel CSV Format Parsing
+
+The opt-in CSV benchmark uses the same 20,000-row RFC 4180 fixture for serial
+and four-worker paths, including quoted multiline fields. Median results from
+three samples:
+
+| Path | ns/op | B/op | allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Serial parse | 9,779,085 | 11,649,621 | 140,040 | 1.00x |
+| Parallel parse | 6,289,099 | 11,506,302 | 120,131 | 1.56x faster |
+| Serial import | 11,283,701 | 9,008,193 | 120,047 | 1.00x |
+| Parallel import | 8,363,252 | 11,507,130 | 120,137 | 1.35x faster |
+
+Parallel import spends 1.28x the bytes for the lower latency; the API is
+therefore opt-in and the existing streaming path remains the default. Raw
+samples and correctness details are in [CH047_CSV_PARALLEL.md](CH047_CSV_PARALLEL.md).
+
 <a id="tu36-snapshot-rotation-policy"></a>
 ## T-U36 Snapshot Rotation Policy
 

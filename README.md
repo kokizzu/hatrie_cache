@@ -4668,6 +4668,10 @@ avoid downloading and decoding an entire remote object; response and row
 limits, safe URL validation, and redirect blocking are enabled by default. See
 [CH047_REMOTE_TABLE_FUNCTIONS.md](CH047_REMOTE_TABLE_FUNCTIONS.md) and the
 [CH-47 benchmark](BENCHMARK.md#ch-47-s3-and-url-table-functions).
+For bounded in-memory bulk CSV loads, the opt-in `hatSql.ParseCSVParallel` and
+`ExternalTables.ImportCSVParallel` APIs parallelize complete RFC 4180 record
+blocks while preserving quoted newlines and input order. See
+[CH047_CSV_PARALLEL.md](CH047_CSV_PARALLEL.md) for the tradeoff and benchmark.
 ## Spatial R-tree SQL Index
 
 Bounded point queries can use the opt-in [`RTreeSpatialSource`](TR027_RTREE_SPATIAL_INDEX.md)

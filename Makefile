@@ -24267,3 +24267,23 @@ commit-ch045-map-subcolumns:
 .PHONY: push-ch045-map-subcolumns
 push-ch045-map-subcolumns:
 	bash scripts/push-ch045-map-subcolumns.sh
+benchmark-ch047-csv:
+	@bash scripts/benchmark-ch047-csv.sh
+
+test-ch047-csv:
+	@bash scripts/test-ch047-csv.sh
+
+format-ch047-csv:
+	@bash scripts/format-ch047-csv.sh
+
+race-ch047-csv:
+	@bash scripts/race-ch047-csv.sh
+
+stage-ch047-csv-parallel:
+	@bash scripts/stage-ch047-csv-parallel.sh
+
+commit-ch047-csv-parallel:
+	@bash scripts/commit-ch047-csv-parallel.sh
+
+push-ch047-csv-parallel:
+	@bash scripts/push-ch047-csv-parallel.sh
