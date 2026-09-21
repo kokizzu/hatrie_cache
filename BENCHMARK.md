@@ -35075,3 +35075,31 @@ Named routing is neutral within scheduler noise and adds no measured per-query
 allocation or retained-byte cost. Pool creation and worker memory are opt-in,
 one per configured named pool. See
 [MZ047_SESSION_COMPUTE_ROUTING.md](MZ047_SESSION_COMPUTE_ROUTING.md).
+## MZ-048 connector secret rotation
+
+Command: `make benchmark-mz048-secret-rotation-baseline` and
+`make benchmark-mz048-secret-rotation-inplace`.
+
+Raw five-run output on AMD Ryzen 9 5950X, `-cpu=1`:
+
+```text
+BenchmarkMZ048ExistingPauseResume   7148785  149.0 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ048ExistingPauseResume   6844999  150.0 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ048ExistingPauseResume   8500760  153.2 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ048ExistingPauseResume   8569366  149.8 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ048ExistingPauseResume   8880678  135.2 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ048InPlaceRotation      40959049  30.22 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ048InPlaceRotation      46425109  29.04 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ048InPlaceRotation      40685962  29.31 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ048InPlaceRotation      41137869  28.91 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ048InPlaceRotation      39126038  29.97 ns/op  0 B/op  0 allocs/op
+```
+
+| Path | Median ns/op | B/op | allocs/op | Relative time |
+| --- | ---: | ---: | ---: | ---: |
+| Existing pause + resume | 150.0 | 0 | 0 | 5.12x slower |
+| In-place rotation | 29.31 | 0 | 0 | 1.00x |
+
+The measured control-plane operation is about 5.1x faster with no allocation
+increase. Connector network/authentication work is outside this microbenchmark;
+see [MZ048_CONNECTOR_SECRET_ROTATION.md](MZ048_CONNECTOR_SECRET_ROTATION.md).

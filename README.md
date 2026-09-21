@@ -4873,3 +4873,4 @@ existing journal/SQL defaults. See [TU39_SPACE_CHANGEFEED.md](TU39_SPACE_CHANGEF
   callers can select bounded named SQL pools while empty routing preserves the
   existing path. See [MZ047_SESSION_COMPUTE_ROUTING.md](MZ047_SESSION_COMPUTE_ROUTING.md)
   and the measurements in [BENCHMARK.md](BENCHMARK.md#mz-047-session-compute-routing).
+- Materialize-inspired MZ-048 connector secret rotation is available through the opt-in `hatPipeline.ConnectorCredentialRotator`; see [MZ048_CONNECTOR_SECRET_ROTATION.md](MZ048_CONNECTOR_SECRET_ROTATION.md) and the [benchmark entry](BENCHMARK.md#mz-048-connector-secret-rotation).

@@ -23932,3 +23932,46 @@ commit-mz047-session-routing:
 
 push-mz047-session-routing:
 	bash ./scripts/push-mz047-session-routing.sh
+.PHONY: benchmark-mz048-secret-rotation-baseline
+benchmark-mz048-secret-rotation-baseline:
+	bash ./scripts/benchmark-mz048-secret-rotation-baseline.sh
+
+.PHONY: test-mz048-secret-rotation
+test-mz048-secret-rotation:
+	bash ./scripts/test-mz048-secret-rotation.sh
+
+.PHONY: benchmark-mz048-secret-rotation
+benchmark-mz048-secret-rotation:
+	bash ./scripts/benchmark-mz048-secret-rotation.sh
+
+.PHONY: benchmark-mz048-secret-rotation-inplace
+benchmark-mz048-secret-rotation-inplace:
+	bash ./scripts/run-mz048-secret-rotation-benchmark.sh inplace
+
+.PHONY: format-mz048-secret-rotation
+format-mz048-secret-rotation:
+	bash ./scripts/format-mz048-secret-rotation.sh
+
+.PHONY: race-mz048-secret-rotation
+race-mz048-secret-rotation:
+	bash ./scripts/race-mz048-secret-rotation.sh
+
+.PHONY: verify-mz048-secret-rotation
+verify-mz048-secret-rotation:
+	bash ./scripts/verify-mz048-secret-rotation.sh
+
+.PHONY: review-mz048-secret-rotation
+review-mz048-secret-rotation:
+	bash ./scripts/review-mz048-secret-rotation.sh
+
+.PHONY: stage-mz048-secret-rotation
+stage-mz048-secret-rotation:
+	bash ./scripts/stage-mz048-secret-rotation.sh
+
+.PHONY: commit-mz048-secret-rotation
+commit-mz048-secret-rotation:
+	bash ./scripts/commit-mz048-secret-rotation.sh
+
+.PHONY: push-mz048-secret-rotation
+push-mz048-secret-rotation:
+	bash ./scripts/push-mz048-secret-rotation.sh

@@ -9,18 +9,23 @@ import (
 )
 
 const (
-	defaultConnectorHistoryLimit = 32
-	maxConnectorHistoryLimit     = 4096
+	defaultConnectorHistoryLimit       = 32
+	maxConnectorHistoryLimit           = 4096
+	defaultConnectorCredentialMaxBytes = 1 << 20
+	maxConnectorCredentialMaxBytes     = 64 << 20
 )
 
 var (
-	ErrConnectorIDEmpty             = errors.New("connector ID is empty")
-	ErrConnectorNil                 = errors.New("connector is nil")
-	ErrConnectorAlreadyRegistered   = errors.New("connector is already registered")
-	ErrConnectorNotFound            = errors.New("connector is not registered")
-	ErrConnectorInvalidTransition   = errors.New("connector lifecycle transition is invalid")
-	ErrConnectorRegistryClosed      = errors.New("connector registry is closed")
-	ErrConnectorHistoryLimitInvalid = errors.New("connector history limit is invalid")
+	ErrConnectorIDEmpty                       = errors.New("connector ID is empty")
+	ErrConnectorNil                           = errors.New("connector is nil")
+	ErrConnectorAlreadyRegistered             = errors.New("connector is already registered")
+	ErrConnectorNotFound                      = errors.New("connector is not registered")
+	ErrConnectorInvalidTransition             = errors.New("connector lifecycle transition is invalid")
+	ErrConnectorRegistryClosed                = errors.New("connector registry is closed")
+	ErrConnectorHistoryLimitInvalid           = errors.New("connector history limit is invalid")
+	ErrConnectorCredentialLimitInvalid        = errors.New("connector credential limit is invalid")
+	ErrConnectorCredentialRotationInvalid     = errors.New("connector credential rotation is invalid")
+	ErrConnectorCredentialRotationUnsupported = errors.New("connector does not support credential rotation")
 )
 
 // ConnectorState is the externally visible lifecycle state of a connector.
@@ -61,11 +66,30 @@ type Connector interface {
 	Stop(context.Context) error
 }
 
+// ConnectorCredentialRotation carries one versioned credential update. The
+// registry validates the version and size but does not retain or copy Value;
+// the optional rotator owns the value after RotateCredentials returns.
+type ConnectorCredentialRotation struct {
+	Version uint64
+	Value   []byte
+}
+
+// ConnectorCredentialRotator is an optional data-plane hook. Implementations
+// should atomically publish the new credential and may retain Value after the
+// call returns. Connectors that do not implement it keep the legacy lifecycle
+// behavior and return ErrConnectorCredentialRotationUnsupported.
+type ConnectorCredentialRotator interface {
+	RotateCredentials(context.Context, ConnectorCredentialRotation) error
+}
+
 // ConnectorRegistryOptions controls the lifecycle control plane.
 type ConnectorRegistryOptions struct {
 	// HistoryLimit is the number of recent transition events retained per
 	// connector. Zero selects the default of 32.
 	HistoryLimit int
+	// MaxCredentialBytes bounds one in-place credential rotation. Zero selects
+	// the default of 1 MiB.
+	MaxCredentialBytes int
 }
 
 // ConnectorStatus is a point-in-time lifecycle snapshot.
@@ -88,26 +112,27 @@ type ConnectorEvent struct {
 }
 
 type managedConnector struct {
-	mu             sync.Mutex
-	remediationMu  sync.Mutex
-	id             string
-	connector      Connector
-	status         ConnectorStatus
-	events         []ConnectorEvent
-	eventNext      int
-	removed        bool
+	mu            sync.Mutex
+	remediationMu sync.Mutex
+	id            string
+	connector     Connector
+	status        ConnectorStatus
+	events        []ConnectorEvent
+	eventNext     int
+	removed       bool
 }
 
 // ConnectorRegistry owns connector registration, lifecycle transitions, and
 // bounded operator-visible status history. It has no effect on data-plane
 // operations unless a caller explicitly uses it.
 type ConnectorRegistry struct {
-	mu           sync.RWMutex
-	healthMu     sync.RWMutex
-	connectors   map[string]*managedConnector
-	health       map[string]ConnectorHealthStatus
-	historyLimit int
-	closed       bool
+	mu                 sync.RWMutex
+	healthMu           sync.RWMutex
+	connectors         map[string]*managedConnector
+	health             map[string]ConnectorHealthStatus
+	historyLimit       int
+	maxCredentialBytes int
+	closed             bool
 }
 
 // NewConnectorRegistry creates a connector lifecycle registry.
@@ -119,10 +144,18 @@ func NewConnectorRegistry(options ConnectorRegistryOptions) (*ConnectorRegistry,
 	if historyLimit < 0 || historyLimit > maxConnectorHistoryLimit {
 		return nil, ErrConnectorHistoryLimitInvalid
 	}
+	maxCredentialBytes := options.MaxCredentialBytes
+	if maxCredentialBytes == 0 {
+		maxCredentialBytes = defaultConnectorCredentialMaxBytes
+	}
+	if maxCredentialBytes < 1 || maxCredentialBytes > maxConnectorCredentialMaxBytes {
+		return nil, ErrConnectorCredentialLimitInvalid
+	}
 	return &ConnectorRegistry{
-		connectors:   make(map[string]*managedConnector),
-		health:       make(map[string]ConnectorHealthStatus),
-		historyLimit: historyLimit,
+		connectors:         make(map[string]*managedConnector),
+		health:             make(map[string]ConnectorHealthStatus),
+		historyLimit:       historyLimit,
+		maxCredentialBytes: maxCredentialBytes,
 	}, nil
 }
 
@@ -189,6 +222,51 @@ func (r *ConnectorRegistry) Unregister(id string) error {
 // Start starts a connector from Created or Failed.
 func (r *ConnectorRegistry) Start(ctx context.Context, id string) error {
 	return r.transition(ctx, id, connectorStart, false)
+}
+
+// RotateCredentials updates a running, paused, or not-yet-started connector
+// without invoking Stop or Start. The call is serialized with lifecycle
+// transitions for the selected connector. It is opt-in: connectors must
+// implement ConnectorCredentialRotator to accept the update.
+func (r *ConnectorRegistry) RotateCredentials(ctx context.Context, id string, rotation ConnectorCredentialRotation) error {
+	if id == "" {
+		return ErrConnectorIDEmpty
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if rotation.Version == 0 || len(rotation.Value) > r.maxCredentialBytes {
+		return ErrConnectorCredentialRotationInvalid
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.RLock()
+	if r.closed {
+		r.mu.RUnlock()
+		return ErrConnectorRegistryClosed
+	}
+	entry := r.connectors[id]
+	r.mu.RUnlock()
+	if entry == nil {
+		return ErrConnectorNotFound
+	}
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	if entry.removed {
+		return ErrConnectorNotFound
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if entry.status.State != ConnectorCreated && entry.status.State != ConnectorRunning && entry.status.State != ConnectorPaused {
+		return ErrConnectorInvalidTransition
+	}
+	rotator, ok := entry.connector.(ConnectorCredentialRotator)
+	if !ok {
+		return ErrConnectorCredentialRotationUnsupported
+	}
+	return rotator.RotateCredentials(ctx, rotation)
 }
 
 // Pause pauses a running connector.
