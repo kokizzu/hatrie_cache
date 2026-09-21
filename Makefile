@@ -25332,3 +25332,38 @@ commit-c226-grace-hash-join:
 .PHONY: push-c226-grace-hash-join
 push-c226-grace-hash-join:
 	bash scripts/push-c226-grace-hash-join.sh
+.PHONY: benchmark-c240-backup-attachment-baseline
+benchmark-c240-backup-attachment-baseline:
+	bash scripts/benchmark-c240-backup-attachment-baseline.sh
+
+.PHONY: test-c240-backup-attachment
+test-c240-backup-attachment:
+	bash scripts/test-c240-backup-attachment.sh
+
+.PHONY: format-c240-backup-attachment
+format-c240-backup-attachment:
+	bash scripts/format-c240-backup-attachment.sh
+
+.PHONY: benchmark-c240-backup-attachment
+benchmark-c240-backup-attachment:
+	bash scripts/benchmark-c240-backup-attachment.sh
+
+.PHONY: race-c240-backup-attachment
+race-c240-backup-attachment:
+	bash scripts/race-c240-backup-attachment.sh
+
+.PHONY: vet-c240-backup-attachment
+vet-c240-backup-attachment:
+	bash scripts/vet-c240-backup-attachment.sh
+
+.PHONY: stage-c240-backup-attachment
+stage-c240-backup-attachment:
+	bash scripts/stage-c240-backup-attachment.sh
+
+.PHONY: commit-c240-backup-attachment
+commit-c240-backup-attachment:
+	bash scripts/commit-c240-backup-attachment.sh
+
+.PHONY: push-c240-backup-attachment
+push-c240-backup-attachment:
+	bash scripts/push-c240-backup-attachment.sh

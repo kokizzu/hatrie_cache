@@ -1231,6 +1231,12 @@ Recommended durability profiles:
 
 ### Backup Runbook
 
+For offline SQL inspection without restoring into a live data directory, use
+`OpenBackupReadOnlyAttachment`; it supports snapshot bundles, Pebble checkpoint
+bundles, and incremental repositories. See
+[C240_READ_ONLY_BACKUP_ATTACHMENT.md](C240_READ_ONLY_BACKUP_ATTACHMENT.md) for
+the API, cleanup requirement, and benchmark tradeoffs.
+
 For snapshot+journal deployments:
 
 1. Trigger an online snapshot.

@@ -23246,6 +23246,30 @@ rather than an always-on foreground path. Full semantics and the
 cumulative-history correctness test are in
 [C239_COMPACTION_METRICS.md](C239_COMPACTION_METRICS.md).
 
+## C240 Read-Only Backup Attachment
+
+Command: `make benchmark-c240-backup-attachment`. Five samples use five
+operations per sample on Linux/amd64 with an AMD Ryzen 9 5950X. Both paths
+read the same two-row JSON source and execute the same SQL projection. The
+baseline restores a bundle into a temporary data directory, loads it, and
+queries it. The attachment extracts into private staging, loads once, queries,
+and closes.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | --- | ---: | ---: | ---: | --- |
+| Existing restore + load + query | `2395097; 2705013; 2486089; 2518624; 2899084` | `2518624` | `294662` | `409` | baseline |
+| Read-only attachment + query | `667154; 638119; 485339; 582310; 505504` | `582310` | `158766` | `253` | `4.33x` faster; `1.86x` lower transient bytes; `1.62x` fewer allocations |
+
+The attachment is faster because it avoids publishing a restore destination
+and the restore path's second verification/load boundary. It still retains a
+detached trie until `Close`, and its resolver intentionally exposes the base
+SQL source interface rather than live-trie mutation or optional accelerator
+interfaces. A cold pre-implementation single-operation baseline was
+`4029309 ns/op`, `2171160 B/op`, and `1087 allocs/op`; the paired run above is
+the stable comparison. Correctness, corruption rejection, race, and staging
+cleanup are covered by the C240 Make targets. Full API details are in
+[C240_READ_ONLY_BACKUP_ATTACHMENT.md](C240_READ_ONLY_BACKUP_ATTACHMENT.md).
+
 ## TT-046 Per-Structure Memory Accounting
 
 This diagnostic feature exposes the native trie and each typed backing pool via
