@@ -36084,3 +36084,18 @@ Five `-benchmem` samples ran on Linux amd64 / AMD Ryzen 9 5950X.
 
 The implementation and decision rationale are recorded in
 [M214_ARRANGEMENT_REUSE_AUDIT.md](M214_ARRANGEMENT_REUSE_AUDIT.md).
+
+## M215 Delta-Join Maintenance Audit
+
+Command: `make benchmark-m215-delta-join-audit`
+
+Five `-benchmem` samples ran on Linux amd64 / AMD Ryzen 9 5950X over a 10,000
+row-per-side join with one changed left row per iteration.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Rebuild the 10k-row join | 5,424,235 | 5,530,657 | 60,035 | baseline |
+| Existing incremental delta join | 2,238 | 2,071 | 15 | 2,424x faster; 2,671x lower bytes; 4,002x fewer allocations |
+
+The operator and correctness evidence are recorded in
+[M215_DELTA_JOIN_AUDIT.md](M215_DELTA_JOIN_AUDIT.md).

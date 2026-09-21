@@ -1100,3 +1100,12 @@ up to 1.44x faster for reused arrangement workloads and 3.12x faster for
 equivalent compiled plans. No process-wide registry was added because table
 lifecycle, invalidation, and checkpoint ownership must remain explicit. See
 [M214_ARRANGEMENT_REUSE_AUDIT.md](M214_ARRANGEMENT_REUSE_AUDIT.md).
+
+## M215: Delta-Join Maintenance Audit
+
+Materialize-style differential join maintenance is already implemented by
+`hatSql.IncrementalJoin`. It updates only matching equality buckets and emits
+pair deltas instead of rebuilding the relation. The focused correctness suite
+and randomized reference test passed; the 10k-row benchmark measured a
+2,424x median latency advantage over rebuilding. See
+[M215_DELTA_JOIN_AUDIT.md](M215_DELTA_JOIN_AUDIT.md).

@@ -25677,3 +25677,23 @@ commit-m214-arrangement-reuse-audit:
 .PHONY: push-m214-arrangement-reuse-audit
 push-m214-arrangement-reuse-audit:
 	bash scripts/push-m214-arrangement-reuse-audit.sh
+
+.PHONY: test-m215-delta-join-audit
+test-m215-delta-join-audit:
+	bash scripts/test-m215-delta-join-audit.sh
+
+.PHONY: benchmark-m215-delta-join-audit
+benchmark-m215-delta-join-audit:
+	bash scripts/benchmark-m215-delta-join-audit.sh
+
+.PHONY: stage-m215-delta-join-audit
+stage-m215-delta-join-audit:
+	bash scripts/stage-m215-delta-join-audit.sh
+
+.PHONY: commit-m215-delta-join-audit
+commit-m215-delta-join-audit:
+	bash scripts/commit-m215-delta-join-audit.sh
+
+.PHONY: push-m215-delta-join-audit
+push-m215-delta-join-audit:
+	bash scripts/push-m215-delta-join-audit.sh

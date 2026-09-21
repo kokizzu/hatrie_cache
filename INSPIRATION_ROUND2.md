@@ -101,7 +101,7 @@ operator control remain the preferred deployment model.
 - [x] M212 Logical compaction that advances retained history without rewriting live state. See [M212_LOGICAL_COMPACTION.md](M212_LOGICAL_COMPACTION.md).
 - [x] M213 Consolidation of equal updates before forwarding to downstream consumers is already covered by query row grouping and M208 adapter folding; the additional enqueue fold was measured and rejected. See [M213_EQUAL_UPDATE_CONSOLIDATION.md](M213_EQUAL_UPDATE_CONSOLIDATION.md).
 - [x] M214 Arrangement reuse across indexes and compatible query plans; already covered by compiled arrangement workloads, canonical plan caching, and typed-table arrangement registries. See [M214_ARRANGEMENT_REUSE_AUDIT.md](M214_ARRANGEMENT_REUSE_AUDIT.md).
-- [ ] M215 Delta-join maintenance for high-churn join inputs.
+- [x] M215 Delta-join maintenance for high-churn join inputs; already implemented by `hatSql.IncrementalJoin` with signed differential updates and equality-bucket maintenance. See [M215_DELTA_JOIN_AUDIT.md](M215_DELTA_JOIN_AUDIT.md).
 - [ ] M216 Incremental top-K arrangements with bounded replacement state.
 - [ ] M217 Indexes that store complete maintained view results for point lookups.
 - [ ] M218 Planner selection of point lookup versus arrangement scan.
