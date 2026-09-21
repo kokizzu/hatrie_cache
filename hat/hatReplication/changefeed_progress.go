@@ -3,7 +3,8 @@ package hatReplication
 import (
 	"errors"
 	"fmt"
-	"sync/atomic"
+
+	"hatrie_cache/hat/hatDataStructure"
 )
 
 var (
@@ -21,13 +22,13 @@ type ChangefeedProgress struct {
 // ChangefeedFrontier tracks the greatest sequence that a producer has
 // completely observed. It is safe for concurrent producers and consumers.
 type ChangefeedFrontier struct {
-	sequence uint64
+	sequence hatDataStructure.MonotoneLogicalTimestamp
 }
 
 // NewChangefeedFrontier creates a frontier at initial. Sequence zero is a
 // valid empty frontier and can be advanced normally.
 func NewChangefeedFrontier(initial uint64) *ChangefeedFrontier {
-	return &ChangefeedFrontier{sequence: initial}
+	return &ChangefeedFrontier{sequence: hatDataStructure.NewMonotoneLogicalTimestamp(initial)}
 }
 
 // Current returns the greatest observed sequence. A nil frontier returns zero.
@@ -35,7 +36,12 @@ func (frontier *ChangefeedFrontier) Current() uint64 {
 	if frontier == nil {
 		return 0
 	}
-	return atomic.LoadUint64(&frontier.sequence)
+	return frontier.sequence.Current()
+}
+
+// AtLeast reports whether the frontier has reached sequence.
+func (frontier *ChangefeedFrontier) AtLeast(sequence uint64) bool {
+	return frontier != nil && frontier.sequence.AtLeast(sequence)
 }
 
 // Progress returns a progress message for the current frontier.
@@ -43,7 +49,7 @@ func (frontier *ChangefeedFrontier) Progress() (ChangefeedProgress, error) {
 	if frontier == nil {
 		return ChangefeedProgress{}, ErrChangefeedFrontierNil
 	}
-	return ChangefeedProgress{Sequence: atomic.LoadUint64(&frontier.sequence), Progressed: true}, nil
+	return ChangefeedProgress{Sequence: frontier.sequence.Current(), Progressed: true}, nil
 }
 
 // Advance publishes a progress message at sequence. Equal advances are
@@ -54,11 +60,11 @@ func (frontier *ChangefeedFrontier) Advance(sequence uint64) (ChangefeedProgress
 		return ChangefeedProgress{}, ErrChangefeedFrontierNil
 	}
 	for {
-		current := atomic.LoadUint64(&frontier.sequence)
+		current := frontier.sequence.Current()
 		if sequence < current {
 			return ChangefeedProgress{Sequence: current, Progressed: true}, fmt.Errorf("%w: current=%d requested=%d", ErrChangefeedFrontierRegressed, current, sequence)
 		}
-		if sequence == current || atomic.CompareAndSwapUint64(&frontier.sequence, current, sequence) {
+		if sequence == current || frontier.sequence.CompareAndSwap(current, sequence) {
 			return ChangefeedProgress{Sequence: sequence, Progressed: true}, nil
 		}
 	}

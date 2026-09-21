@@ -1047,3 +1047,9 @@ implementation preserves stable order, drops zero net changes, checks integer
 overflow, and keeps the existing adapter multiplicity validation. See
 `M208_DIFFERENTIAL_MULTIPLICITY_FOLDING.md` for correctness and benchmark
 results.
+## M209: Monotone Logical Timestamp Frontiers
+
+Adopted one lock-free scalar frontier for both SQL source-partition reads and
+changefeed progress. Equal timestamps remain idempotent, regressions retain
+the existing API errors, and hot callers have a zero-allocation fast path.
+See `M209_MONOTONE_LOGICAL_TIMESTAMP.md` for the measured CPU tradeoff.

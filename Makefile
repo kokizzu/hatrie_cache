@@ -25447,6 +25447,47 @@ commit-m208-differential-folding:
 .PHONY: push-m208-differential-folding
 push-m208-differential-folding:
 	bash scripts/push-m208-differential-folding.sh
+
+.PHONY: benchmark-m209-monotone-frontier-baseline
+benchmark-m209-monotone-frontier-baseline:
+	bash scripts/benchmark-m209-monotone-frontier-baseline.sh
+
+.PHONY: format-m209-monotone-frontier
+format-m209-monotone-frontier:
+	bash scripts/format-m209-monotone-frontier.sh
+
+.PHONY: test-m209-monotone-frontier
+test-m209-monotone-frontier:
+	bash scripts/test-m209-monotone-frontier.sh
+
+.PHONY: benchmark-m209-monotone-frontier
+benchmark-m209-monotone-frontier:
+	bash scripts/benchmark-m209-monotone-frontier.sh
+
+.PHONY: benchmark-m209-changefeed-frontier
+benchmark-m209-changefeed-frontier:
+	bash scripts/benchmark-m209-changefeed-frontier.sh
+
+.PHONY: race-m209-monotone-frontier
+race-m209-monotone-frontier:
+	bash scripts/race-m209-monotone-frontier.sh
+
+.PHONY: vet-m209-monotone-frontier
+vet-m209-monotone-frontier:
+	bash scripts/vet-m209-monotone-frontier.sh
+
+.PHONY: stage-m209-monotone-frontier
+stage-m209-monotone-frontier:
+	bash scripts/stage-m209-monotone-frontier.sh
+
+.PHONY: commit-m209-monotone-frontier
+commit-m209-monotone-frontier:
+	bash scripts/commit-m209-monotone-frontier.sh
+
+.PHONY: push-m209-monotone-frontier
+push-m209-monotone-frontier:
+	bash scripts/push-m209-monotone-frontier.sh
+
 .PHONY: benchmark-m208-differential-folding-baseline
 benchmark-m208-differential-folding-baseline:
 	bash scripts/benchmark-m208-differential-folding-baseline.sh

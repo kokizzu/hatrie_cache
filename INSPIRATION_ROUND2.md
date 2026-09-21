@@ -94,8 +94,8 @@ operator control remain the preferred deployment model.
 - [x] M205 Deterministic within-timestamp ordering for changefeed batches. Opt-in `QuerySubscriptionDefinition.DeterministicOrder` sorts differential initial, update, progress-safe, and reset batch phases by canonical row key without changing default behavior; see [M205_DETERMINISTIC_SUBSCRIPTION_ORDER.md](M205_DETERMINISTIC_SUBSCRIPTION_ORDER.md).
 - [x] M206 Upsert envelopes that expose a stable key and current row image. `hatSql.UpsertChangefeed` emits detached keyed current-image envelopes and tombstones with subscription frontier metadata; see [M206_UPSERT_ENVELOPES.md](M206_UPSERT_ENVELOPES.md) and [BENCHMARK.md#mz-016-keyed-upsert-envelopes](BENCHMARK.md#mz-016-keyed-upsert-envelopes).
 - [x] M207 Debezium envelopes with before/after images and operation type. `hatSql.DebeziumChangefeed` requires declared unique key columns, emits snapshot/create/update/delete payloads, preserves subscription frontier metadata, and rejects ambiguous multiplicity; the optimized adapter measured about 16x lower latency, 18x lower allocated bytes, and 10x fewer allocations than its full-state-copy baseline; see [M207_DEBEZIUM_CHANGEFEED.md](M207_DEBEZIUM_CHANGEFEED.md).
-- [ ] M208 Differential multiplicity folding for insert/delete update streams.
-- [ ] M209 Monotone logical timestamp frontiers for read and stream APIs.
+- [x] M208 Differential multiplicity folding for insert/delete update streams. See [M208_DIFFERENTIAL_MULTIPLICITY_FOLDING.md](M208_DIFFERENTIAL_MULTIPLICITY_FOLDING.md).
+- [x] M209 Monotone logical timestamp frontiers for read and stream APIs. See [M209_MONOTONE_LOGICAL_TIMESTAMP.md](M209_MONOTONE_LOGICAL_TIMESTAMP.md).
 - [ ] M210 Historical `AS OF` reads against retained logical state.
 - [ ] M211 Explicit rejection of reads before `since` or at/after `upper` frontiers.
 - [ ] M212 Logical compaction that advances retained history without rewriting live state.
@@ -203,6 +203,3 @@ paired measurements in [BENCHMARK.md](BENCHMARK.md#c204-projection-idempotency-m
 - Implementation: `hat/hatSql/ch234_stage_profiler.go` and
   `hat/hatSql/ch234_stage_profiler_test.go`.
 - Benchmark and tradeoff: `C234_QUERY_STAGE_PROFILER.md`.
-## M208 Status
-
-- [x] Differential multiplicity folding for insert/delete update streams.

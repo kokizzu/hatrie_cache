@@ -35987,3 +35987,18 @@ Linux amd64, AMD Ryzen 9 5950X, five samples, `-benchtime=2s`.
 
 Raw samples and the integrated adapter comparison are recorded in
 `M208_DIFFERENTIAL_MULTIPLICITY_FOLDING.md`.
+## M209 Monotone Logical Timestamp Frontiers
+
+Commands: `make benchmark-m209-monotone-frontier` and
+`make benchmark-m209-changefeed-frontier`.
+
+| Path | Median ns/op | B/op | allocs/op | Improvement/tradeoff |
+| --- | ---: | ---: | ---: | --- |
+| Raw atomic baseline | 2.133 | 0 | 0 | 1.00x |
+| Shared `AdvanceIfNewer` | 2.319 | 0 | 0 | 1.09x CPU cost |
+| Changefeed adapter baseline | 2.302 | 0 | 0 | 1.00x |
+| Changefeed adapter with shared frontier | 2.517 | 0 | 0 | 1.09x CPU cost |
+| SQL source-frontier observe | 46.07 | 0 | 0 | allocation-free |
+
+The full raw samples and checked-error-path measurement are in
+`M209_MONOTONE_LOGICAL_TIMESTAMP.md`.

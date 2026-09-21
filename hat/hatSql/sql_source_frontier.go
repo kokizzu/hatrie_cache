@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"hatrie_cache/hat/hatDataStructure"
 )
 
 var (
@@ -45,7 +47,7 @@ type sqlSourceFrontierKey struct {
 
 type sqlSourceFrontierState struct {
 	partition SQLSourceFrontierPartition
-	frontier  uint64
+	timestamp hatDataStructure.MonotoneLogicalTimestamp
 	observed  bool
 	heapIndex int
 }
@@ -97,7 +99,11 @@ func NewSQLSourceFrontierTracker(partitions []SQLSourceFrontierPartition) (*SQLS
 		frontierHeap: make([]int, len(normalized)),
 	}
 	for index, partition := range normalized {
-		tracker.states[index] = sqlSourceFrontierState{partition: partition, heapIndex: index}
+		tracker.states[index] = sqlSourceFrontierState{
+			partition: partition,
+			timestamp: hatDataStructure.NewMonotoneLogicalTimestamp(0),
+			heapIndex: index,
+		}
 		tracker.indexes[sqlSourceFrontierKey{source: partition.Source, partition: partition.Partition}] = index
 		tracker.frontierHeap[index] = index
 	}
@@ -179,7 +185,7 @@ func (tracker *SQLSourceFrontierTracker) CommonFrontier() (frontier uint64, read
 	if tracker.observedCount != len(tracker.states) || len(tracker.frontierHeap) == 0 {
 		return 0, false
 	}
-	return tracker.states[tracker.frontierHeap[0]].frontier, true
+	return tracker.states[tracker.frontierHeap[0]].timestamp.Current(), true
 }
 
 // ReadyAt reports whether every configured partition has reached frontier.
@@ -204,7 +210,7 @@ func (tracker *SQLSourceFrontierTracker) Frontier(source, partition string) (uin
 	if !known || !tracker.states[index].observed {
 		return 0, false
 	}
-	return tracker.states[index].frontier, true
+	return tracker.states[index].timestamp.Current(), true
 }
 
 // Snapshot returns all configured partitions in deterministic order.
@@ -219,7 +225,7 @@ func (tracker *SQLSourceFrontierTracker) Snapshot() []SQLSourceFrontierSnapshot 
 		snapshot[index] = SQLSourceFrontierSnapshot{
 			Source:    state.partition.Source,
 			Partition: state.partition.Partition,
-			Frontier:  state.frontier,
+			Frontier:  state.timestamp.Current(),
 			Observed:  state.observed,
 		}
 	}
@@ -228,14 +234,14 @@ func (tracker *SQLSourceFrontierTracker) Snapshot() []SQLSourceFrontierSnapshot 
 
 func (tracker *SQLSourceFrontierTracker) observeLocked(index int, frontier uint64) bool {
 	state := &tracker.states[index]
-	if state.observed && frontier <= state.frontier {
+	if state.observed && frontier <= state.timestamp.Current() {
 		return false
 	}
+	state.timestamp.AdvanceIfNewer(frontier)
 	if !state.observed {
 		state.observed = true
 		tracker.observedCount++
 	}
-	state.frontier = frontier
 	tracker.frontierDown(state.heapIndex)
 	return true
 }
@@ -262,8 +268,10 @@ func (tracker *SQLSourceFrontierTracker) frontierDown(index int) {
 func (tracker *SQLSourceFrontierTracker) frontierLess(left, right int) bool {
 	leftState := tracker.states[tracker.frontierHeap[left]]
 	rightState := tracker.states[tracker.frontierHeap[right]]
-	if leftState.frontier != rightState.frontier {
-		return leftState.frontier < rightState.frontier
+	leftFrontier := leftState.timestamp.Current()
+	rightFrontier := rightState.timestamp.Current()
+	if leftFrontier != rightFrontier {
+		return leftFrontier < rightFrontier
 	}
 	return tracker.frontierHeap[left] < tracker.frontierHeap[right]
 }
