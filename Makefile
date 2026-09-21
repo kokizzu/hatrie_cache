@@ -24560,4 +24560,40 @@ push-tt028-upsert:
 	bash scripts/push-tt028-upsert.sh
 
 inspect-open-ideas:
-	bash scripts/inspect-next-goal.sh OPEN
+	bash scripts/inspect-open-ideas.sh OPEN
+
+test-tt021-mutable:
+	bash scripts/test-tt021-mutable.sh
+
+format-tt021-mutable:
+	bash scripts/format-tt021-mutable.sh
+
+benchmark-tt021-mutable-before:
+	bash scripts/benchmark-tt021-mutable-before.sh
+
+benchmark-tt021-mutable:
+	bash scripts/benchmark-tt021-mutable.sh
+
+test-tt021-package:
+	bash scripts/test-tt021-package.sh
+
+test-tt021-parent-package:
+	bash scripts/test-tt021-parent-package.sh
+
+race-tt021-mutable:
+	bash scripts/race-tt021-mutable.sh
+
+vet-tt021-mutable:
+	bash scripts/vet-tt021-mutable.sh
+
+review-tt021-mutable:
+	bash scripts/review-tt021-mutable.sh
+
+stage-tt021-mutable:
+	bash scripts/stage-tt021-mutable.sh
+
+commit-tt021-mutable:
+	bash scripts/commit-tt021-mutable.sh
+
+push-tt021-mutable:
+	bash scripts/push-tt021-mutable.sh

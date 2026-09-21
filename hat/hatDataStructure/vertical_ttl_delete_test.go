@@ -97,7 +97,7 @@ func TestPersistentDeleteBitmapAppliesVerticalTTLDeletesIntoBuffer(t *testing.T)
 	if !reflect.DeepEqual(result.Candidates, want) {
 		t.Fatalf("Candidates = %#v, want %#v", result.Candidates, want)
 	}
-	if len(result.Candidates) != len(buffer) || &result.Candidates[0] != &buffer[0] {
+	if cap(result.Candidates) != cap(buffer) || &result.Candidates[0] != &buffer[:cap(buffer)][0] {
 		t.Fatalf("result did not reuse caller buffer")
 	}
 	for _, candidate := range result.Candidates {

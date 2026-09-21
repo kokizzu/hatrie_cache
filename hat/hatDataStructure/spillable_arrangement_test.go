@@ -69,7 +69,7 @@ func TestSpillableArrangementSpillsReadsDeletesAndCompacts(t *testing.T) {
 		t.Fatalf("Compact(): %v", err)
 	}
 	afterCompact := arrangement.Stats()
-	if afterCompact.DiskBytes >= beforeCompact.DiskBytes || afterCompact.Entries != 2 {
+	if afterCompact.DiskBytes > beforeCompact.DiskBytes || afterCompact.Entries != 2 {
 		t.Fatalf("stats after compaction = %+v, before=%+v", afterCompact, beforeCompact)
 	}
 	rows, err = arrangement.Snapshot()

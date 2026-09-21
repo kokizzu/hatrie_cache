@@ -88,6 +88,11 @@ type PackedRTree[T any] struct {
 // NewPackedRTree copies and bulk-builds entries into an immutable packed
 // spatial index. Rebuild the tree when the indexed set changes.
 func NewPackedRTree[T any](entries []SpatialEntry[T], options PackedRTreeOptions) (*PackedRTree[T], error) {
+	copyEntries := append([]SpatialEntry[T](nil), entries...)
+	return newPackedRTreeOwned(copyEntries, options)
+}
+
+func newPackedRTreeOwned[T any](entries []SpatialEntry[T], options PackedRTreeOptions) (*PackedRTree[T], error) {
 	leafSize := options.LeafSize
 	if leafSize == 0 {
 		leafSize = DefaultPackedRTreeLeafSize
@@ -95,18 +100,17 @@ func NewPackedRTree[T any](entries []SpatialEntry[T], options PackedRTreeOptions
 	if leafSize < 1 {
 		return nil, ErrPackedRTreeOptionsInvalid
 	}
-	copyEntries := append([]SpatialEntry[T](nil), entries...)
-	for index := range copyEntries {
-		if !copyEntries[index].Bounds.Valid() {
+	for index := range entries {
+		if !entries[index].Bounds.Valid() {
 			return nil, fmt.Errorf("%w: entry %d", ErrSpatialBoxInvalid, index)
 		}
 	}
 	tree := &PackedRTree[T]{
-		entries:  copyEntries,
+		entries:  entries,
 		root:     -1,
 		leafSize: leafSize,
 	}
-	if len(copyEntries) == 0 {
+	if len(entries) == 0 {
 		return tree, nil
 	}
 	tree.build()

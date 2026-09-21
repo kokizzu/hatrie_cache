@@ -1,5 +1,18 @@
 # Benchmark
 
+## TT-021 Mutable Packed R-Tree
+
+The 10,000-entry update/query and compaction comparison, including raw samples
+and memory measurements, is documented in
+[TT021_MUTABLE_PACKED_RTREE.md](TT021_MUTABLE_PACKED_RTREE.md).
+
+| Operation | Median ns/op | B/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Existing mutable `RTree` update + query | 4,086 | 2,040 | 8 | baseline |
+| Packed rebuild update + query | 5,977,552 | 547,522 | 102 | baseline |
+| `MutablePackedRTree` update + query | 1,633 | 0 | 0 | 2.50x faster than mutable `RTree` |
+| `MutablePackedRTree` update + compact | 3,400,805 | 631,444 | 111 | 1.76x faster than packed rebuild; 1.15x transient bytes |
+
 ## TT-028 Upsert Conflict Handlers
 
 Workload: 1,024 materialized rows, one repeated unique-key merge, five
