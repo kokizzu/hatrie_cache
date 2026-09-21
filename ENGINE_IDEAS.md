@@ -155,7 +155,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-015 | Vinyl read/write thread tuning | Read and compaction workers lack independent bounded runtime configuration. | Medium |
 | TT-016 | Disk-space reserve admission | Implemented as an opt-in filesystem free-space reserve for LevelDB/Pebble full, key, dirty, and generation saves; default remains disabled. | Low |
 | TT-017 | Run-level Bloom filters | Implemented as an opt-in native LevelDB/Pebble Bloom prefilter for new persistent runs and replication-outbox tables; default remains `0` because the measured warm workload adds 11.7%-14.4% storage with no general CPU win. | Medium |
-| TT-018 | Page-index residency policy | Page indexes have no explicit memory budget and eviction metrics. | Medium |
+| TT-018 | Page-index residency policy | Adopted as opt-in `hatDataStructure.PageIndexResidency[K,V]` with byte/entry-bounded LRU eviction, zero-allocation hits, and admission/eviction counters; storage integration remains caller-owned. | Medium |
 | TT-019 | Covering secondary indexes | Secondary postings cannot retain selected payload fields to avoid primary lookups. | Medium |
 | TT-020 | Generic multi-part TREE ranges | Implemented as the allocation-free `OrderedIndex.Range` API, which binary-searches inclusive composite bounds and iterates only the bounded subslice; callers can express a partial-key prefix with the smallest and largest suffix values. | Medium |
 | TT-021 | RTREE spatial index | Adopted as the opt-in immutable `hatDataStructure.PackedRTree[T]` bounding-box API; mutable updates, SQL planner wiring, and persistence remain open. | High |

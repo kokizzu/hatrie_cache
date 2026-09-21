@@ -989,8 +989,19 @@ ClickHouse-style immutable-part metadata is available through the opt-in
 independent named column checksums. `Validate` is used when bytes enter a
 local cache or cross an untrusted boundary; `Equal` is an allocation-free
 metadata check for repeated reuse. See [C244_LOCAL_CACHE_REUSE.md](C244_LOCAL_CACHE_REUSE.md)
-and [BENCHMARK.md](BENCHMARK.md#c244-local-cache-reuse-validation) for the
+ and [BENCHMARK.md](BENCHMARK.md#c244-local-cache-reuse-validation) for the
 measured validation cost and the fast reuse path.
+
+## TT-018: Page-index Residency Policy
+
+Tarantool/Vinyl-style bounded page-index residency is adopted as the opt-in
+generic `hatDataStructure.PageIndexResidency[K,V]`. It retains caller-owned
+immutable indexes under byte and entry limits, evicts least-recently-used
+entries, keeps `Get` allocation-free, and exposes hit/miss/admission/
+replacement/eviction/rejection counters. Existing storage defaults and index
+integration remain unchanged; callers own byte charging and invalidation. See
+[TT018_PAGE_INDEX_RESIDENCY.md](TT018_PAGE_INDEX_RESIDENCY.md) and
+[BENCHMARK.md](BENCHMARK.md#tt-018-page-index-residency-policy).
 
 ## TT-021: Packed R-tree Spatial Index
 

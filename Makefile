@@ -23284,6 +23284,37 @@ race-c246:
 benchmark-c246:
 	bash scripts/benchmark-c246.sh
 
+.PHONY: format-tt018
+format-tt018:
+	bash scripts/format-tt018.sh
+
+.PHONY: test-tt018
+test-tt018:
+	bash scripts/test-tt018.sh
+
+.PHONY: race-tt018
+race-tt018:
+	bash scripts/race-tt018.sh
+
+.PHONY: benchmark-tt018
+benchmark-tt018:
+	bash scripts/benchmark-tt018.sh
+
+.PHONY: stage-tt018-page-index-residency
+stage-tt018-page-index-residency:
+	bash scripts/stage-tt018-page-index-residency.sh
+
+.PHONY: commit-tt018-page-index-residency
+commit-tt018-page-index-residency:
+	bash scripts/commit-tt018-page-index-residency.sh
+
+.PHONY: push-tt018-page-index-residency
+push-tt018-page-index-residency:
+	bash scripts/push-tt018-page-index-residency.sh
+
+
+
+
 .PHONY: stage-c246-tt021-packed-rtree
 stage-c246-tt021-packed-rtree:
 	bash scripts/stage-c246-tt021-packed-rtree.sh

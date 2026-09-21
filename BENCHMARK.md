@@ -34734,6 +34734,49 @@ rows and segment size 64:
 
 Zone-map queries return candidate blocks; callers still verify rows. The
 results depend on clustering and segment size.
+## TT-018 Page-index Residency Policy
+
+Five-run medians on Linux amd64, AMD Ryzen 9 5950X, using 1,024 integer page
+keys. The raw map is an unbounded lookup baseline; the residency policy adds
+byte/entry limits, LRU recency, and counters.
+
+| Workload | Raw map | `PageIndexResidency` | Relative result |
+| --- | ---: | ---: | --- |
+| Resident hit | 7.750 ns/op, 0 B/op, 0 allocs/op | 27.65 ns/op, 0 B/op, 0 allocs/op | 3.57x slower with bounded LRU/telemetry |
+| Fill 1,024 entries | 22,947 ns/op, 36,944 B/op, 5 allocs/op | 54,530 ns/op, 69,936 B/op, 8 allocs/op | 2.38x slower, 1.89x cumulative allocation |
+
+The policy is therefore not a raw-map fast path. Its value is bounded
+residency: `MaxBytes` and `MaxEntries` prevent unlimited retention, while
+evictions and rejections are visible through `Stats`. The first pointer-node
+prototype used 1,047 allocations and 123,752 B/op for the fill workload; the
+final reusable-slot implementation reduced that to 8 allocations and 69,936
+B/op before acceptance, with no query allocations.
+
+Raw final output:
+
+```text
+BenchmarkTT018MapPageIndexGet-32            143565705 7.750 ns/op 0 B/op 0 allocs/op
+BenchmarkTT018MapPageIndexGet-32            146825983 7.558 ns/op 0 B/op 0 allocs/op
+BenchmarkTT018MapPageIndexGet-32            143921814 7.964 ns/op 0 B/op 0 allocs/op
+BenchmarkTT018MapPageIndexGet-32            159830025 7.486 ns/op 0 B/op 0 allocs/op
+BenchmarkTT018MapPageIndexGet-32            148391937 8.032 ns/op 0 B/op 0 allocs/op
+BenchmarkTT018MapPageIndexFill-32              58270 20045 ns/op 36944 B/op 5 allocs/op
+BenchmarkTT018MapPageIndexFill-32              60338 22027 ns/op 36944 B/op 5 allocs/op
+BenchmarkTT018MapPageIndexFill-32              55845 23619 ns/op 36944 B/op 5 allocs/op
+BenchmarkTT018MapPageIndexFill-32              51746 22947 ns/op 36944 B/op 5 allocs/op
+BenchmarkTT018MapPageIndexFill-32              42645 23697 ns/op 36944 B/op 5 allocs/op
+BenchmarkTT018PageIndexResidencyGet-32     45014914 27.65 ns/op 0 B/op 0 allocs/op
+BenchmarkTT018PageIndexResidencyGet-32     46956214 28.63 ns/op 0 B/op 0 allocs/op
+BenchmarkTT018PageIndexResidencyGet-32     40886409 27.89 ns/op 0 B/op 0 allocs/op
+BenchmarkTT018PageIndexResidencyGet-32     45767401 27.60 ns/op 0 B/op 0 allocs/op
+BenchmarkTT018PageIndexResidencyGet-32     45478431 27.14 ns/op 0 B/op 0 allocs/op
+BenchmarkTT018PageIndexResidencyFill-32       22693 54530 ns/op 69936 B/op 8 allocs/op
+BenchmarkTT018PageIndexResidencyFill-32       20605 54626 ns/op 69936 B/op 8 allocs/op
+BenchmarkTT018PageIndexResidencyFill-32       22909 54450 ns/op 69936 B/op 8 allocs/op
+BenchmarkTT018PageIndexResidencyFill-32       20731 54637 ns/op 69936 B/op 8 allocs/op
+BenchmarkTT018PageIndexResidencyFill-32       24392 52374 ns/op 69936 B/op 8 allocs/op
+```
+
 ## TT-021 Packed R-tree Spatial Index
 
 Five-run medians on Linux amd64, AMD Ryzen 9 5950X, with 10,000 grid-aligned
