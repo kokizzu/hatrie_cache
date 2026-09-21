@@ -13,5 +13,7 @@ test ! -e scripts/inspect-ch037-array-join.sh
 test ! -e scripts/inspect-ch014-decoded-cache.sh
 test ! -e scripts/inspect-mz026-dictionary-compression.sh
 test ! -e scripts/inspect-ch017-insert-dedup.sh
+test ! -e scripts/inspect-mz028-adaptive-compaction.sh
+test ! -e scripts/inspect-mz028-test-process.sh
 
 printf '%s\n' 'ledger corrections verified'

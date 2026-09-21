@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -2017,20 +2016,7 @@ func (aggregate *TypedTableAggregate) Rows() []Row {
 	if aggregate == nil {
 		return nil
 	}
-	var groups []typedTableAggregateGroup
-	if aggregate.dictionaryEncodeGroups {
-		groups = aggregate.compactOrderedGroups()
-	} else {
-		aggregate.ensureGroupKeys()
-		groups = make([]typedTableAggregateGroup, 0, aggregate.groupCount)
-		for _, bucket := range aggregate.groups {
-			groups = append(groups, bucket.group)
-			groups = append(groups, bucket.collisions...)
-		}
-		sort.Slice(groups, func(left, right int) bool {
-			return groups[left].key < groups[right].key
-		})
-	}
+	groups := aggregate.compactOrderedGroups()
 	rows := make([]Row, 0, len(groups))
 	for _, group := range groups {
 		rowFields := len(aggregate.groupBy) + 1

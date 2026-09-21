@@ -24140,6 +24140,47 @@ commit-ledger-corrections:
 push-ledger-corrections:
 	bash scripts/push-ledger-corrections.sh
 
+.PHONY: test-mz028-adaptive-arrangement
+test-mz028-adaptive-arrangement:
+	bash scripts/mz028-adaptive-arrangement.sh test
+
+.PHONY: race-mz028-adaptive-arrangement
+race-mz028-adaptive-arrangement:
+	bash scripts/mz028-adaptive-arrangement.sh race
+
+.PHONY: test-mz028-adaptive-arrangement-aggregate
+test-mz028-adaptive-arrangement-aggregate:
+	bash scripts/mz028-adaptive-arrangement.sh aggregate
+
+.PHONY: test-mz028-adaptive-arrangement-package
+test-mz028-adaptive-arrangement-package:
+	bash scripts/mz028-adaptive-arrangement.sh package
+
+.PHONY: benchmark-mz028-adaptive-arrangement
+benchmark-mz028-adaptive-arrangement:
+	bash scripts/mz028-adaptive-arrangement.sh benchmark
+
+.PHONY: format-mz028-adaptive-arrangement
+format-mz028-adaptive-arrangement:
+	bash scripts/mz028-adaptive-arrangement.sh format
+
+.PHONY: verify-mz028-adaptive-arrangement
+verify-mz028-adaptive-arrangement:
+	bash scripts/verify-mz028-adaptive-arrangement.sh
+
+.PHONY: stage-mz028-adaptive-arrangement
+stage-mz028-adaptive-arrangement:
+	bash scripts/stage-mz028-adaptive-arrangement.sh
+
+.PHONY: commit-mz028-adaptive-arrangement
+commit-mz028-adaptive-arrangement:
+	bash scripts/commit-mz028-adaptive-arrangement.sh
+
+.PHONY: push-mz028-adaptive-arrangement
+push-mz028-adaptive-arrangement:
+	bash scripts/push-mz028-adaptive-arrangement.sh
+
+
 
 
 .PHONY: stage-ch045-map-subcolumns
