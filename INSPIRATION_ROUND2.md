@@ -196,3 +196,10 @@ C204 is adopted. Idempotency keys now propagate from async journal entries
 through incremental projections into refreshed materialized-view status. See
 [C204_PROJECTION_IDEMPOTENCY.md](C204_PROJECTION_IDEMPOTENCY.md) and the
 paired measurements in [BENCHMARK.md](BENCHMARK.md#c204-projection-idempotency-metadata).
+
+### C234 Query stage profiler
+
+- [x] Added bounded explicit stage aggregation for SQL profiling.
+- Implementation: `hat/hatSql/ch234_stage_profiler.go` and
+  `hat/hatSql/ch234_stage_profiler_test.go`.
+- Benchmark and tradeoff: `C234_QUERY_STAGE_PROFILER.md`.

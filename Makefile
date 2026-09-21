@@ -23292,6 +23292,18 @@ commit-chu49-reconcile:
 push-chu49-reconcile:
 	bash scripts/push-chu49-reconcile.sh
 
+inspect-c234-context:
+	bash scripts/inspect-c234-context.sh
+
+test-c234-stage-profiler:
+	bash scripts/test-c234-stage-profiler.sh
+
+benchmark-c234-baseline:
+	bash scripts/benchmark-c234-baseline.sh
+
+format-c234-stage-profiler:
+	bash scripts/format-c234-stage-profiler.sh
+
 test-ch237-projection-explain:
 	bash scripts/test-ch237-projection-explain.sh
 
@@ -25096,3 +25108,24 @@ commit-ch020-zero-copy-part-sharing:
 	bash scripts/commit-ch020-zero-copy-part-sharing.sh
 push-ch020-zero-copy-part-sharing:
 	bash scripts/push-ch020-zero-copy-part-sharing.sh
+.PHONY: benchmark-c234-stage-profiler
+
+benchmark-c234-stage-profiler:
+	bash scripts/benchmark-c234-stage-profiler.sh
+.PHONY: race-c234-stage-profiler vet-c234-stage-profiler
+
+race-c234-stage-profiler:
+	bash scripts/race-c234-stage-profiler.sh
+
+vet-c234-stage-profiler:
+	bash scripts/vet-c234-stage-profiler.sh
+.PHONY: stage-c234-stage-profiler commit-c234-stage-profiler push-c234-stage-profiler
+
+stage-c234-stage-profiler:
+	bash scripts/stage-c234-stage-profiler.sh
+
+commit-c234-stage-profiler:
+	bash scripts/commit-c234-stage-profiler.sh
+
+push-c234-stage-profiler:
+	bash scripts/push-c234-stage-profiler.sh

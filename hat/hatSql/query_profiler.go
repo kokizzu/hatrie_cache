@@ -18,13 +18,17 @@ const (
 	// DefaultSQLQueryProfilerMaxMemoryOperatorsPerQuery bounds distinct
 	// operators retained by a default memory profile.
 	DefaultSQLQueryProfilerMaxMemoryOperatorsPerQuery = 64
-	defaultSQLQueryProfilerSampleEvery                = 1
-	maxSQLQueryProfilerQueries                        = 4096
-	maxSQLQueryProfilerSamplesPerQuery                = 1024
-	maxSQLQueryProfilerMemoryOperatorsPerQuery        = 1024
-	maxSQLQueryProfilerTotalSamples                   = 1 << 20
-	maxSQLQueryProfilerQueryIDBytes                   = 256
-	maxSQLQueryProfilerOperatorBytes                  = 256
+	// DefaultSQLQueryProfilerMaxStagesPerQuery bounds distinct stages retained
+	// by a default stage profile.
+	DefaultSQLQueryProfilerMaxStagesPerQuery   = 64
+	defaultSQLQueryProfilerSampleEvery         = 1
+	maxSQLQueryProfilerQueries                 = 4096
+	maxSQLQueryProfilerSamplesPerQuery         = 1024
+	maxSQLQueryProfilerMemoryOperatorsPerQuery = 1024
+	maxSQLQueryProfilerStagesPerQuery          = 1024
+	maxSQLQueryProfilerTotalSamples            = 1 << 20
+	maxSQLQueryProfilerQueryIDBytes            = 256
+	maxSQLQueryProfilerOperatorBytes           = 256
 )
 
 var (
@@ -32,6 +36,7 @@ var (
 	ErrSQLQueryProfilerLimitInvalid     = errors.New("hatSql: SQL query profiler limit is invalid")
 	ErrSQLQueryProfilerQueryIDRequired  = errors.New("hatSql: SQL query profiler query ID is required")
 	ErrSQLQueryProfilerOperatorRequired = errors.New("hatSql: SQL query profiler operator is required")
+	ErrSQLQueryProfilerStageRequired    = errors.New("hatSql: SQL query profiler stage is required")
 	ErrSQLQueryProfilerDurationInvalid  = errors.New("hatSql: SQL query profiler duration is invalid")
 )
 
@@ -42,6 +47,7 @@ type SQLQueryProfilerOptions struct {
 	MaxQueries                 int
 	MaxSamplesPerQuery         int
 	MaxMemoryOperatorsPerQuery int
+	MaxStagesPerQuery          int
 	MaxPartColumnsPerQuery     int
 	SampleEvery                uint64
 }
@@ -111,6 +117,10 @@ type SQLQueryProfilerStats struct {
 	MemoryObservationCount            uint64 `json:"memory_observation_count"`
 	DroppedMemoryObservationCount     uint64 `json:"dropped_memory_observation_count"`
 	EvictedMemoryQueryCount           uint64 `json:"evicted_memory_query_count"`
+	StageQueryCount                   int    `json:"stage_query_count"`
+	StageObservationCount             uint64 `json:"stage_observation_count"`
+	DroppedStageObservationCount      uint64 `json:"dropped_stage_observation_count"`
+	EvictedStageQueryCount            uint64 `json:"evicted_stage_query_count"`
 	PartColumnQueryCount              int    `json:"part_column_query_count"`
 	PartColumnObservationCount        uint64 `json:"part_column_observation_count"`
 	DroppedPartColumnObservationCount uint64 `json:"dropped_part_column_observation_count"`
@@ -137,6 +147,7 @@ type SQLQueryProfiler struct {
 	maxQueries                        int
 	maxSamplesPerQuery                int
 	maxMemoryOperatorsPerQuery        int
+	maxStagesPerQuery                 int
 	maxPartColumnsPerQuery            int
 	sampleEvery                       uint64
 	sequence                          uint64
@@ -151,6 +162,11 @@ type SQLQueryProfiler struct {
 	memoryObservationCount            uint64
 	droppedMemoryObservationCount     uint64
 	evictedMemoryQueryCount           uint64
+	stageSequence                     uint64
+	stageProfiles                     map[string]*sqlQueryStageProfileState
+	stageObservationCount             uint64
+	droppedStageObservationCount      uint64
+	evictedStageQueryCount            uint64
 	partColumnSequence                uint64
 	partColumnProfiles                map[string]*sqlQueryPartColumnProfileState
 	partColumnObservationCount        uint64
@@ -188,6 +204,16 @@ func NewSQLQueryProfiler(options SQLQueryProfilerOptions) (*SQLQueryProfiler, er
 	if maxQueries > maxSQLQueryProfilerTotalSamples/maxMemoryOperators {
 		return nil, fmt.Errorf("%w: total memory operators", ErrSQLQueryProfilerLimitInvalid)
 	}
+	maxStages := options.MaxStagesPerQuery
+	if maxStages == 0 {
+		maxStages = DefaultSQLQueryProfilerMaxStagesPerQuery
+	}
+	if maxStages < 0 || maxStages > maxSQLQueryProfilerStagesPerQuery {
+		return nil, fmt.Errorf("%w: max stages per query", ErrSQLQueryProfilerLimitInvalid)
+	}
+	if maxQueries > maxSQLQueryProfilerTotalSamples/maxStages {
+		return nil, fmt.Errorf("%w: total stages", ErrSQLQueryProfilerLimitInvalid)
+	}
 	maxPartColumns := options.MaxPartColumnsPerQuery
 	if maxPartColumns == 0 {
 		maxPartColumns = DefaultSQLQueryProfilerMaxPartColumnsPerQuery
@@ -206,6 +232,7 @@ func NewSQLQueryProfiler(options SQLQueryProfilerOptions) (*SQLQueryProfiler, er
 		maxQueries:                 maxQueries,
 		maxSamplesPerQuery:         maxSamples,
 		maxMemoryOperatorsPerQuery: maxMemoryOperators,
+		maxStagesPerQuery:          maxStages,
 		maxPartColumnsPerQuery:     maxPartColumns,
 		sampleEvery:                sampleEvery,
 		queries:                    make(map[string]*sqlQueryProfileState, maxQueries),
@@ -428,6 +455,10 @@ func (profiler *SQLQueryProfiler) Stats() SQLQueryProfilerStats {
 		MemoryObservationCount:            profiler.memoryObservationCount,
 		DroppedMemoryObservationCount:     profiler.droppedMemoryObservationCount,
 		EvictedMemoryQueryCount:           profiler.evictedMemoryQueryCount,
+		StageQueryCount:                   len(profiler.stageProfiles),
+		StageObservationCount:             profiler.stageObservationCount,
+		DroppedStageObservationCount:      profiler.droppedStageObservationCount,
+		EvictedStageQueryCount:            profiler.evictedStageQueryCount,
 		PartColumnQueryCount:              len(profiler.partColumnProfiles),
 		PartColumnObservationCount:        profiler.partColumnObservationCount,
 		DroppedPartColumnObservationCount: profiler.droppedPartColumnObservationCount,

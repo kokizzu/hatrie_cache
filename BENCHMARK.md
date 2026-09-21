@@ -35798,3 +35798,17 @@ initial row-cloning implementation was rejected during the same measurement:
 it reached a `196822 ns/op` median, `91884 B/op`, and `1584 allocs/op`; the
 metadata-only implementation reduced that to `25774 ns/op`, `10370 B/op`, and
 `47 allocs/op`. See [CH237_PROJECTION_EXPLAIN.md](CH237_PROJECTION_EXPLAIN.md).
+
+## C234 Query stage profiler
+
+The stage profiler is explicit and bounded. Existing query profiling remains
+allocation-free; stage recording is measured separately because it aggregates
+additional per-stage metrics. Full raw samples and interpretation are in
+`C234_QUERY_STAGE_PROFILER.md`.
+
+| Benchmark | Median | Bytes/op | Allocs/op |
+| --- | ---: | ---: | ---: |
+| Existing `Record` before C234 | 32.35 ns | 0 | 0 |
+| Existing `Record` after C234 | 27.39 ns | 0 | 0 |
+| `RecordStage` | 55.81 ns | 0 | 0 |
+| `StageProfile` with 64 stages | 9.352 us | 5528 | 4 |
