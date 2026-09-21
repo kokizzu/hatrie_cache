@@ -2,4 +2,4 @@
 set -euo pipefail
 
 git diff --cached --check
-git commit -m 'hatSql: support nested map subcolumn pruning'
+git commit -m 'hatSql: cover nested map array paths'

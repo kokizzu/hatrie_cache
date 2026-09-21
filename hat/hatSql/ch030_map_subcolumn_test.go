@@ -56,7 +56,11 @@ func (resolver *ch030MapSubcolumnResolver) ResolveSQLColumnarMapSubcolumns(_, _ 
 				return ColumnarBatch{}, nil, false, err
 			}
 			if exists {
-				if err := ch045SetMapPath(mapRows[rowIndex], path.Path, value); err != nil {
+				materialPath, materialValue, err := ch045MapPathMaterialization(row[path.Field], path.Path, value)
+				if err != nil {
+					return ColumnarBatch{}, nil, false, err
+				}
+				if err := ch045SetMapPath(mapRows[rowIndex], materialPath, materialValue); err != nil {
 					return ColumnarBatch{}, nil, false, err
 				}
 			}
@@ -222,6 +226,59 @@ func TestCH045NestedMapSubcolumnQueryUsesSelectedPathAndMatchesRowExecution(t *t
 	if !reflect.DeepEqual(optimizedResolver.requestedPaths, []ColumnarMapSubcolumn{{Field: "doc", Path: "$.profile.country"}}) {
 		t.Fatalf("requested paths = %#v", optimizedResolver.requestedPaths)
 	}
+}
+
+func TestCH045NestedMapSubcolumnArrayPathUsesSelectedPathAndMatchesRowExecution(t *testing.T) {
+	rows := []Row{
+		{"id": int64(1), "doc": map[string]interface{}{"profile": map[string]interface{}{"tags": []interface{}{"hot", "stable"}}}},
+		{"id": int64(2), "doc": map[string]interface{}{"profile": map[string]interface{}{"tags": []interface{}{"cold"}}}},
+		{"id": int64(3), "doc": map[string]interface{}{"profile": map[string]interface{}{"tags": []interface{}{}}}},
+		{"id": int64(4), "doc": nil},
+	}
+	query := "FROM CACHE('docs') AS src WHERE JSON_VALUE(src.doc, '$.profile.tags[0]') = 'hot' SELECT id, JSON_VALUE(src.doc, '$.profile.tags[0]') AS first_tag, JSON_EXISTS(src.doc, '$.profile.tags[0]') AS tag_exists"
+	optimizedResolver := &ch030MapSubcolumnResolver{rows: rows}
+	optimized, err := ExecuteSQLQuery(query, optimizedResolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseline, err := ExecuteSQLQuery(query, ch030FullMapResolver{rows: rows})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(optimized.Rows, baseline.Rows) {
+		t.Fatalf("optimized rows = %#v, baseline rows = %#v", optimized.Rows, baseline.Rows)
+	}
+	if want := []Row{{"id": int64(1), "first_tag": "hot", "tag_exists": true}}; !reflect.DeepEqual(optimized.Rows, want) {
+		t.Fatalf("rows = %#v, want %#v", optimized.Rows, want)
+	}
+	if optimizedResolver.mapSubcolumnCalls != 1 || optimizedResolver.columnarCalls != 0 {
+		t.Fatalf("resolver calls = map:%d columnar:%d, want map:1 columnar:0", optimizedResolver.mapSubcolumnCalls, optimizedResolver.columnarCalls)
+	}
+	if !reflect.DeepEqual(optimizedResolver.requestedPaths, []ColumnarMapSubcolumn{{Field: "doc", Path: "$.profile.tags[0]"}}) {
+		t.Fatalf("requested paths = %#v", optimizedResolver.requestedPaths)
+	}
+}
+
+func ch045MapPathMaterialization(source interface{}, path string, value interface{}) (string, interface{}, error) {
+	segments, err := parseSQLJSONPath(path)
+	if err != nil {
+		return "", nil, err
+	}
+	for index, segment := range segments {
+		if !segment.isIndex {
+			continue
+		}
+		prefix := formatSQLJSONPath(segments[:index])
+		material, exists, err := JSONPathValue(source, prefix)
+		if err != nil {
+			return "", nil, err
+		}
+		if !exists {
+			return path, value, nil
+		}
+		return prefix, material, nil
+	}
+	return path, value, nil
 }
 
 func ch045SetMapPath(root map[string]interface{}, path string, value interface{}) error {

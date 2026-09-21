@@ -23,7 +23,8 @@ are still caller-owned.
 
 The regression suite compares nested map-subcolumn execution with ordinary row
 execution, checks the requested path, preserves missing and `NULL` semantics,
-and verifies that root-array paths still fall back:
+verifies array traversal after an object root (`$.profile.tags[0]`), and
+verifies that root-array paths still fall back:
 
 ```text
 make test-ch045-map-subcolumns
