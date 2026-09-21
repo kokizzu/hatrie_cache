@@ -34679,3 +34679,25 @@ rows and segment size 64:
 
 Zone-map queries return candidate blocks; callers still verify rows. The
 results depend on clustering and segment size.
+## C243: Remote-Part Read-Through Cache
+
+The focused benchmark uses a 64 KiB immutable part and compares the committed
+`HEAD` source with the working tree through `make benchmark-c243-isolated`.
+The cache-keyed implementation has no measurable allocation change:
+
+| Path | HEAD median | Working-tree median | Memory / allocations |
+| --- | ---: | ---: | --- |
+| Cached hit | 67.08 ns/op | 64.17 ns/op | 0 B/op, 0 allocs/op |
+| Cold miss | 12,442 ns/op | 11,440 ns/op | 66,848 B/op, 9 allocs/op |
+
+Five-run ranges were 62.52-69.66 ns/op for HEAD hits and 62.78-69.14 ns/op
+for working-tree hits. Misses ranged from 11,490-17,789 ns/op for HEAD and
+10,853-11,461 ns/op for the working tree; this is normal run-to-run noise, not
+a claimed speedup.
+
+A candidate that verified canonical `sha256:<64-hex>` payloads on each miss
+was measured and rolled back. Its miss results were 43,416-45,153 ns/op versus
+the roughly 12,000 ns/op baseline, about 3.6x slower, with the same 66,848 B/op
+and 9 allocations. The rejected variant therefore does not ship.
+
+## C242: Bounded Parallel Restore

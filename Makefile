@@ -23239,6 +23239,18 @@ push-tu33-function-grants:
 audit-hatrie-tmp:
 	bash scripts/audit-hatrie-tmp.sh
 
+.PHONY: stage-c243-remote-part-cache
+stage-c243-remote-part-cache:
+	bash scripts/stage-c243-remote-part-cache.sh
+
+.PHONY: commit-c243-remote-part-cache
+commit-c243-remote-part-cache:
+	bash scripts/commit-c243-remote-part-cache.sh
+
+.PHONY: push-c243-remote-part-cache
+push-c243-remote-part-cache:
+	bash scripts/push-c243-remote-part-cache.sh
+
 test-c247-delta-codec:
 	bash scripts/test-c247-delta-codec.sh
 
@@ -23433,6 +23445,18 @@ commit-c242-parallel-restore:
 .PHONY: push-c242-parallel-restore
 push-c242-parallel-restore:
 	bash scripts/push-c242-parallel-restore.sh
+
+.PHONY: benchmark-c243-isolated
+benchmark-c243-isolated:
+	bash scripts/benchmark-c243-isolated.sh
+
+.PHONY: test-c243-isolated
+test-c243-isolated:
+	bash scripts/test-c243-isolated.sh
+
+.PHONY: format-c243-isolated
+format-c243-isolated:
+	bash scripts/format-c243-isolated.sh
 
 test-c249-offset-inspection-package:
 	bash scripts/test-c249-offset-inspection-package.sh

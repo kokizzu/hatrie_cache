@@ -959,6 +959,19 @@ heap and `1.02x` allocations. The API is importable and opt-in; existing SQL
 planner behavior is unchanged. See
 [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).
 
+## C243: Remote-Part Read-Through Cache
+
+The existing `hatStorage.RemotePartCache` adopts ClickHouse-style immutable
+remote-part reuse. Its identity includes normalized object URI, checksum, and
+declared size; bounded bytes and entries, single-flight misses, priority-aware
+eviction, pinned handles, invalidation, and bounded prefetch keep memory and
+remote-read behavior predictable. A measured SHA-256-on-miss validation variant
+was rejected because it made 64 KiB cold loads about 3.6x slower without
+changing allocations; loaders remain responsible for payload validation when
+needed. See [C243_REMOTE_PART_CACHE.md](C243_REMOTE_PART_CACHE.md),
+[REMOTE_PART_CACHE.md](REMOTE_PART_CACHE.md), and
+[BENCHMARK.md](BENCHMARK.md#c243-remote-part-read-through-cache).
+
 ## C242: Bounded Parallel Restore
 
 Adopted a ClickHouse-style independent-part restore path for content-addressed

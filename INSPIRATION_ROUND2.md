@@ -76,7 +76,7 @@ operator control remain the preferred deployment model.
 - [ ] C240 Read-only backup database attachment for querying backup parts in place.
 - [ ] C241 Incremental backup chunk deduplication across snapshots.
 - [x] C242 Parallel restore of independent parts with bounded concurrency. See [C242_PARALLEL_RESTORE.md](C242_PARALLEL_RESTORE.md) and [BENCHMARK.md](BENCHMARK.md#c242-bounded-parallel-restore).
-- [ ] C243 Remote-part read-through caching with immutable checksum keys.
+- [x] C243 Remote-part read-through caching with immutable checksum keys is implemented by `hatStorage.RemotePartCache`. See [C243_REMOTE_PART_CACHE.md](C243_REMOTE_PART_CACHE.md), [REMOTE_PART_CACHE.md](REMOTE_PART_CACHE.md), and [BENCHMARK.md](BENCHMARK.md#c243-remote-part-read-through-cache).
 - [ ] C244 Local cache reuse validated by part and column checksums.
 - [x] C245 Vertical TTL deletion that reads only the deletion mask and key columns is implemented as an opt-in `hatDataStructure.PersistentDeleteBitmap` operation with a reusable zero-allocation buffer form. See [C245_VERTICAL_TTL_DELETE.md](C245_VERTICAL_TTL_DELETE.md) and [BENCHMARK.md](BENCHMARK.md#c245-vertical-ttl-deletion).
 - [x] C246 TTL-driven recompression policies separate from row deletion are implemented as an opt-in `hatDataStructure.TTLRecompressionPolicy` and `TupleCompressor.RecompressIfDue`. See [C246_TTL_RECOMPRESSION.md](C246_TTL_RECOMPRESSION.md) and [BENCHMARK.md](BENCHMARK.md#c246-ttl-driven-recompression).
