@@ -103,7 +103,7 @@ operator control remain the preferred deployment model.
 - [x] M214 Arrangement reuse across indexes and compatible query plans; already covered by compiled arrangement workloads, canonical plan caching, and typed-table arrangement registries. See [M214_ARRANGEMENT_REUSE_AUDIT.md](M214_ARRANGEMENT_REUSE_AUDIT.md).
 - [x] M215 Delta-join maintenance for high-churn join inputs; already implemented by `hatSql.IncrementalJoin` with signed differential updates and equality-bucket maintenance. See [M215_DELTA_JOIN_AUDIT.md](M215_DELTA_JOIN_AUDIT.md).
 - [x] M216 Incremental top-K arrangements with bounded replacement state; already implemented by `hatSql.IncrementalTopK`, with selected/replacement output bounded by K and full exact source indexing retained. See [M216_INCREMENTAL_TOP_K_AUDIT.md](M216_INCREMENTAL_TOP_K_AUDIT.md).
-- [ ] M217 Indexes that store complete maintained view results for point lookups.
+- [x] M217 Indexes that store complete maintained view results for point lookups; added opt-in maintained point lookup indexes to `MaterializedViews` with atomic refresh integration. See [M217_MATERIALIZED_POINT_LOOKUP.md](M217_MATERIALIZED_POINT_LOOKUP.md).
 - [ ] M218 Planner selection of point lookup versus arrangement scan.
 - [ ] M219 Background index creation with observable build frontier.
 - [ ] M220 Safe index removal after dependent readers drain.

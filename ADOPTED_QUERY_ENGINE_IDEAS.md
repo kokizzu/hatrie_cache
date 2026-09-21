@@ -1118,3 +1118,12 @@ the full active input index because exact replacement needs non-selected rows,
 but avoids rebuilding and sorting the relation. The 10k-row benchmark measured
 33.5x lower median latency with the same allocations. See
 [M216_INCREMENTAL_TOP_K_AUDIT.md](M216_INCREMENTAL_TOP_K_AUDIT.md).
+
+## M217: Maintained Materialized Point Lookup
+
+Added opt-in point lookup indexes for `MaterializedViews`. They retain complete
+view rows under caller-defined keys, update atomically with refreshes, support
+duplicate keys, and return isolated row copies. A 10k-row probe was 8,975x
+faster than cloning and scanning the full snapshot, while indexed refreshes
+cost 12.0% more CPU in the measured workload. See
+[M217_MATERIALIZED_POINT_LOOKUP.md](M217_MATERIALIZED_POINT_LOOKUP.md).

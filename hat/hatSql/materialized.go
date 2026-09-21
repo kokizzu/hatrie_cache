@@ -63,13 +63,14 @@ type MaterializedView struct {
 // MaterializedViews stores named query-result snapshots. It is safe for
 // concurrent reads and refreshes.
 type MaterializedViews struct {
-	mu         sync.RWMutex
-	views      map[string]materializedView
-	dependents map[string][]string
-	maxRows    int
-	maxBytes   int64
-	rows       int
-	bytes      int64
+	mu           sync.RWMutex
+	views        map[string]materializedView
+	dependents   map[string][]string
+	pointLookups map[string]materializedViewPointLookup
+	maxRows      int
+	maxBytes     int64
+	rows         int
+	bytes        int64
 }
 
 type materializedView struct {
@@ -95,10 +96,11 @@ func NewMaterializedViewsWithOptions(options MaterializedViewsOptions) (*Materia
 		return nil, fmt.Errorf("materialized view storage limits must not be negative")
 	}
 	return &MaterializedViews{
-		views:      make(map[string]materializedView),
-		dependents: make(map[string][]string),
-		maxRows:    options.MaxRows,
-		maxBytes:   options.MaxBytes,
+		views:        make(map[string]materializedView),
+		dependents:   make(map[string][]string),
+		pointLookups: make(map[string]materializedViewPointLookup),
+		maxRows:      options.MaxRows,
+		maxBytes:     options.MaxBytes,
 	}, nil
 }
 
@@ -220,6 +222,11 @@ func (views *MaterializedViews) Drop(name string) error {
 		return fmt.Errorf("materialized view %q does not exist", name)
 	}
 	delete(views.views, name)
+	for indexName, index := range views.pointLookups {
+		if index.definition.ViewName == name {
+			delete(views.pointLookups, indexName)
+		}
+	}
 	views.rows -= view.storedRows
 	views.bytes -= view.storedBytes
 	for dependency, dependents := range views.dependents {
@@ -316,6 +323,23 @@ func (views *MaterializedViews) RefreshChangedWithMetadata(ctx context.Context, 
 	if err := views.checkStorageBudget(nextRows, nextBytes); err != nil {
 		return nil, err
 	}
+	lookupUpdates := make(map[string]materializedViewPointLookup)
+	for _, candidate := range candidates {
+		current, exists := views.views[candidate.definition.Name]
+		if !exists || !sameMaterializedViewDefinition(current.definition, candidate.definition) {
+			continue
+		}
+		for indexName, index := range views.pointLookups {
+			if index.definition.ViewName != candidate.definition.Name {
+				continue
+			}
+			refreshed, err := buildMaterializedViewPointLookup(index.definition, results[candidate.definition.Name])
+			if err != nil {
+				return nil, fmt.Errorf("refresh materialized view point lookup %q: %w", indexName, err)
+			}
+			lookupUpdates[indexName] = refreshed
+		}
+	}
 	for _, candidate := range candidates {
 		current, exists := views.views[candidate.definition.Name]
 		if !exists || !sameMaterializedViewDefinition(current.definition, candidate.definition) {
@@ -331,6 +355,9 @@ func (views *MaterializedViews) RefreshChangedWithMetadata(ctx context.Context, 
 		current.storedBytes = resultBytes[candidate.definition.Name]
 		views.views[candidate.definition.Name] = current
 		statuses = append(statuses, cloneMaterializedViewStatus(current.snapshot.Status))
+	}
+	for indexName, index := range lookupUpdates {
+		views.pointLookups[indexName] = index
 	}
 	views.rows = nextRows
 	views.bytes = nextBytes

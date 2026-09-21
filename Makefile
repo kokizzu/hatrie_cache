@@ -25717,3 +25717,31 @@ commit-m216-incremental-top-k-audit:
 .PHONY: push-m216-incremental-top-k-audit
 push-m216-incremental-top-k-audit:
 	bash scripts/push-m216-incremental-top-k-audit.sh
+
+.PHONY: test-m217-materialized-point-lookup
+test-m217-materialized-point-lookup:
+	bash scripts/test-m217-materialized-point-lookup.sh
+
+.PHONY: format-m217-point-lookup
+format-m217-point-lookup:
+	bash scripts/format-m217-point-lookup.sh
+
+.PHONY: benchmark-m217-point-lookup
+benchmark-m217-point-lookup:
+	bash scripts/benchmark-m217-point-lookup.sh
+
+.PHONY: race-m217-point-lookup
+race-m217-point-lookup:
+	bash scripts/race-m217-point-lookup.sh
+
+.PHONY: stage-m217-materialized-point-lookup
+stage-m217-materialized-point-lookup:
+	bash scripts/stage-m217-materialized-point-lookup.sh
+
+.PHONY: commit-m217-materialized-point-lookup
+commit-m217-materialized-point-lookup:
+	bash scripts/commit-m217-materialized-point-lookup.sh
+
+.PHONY: push-m217-materialized-point-lookup
+push-m217-materialized-point-lookup:
+	bash scripts/push-m217-materialized-point-lookup.sh
