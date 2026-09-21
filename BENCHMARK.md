@@ -34882,3 +34882,35 @@ BenchmarkChecksumPart-32  2212  473871 ns/op  2212.79 MB/s  0 B/op  0 allocs/op
 BenchmarkChecksumPart-32  2370  484803 ns/op  2162.89 MB/s  0 B/op  0 allocs/op
 BenchmarkChecksumPart-32  2419  537548 ns/op  1950.67 MB/s  0 B/op  0 allocs/op
 ```
+## MZ-049 Exactly-Once Snapshot Export
+
+Command:
+
+`make benchmark-mz049-snapshot-export`
+
+Workload: 256 string keys, binary snapshot format, AMD Ryzen 9 5950X,
+`-benchtime=500ms -count=3`. The payload was 10,504 bytes; resumable export
+reads and writes the staged payload, so its measured payload I/O is 21,008
+bytes.
+
+Raw result:
+
+```text
+BenchmarkSnapshotExport/direct-32         303  1714068 ns/op  6.13 MB/s  10504 payload-io-B  141328 B/op  795 allocs/op
+BenchmarkSnapshotExport/direct-32         345  1975905 ns/op  5.32 MB/s  10504 payload-io-B  141331 B/op  795 allocs/op
+BenchmarkSnapshotExport/direct-32         345  1749925 ns/op  6.00 MB/s  10504 payload-io-B  141328 B/op  795 allocs/op
+BenchmarkSnapshotExport/resumable-32       81  7086901 ns/op  1.48 MB/s  21008 payload-io-B  324603 B/op 1957 allocs/op
+BenchmarkSnapshotExport/resumable-32       98  6972492 ns/op  1.51 MB/s  21008 payload-io-B  324461 B/op 1957 allocs/op
+BenchmarkSnapshotExport/resumable-32       86  7068212 ns/op  1.49 MB/s  21008 payload-io-B  324472 B/op 1957 allocs/op
+```
+
+Median comparison:
+
+| Path | Median time | Allocated bytes | Allocs | Payload I/O | Relative time |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Direct atomic export | 1.75 ms | 141,328 B/op | 795 | 10,504 B | 1.00x |
+| Resumable export | 7.07 ms | 324,472 B/op | 1,957 | 21,008 B | 4.04x |
+
+The resumable path is opt-in because its durability and retry guarantee costs
+about 4.04x CPU time, 2.30x allocation bytes, and 2x payload I/O in this
+workload.

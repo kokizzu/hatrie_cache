@@ -131,7 +131,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | MZ-046 | Frontier-aware cancellation | A query cannot cancel after a specified freshness or result frontier is reached. | Low |
 | MZ-047 | Session compute routing | Client sessions cannot choose a named compute cluster for an operation. | Medium |
 | MZ-048 | Connector secret rotation | Source/sink credentials cannot rotate without stopping the maintained dataflow. | Medium |
-| MZ-049 | Exactly-once snapshot export | Export has no frontier-bound manifest that can resume without duplicate rows. | High |
+| MZ-049 | Exactly-once snapshot export | Implemented as opt-in `CommandJournal.WriteSnapshotWithResumableExport`: an immutable manifest-bound source, fsynced prefix checkpoints, tail truncation, and atomic publication prevent duplicate bytes after interruption. See [MZ049_SNAPSHOT_EXPORT.md](MZ049_SNAPSHOT_EXPORT.md) and [BENCHMARK.md](BENCHMARK.md#mz-049-exactly-once-snapshot-export). | High |
 | MZ-050 | Timeline branching and replay | There is no isolated branch of maintained state for deterministic what-if replay. | High |
 
 ## Tarantool candidates

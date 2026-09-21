@@ -293,7 +293,7 @@ func typedTableArrangementValueLess(left, right TypedTableValue) bool {
 	switch left.Kind {
 	case TypedTableString:
 		return left.String < right.String
-	case TypedTableInt64, TypedTableDate, TypedTableTimestamp:
+	case TypedTableInt64:
 		return left.Int64 < right.Int64
 	case TypedTableFloat64:
 		return math.Float64bits(left.Float64) < math.Float64bits(right.Float64)
@@ -314,7 +314,7 @@ func typedTableArrangementValueEqual(left, right TypedTableValue) bool {
 	switch left.Kind {
 	case TypedTableString:
 		return left.String == right.String
-	case TypedTableInt64, TypedTableDate, TypedTableTimestamp:
+	case TypedTableInt64:
 		return left.Int64 == right.Int64
 	case TypedTableFloat64:
 		return math.Float64bits(left.Float64) == math.Float64bits(right.Float64)
@@ -349,7 +349,7 @@ func typedTableAggregateDistinctCheckpointValue(value typedTableDistinctValue) T
 	switch value.kind {
 	case TypedTableString:
 		checkpoint.String = value.stringValue
-	case TypedTableInt64, TypedTableDate, TypedTableTimestamp:
+	case TypedTableInt64:
 		checkpoint.Int64 = value.int64Value
 	case TypedTableFloat64:
 		checkpoint.Float64 = math.Float64frombits(value.floatBits)

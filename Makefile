@@ -23785,3 +23785,30 @@ commit-c244-local-cache-reuse:
 
 push-c244-local-cache-reuse:
 	bash scripts/push-c244-local-cache-reuse.sh
+.PHONY: test-mz049-snapshot-export
+test-mz049-snapshot-export:
+	bash scripts/test-mz049-snapshot-export.sh
+.PHONY: format-mz049-snapshot-export
+format-mz049-snapshot-export:
+	bash scripts/format-mz049-snapshot-export.sh
+.PHONY: benchmark-mz049-snapshot-export
+benchmark-mz049-snapshot-export:
+	bash scripts/benchmark-mz049-snapshot-export.sh
+.PHONY: race-mz049-snapshot-export
+race-mz049-snapshot-export:
+	bash scripts/race-mz049-snapshot-export.sh
+.PHONY: verify-mz049-snapshot-export
+verify-mz049-snapshot-export:
+	bash scripts/verify-mz049-snapshot-export.sh
+
+.PHONY: stage-mz049-snapshot-export
+stage-mz049-snapshot-export:
+	bash scripts/stage-mz049-snapshot-export.sh
+
+.PHONY: commit-mz049-snapshot-export
+commit-mz049-snapshot-export:
+	bash scripts/commit-mz049-snapshot-export.sh
+
+.PHONY: push-mz049-snapshot-export
+push-mz049-snapshot-export:
+	bash scripts/push-mz049-snapshot-export.sh

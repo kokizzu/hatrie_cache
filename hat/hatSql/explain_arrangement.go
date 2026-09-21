@@ -12,6 +12,9 @@ const explainArrangementFormat = "hatrie-cache-explain-arrangements/v1"
 // accepted in one enriched explain document.
 const MaxExplainArrangementAnnotations = 4096
 
+// MaxDataflowTextBytes bounds one arrangement annotation key.
+const MaxDataflowTextBytes = 1 << 20
+
 // ExplainArrangementMetadata describes the arrangement decision attached to
 // one explain operator. EstimatedBytes is an incremental memory estimate from
 // the arrangement advisor, not an allocator measurement.
