@@ -24526,3 +24526,38 @@ commit-ch037-left-array-join:
 .PHONY: push-ch037-left-array-join
 push-ch037-left-array-join:
 	bash scripts/push-ch037-left-array-join.sh
+test-tt028-upsert:
+	bash scripts/test-tt028-upsert.sh
+
+benchmark-tt028-before:
+	bash scripts/benchmark-tt028-before.sh
+
+format-tt028-upsert:
+	bash scripts/format-tt028-upsert.sh
+
+benchmark-tt028-upsert:
+	bash scripts/benchmark-tt028-upsert.sh
+
+test-tt028-package:
+	bash scripts/test-tt028-package.sh
+
+race-tt028-upsert:
+	bash scripts/race-tt028-upsert.sh
+
+vet-tt028-upsert:
+	bash scripts/vet-tt028-upsert.sh
+
+review-tt028-upsert:
+	bash scripts/review-tt028-upsert.sh
+
+stage-tt028-upsert:
+	bash scripts/stage-tt028-upsert.sh
+
+commit-tt028-upsert:
+	bash scripts/commit-tt028-upsert.sh
+
+push-tt028-upsert:
+	bash scripts/push-tt028-upsert.sh
+
+inspect-open-ideas:
+	bash scripts/inspect-next-goal.sh OPEN

@@ -1,5 +1,21 @@
 # Benchmark
 
+## TT-028 Upsert Conflict Handlers
+
+Workload: 1,024 materialized rows, one repeated unique-key merge, five
+benchmark samples on the same host. The legacy control copies and scans the
+whole row set for each merge; `Upsert` updates the matched row and maintained
+indexes in place.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Legacy manual copy/scan/merge, before implementation | 373,233; 372,710; 382,708; 387,128; 353,941 | 373,233 | 353,550 | 2,050 | 1.00x |
+| Legacy manual copy/scan/merge, same post-change run | 359,559; 347,647; 353,538; 333,245; 356,241 | 353,538 | 353,548 | 2,050 | 1.00x |
+| Indexed `Upsert` conflict handler | 3,827; 3,801; 3,813; 3,589; 3,598 | 3,801 | 2,542 | 24 | 93.01x faster |
+
+The new path is about 139x lower in bytes/op and 85x lower in allocations/op
+than the same-run control. The raw command is `make benchmark-tt028-upsert`.
+
 ## CH-037 Left Array Join
 
 Exact 2,048-row `hatSql` benchmark, five `-benchmem` samples per path. The

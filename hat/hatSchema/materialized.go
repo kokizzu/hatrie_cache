@@ -19,9 +19,36 @@ var (
 	ErrMaterializedSourceFunctionalIndexEvaluatorRequired    = errors.New("hatSchema: materialized source functional index evaluator is required")
 	ErrMaterializedSourceFunctionalIndexNameConflict         = errors.New("hatSchema: materialized source functional index name conflicts with an existing index")
 	ErrMaterializedSourceUniqueIndexViolation                = errors.New("hatSchema: materialized source unique index violation")
+	ErrMaterializedSourceConflictFieldRequired               = errors.New("hatSchema: materialized source conflict field is required")
+	ErrMaterializedSourceConflictFieldNotUnique              = errors.New("hatSchema: materialized source conflict field is not unique")
+	ErrMaterializedSourceConflictHandlerRequired             = errors.New("hatSchema: materialized source conflict handler is required")
+	ErrMaterializedSourceConflictKeyChanged                  = errors.New("hatSchema: materialized source conflict handler changed the conflict key")
+	ErrMaterializedSourceConflictResultNil                   = errors.New("hatSchema: materialized source conflict handler returned a nil row")
 )
 
 type GeneratedValue func(Row) (interface{}, error)
+
+// MaterializedConflictHandler merges an existing row and an incoming row after
+// a unique conflict. The callback must return the complete replacement row;
+// both inputs are copies and may be retained or modified by the callback.
+type MaterializedConflictHandler func(existing, incoming Row) (Row, error)
+
+// MaterializedUpsertOptions configures the opt-in unique-key upsert path.
+// ConflictField must have a maintained unique index, normally installed with
+// BuildUniqueIndex. Insert remains the default operation and still rejects
+// duplicate unique values.
+type MaterializedUpsertOptions struct {
+	ConflictField string
+	OnConflict    MaterializedConflictHandler
+}
+
+// MaterializedUpsertResult describes whether an upsert appended or replaced a
+// row. Row is an isolated copy of the committed value.
+type MaterializedUpsertResult struct {
+	Row      Row
+	Inserted bool
+	Updated  bool
+}
 
 // FunctionalIndexEvaluator derives the lookup value for one materialized row.
 // Evaluators should be deterministic and read-only; the source passes a row
@@ -196,7 +223,130 @@ func (source *MaterializedSource) Insert(row Row) (Row, error) {
 	}
 	source.mu.Lock()
 	defer source.mu.Unlock()
+	materialized, err := source.materializeRowLocked(row)
+	if err != nil {
+		return nil, err
+	}
+	return source.insertMaterializedLocked(materialized)
+}
+
+// Upsert inserts a row or invokes an explicit conflict handler for an existing
+// non-NULL value in a maintained unique index. The handler and all derived
+// values are evaluated before the source is changed; a handler or validation
+// error therefore leaves rows, indexes, and generation unchanged.
+func (source *MaterializedSource) Upsert(row Row, options MaterializedUpsertOptions) (MaterializedUpsertResult, error) {
+	if source == nil {
+		return MaterializedUpsertResult{}, ErrMaterializedSourceNil
+	}
+	field := strings.TrimSpace(options.ConflictField)
+	if field == "" {
+		return MaterializedUpsertResult{}, ErrMaterializedSourceConflictFieldRequired
+	}
+	if options.OnConflict == nil {
+		return MaterializedUpsertResult{}, ErrMaterializedSourceConflictHandlerRequired
+	}
+	source.mu.Lock()
+	defer source.mu.Unlock()
+	if !source.hasColumnLocked(field) {
+		return MaterializedUpsertResult{}, fmt.Errorf("%w: %s", ErrMaterializedSourceColumnUnknown, field)
+	}
+	if _, unique := source.uniqueFields[field]; !unique {
+		return MaterializedUpsertResult{}, fmt.Errorf("%w: %s", ErrMaterializedSourceConflictFieldNotUnique, field)
+	}
+	previousSequences := cloneMaterializedSequences(source.nextID)
+	materialized, err := source.materializeRowLocked(row)
+	if err != nil {
+		return MaterializedUpsertResult{}, err
+	}
+	var position = -1
+	if materialized[field] != nil {
+		positions := source.indexes[field][materializedIndexKey(materialized[field])]
+		if len(positions) > 0 {
+			position = positions[0]
+		}
+	}
+	if position < 0 {
+		inserted, insertErr := source.insertMaterializedLocked(materialized)
+		if insertErr != nil {
+			source.nextID = previousSequences
+			return MaterializedUpsertResult{}, insertErr
+		}
+		return MaterializedUpsertResult{Row: inserted, Inserted: true}, nil
+	}
+
+	existing := cloneRow(source.rows[position])
+	merged, err := options.OnConflict(existing, cloneRow(materialized))
+	if err != nil {
+		source.nextID = previousSequences
+		return MaterializedUpsertResult{}, err
+	}
+	if merged == nil {
+		source.nextID = previousSequences
+		return MaterializedUpsertResult{}, ErrMaterializedSourceConflictResultNil
+	}
+	merged, err = source.materializeRowLocked(merged)
+	if err != nil {
+		source.nextID = previousSequences
+		return MaterializedUpsertResult{}, err
+	}
+	if materializedIndexKey(merged[field]) != materializedIndexKey(existing[field]) {
+		source.nextID = previousSequences
+		return MaterializedUpsertResult{}, fmt.Errorf("%w: %s", ErrMaterializedSourceConflictKeyChanged, field)
+	}
+	functionalKeys, err := source.functionalIndexKeysLocked(merged)
+	if err != nil {
+		source.nextID = previousSequences
+		return MaterializedUpsertResult{}, err
+	}
+	oldFunctionalKeys, err := source.functionalIndexKeysLocked(existing)
+	if err != nil {
+		source.nextID = previousSequences
+		return MaterializedUpsertResult{}, err
+	}
+	for uniqueField := range source.uniqueFields {
+		value := merged[uniqueField]
+		if value == nil {
+			continue
+		}
+		key := materializedIndexKey(value)
+		for _, otherPosition := range source.indexes[uniqueField][key] {
+			if otherPosition != position {
+				source.nextID = previousSequences
+				return MaterializedUpsertResult{}, fmt.Errorf("%w: field %q", ErrMaterializedSourceUniqueIndexViolation, uniqueField)
+			}
+		}
+	}
+
+	for indexedField := range source.indexedFields {
+		oldKey := materializedIndexKey(existing[indexedField])
+		newKey := materializedIndexKey(merged[indexedField])
+		replaceMaterializedIndexPosition(source.indexes[indexedField], oldKey, newKey, position)
+	}
+	for fieldName, index := range source.coveringIndexes {
+		if index == nil {
+			continue
+		}
+		oldKey := materializedIndexKey(existing[fieldName])
+		newKey := materializedIndexKey(merged[fieldName])
+		replaceMaterializedCoveringPosition(index, oldKey, newKey, position, projectMaterializedRow(merged, index.fields))
+	}
+	for name, index := range source.functionalIndexes {
+		if index == nil {
+			continue
+		}
+		replaceMaterializedIndexPosition(index.positions, oldFunctionalKeys[name], functionalKeys[name], position)
+	}
+	source.rows[position] = cloneRow(merged)
+	source.generation++
+	source.indexStatsCache = nil
+	return MaterializedUpsertResult{Row: cloneRow(merged), Updated: true}, nil
+}
+
+func (source *MaterializedSource) materializeRowLocked(row Row) (Row, error) {
 	materialized := cloneRow(row)
+	if materialized == nil {
+		materialized = Row{}
+	}
 	for _, column := range source.columns {
 		if column.Name == "" {
 			return nil, fmt.Errorf("hatSchema: derived column name is required")
@@ -223,19 +373,13 @@ func (source *MaterializedSource) Insert(row Row) (Row, error) {
 		}
 		materialized[column.Name] = value
 	}
-	var functionalKeys map[string]string
-	if len(source.functionalIndexes) > 0 {
-		functionalKeys = make(map[string]string, len(source.functionalIndexes))
-		for name, index := range source.functionalIndexes {
-			if index == nil || index.evaluator == nil {
-				continue
-			}
-			value, err := index.evaluator(cloneRow(materialized))
-			if err != nil {
-				return nil, fmt.Errorf("hatSchema: evaluate functional index %q: %w", name, err)
-			}
-			functionalKeys[name] = materializedIndexKey(value)
-		}
+	return materialized, nil
+}
+
+func (source *MaterializedSource) insertMaterializedLocked(materialized Row) (Row, error) {
+	functionalKeys, err := source.functionalIndexKeysLocked(materialized)
+	if err != nil {
+		return nil, err
 	}
 	for field := range source.uniqueFields {
 		value := materialized[field]
@@ -274,6 +418,103 @@ func (source *MaterializedSource) Insert(row Row) (Row, error) {
 	source.generation++
 	source.indexStatsCache = nil
 	return cloneRow(materialized), nil
+}
+
+func (source *MaterializedSource) functionalIndexKeysLocked(row Row) (map[string]string, error) {
+	if len(source.functionalIndexes) == 0 {
+		return nil, nil
+	}
+	keys := make(map[string]string, len(source.functionalIndexes))
+	for name, index := range source.functionalIndexes {
+		if index == nil || index.evaluator == nil {
+			continue
+		}
+		value, err := index.evaluator(cloneRow(row))
+		if err != nil {
+			return nil, fmt.Errorf("hatSchema: evaluate functional index %q: %w", name, err)
+		}
+		keys[name] = materializedIndexKey(value)
+	}
+	return keys, nil
+}
+
+func cloneMaterializedSequences(values map[string]int64) map[string]int64 {
+	if values == nil {
+		return nil
+	}
+	cloned := make(map[string]int64, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func replaceMaterializedIndexPosition(postings map[string][]int, oldKey, newKey string, position int) {
+	if postings == nil || oldKey == newKey {
+		return
+	}
+	oldPositions := postings[oldKey]
+	oldIndex := sort.SearchInts(oldPositions, position)
+	if oldIndex >= len(oldPositions) || oldPositions[oldIndex] != position {
+		return
+	}
+	oldPositions = append(oldPositions[:oldIndex], oldPositions[oldIndex+1:]...)
+	if len(oldPositions) == 0 {
+		delete(postings, oldKey)
+	} else {
+		postings[oldKey] = oldPositions
+	}
+	newPositions := postings[newKey]
+	newIndex := sort.SearchInts(newPositions, position)
+	newPositions = append(newPositions, 0)
+	copy(newPositions[newIndex+1:], newPositions[newIndex:])
+	newPositions[newIndex] = position
+	postings[newKey] = newPositions
+}
+
+func replaceMaterializedCoveringPosition(index *materializedCoveringIndex, oldKey, newKey string, position int, projected Row) {
+	if index == nil || index.positions == nil || oldKey == newKey {
+		if index != nil && oldKey == newKey {
+			positions := index.positions[oldKey]
+			positionIndex := sort.SearchInts(positions, position)
+			if positionIndex < len(positions) && positions[positionIndex] == position {
+				rows := index.rows[oldKey]
+				if positionIndex < len(rows) {
+					rows[positionIndex] = projected
+					index.rows[oldKey] = rows
+				}
+			}
+		}
+		return
+	}
+	oldPositions := index.positions[oldKey]
+	oldIndex := sort.SearchInts(oldPositions, position)
+	if oldIndex >= len(oldPositions) || oldPositions[oldIndex] != position {
+		return
+	}
+	oldPositions = append(oldPositions[:oldIndex], oldPositions[oldIndex+1:]...)
+	oldRows := index.rows[oldKey]
+	if oldIndex < len(oldRows) {
+		oldRows = append(oldRows[:oldIndex], oldRows[oldIndex+1:]...)
+	}
+	if len(oldPositions) == 0 {
+		delete(index.positions, oldKey)
+		delete(index.rows, oldKey)
+	} else {
+		index.positions[oldKey] = oldPositions
+		index.rows[oldKey] = oldRows
+	}
+	newPositions := index.positions[newKey]
+	newRows := index.rows[newKey]
+	newIndex := sort.SearchInts(newPositions, position)
+	newPositions = append(newPositions, 0)
+	copy(newPositions[newIndex+1:], newPositions[newIndex:])
+	newPositions[newIndex] = position
+	newRows = append(newRows, nil)
+	copy(newRows[newIndex+1:], newRows[newIndex:])
+	newRows[newIndex] = projected
+	index.positions[newKey] = newPositions
+	index.rows[newKey] = newRows
 }
 
 // HasIndex reports whether field has a maintained equality index.
