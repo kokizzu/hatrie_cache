@@ -35858,6 +35858,19 @@ The measurement command is `make benchmark-c225-baseline`; correctness is
 covered by `make test-c225-window-suite`. See
 [`C225_INCREMENTAL_WINDOW.md`](C225_INCREMENTAL_WINDOW.md).
 
+## C230 Memory-Overcommit Wait Queues
+
+The C230 queue is opt-in. The benchmark uses the same materialized `VALUES ... GROUP BY ... ORDER BY` query for the default and queue-enabled variants.
+
+| Variant | Median ns/op | B/op | allocs/op | Relative CPU | Relative heap | Relative allocs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Default, before C230 | 11,566 | 8,648 | 55 | 1.00x | 1.00x | 1.00x |
+| Existing operator tracker, before C230 | 15,410 | 9,864 | 82 | 1.33x | 1.14x | 1.49x |
+| Default, matched after C230 | 11,960 | 8,648 | 55 | 1.00x | 1.00x | 1.00x |
+| Memory-overcommit queue, matched after C230 | 15,494 | 9,631 | 81 | 1.30x | 1.11x | 1.47x |
+
+Queue mode is a bounded-memory reliability policy, not a speed optimization. It waits for capacity before cancellation and is disabled by default, so the matched default path retains the baseline allocation and heap behavior. See [C230_MEMORY_OVERCOMMIT.md](C230_MEMORY_OVERCOMMIT.md) for raw commands, limits, and safety boundaries.
+
 ## C226 Grace-Hash Join Spilling
 
 Five `-benchmem` samples ran on Linux amd64 with an AMD Ryzen 9 5950X over the

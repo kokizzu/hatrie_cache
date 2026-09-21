@@ -287,6 +287,9 @@ type SQLQueryOptions struct {
 	// per SQL operator and can enforce its configured per-operator limit. Nil
 	// keeps the default path free of tracker allocations and accounting.
 	OperatorMemoryTracker *SQLOperatorMemoryTracker
+	// MemoryOvercommit optionally waits for shared retained-memory capacity
+	// before an operator grows. Nil keeps the default path unchanged.
+	MemoryOvercommit *SQLMemoryOvercommitQueue
 	// SpillFaults is an optional per-query external-sort I/O hook. It exists
 	// for deterministic fault-injection and chaos tests; production callers
 	// normally leave it nil.
@@ -8177,23 +8180,25 @@ func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]
 }
 
 type sqlExecutionControl struct {
-	ctx            context.Context
-	maxRows        int
-	options        SQLQueryOptions
-	parameters     []interface{}
-	joinWork       int
-	sources        map[string][]SQLRow
-	arena          sqlExecutionArena
-	spillQuota     *sqlSpillQuota
-	operatorMemory *SQLOperatorMemoryTracker
-	yieldEvery     uint64
-	yieldFuel      atomic.Uint64
-	yields         atomic.Uint64
-	maxCPUTime     time.Duration
-	cpuClock       sqlCPUClock
-	cpuTime        sqlCPUTimeTracker
-	cpuTimeEvery   uint64
-	cpuTimeFuel    atomic.Uint64
+	ctx              context.Context
+	maxRows          int
+	options          SQLQueryOptions
+	parameters       []interface{}
+	joinWork         int
+	sources          map[string][]SQLRow
+	arena            sqlExecutionArena
+	spillQuota       *sqlSpillQuota
+	operatorMemory   *SQLOperatorMemoryTracker
+	memoryOvercommit *SQLMemoryOvercommitQueue
+	overcommitBytes  map[string]int
+	yieldEvery       uint64
+	yieldFuel        atomic.Uint64
+	yields           atomic.Uint64
+	maxCPUTime       time.Duration
+	cpuClock         sqlCPUClock
+	cpuTime          sqlCPUTimeTracker
+	cpuTimeEvery     uint64
+	cpuTimeFuel      atomic.Uint64
 }
 
 // sqlExecutionControlContext preserves the normal context contract while
@@ -8213,17 +8218,55 @@ func (control *sqlExecutionControl) executionContext() context.Context {
 }
 
 func (control *sqlExecutionControl) observeOperatorMemory(operator string, currentBytes int) error {
-	if control == nil || control.operatorMemory == nil {
+	if control == nil || (control.operatorMemory == nil && control.memoryOvercommit == nil) {
 		return nil
 	}
-	return control.operatorMemory.Observe(operator, currentBytes)
+	if operator == "" || currentBytes < 0 {
+		return fmt.Errorf("%w: operator and non-negative bytes are required", ErrSQLOperatorMemoryInvalid)
+	}
+	previousBytes := 0
+	if control.memoryOvercommit != nil {
+		if control.overcommitBytes == nil {
+			control.overcommitBytes = make(map[string]int)
+		}
+		previousBytes = control.overcommitBytes[operator]
+	}
+	delta := currentBytes - previousBytes
+	if delta > 0 && control.memoryOvercommit != nil {
+		if err := control.memoryOvercommit.Acquire(control.ctx, int64(delta)); err != nil {
+			return err
+		}
+	}
+	if control.operatorMemory != nil {
+		if err := control.operatorMemory.Observe(operator, currentBytes); err != nil {
+			if delta > 0 && control.memoryOvercommit != nil {
+				control.memoryOvercommit.Release(int64(delta))
+			}
+			return err
+		}
+	}
+	if delta < 0 && control.memoryOvercommit != nil {
+		control.memoryOvercommit.Release(int64(-delta))
+	}
+	if control.memoryOvercommit != nil {
+		control.overcommitBytes[operator] = currentBytes
+	}
+	return nil
 }
 
 func (control *sqlExecutionControl) releaseOperatorMemory(operator string) {
-	if control == nil || control.operatorMemory == nil {
+	if control == nil {
 		return
 	}
-	control.operatorMemory.Release(operator)
+	if control.memoryOvercommit != nil && control.overcommitBytes != nil {
+		if bytes, ok := control.overcommitBytes[operator]; ok {
+			control.memoryOvercommit.Release(int64(bytes))
+			delete(control.overcommitBytes, operator)
+		}
+	}
+	if control.operatorMemory != nil {
+		control.operatorMemory.Release(operator)
+	}
 }
 
 // sqlExecutionArena reuses row backing only while one query is executing. Its
@@ -8268,7 +8311,7 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 		return nil, func() {}, fmt.Errorf("unsupported SQL collation %q", options.Collation)
 	}
 	newControl := func(controlContext context.Context) *sqlExecutionControl {
-		control := &sqlExecutionControl{ctx: controlContext, maxRows: sqlQueryMaxRows(options), options: options, sources: map[string][]SQLRow{}, operatorMemory: options.OperatorMemoryTracker, maxCPUTime: options.MaxCPUTime}
+		control := &sqlExecutionControl{ctx: controlContext, maxRows: sqlQueryMaxRows(options), options: options, sources: map[string][]SQLRow{}, operatorMemory: options.OperatorMemoryTracker, memoryOvercommit: options.MemoryOvercommit, maxCPUTime: options.MaxCPUTime}
 		if options.MaxCPUTime > 0 {
 			control.cpuClock = currentSQLThreadCPUTime
 			every := options.CPUTimeCheckEvery
@@ -11577,7 +11620,7 @@ func sqlColumnarNumericMatches(number float64, operator string, value float64) b
 }
 
 func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl, outer *sqlExecRow) (SQLQueryResult, error) {
-	if control != nil && control.operatorMemory != nil {
+	if control != nil && (control.operatorMemory != nil || control.memoryOvercommit != nil) {
 		defer func() {
 			control.releaseOperatorMemory("GROUP BY")
 			control.releaseOperatorMemory("SORT")
@@ -12336,7 +12379,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		}
 	}
 	groupBytes := 0
-	if control != nil && (control.options.MaxGroupBytes > 0 || control.operatorMemory != nil) {
+	if control != nil && (control.options.MaxGroupBytes > 0 || control.operatorMemory != nil || control.memoryOvercommit != nil) {
 		groupBytes = sqlGroupedRowsBytes(groups)
 		if err := control.observeOperatorMemory("GROUP BY", groupBytes); err != nil {
 			return SQLQueryResult{}, err
@@ -12743,7 +12786,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			}
 			spillRecords = append(spillRecords, record)
 		}
-		if control != nil && (control.options.MaxSortBytes > 0 || control.operatorMemory != nil) && !sqlQueryHasWithFill(q) {
+		if control != nil && (control.options.MaxSortBytes > 0 || control.operatorMemory != nil || control.memoryOvercommit != nil) && !sqlQueryHasWithFill(q) {
 			sortBytes := 0
 			for _, item := range out {
 				sortBytes += sqlRowBytes(item.row)
