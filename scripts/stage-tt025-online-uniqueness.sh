@@ -2,6 +2,8 @@
 set -euo pipefail
 
 git add \
+    Makefile \
+	Makefile \
 	BENCHMARK.md \
 	ENGINE_IDEAS.md \
 	README.md \

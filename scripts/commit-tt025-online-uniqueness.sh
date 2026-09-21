@@ -2,4 +2,4 @@
 set -euo pipefail
 
 bash scripts/stage-tt025-online-uniqueness.sh
-git commit -m 'hatSchema: add online unique index validation'
+git commit -m 'build: include TT-025 Makefile targets'
