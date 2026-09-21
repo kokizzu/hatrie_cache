@@ -35841,3 +35841,19 @@ so there is no before/after speedup claim.
 Run with `make benchmark-c228-external-sort`; correctness and temporary-file
 cleanup are covered by `make test-c228-external-sort`. See
 [`C228_EXTERNAL_SORT_STABILITY.md`](C228_EXTERNAL_SORT_STABILITY.md).
+
+## C225 Incremental Ordered Window Frames
+
+Five `-benchmem` samples ran on Linux amd64 with an AMD Ryzen 9 5950X. The
+workload evaluates four repeated running aggregates over 2,000 rows in eight
+partitions. The fast path is restricted to the growing unbounded-preceding
+`ROWS` frame.
+
+| Path | Raw ns/op samples | Median ns/op | Bytes/op | Allocs/op | Relative |
+| --- | --- | ---: | ---: | ---: | --- |
+| Existing frame rescans | 59,844,612; 65,599,333; 62,008,065; 63,728,981; 65,855,024 | 63,728,981 | 24,467,225 | 96,111 | 1.00x |
+| Incremental frame state | 6,236,883; 6,117,514; 5,598,120; 5,552,759; 5,709,535 | 5,709,535 | 4,333,787 | 39,907 | 11.16x CPU, 5.65x lower bytes, 2.41x fewer allocations |
+
+The measurement command is `make benchmark-c225-baseline`; correctness is
+covered by `make test-c225-window-suite`. See
+[`C225_INCREMENTAL_WINDOW.md`](C225_INCREMENTAL_WINDOW.md).

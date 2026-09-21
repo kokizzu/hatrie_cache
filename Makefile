@@ -25200,3 +25200,47 @@ commit-c228-external-sort:
 .PHONY: push-c228-external-sort
 push-c228-external-sort:
 	bash scripts/push-c228-external-sort.sh
+
+.PHONY: report-inspiration-backlog
+report-inspiration-backlog:
+	bash scripts/report-inspiration-backlog.sh
+
+.PHONY: format-c225-incremental-window
+format-c225-incremental-window:
+	bash scripts/format-c225-incremental-window.sh
+
+.PHONY: test-c225-incremental-window
+test-c225-incremental-window:
+	bash scripts/test-c225-incremental-window.sh
+
+.PHONY: benchmark-c225-baseline
+benchmark-c225-baseline:
+	bash scripts/benchmark-c225-baseline.sh
+
+.PHONY: test-c225-window-suite
+test-c225-window-suite:
+	bash scripts/test-c225-window-suite.sh
+
+.PHONY: race-c225-incremental-window
+race-c225-incremental-window:
+	bash scripts/race-c225-incremental-window.sh
+
+.PHONY: vet-c225-incremental-window
+vet-c225-incremental-window:
+	bash scripts/vet-c225-incremental-window.sh
+
+.PHONY: test-c225-package
+test-c225-package:
+	bash scripts/test-c225-package.sh
+
+.PHONY: race-c225-package
+race-c225-package:
+	bash scripts/race-c225-package.sh
+
+.PHONY: commit-c225-incremental-window
+commit-c225-incremental-window:
+	bash scripts/commit-c225-incremental-window.sh
+
+.PHONY: push-c225-incremental-window
+push-c225-incremental-window:
+	bash scripts/push-c225-incremental-window.sh

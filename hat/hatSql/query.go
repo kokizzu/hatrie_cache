@@ -12446,6 +12446,11 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		if item.expr.name != "ROW_NUMBER" && item.expr.name != "RANK" && item.expr.name != "DENSE_RANK" && item.expr.name != "SUM" && item.expr.name != "AVG" && item.expr.name != "MIN" && item.expr.name != "MAX" && item.expr.name != "ARGMAX" && item.expr.name != "ARGMIN" && item.expr.name != "LAG" && item.expr.name != "LEAD" {
 			return SQLQueryResult{}, fmt.Errorf("SQL window function %q is not supported", item.expr.name)
 		}
+		if handled, err := sqlTryIncrementalWindowAggregate(item, column, result.Columns, out); err != nil {
+			return SQLQueryResult{}, err
+		} else if handled {
+			continue
+		}
 		for _, output := range out {
 			row := sqlExecRow{}
 			if len(output.group) > 0 {
