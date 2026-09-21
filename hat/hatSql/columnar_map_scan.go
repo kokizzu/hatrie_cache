@@ -24,7 +24,7 @@ func sqlColumnarMapPath(expr sqlExpr, alias string) (ColumnarMapSubcolumn, bool)
 		return ColumnarMapSubcolumn{}, false
 	}
 	segments, err := parseSQLJSONPath(path)
-	if err != nil || len(segments) != 1 || segments[0].isIndex {
+	if err != nil || len(segments) == 0 || segments[0].isIndex {
 		return ColumnarMapSubcolumn{}, false
 	}
 	return ColumnarMapSubcolumn{Field: field.name, Path: formatSQLJSONPath(segments)}, true

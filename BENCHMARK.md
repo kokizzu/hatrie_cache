@@ -35190,3 +35190,30 @@ After:   754772 ns/op 10347 B/op 58 allocs/op
 
 See [TT035_REQUEST_DEADLINES.md](TT035_REQUEST_DEADLINES.md) for semantics and
 the embedded API configuration.
+## CH-045 Nested Map Subcolumn Pruning (2026-09-21)
+
+Workload: `JSON_VALUE(src.doc, '$.profile.country')` over nested JSON, with a
+large sibling value that is not requested. The before columnar-map case used
+the old planner and fell back to full-row JSON parsing; the after case used the
+same resolver contract with a nested `ColumnarMapColumn` value. Values are
+medians of three `-count=3` runs on an AMD Ryzen 9 5950X, with
+`-benchtime=300ms -benchmem`.
+
+| Rows | Before ns/op | After ns/op | Speed improvement | Before B/op | After B/op | Memory improvement | Before allocs/op | After allocs/op | Allocation improvement |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1,024 | 29,584,139 | 1,032,678 | 28.6x | 11,814,353 | 726,903 | 16.3x lower | 21,358 | 7,937 | 2.69x lower |
+| 10,000 | 307,883,237 | 11,047,532 | 27.9x | 115,179,360 | 7,017,781 | 16.4x lower | 208,104 | 77,053 | 2.70x lower |
+
+Raw nested map-subcolumn samples:
+
+```text
+before 1024: 29,216,179 / 31,645,275 / 29,584,139 ns/op; 11,814,348-11,814,378 B/op; 21,358-21,359 allocs/op
+after  1024:    963,885 /  1,198,998 /  1,032,678 ns/op;    726,901-726,903 B/op;  7,937 allocs/op
+before 10000: 315,610,016 / 300,777,660 / 307,883,237 ns/op; 115,179,344-115,179,408 B/op; 208,103-208,106 allocs/op
+after  10000:  11,047,532 /  12,155,664 /  10,691,482 ns/op; 7,017,780-7,017,975 B/op; 77,053 allocs/op
+```
+
+The existing top-level `$.country` control retained the same allocation counts
+after the planner generalization: 7,934 allocs/op at 1,024 rows and 77,050
+allocs/op at 10,000 rows. Latency samples overlapped across runs, so no
+separate top-level speedup is claimed.

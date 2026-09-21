@@ -24096,3 +24096,39 @@ commit-tt035-request-deadlines:
 
 push-tt035-request-deadlines:
 	bash ./scripts/push-tt035-request-deadlines.sh
+.PHONY: test-ch045-map-subcolumns
+test-ch045-map-subcolumns:
+	bash scripts/test-ch045-map-subcolumns.sh
+.PHONY: test-ch045-map-subcolumns-package
+test-ch045-map-subcolumns-package:
+	bash scripts/test-ch045-map-subcolumns-package.sh
+.PHONY: race-ch045-map-subcolumns
+race-ch045-map-subcolumns:
+	bash scripts/race-ch045-map-subcolumns.sh
+.PHONY: benchmark-ch045-map-subcolumns
+benchmark-ch045-map-subcolumns:
+	bash scripts/benchmark-ch045-map-subcolumns.sh
+.PHONY: benchmark-ch045-map-subcolumns-nested
+benchmark-ch045-map-subcolumns-nested:
+	bash scripts/benchmark-ch045-map-subcolumns-nested.sh
+.PHONY: format-ch045-map-subcolumns
+format-ch045-map-subcolumns:
+	bash scripts/format-ch045-map-subcolumns.sh
+.PHONY: benchmark-ch045-map-subcolumns-top-level
+benchmark-ch045-map-subcolumns-top-level:
+	bash scripts/benchmark-ch045-map-subcolumns-top-level.sh
+.PHONY: verify-ch045-map-subcolumns
+verify-ch045-map-subcolumns:
+	bash scripts/verify-ch045-map-subcolumns.sh
+.PHONY: review-ch045-map-subcolumns
+review-ch045-map-subcolumns:
+	bash scripts/review-ch045-map-subcolumns.sh
+.PHONY: stage-ch045-map-subcolumns
+stage-ch045-map-subcolumns:
+	bash scripts/stage-ch045-map-subcolumns.sh
+.PHONY: commit-ch045-map-subcolumns
+commit-ch045-map-subcolumns:
+	bash scripts/commit-ch045-map-subcolumns.sh
+.PHONY: push-ch045-map-subcolumns
+push-ch045-map-subcolumns:
+	bash scripts/push-ch045-map-subcolumns.sh

@@ -56,8 +56,9 @@ func (resolver *ch030MapSubcolumnResolver) ResolveSQLColumnarMapSubcolumns(_, _ 
 				return ColumnarBatch{}, nil, false, err
 			}
 			if exists {
-				key := strings.TrimPrefix(path.Path, "$.")
-				mapRows[rowIndex][key] = value
+				if err := ch045SetMapPath(mapRows[rowIndex], path.Path, value); err != nil {
+					return ColumnarBatch{}, nil, false, err
+				}
 			}
 		}
 	}
@@ -176,10 +177,10 @@ func TestCH030MapSubcolumnQueryPreservesNullAndMissingResults(t *testing.T) {
 	}
 }
 
-func TestCH030UnsupportedMapPathFallsBackToRowExecution(t *testing.T) {
-	rows := []Row{{"doc": map[string]interface{}{"profile": map[string]interface{}{"country": "SG"}}}}
+func TestCH045RootArrayMapPathFallsBackToRowExecution(t *testing.T) {
+	rows := []Row{{"doc": []interface{}{"SG"}}}
 	resolver := &ch030MapSubcolumnResolver{rows: rows}
-	result, err := ExecuteSQLQuery("FROM CACHE('docs') AS src SELECT JSON_VALUE(src.doc, '$.profile.country') AS country", resolver)
+	result, err := ExecuteSQLQuery("FROM CACHE('docs') AS src SELECT JSON_VALUE(src.doc, '$[0]') AS country", resolver)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,4 +190,60 @@ func TestCH030UnsupportedMapPathFallsBackToRowExecution(t *testing.T) {
 	if resolver.mapSubcolumnCalls != 0 {
 		t.Fatalf("map subcolumn calls = %d, want fallback", resolver.mapSubcolumnCalls)
 	}
+}
+
+func TestCH045NestedMapSubcolumnQueryUsesSelectedPathAndMatchesRowExecution(t *testing.T) {
+	rows := []Row{
+		{"id": int64(1), "doc": map[string]interface{}{"profile": map[string]interface{}{"country": "SG", "large": strings.Repeat("x", 2048)}}},
+		{"id": int64(2), "doc": map[string]interface{}{"profile": map[string]interface{}{"country": "US", "large": strings.Repeat("y", 2048)}}},
+		{"id": int64(3), "doc": map[string]interface{}{"profile": nil}},
+		{"id": int64(4), "doc": nil},
+		{"id": int64(5), "doc": map[string]interface{}{"profile": map[string]interface{}{}}},
+	}
+	query := "FROM CACHE('docs') AS src WHERE JSON_VALUE(src.doc, '$.profile.country') = 'SG' SELECT id, JSON_VALUE(src.doc, '$.profile.country') AS country, JSON_EXISTS(src.doc, '$.profile.country') AS country_exists"
+	optimizedResolver := &ch030MapSubcolumnResolver{rows: rows}
+	optimized, err := ExecuteSQLQuery(query, optimizedResolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseline, err := ExecuteSQLQuery(query, ch030FullMapResolver{rows: rows})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(optimized.Rows, baseline.Rows) {
+		t.Fatalf("optimized rows = %#v, baseline rows = %#v", optimized.Rows, baseline.Rows)
+	}
+	if want := []Row{{"id": int64(1), "country": "SG", "country_exists": true}}; !reflect.DeepEqual(optimized.Rows, want) {
+		t.Fatalf("rows = %#v, want %#v", optimized.Rows, want)
+	}
+	if optimizedResolver.mapSubcolumnCalls != 1 || optimizedResolver.columnarCalls != 0 {
+		t.Fatalf("resolver calls = map:%d columnar:%d, want map:1 columnar:0", optimizedResolver.mapSubcolumnCalls, optimizedResolver.columnarCalls)
+	}
+	if !reflect.DeepEqual(optimizedResolver.requestedPaths, []ColumnarMapSubcolumn{{Field: "doc", Path: "$.profile.country"}}) {
+		t.Fatalf("requested paths = %#v", optimizedResolver.requestedPaths)
+	}
+}
+
+func ch045SetMapPath(root map[string]interface{}, path string, value interface{}) error {
+	segments, err := parseSQLJSONPath(path)
+	if err != nil {
+		return err
+	}
+	if len(segments) == 0 || segments[0].isIndex {
+		return nil
+	}
+	current := root
+	for _, segment := range segments[:len(segments)-1] {
+		if segment.isIndex {
+			return nil
+		}
+		child, ok := current[segment.key].(map[string]interface{})
+		if !ok {
+			child = make(map[string]interface{})
+			current[segment.key] = child
+		}
+		current = child
+	}
+	current[segments[len(segments)-1].key] = value
+	return nil
 }
