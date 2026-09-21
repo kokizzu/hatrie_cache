@@ -36050,3 +36050,20 @@ Raw samples from `make benchmark-m212-logical-compaction-baseline` and
 Logical compaction removes the compaction allocation cost and is about 8.5k
 times faster here, but retains 8x more version nodes until physical
 reclamation. It is therefore explicit and does not change the default.
+
+## M213 Equal Update Consolidation Audit
+
+The audit compared the existing grouped subscription producer with an
+unconditional differential fold at the forwarding boundary. Five benchmark
+samples ran on Linux amd64 / AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | B/op | Allocs/op | Result |
+| --- | ---: | ---: | ---: | --- |
+| Existing generated forwarding path | 27.90 | 0 | 0 | Keep |
+| Fold 32 unique unmarked deltas | 17,368 | 6,967 | 196 | Rejected |
+| Fold 32 deltas / 16 unique rows | 18,973 | 6,967 | 196 | Rejected as default |
+
+The generated query path already groups equal rows, and M208's downstream
+adapters already fold defensive inputs. The extra enqueue fold was therefore
+rolled back. Raw decision details are in
+[M213_EQUAL_UPDATE_CONSOLIDATION.md](M213_EQUAL_UPDATE_CONSOLIDATION.md).

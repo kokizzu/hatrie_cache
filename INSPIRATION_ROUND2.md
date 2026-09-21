@@ -99,7 +99,7 @@ operator control remain the preferred deployment model.
 - [x] M210 Historical `AS OF` reads against retained logical state. See [M210_RETAINED_SQL_SNAPSHOTS.md](M210_RETAINED_SQL_SNAPSHOTS.md) and [BENCHMARK.md#m210-retained-sql-snapshots](BENCHMARK.md#m210-retained-sql-snapshots).
 - [x] M211 Explicit rejection of reads before `since` or at/after `upper` frontiers. See [M211_SQL_FRONTIER_BOUNDS.md](M211_SQL_FRONTIER_BOUNDS.md) and [BENCHMARK.md#m211-sql-frontier-bounds](BENCHMARK.md#m211-sql-frontier-bounds).
 - [x] M212 Logical compaction that advances retained history without rewriting live state. See [M212_LOGICAL_COMPACTION.md](M212_LOGICAL_COMPACTION.md).
-- [ ] M213 Consolidation of equal updates before forwarding to downstream consumers.
+- [x] M213 Consolidation of equal updates before forwarding to downstream consumers is already covered by query row grouping and M208 adapter folding; the additional enqueue fold was measured and rejected. See [M213_EQUAL_UPDATE_CONSOLIDATION.md](M213_EQUAL_UPDATE_CONSOLIDATION.md).
 - [ ] M214 Arrangement reuse across indexes and compatible query plans.
 - [ ] M215 Delta-join maintenance for high-churn join inputs.
 - [ ] M216 Incremental top-K arrangements with bounded replacement state.

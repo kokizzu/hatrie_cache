@@ -1081,3 +1081,12 @@ frontier without rewriting version chains, while preserving physical
 `CompactMVCCThrough` for later memory reclamation. It is opt-in because it
 retains 8x as many version nodes in the benchmark fixture until physical
 compaction runs. See [M212_LOGICAL_COMPACTION.md](M212_LOGICAL_COMPACTION.md).
+
+## M213: Equal Update Consolidation Audit
+
+The requested Materialize-style consolidation is already covered before
+forwarding: query subscription row grouping emits one delta per canonical row
+key, and M208 folds batches defensively in the downstream changefeed adapters.
+An additional enqueue fold was measured and rejected because it added roughly
+680x CPU and 6,967 B/196 allocations for a 32-delta batch. See
+[M213_EQUAL_UPDATE_CONSOLIDATION.md](M213_EQUAL_UPDATE_CONSOLIDATION.md).
