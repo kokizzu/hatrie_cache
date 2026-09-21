@@ -75,7 +75,7 @@ operator control remain the preferred deployment model.
 - [ ] C239 Part-merge backlog, amplification, and age metrics.
 - [ ] C240 Read-only backup database attachment for querying backup parts in place.
 - [ ] C241 Incremental backup chunk deduplication across snapshots.
-- [ ] C242 Parallel restore of independent parts with bounded concurrency.
+- [x] C242 Parallel restore of independent parts with bounded concurrency. See [C242_PARALLEL_RESTORE.md](C242_PARALLEL_RESTORE.md) and [BENCHMARK.md](BENCHMARK.md#c242-bounded-parallel-restore).
 - [ ] C243 Remote-part read-through caching with immutable checksum keys.
 - [ ] C244 Local cache reuse validated by part and column checksums.
 - [x] C245 Vertical TTL deletion that reads only the deletion mask and key columns is implemented as an opt-in `hatDataStructure.PersistentDeleteBitmap` operation with a reusable zero-allocation buffer form. See [C245_VERTICAL_TTL_DELETE.md](C245_VERTICAL_TTL_DELETE.md) and [BENCHMARK.md](BENCHMARK.md#c245-vertical-ttl-deletion).

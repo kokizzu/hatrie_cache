@@ -23386,6 +23386,54 @@ commit-c245-vertical-ttl-delete:
 push-c245-vertical-ttl-delete:
 	bash scripts/push-c245-vertical-ttl-delete.sh
 
+.PHONY: test-c242-parallel-restore
+test-c242-parallel-restore:
+	bash scripts/test-c242-parallel-restore.sh
+
+.PHONY: format-c242-parallel-restore
+format-c242-parallel-restore:
+	bash scripts/format-c242-parallel-restore.sh
+
+.PHONY: benchmark-c242-parallel-restore
+benchmark-c242-parallel-restore:
+	bash scripts/benchmark-c242-parallel-restore.sh
+
+.PHONY: benchmark-c242-parallel-restore-long
+benchmark-c242-parallel-restore-long:
+	BENCHTIME=3s bash scripts/benchmark-c242-parallel-restore.sh
+
+.PHONY: race-c242-parallel-restore
+race-c242-parallel-restore:
+	bash scripts/race-c242-parallel-restore.sh
+
+.PHONY: vet-c242-parallel-restore
+vet-c242-parallel-restore:
+	bash scripts/vet-c242-parallel-restore.sh
+
+.PHONY: test-c242-cli
+test-c242-cli:
+	bash scripts/test-c242-cli.sh
+
+.PHONY: review-c242-parallel-restore
+review-c242-parallel-restore:
+	bash scripts/review-c242-parallel-restore.sh
+
+.PHONY: test-c242-package
+test-c242-package:
+	bash scripts/test-c242-package.sh
+
+.PHONY: stage-c242-parallel-restore
+stage-c242-parallel-restore:
+	bash scripts/stage-c242-parallel-restore.sh
+
+.PHONY: commit-c242-parallel-restore
+commit-c242-parallel-restore:
+	bash scripts/commit-c242-parallel-restore.sh
+
+.PHONY: push-c242-parallel-restore
+push-c242-parallel-restore:
+	bash scripts/push-c242-parallel-restore.sh
+
 test-c249-offset-inspection-package:
 	bash scripts/test-c249-offset-inspection-package.sh
 

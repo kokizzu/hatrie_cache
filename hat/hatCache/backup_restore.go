@@ -50,6 +50,9 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 	if dataDir == "" {
 		return BackupBundleRestoreReport{}, errors.New("hatriecache: restore data dir is required")
 	}
+	if err := (hatBackup.RestoreFileOptions{MaxConcurrency: options.MaxPartConcurrency}).Validate(); err != nil {
+		return BackupBundleRestoreReport{}, err
+	}
 	if info, err := os.Stat(bundlePath); err == nil && info.IsDir() && fileExists(filepath.Join(bundlePath, backupRepositoryDescriptorPath)) {
 		return RestoreBackupRepository(bundlePath, "", dataDir, options)
 	} else if err != nil {
@@ -168,6 +171,9 @@ func RestoreBackupRepository(repositoryPath string, backupID string, dataDir str
 	if dataDir == "" {
 		return BackupBundleRestoreReport{}, errors.New("hatriecache: restore data dir is required")
 	}
+	if err := (hatBackup.RestoreFileOptions{MaxConcurrency: options.MaxPartConcurrency}).Validate(); err != nil {
+		return BackupBundleRestoreReport{}, err
+	}
 	if err := verifyBackupRepositoryDescriptor(repositoryPath); err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
@@ -192,7 +198,7 @@ func RestoreBackupRepository(repositoryPath string, backupID string, dataDir str
 	if !options.Resume {
 		defer destination.Cleanup()
 	}
-	if _, err := materializeBackupRepositoryWithResume(repositoryPath, manifest.BackupID, destination.StagingPath(), options.Resume); err != nil {
+	if _, err := materializeBackupRepositoryWithConcurrency(repositoryPath, manifest.BackupID, destination.StagingPath(), options.Resume, options.MaxPartConcurrency); err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
 	doctor, err := verifyPebbleBackupRoot(repositoryPath, "repository", manifest, destination.StagingPath())

@@ -394,8 +394,16 @@ func materializeBackupRepository(root string, backupID string, destination strin
 }
 
 func materializeBackupRepositoryWithResume(root string, backupID string, destination string, resume bool) (BackupBundleManifest, error) {
+	return materializeBackupRepositoryWithConcurrency(root, backupID, destination, resume, 0)
+}
+
+func materializeBackupRepositoryWithConcurrency(root string, backupID string, destination string, resume bool, maxPartConcurrency int) (BackupBundleManifest, error) {
 	manifest, err := readBackupRepositoryManifest(root, backupID)
 	if err != nil {
+		return BackupBundleManifest{}, err
+	}
+	fileOptions := hatBackup.RestoreFileOptions{MaxConcurrency: maxPartConcurrency}
+	if err := fileOptions.Validate(); err != nil {
 		return BackupBundleManifest{}, err
 	}
 	if err := os.MkdirAll(destination, 0o700); err != nil {
@@ -417,7 +425,32 @@ func materializeBackupRepositoryWithResume(root string, backupID string, destina
 			return BackupBundleManifest{}, err
 		}
 	}
-	for _, file := range manifest.Files {
+	if resume {
+		for _, file := range manifest.Files {
+			clean, err := cleanBackupBundlePath(file.Path)
+			if err != nil {
+				return BackupBundleManifest{}, err
+			}
+			objectPath, err := backupRepositoryObjectPath(root, file.SHA256)
+			if err != nil {
+				return BackupBundleManifest{}, err
+			}
+			target := filepath.Join(destination, filepath.FromSlash(clean))
+			if err := rejectRestoreSymlinkComponents(filepath.Dir(target)); err != nil {
+				return BackupBundleManifest{}, err
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+				return BackupBundleManifest{}, err
+			}
+			if err := copyBackupRepositoryObjectWithResume(objectPath, target, file, true); err != nil {
+				return BackupBundleManifest{}, err
+			}
+		}
+		return manifest, nil
+	}
+
+	files := make([]hatBackup.RestoreFile, len(manifest.Files))
+	for index, file := range manifest.Files {
 		clean, err := cleanBackupBundlePath(file.Path)
 		if err != nil {
 			return BackupBundleManifest{}, err
@@ -427,17 +460,10 @@ func materializeBackupRepositoryWithResume(root string, backupID string, destina
 			return BackupBundleManifest{}, err
 		}
 		target := filepath.Join(destination, filepath.FromSlash(clean))
-		if resume {
-			if err := rejectRestoreSymlinkComponents(filepath.Dir(target)); err != nil {
-				return BackupBundleManifest{}, err
-			}
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-			return BackupBundleManifest{}, err
-		}
-		if err := copyBackupRepositoryObjectWithResume(objectPath, target, file, resume); err != nil {
-			return BackupBundleManifest{}, err
-		}
+		files[index] = hatBackup.RestoreFile{Source: objectPath, Destination: target, Size: file.Size, SHA256: file.SHA256}
+	}
+	if err := hatBackup.CopyRestoreFiles(files, fileOptions); err != nil {
+		return BackupBundleManifest{}, err
 	}
 	return manifest, nil
 }

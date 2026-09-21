@@ -34615,6 +34615,30 @@ Five-sample median on AMD Ryzen 9 5950X, Linux amd64:
 The bounded runtime is an opt-in safety boundary, not a faster execution
 engine. It is appropriate for untrusted row-local expressions; trusted hot
 paths should keep direct or specialized compiled execution.
+
+## C242: Bounded Parallel Restore
+
+Measured with `make benchmark-c242-parallel-restore` on AMD Ryzen 9 5950X,
+Linux amd64, local filesystem, 16 independent files of approximately 64 KiB,
+`-benchtime=1s`:
+
+| Workload | Serial | Bounded parallel | Improvement / tradeoff |
+| --- | ---: | ---: | ---: |
+| 16-file restore copy | 2,195,293 ns/op; 546,624 B/op; 325 allocs; 477.65 MB/s | 1,117,681 ns/op; 548,631 B/op; 344 allocs; 938.17 MB/s | 1.96x faster; 1.96x throughput; +2,007 B/op; +19 allocs |
+
+The default is serial (`MaxPartConcurrency=0`); the parallel variant is
+explicitly bounded. It applies only to fresh content-addressed repository
+materialization. Gzip bundle extraction and resume restore remain serial, and
+checksum validation plus atomic publication are unchanged. The repository-level
+benchmark target was also attempted, but this checkout has unrelated existing
+`hatSql` compile failures for `MaxDataflowTextBytes`, `TypedTableDate`, and
+`TypedTableTimestamp`, so this independent `hatBackup` benchmark is the raw
+feature measurement.
+
+```sh
+make benchmark-c242-parallel-restore
+make cli ARGS='restore-bundle -bundle backup/pebble-repository -data-dir data -max-part-concurrency 4'
+```
 ## T-U53 Logical-Time Frontier
 
 Five-sample median on AMD Ryzen 9 5950X, Linux amd64:

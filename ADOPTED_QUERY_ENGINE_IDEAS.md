@@ -958,3 +958,13 @@ output for invalid multiplicity, callback, or overflow errors. The matched
 heap and `1.02x` allocations. The API is importable and opt-in; existing SQL
 planner behavior is unchanged. See
 [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).
+
+## C242: Bounded Parallel Restore
+
+Adopted a ClickHouse-style independent-part restore path for content-addressed
+incremental repositories. `MaxPartConcurrency` is opt-in and bounded at 256;
+the default remains serial, gzip bundles remain serial, and resume restores
+retain their existing verified-file reuse semantics. Each part is copied with
+exclusive destination creation plus size and SHA-256 verification before the
+existing atomic publish. See [C242_PARALLEL_RESTORE.md](C242_PARALLEL_RESTORE.md)
+and [BENCHMARK.md](BENCHMARK.md#c242-bounded-parallel-restore).

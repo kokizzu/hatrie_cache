@@ -65,6 +65,9 @@ type RestoreOptions struct {
 	// behavior. The sequence must be within the snapshot checkpoint and the
 	// bundle's recorded journal range.
 	MaxJournalSequence uint64
+	// MaxPartConcurrency bounds independent content-addressed repository file
+	// copies. Zero keeps fresh restore serial and resume restore semantics.
+	MaxPartConcurrency int
 }
 
 // RestoreReport describes an applied offline restore.
