@@ -14160,6 +14160,9 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 	if rows, indexed, err := resolveSQLGeoIndexedSource(source, condition, resolver, hint); indexed || err != nil {
 		return rows, indexed, err
 	}
+	if rows, indexed, err := resolveSQLValidityIndexedSource(source, condition, resolver, hint); indexed || err != nil {
+		return rows, indexed, err
+	}
 	if condition.kind != "binary" || condition.left == nil || condition.right == nil {
 		return nil, false, nil
 	}
@@ -16344,7 +16347,14 @@ func sqlCanPushBaseWhere(query *sqlQuery) bool {
 			return false
 		}
 	}
-	return sqlExprReferencesOnlyAlias(query.where, query.from.alias)
+	if sqlExprReferencesOnlyAlias(query.where, query.from.alias) {
+		return true
+	}
+	if len(query.joins) == 0 && query.from != nil {
+		_, _, ok := sqlValidityIndexPredicate(*query.from, query.where)
+		return ok
+	}
+	return false
 }
 
 // sqlInnerJoinPushdownCondition extracts deterministic AND terms that inspect

@@ -35629,6 +35629,20 @@ repeated explain. The one-time compile step now pays the workload preparation
 cost; parameter-bound clones clear the cache before rewrite so correctness is
 preserved.
 
+# MZ-009: VALID_AT Range Candidate Pushdown
+
+This benchmark compares a full-source `VALID_AT` scan with the same query
+using a prebuilt `valid_from` range-index candidate list. The original
+`VALID_AT` predicate is rechecked after candidate resolution.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | ---: |
+| Full-source scan | 3,938,877 | 4,734,706 | 20,036 | 1.00x |
+| Range-index candidates | 9,680 | 6,512 | 34 | 406.9x faster, 727.2x lower heap, 589.3x fewer allocations |
+
+The result measures query execution against an already-maintained index. Index
+build and update costs remain the responsibility of the source resolver.
+
 # CH-041: Multi-Argument GROUPING_ID
 
 This benchmark compares native `GROUPING_ID(region, product)` with the

@@ -24767,3 +24767,39 @@ commit-ch041-grouping-id:
 .PHONY: push-ch041-grouping-id
 push-ch041-grouping-id:
 	bash scripts/push-ch041-grouping-id.sh
+
+.PHONY: format-mz009-validity-index
+format-mz009-validity-index:
+	bash scripts/mz009-validity-index.sh format
+
+.PHONY: test-mz009-validity-index
+test-mz009-validity-index:
+	bash scripts/mz009-validity-index.sh test
+
+.PHONY: benchmark-mz009-validity-index
+benchmark-mz009-validity-index:
+	bash scripts/mz009-validity-index.sh benchmark
+
+.PHONY: race-mz009-validity-index
+race-mz009-validity-index:
+	bash scripts/mz009-validity-index.sh race
+
+.PHONY: vet-mz009-validity-index
+vet-mz009-validity-index:
+	bash scripts/mz009-validity-index.sh vet
+
+.PHONY: verify-mz009-validity-index
+verify-mz009-validity-index:
+	bash scripts/mz009-validity-index.sh verify
+
+.PHONY: stage-mz009-validity-index
+stage-mz009-validity-index:
+	bash scripts/stage-mz009-validity-index.sh
+
+.PHONY: commit-mz009-validity-index
+commit-mz009-validity-index:
+	bash scripts/commit-mz009-validity-index.sh
+
+.PHONY: push-mz009-validity-index
+push-mz009-validity-index:
+	bash scripts/push-mz009-validity-index.sh
