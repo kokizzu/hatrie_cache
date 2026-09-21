@@ -35741,3 +35741,20 @@ The lease adds a small append-path cost while active and no measured heap or
 allocation increase. Its value is correctness under snapshot transfer: when
 the configured journal bound would evict a required delta, the writer gets
 bounded backpressure rather than a join that can restore incomplete state.
+
+# C235: Part-Column Query Profiling
+
+Five `-benchmem` samples ran on Linux amd64 with an AMD Ryzen 9 5950X. The
+control is the existing profiler `Record` path from the parent commit; C235 is
+an opt-in physical part/column aggregation path.
+
+| Path | Raw ns/op samples | Median ns/op | B/op | allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Existing `Record` control | 14.13, 15.24, 14.99, 14.69, 14.97 | 14.97 | 0 | 0 | 1.00x |
+| `RecordPartColumn`, one hot key | 102.6, 95.39, 99.93, 100.1, 101.7 | 100.1 | 0 | 0 | 6.69x |
+| `PartColumnProfile`, 64 entries | 12614, 12315, 12337, 10927, 13632 | 12337 | 5528 | 4 | n/a |
+
+The C235 cost is paid only by callers that explicitly record part/column
+observations. The existing sample path remains allocation-free, and the
+normal SQL executor does not construct this profiler automatically. See
+[CH235_PART_COLUMN_PROFILER.md](CH235_PART_COLUMN_PROFILER.md).

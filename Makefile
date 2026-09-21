@@ -23253,6 +23253,37 @@ stage-t042-rejection:
 inspect-inspiration-ledgers:
 	bash scripts/inspect-inspiration-ledgers.sh
 
+.PHONY: test-ch235-part-column-profiler benchmark-ch235-part-column-profiler race-ch235-part-column-profiler test-ch235-package verify-ch235-baseline benchmark-ch235-baseline
+
+.PHONY: format-ch235-part-column-profiler
+
+format-ch235-part-column-profiler:
+	bash scripts/format-ch235-part-column-profiler.sh
+
+test-ch235-part-column-profiler:
+	bash scripts/test-ch235-part-column-profiler.sh
+
+vet-ch235-package:
+	bash scripts/vet-ch235-package.sh
+
+stage-ch235-part-column-profiler:
+	bash scripts/stage-ch235-part-column-profiler.sh
+
+commit-ch235-part-column-profiler:
+	bash scripts/commit-ch235-part-column-profiler.sh
+
+push-ch235-part-column-profiler:
+	bash scripts/push-ch235-part-column-profiler.sh
+
+benchmark-ch235-part-column-profiler:
+	bash scripts/benchmark-ch235-part-column-profiler.sh
+
+race-ch235-part-column-profiler:
+	bash scripts/race-ch235-part-column-profiler.sh
+
+test-ch235-package:
+	bash scripts/test-ch235-package.sh
+
 .PHONY: stage-inspiration-ledger commit-inspiration-ledger push-inspiration-ledger
 
 stage-inspiration-ledger:

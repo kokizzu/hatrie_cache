@@ -42,6 +42,7 @@ type SQLQueryProfilerOptions struct {
 	MaxQueries                 int
 	MaxSamplesPerQuery         int
 	MaxMemoryOperatorsPerQuery int
+	MaxPartColumnsPerQuery     int
 	SampleEvery                uint64
 }
 
@@ -101,15 +102,19 @@ type SQLQueryProfile struct {
 // SQLQueryProfilerStats describes bounded profiler state without exposing
 // query IDs or sample contents.
 type SQLQueryProfilerStats struct {
-	QueryCount                    int    `json:"query_count"`
-	SampleCount                   uint64 `json:"sample_count"`
-	UnsampledCount                uint64 `json:"unsampled_count"`
-	DroppedSampleCount            uint64 `json:"dropped_sample_count"`
-	EvictedQueryCount             uint64 `json:"evicted_query_count"`
-	MemoryQueryCount              int    `json:"memory_query_count"`
-	MemoryObservationCount        uint64 `json:"memory_observation_count"`
-	DroppedMemoryObservationCount uint64 `json:"dropped_memory_observation_count"`
-	EvictedMemoryQueryCount       uint64 `json:"evicted_memory_query_count"`
+	QueryCount                        int    `json:"query_count"`
+	SampleCount                       uint64 `json:"sample_count"`
+	UnsampledCount                    uint64 `json:"unsampled_count"`
+	DroppedSampleCount                uint64 `json:"dropped_sample_count"`
+	EvictedQueryCount                 uint64 `json:"evicted_query_count"`
+	MemoryQueryCount                  int    `json:"memory_query_count"`
+	MemoryObservationCount            uint64 `json:"memory_observation_count"`
+	DroppedMemoryObservationCount     uint64 `json:"dropped_memory_observation_count"`
+	EvictedMemoryQueryCount           uint64 `json:"evicted_memory_query_count"`
+	PartColumnQueryCount              int    `json:"part_column_query_count"`
+	PartColumnObservationCount        uint64 `json:"part_column_observation_count"`
+	DroppedPartColumnObservationCount uint64 `json:"dropped_part_column_observation_count"`
+	EvictedPartColumnQueryCount       uint64 `json:"evicted_part_column_query_count"`
 }
 
 type sqlQueryProfileState struct {
@@ -128,23 +133,29 @@ type sqlQueryMemoryProfileState struct {
 // query ID. It has no goroutines and adds no cost unless callers construct it
 // and call Record.
 type SQLQueryProfiler struct {
-	mu                            sync.RWMutex
-	maxQueries                    int
-	maxSamplesPerQuery            int
-	maxMemoryOperatorsPerQuery    int
-	sampleEvery                   uint64
-	sequence                      uint64
-	sampleCount                   uint64
-	unsampledCount                uint64
-	droppedSampleCount            uint64
-	evictedQueryCount             uint64
-	closed                        bool
-	queries                       map[string]*sqlQueryProfileState
-	memorySequence                uint64
-	memoryProfiles                map[string]*sqlQueryMemoryProfileState
-	memoryObservationCount        uint64
-	droppedMemoryObservationCount uint64
-	evictedMemoryQueryCount       uint64
+	mu                                sync.RWMutex
+	maxQueries                        int
+	maxSamplesPerQuery                int
+	maxMemoryOperatorsPerQuery        int
+	maxPartColumnsPerQuery            int
+	sampleEvery                       uint64
+	sequence                          uint64
+	sampleCount                       uint64
+	unsampledCount                    uint64
+	droppedSampleCount                uint64
+	evictedQueryCount                 uint64
+	closed                            bool
+	queries                           map[string]*sqlQueryProfileState
+	memorySequence                    uint64
+	memoryProfiles                    map[string]*sqlQueryMemoryProfileState
+	memoryObservationCount            uint64
+	droppedMemoryObservationCount     uint64
+	evictedMemoryQueryCount           uint64
+	partColumnSequence                uint64
+	partColumnProfiles                map[string]*sqlQueryPartColumnProfileState
+	partColumnObservationCount        uint64
+	droppedPartColumnObservationCount uint64
+	evictedPartColumnQueryCount       uint64
 }
 
 // NewSQLQueryProfiler creates a bounded profiler. Limits above the safety
@@ -177,6 +188,16 @@ func NewSQLQueryProfiler(options SQLQueryProfilerOptions) (*SQLQueryProfiler, er
 	if maxQueries > maxSQLQueryProfilerTotalSamples/maxMemoryOperators {
 		return nil, fmt.Errorf("%w: total memory operators", ErrSQLQueryProfilerLimitInvalid)
 	}
+	maxPartColumns := options.MaxPartColumnsPerQuery
+	if maxPartColumns == 0 {
+		maxPartColumns = DefaultSQLQueryProfilerMaxPartColumnsPerQuery
+	}
+	if maxPartColumns < 0 || maxPartColumns > maxSQLQueryProfilerPartColumnsPerQuery {
+		return nil, fmt.Errorf("%w: max part-columns per query", ErrSQLQueryProfilerLimitInvalid)
+	}
+	if maxQueries > maxSQLQueryProfilerTotalSamples/maxPartColumns {
+		return nil, fmt.Errorf("%w: total part-columns", ErrSQLQueryProfilerLimitInvalid)
+	}
 	sampleEvery := options.SampleEvery
 	if sampleEvery == 0 {
 		sampleEvery = defaultSQLQueryProfilerSampleEvery
@@ -185,6 +206,7 @@ func NewSQLQueryProfiler(options SQLQueryProfilerOptions) (*SQLQueryProfiler, er
 		maxQueries:                 maxQueries,
 		maxSamplesPerQuery:         maxSamples,
 		maxMemoryOperatorsPerQuery: maxMemoryOperators,
+		maxPartColumnsPerQuery:     maxPartColumns,
 		sampleEvery:                sampleEvery,
 		queries:                    make(map[string]*sqlQueryProfileState, maxQueries),
 	}, nil
@@ -397,15 +419,19 @@ func (profiler *SQLQueryProfiler) Stats() SQLQueryProfilerStats {
 	profiler.mu.RLock()
 	defer profiler.mu.RUnlock()
 	return SQLQueryProfilerStats{
-		QueryCount:                    len(profiler.queries),
-		SampleCount:                   profiler.sampleCount,
-		UnsampledCount:                profiler.unsampledCount,
-		DroppedSampleCount:            profiler.droppedSampleCount,
-		EvictedQueryCount:             profiler.evictedQueryCount,
-		MemoryQueryCount:              len(profiler.memoryProfiles),
-		MemoryObservationCount:        profiler.memoryObservationCount,
-		DroppedMemoryObservationCount: profiler.droppedMemoryObservationCount,
-		EvictedMemoryQueryCount:       profiler.evictedMemoryQueryCount,
+		QueryCount:                        len(profiler.queries),
+		SampleCount:                       profiler.sampleCount,
+		UnsampledCount:                    profiler.unsampledCount,
+		DroppedSampleCount:                profiler.droppedSampleCount,
+		EvictedQueryCount:                 profiler.evictedQueryCount,
+		MemoryQueryCount:                  len(profiler.memoryProfiles),
+		MemoryObservationCount:            profiler.memoryObservationCount,
+		DroppedMemoryObservationCount:     profiler.droppedMemoryObservationCount,
+		EvictedMemoryQueryCount:           profiler.evictedMemoryQueryCount,
+		PartColumnQueryCount:              len(profiler.partColumnProfiles),
+		PartColumnObservationCount:        profiler.partColumnObservationCount,
+		DroppedPartColumnObservationCount: profiler.droppedPartColumnObservationCount,
+		EvictedPartColumnQueryCount:       profiler.evictedPartColumnQueryCount,
 	}
 }
 
