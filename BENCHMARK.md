@@ -36277,3 +36277,19 @@ HCM1 was 79 bytes versus JSON at 167 bytes, or 2.11x smaller. The capacity
 calculation was benchmarked after implementation and removed the initial
 maximum-frame allocation. Raw samples and the restart/consensus boundary are in
 [M226_DURABLE_CONSENSUS_METADATA.md](M226_DURABLE_CONSENSUS_METADATA.md).
+
+## M227 Atomic Snapshot Offset And First Live Frontier
+
+The workload committed one `orders` snapshot boundary and advanced its live
+frontier. Five samples were run per operation. CBS1 is the feature path; JSON
+is a control using the same snapshot struct.
+
+| Operation | CBS1 ns/op | JSON ns/op | CBS1 B/op | JSON B/op | CBS1 allocs/op | JSON allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Commit + advance | 17.27 | n/a | 0 | n/a | 0 | n/a | 0 allocations |
+| Marshal | 72.45 | 263.0 | 48 | 112 | 1 | 1 | 3.63x CPU, 2.33x lower B/op |
+| Unmarshal | 47.48 | 1,465 | 8 | 272 | 1 | 6 | 30.9x CPU, 34.0x lower B/op, 6x fewer allocs |
+
+CBS1 was 38 bytes versus JSON at 104 bytes, or 2.74x smaller. Raw samples and
+the recovery semantics are in
+[M227_ATOMIC_SNAPSHOT_FRONTIER.md](M227_ATOMIC_SNAPSHOT_FRONTIER.md).

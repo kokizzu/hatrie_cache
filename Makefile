@@ -26036,3 +26036,46 @@ commit-m226-consensus-metadata:
 .PHONY: push-m226-consensus-metadata
 push-m226-consensus-metadata:
 	bash scripts/push-m226-consensus-metadata.sh
+.PHONY: format-m227-snapshot-boundary
+format-m227-snapshot-boundary:
+	bash scripts/m227-snapshot-boundary.sh format
+
+.PHONY: test-m227-snapshot-boundary
+test-m227-snapshot-boundary:
+	bash scripts/m227-snapshot-boundary.sh test
+
+.PHONY: benchmark-m227-snapshot-boundary
+benchmark-m227-snapshot-boundary:
+	bash scripts/m227-snapshot-boundary.sh benchmark
+
+.PHONY: measure-m227-snapshot-boundary-size
+measure-m227-snapshot-boundary-size:
+	bash scripts/m227-snapshot-boundary.sh size
+
+.PHONY: race-m227-snapshot-boundary
+race-m227-snapshot-boundary:
+	bash scripts/m227-snapshot-boundary.sh race
+
+.PHONY: vet-m227-snapshot-boundary
+vet-m227-snapshot-boundary:
+	bash scripts/m227-snapshot-boundary.sh vet
+
+.PHONY: test-m227-snapshot-boundary-package
+test-m227-snapshot-boundary-package:
+	bash scripts/m227-snapshot-boundary.sh package
+
+.PHONY: verify-m227-snapshot-boundary-docs
+verify-m227-snapshot-boundary-docs:
+	bash scripts/m227-snapshot-boundary.sh docs
+
+.PHONY: stage-m227-snapshot-boundary
+stage-m227-snapshot-boundary:
+	bash scripts/stage-m227-snapshot-boundary.sh
+
+.PHONY: commit-m227-snapshot-boundary
+commit-m227-snapshot-boundary:
+	bash scripts/commit-m227-snapshot-boundary.sh
+
+.PHONY: push-m227-snapshot-boundary
+push-m227-snapshot-boundary:
+	bash scripts/push-m227-snapshot-boundary.sh

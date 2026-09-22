@@ -113,7 +113,7 @@ operator control remain the preferred deployment model.
 - [x] M224 Hydration progress and estimated remaining work metrics. See [M224_MATERIALIZED_HYDRATION_PROGRESS.md](M224_MATERIALIZED_HYDRATION_PROGRESS.md).
 - [x] M225 Persisted shard leases that prevent duplicate state ownership. See [M225_PERSISTED_SHARD_LEASES.md](M225_PERSISTED_SHARD_LEASES.md).
 - [x] M226 Durable consensus metadata for state shard and frontier ownership. See [M226_DURABLE_CONSENSUS_METADATA.md](M226_DURABLE_CONSENSUS_METADATA.md).
-- [ ] M227 Source snapshot offsets coupled atomically to the first live frontier.
+- [x] M227 Source snapshot offsets coupled atomically to the first live frontier. See [M227_ATOMIC_SNAPSHOT_FRONTIER.md](M227_ATOMIC_SNAPSHOT_FRONTIER.md).
 - [ ] M228 Exactly-once source restart from a committed source offset.
 - [ ] M229 Source schema evolution with additive field compatibility checks.
 - [ ] M230 Source backpressure based on downstream frontier lag.

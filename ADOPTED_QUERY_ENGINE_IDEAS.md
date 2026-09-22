@@ -1216,3 +1216,11 @@ term/vote, log indexes, source frontier, and configuration generation in one
 validated monotone record with a compact HCM1 snapshot. It does not replace
 distributed consensus or durable atomic storage. See
 [M226_DURABLE_CONSENSUS_METADATA.md](M226_DURABLE_CONSENSUS_METADATA.md).
+
+## M227 Atomic Snapshot Offset And First Live Frontier
+
+The source-bootstrap boundary pattern from Materialize is adopted as an opt-in
+`hatReplication.ChangefeedSnapshotBoundary`. It publishes the snapshot offset
+and first live frontier together, rejects partial or regressed recovery, and
+persists the coupled boundary in compact CBS1 form. See
+[M227_ATOMIC_SNAPSHOT_FRONTIER.md](M227_ATOMIC_SNAPSHOT_FRONTIER.md).
