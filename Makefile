@@ -26323,6 +26323,37 @@ commit-m234-sink-backpressure:
 push-m234-sink-backpressure:
 	bash scripts/push-m234-sink-backpressure.sh
 
+.PHONY: test-m237-lazy-hydration test-m237-lazy-hydration-package race-m237-lazy-hydration vet-m237-lazy-hydration benchmark-m237-lazy-hydration verify-docs-m237-lazy-hydration format-m237-lazy-hydration stage-m237-lazy-hydration commit-m237-lazy-hydration push-m237-lazy-hydration
+test-m237-lazy-hydration:
+	bash scripts/test-m237-lazy-hydration.sh test
+
+test-m237-lazy-hydration-package:
+	bash scripts/test-m237-lazy-hydration.sh package
+
+race-m237-lazy-hydration:
+	bash scripts/test-m237-lazy-hydration.sh race
+
+vet-m237-lazy-hydration:
+	bash scripts/test-m237-lazy-hydration.sh vet
+
+benchmark-m237-lazy-hydration:
+	bash scripts/test-m237-lazy-hydration.sh benchmark
+
+verify-docs-m237-lazy-hydration:
+	bash scripts/test-m237-lazy-hydration.sh docs
+
+format-m237-lazy-hydration:
+	bash scripts/test-m237-lazy-hydration.sh format
+
+stage-m237-lazy-hydration:
+	bash scripts/stage-m237-lazy-hydration.sh
+
+commit-m237-lazy-hydration:
+	bash scripts/commit-m237-lazy-hydration.sh
+
+push-m237-lazy-hydration:
+	bash scripts/push-m237-lazy-hydration.sh
+
 format-m233-sink-retry:
 	bash scripts/m233-sink-retry.sh format
 

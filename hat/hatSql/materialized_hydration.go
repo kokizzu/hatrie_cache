@@ -30,6 +30,12 @@ const (
 	MaterializedViewHydrationStateReady     MaterializedViewHydrationState = "ready"
 )
 
+type materializedViewHydrationWait struct {
+	done   chan struct{}
+	err    error
+	closed bool
+}
+
 func materializedViewHydrationState(status MaterializedViewStatus) MaterializedViewHydrationState {
 	if status.HydrationState == "" {
 		// Treat statuses created before M223 as ready for compatibility.
@@ -136,67 +142,157 @@ func (views *MaterializedViews) MarkMaterializedViewCold(name string) error {
 // publishes its first snapshot. While the query is running, Get exposes the
 // hydrating state and no read or incremental refresh may use the view.
 func (views *MaterializedViews) Hydrate(ctx context.Context, name string, resolver SourceResolver, options QueryOptions) (MaterializedViewStatus, error) {
+	view, generation, progress, wait, err := views.beginMaterializedViewHydration(ctx, name, resolver)
+	if err != nil {
+		return MaterializedViewStatus{}, err
+	}
+	return views.hydrateMaterializedView(withMaterializedViewHydrationProgress(ctx, progress), strings.TrimSpace(name), generation, view, resolver, options, progress, wait)
+}
+
+// GetOrHydrate returns a ready snapshot, or lazily hydrates a cold view on the
+// first read. Readers that arrive during the same hydration share its result;
+// a waiting reader may cancel without cancelling the hydration owner.
+func (views *MaterializedViews) GetOrHydrate(ctx context.Context, name string, resolver SourceResolver, options QueryOptions) (MaterializedView, error) {
 	if views == nil {
-		return MaterializedViewStatus{}, fmt.Errorf("materialized views are nil")
+		return MaterializedView{}, fmt.Errorf("materialized views are nil")
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return MaterializedViewStatus{}, fmt.Errorf("materialized view name is required")
+		return MaterializedView{}, fmt.Errorf("materialized view name is required")
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return MaterializedView{}, err
+		}
+		views.mu.RLock()
+		view, exists := views.views[name]
+		if !exists {
+			views.mu.RUnlock()
+			return MaterializedView{}, fmt.Errorf("materialized view %q does not exist", name)
+		}
+		state := materializedViewHydrationState(view.snapshot.Status)
+		switch state {
+		case MaterializedViewHydrationStateReady:
+			snapshot := cloneMaterializedView(view.snapshot)
+			if view.hydrationProgress != nil {
+				snapshot.Status.HydrationProgress = view.hydrationProgress.snapshot()
+			}
+			views.mu.RUnlock()
+			return snapshot, nil
+		case MaterializedViewHydrationStateHydrating:
+			wait := views.hydrationWaits[name]
+			views.mu.RUnlock()
+			if wait == nil {
+				return MaterializedView{}, fmt.Errorf("%w: %q", ErrMaterializedViewHydrationInProgress, name)
+			}
+			select {
+			case <-wait.done:
+				if wait.err != nil {
+					return MaterializedView{}, wait.err
+				}
+				snapshot, ok := views.Get(name)
+				if !ok {
+					return MaterializedView{}, fmt.Errorf("materialized view %q disappeared after hydration", name)
+				}
+				return snapshot, nil
+			case <-ctx.Done():
+				return MaterializedView{}, ctx.Err()
+			}
+		case MaterializedViewHydrationStateCold:
+			views.mu.RUnlock()
+			startedView, generation, progress, wait, err := views.beginMaterializedViewHydration(ctx, name, resolver)
+			if err != nil {
+				if errors.Is(err, ErrMaterializedViewHydrationInProgress) {
+					continue
+				}
+				return MaterializedView{}, err
+			}
+			if _, err := views.hydrateMaterializedView(withMaterializedViewHydrationProgress(ctx, progress), name, generation, startedView, resolver, options, progress, wait); err != nil {
+				return MaterializedView{}, err
+			}
+			snapshot, ok := views.Get(name)
+			if !ok {
+				return MaterializedView{}, fmt.Errorf("materialized view %q disappeared after hydration", name)
+			}
+			return snapshot, nil
+		default:
+			views.mu.RUnlock()
+			return MaterializedView{}, fmt.Errorf("%w: %q has invalid state %q", ErrMaterializedViewHydrationNotReady, name, state)
+		}
+	}
+}
+
+func (views *MaterializedViews) beginMaterializedViewHydration(ctx context.Context, name string, resolver SourceResolver) (materializedView, uint64, *materializedViewHydrationProgressState, *materializedViewHydrationWait, error) {
+	if views == nil {
+		return materializedView{}, 0, nil, nil, fmt.Errorf("materialized views are nil")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return materializedView{}, 0, nil, nil, fmt.Errorf("materialized view name is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return materializedView{}, 0, nil, nil, err
 	}
 	views.mu.RLock()
 	view, exists := views.views[name]
 	if !exists {
 		views.mu.RUnlock()
-		return MaterializedViewStatus{}, fmt.Errorf("materialized view %q does not exist", name)
+		return materializedView{}, 0, nil, nil, fmt.Errorf("materialized view %q does not exist", name)
 	}
 	state := materializedViewHydrationState(view.snapshot.Status)
-	switch state {
-	case MaterializedViewHydrationStateHydrating:
+	if state == MaterializedViewHydrationStateHydrating {
 		views.mu.RUnlock()
-		return MaterializedViewStatus{}, fmt.Errorf("%w: %q", ErrMaterializedViewHydrationInProgress, name)
-	case MaterializedViewHydrationStateReady:
+		return materializedView{}, 0, nil, nil, fmt.Errorf("%w: %q", ErrMaterializedViewHydrationInProgress, name)
+	}
+	if state == MaterializedViewHydrationStateReady {
 		views.mu.RUnlock()
-		return MaterializedViewStatus{}, fmt.Errorf("%w: %q", ErrMaterializedViewHydrationNotCold, name)
-	case MaterializedViewHydrationStateCold:
-	default:
+		return materializedView{}, 0, nil, nil, fmt.Errorf("%w: %q", ErrMaterializedViewHydrationNotCold, name)
+	}
+	if state != MaterializedViewHydrationStateCold {
 		views.mu.RUnlock()
-		return MaterializedViewStatus{}, fmt.Errorf("%w: %q has invalid state %q", ErrMaterializedViewHydrationNotCold, name, state)
+		return materializedView{}, 0, nil, nil, fmt.Errorf("%w: %q has invalid state %q", ErrMaterializedViewHydrationNotCold, name, state)
 	}
 	definition := view.definition
 	views.mu.RUnlock()
 
 	estimatedWork, estimateAvailable, estimateExact := estimateMaterializedViewHydrationWork(resolver, definition.Dependencies)
+	if err := ctx.Err(); err != nil {
+		return materializedView{}, 0, nil, nil, err
+	}
 
 	views.mu.Lock()
+	defer views.mu.Unlock()
 	view, exists = views.views[name]
 	if !exists {
-		views.mu.Unlock()
-		return MaterializedViewStatus{}, fmt.Errorf("materialized view %q does not exist", name)
+		return materializedView{}, 0, nil, nil, fmt.Errorf("materialized view %q does not exist", name)
 	}
 	state = materializedViewHydrationState(view.snapshot.Status)
 	switch state {
 	case MaterializedViewHydrationStateHydrating:
-		views.mu.Unlock()
-		return MaterializedViewStatus{}, fmt.Errorf("%w: %q", ErrMaterializedViewHydrationInProgress, name)
+		return materializedView{}, 0, nil, nil, fmt.Errorf("%w: %q", ErrMaterializedViewHydrationInProgress, name)
 	case MaterializedViewHydrationStateReady:
-		views.mu.Unlock()
-		return MaterializedViewStatus{}, fmt.Errorf("%w: %q", ErrMaterializedViewHydrationNotCold, name)
+		return materializedView{}, 0, nil, nil, fmt.Errorf("%w: %q", ErrMaterializedViewHydrationNotCold, name)
 	case MaterializedViewHydrationStateCold:
 		progress := newMaterializedViewHydrationProgressState(estimatedWork, estimateAvailable, estimateExact)
+		wait := &materializedViewHydrationWait{done: make(chan struct{})}
+		if views.hydrationWaits == nil {
+			views.hydrationWaits = make(map[string]*materializedViewHydrationWait)
+		}
 		view.snapshot.Status.HydrationState = MaterializedViewHydrationStateHydrating
 		view.snapshot.Status.HydrationProgress = progress.snapshot()
 		view.hydrationProgress = progress
-		generation := view.generation
 		views.views[name] = view
-		views.mu.Unlock()
-		return views.hydrateMaterializedView(withMaterializedViewHydrationProgress(ctx, progress), name, generation, view, resolver, options, progress)
+		views.hydrationWaits[name] = wait
+		return view, view.generation, progress, wait, nil
 	default:
-		views.mu.Unlock()
-		return MaterializedViewStatus{}, fmt.Errorf("%w: %q has invalid state %q", ErrMaterializedViewHydrationNotCold, name, state)
+		return materializedView{}, 0, nil, nil, fmt.Errorf("%w: %q has invalid state %q", ErrMaterializedViewHydrationNotCold, name, state)
 	}
 }
 
-func (views *MaterializedViews) hydrateMaterializedView(ctx context.Context, name string, generation uint64, view materializedView, resolver SourceResolver, options QueryOptions, progress *materializedViewHydrationProgressState) (MaterializedViewStatus, error) {
+func (views *MaterializedViews) hydrateMaterializedView(ctx context.Context, name string, generation uint64, view materializedView, resolver SourceResolver, options QueryOptions, progress *materializedViewHydrationProgressState, wait *materializedViewHydrationWait) (status MaterializedViewStatus, err error) {
+	defer func() {
+		views.completeMaterializedViewHydration(name, wait, err)
+	}()
 	result, sourceVersions, err := executeMaterializedViewQuery(ctx, view.definition.Query, view.definition.Dependencies, resolver, options)
 	if err != nil {
 		return views.finishMaterializedViewHydrationFailure(name, generation, fmt.Errorf("hydrate materialized view %q: %w", name, err))
@@ -275,4 +371,25 @@ func (views *MaterializedViews) finishMaterializedViewHydrationFailure(name stri
 	view.hydrationProgress = nil
 	views.views[name] = view
 	return cloneMaterializedViewStatus(view.snapshot.Status), err
+}
+
+func (views *MaterializedViews) completeMaterializedViewHydration(name string, wait *materializedViewHydrationWait, err error) {
+	if views == nil || wait == nil {
+		return
+	}
+	views.mu.Lock()
+	views.closeMaterializedViewHydrationWaitLocked(name, wait, err)
+	views.mu.Unlock()
+}
+
+func (views *MaterializedViews) closeMaterializedViewHydrationWaitLocked(name string, wait *materializedViewHydrationWait, err error) {
+	if wait == nil || wait.closed {
+		return
+	}
+	if views.hydrationWaits != nil && views.hydrationWaits[name] == wait {
+		delete(views.hydrationWaits, name)
+	}
+	wait.err = err
+	wait.closed = true
+	close(wait.done)
 }

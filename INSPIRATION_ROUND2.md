@@ -121,9 +121,9 @@ operator control remain the preferred deployment model.
 - [x] M232 Sink progress checkpoints coupled to emitted frontier messages. See [M232_SINK_PROGRESS_ENVELOPES.md](M232_SINK_PROGRESS_ENVELOPES.md).
 - [x] M233 Sink retry and deduplication for disconnected output connections. See [M233_SINK_RETRY_OUTBOX.md](M233_SINK_RETRY_OUTBOX.md).
 - [x] M234 Sink backpressure and bounded pending-output memory. See [M234_SINK_BACKPRESSURE.md](M234_SINK_BACKPRESSURE.md).
-- [ ] M235 Dependency graph invalidation for affected indexes and views only.
-- [ ] M236 On-demand refresh of only invalidated maintained objects.
-- [ ] M237 Lazy hydration triggered by the first reader with cancellation support.
+- [x] M235 Dependency graph invalidation for affected indexes and views only. `MaterializedViews` maintains a reverse dependency index and `RefreshChanged` visits only affected views.
+- [x] M236 On-demand refresh of only invalidated maintained objects. `RefreshChanged` skips maintained objects whose dependencies were not changed.
+- [x] M237 Lazy hydration triggered by the first reader with cancellation support. See [M237_LAZY_HYDRATION.md](M237_LAZY_HYDRATION.md).
 - [ ] M238 Explain output for filter pushdown and arrangement reuse.
 - [ ] M239 Explain output for logical timestamp and frontier requirements.
 - [ ] M240 Raw dataflow explain output for operator and exchange topology.

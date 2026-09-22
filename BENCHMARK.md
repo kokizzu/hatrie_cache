@@ -36406,3 +36406,20 @@ Backpressure adds no allocation in the healthy path and was not measurably
 slower in the paired benchmark. It is disabled by default and retains the M233
 hard bounds. Full semantics and the exact commands are in
 [M234_SINK_BACKPRESSURE.md](M234_SINK_BACKPRESSURE.md).
+
+## M237 Lazy Materialized-View Hydration
+
+Five `-benchmem` samples were collected on Linux amd64, AMD Ryzen 9 5950X.
+This compares the existing ready-view `Get` path with the new ready-view
+`GetOrHydrate` path; it does not hide the one-time source-query cost of a cold
+view.
+
+| Read path | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| `Get` | 598.5 | 392 | 5 | 1.00x |
+| `GetOrHydrate` on ready view | 606.3 | 392 | 5 | 1.01x |
+
+The allocation profile is unchanged and the small latency difference is within
+run variance. Shared cold-reader correctness and cancellation are covered by
+the focused test and race targets. Raw behavior and commands are in
+[M237_LAZY_HYDRATION.md](M237_LAZY_HYDRATION.md).

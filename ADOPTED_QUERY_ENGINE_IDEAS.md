@@ -1293,3 +1293,14 @@ queue cap, clears only after both pending-count and byte watermarks recover,
 and still permits duplicate suppression and pending-record compaction. The
 default remains off; `Stats` and `BackpressureStatus` expose operational
 state. See [M234_SINK_BACKPRESSURE.md](M234_SINK_BACKPRESSURE.md).
+
+## M237 Lazy Materialized-View Hydration
+
+The lazy activation pattern from streaming query engines is adopted as the
+opt-in `MaterializedViews.GetOrHydrate` read path. The first reader of a cold
+maintained view owns hydration, concurrent readers share its completion, and a
+waiting reader may cancel independently. Existing `Get` and explicit
+`Hydrate` semantics remain unchanged. The ready path keeps the same
+`392 B/op` and `5 allocs/op` as `Get`; five benchmark medians were 598.5 ns/op
+for `Get` and 606.3 ns/op for `GetOrHydrate`. See
+[M237_LAZY_HYDRATION.md](M237_LAZY_HYDRATION.md).

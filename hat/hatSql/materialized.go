@@ -72,6 +72,7 @@ type MaterializedViews struct {
 	pointLookupBuilds      map[string]*MaterializedViewPointLookupBuild
 	pointLookupReaders     map[string]*materializedViewPointLookupReaderState
 	pointLookupRetirements map[string]*MaterializedViewPointLookupRetirement
+	hydrationWaits         map[string]*materializedViewHydrationWait
 	maxRows                int
 	maxBytes               int64
 	rows                   int
@@ -110,6 +111,7 @@ func NewMaterializedViewsWithOptions(options MaterializedViewsOptions) (*Materia
 		pointLookupBuilds:      make(map[string]*MaterializedViewPointLookupBuild),
 		pointLookupReaders:     make(map[string]*materializedViewPointLookupReaderState),
 		pointLookupRetirements: make(map[string]*MaterializedViewPointLookupRetirement),
+		hydrationWaits:         make(map[string]*materializedViewHydrationWait),
 		maxRows:                options.MaxRows,
 		maxBytes:               options.MaxBytes,
 	}, nil
@@ -238,6 +240,9 @@ func (views *MaterializedViews) Drop(name string) error {
 	view, exists := views.views[name]
 	if !exists {
 		return fmt.Errorf("materialized view %q does not exist", name)
+	}
+	if wait := views.hydrationWaits[name]; wait != nil {
+		views.closeMaterializedViewHydrationWaitLocked(name, wait, fmt.Errorf("materialized view %q was dropped during hydration", name))
 	}
 	delete(views.views, name)
 	for _, build := range views.pointLookupBuilds {
