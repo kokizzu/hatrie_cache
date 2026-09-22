@@ -24991,3 +24991,35 @@ commit-c233-query-cpu-budget:
 .PHONY: push-c233-query-cpu-budget
 push-c233-query-cpu-budget:
 	bash scripts/push-c233-query-cpu-budget.sh
+
+.PHONY: test-t238-batch-protocol
+test-t238-batch-protocol:
+	bash scripts/test-t238-batch-protocol.sh
+
+.PHONY: benchmark-t238-batch-protocol
+benchmark-t238-batch-protocol:
+	bash scripts/benchmark-t238-batch-protocol.sh
+
+.PHONY: format-t238-batch-protocol
+format-t238-batch-protocol:
+	bash scripts/format-t238-batch-protocol.sh
+
+.PHONY: race-t238-batch-protocol
+race-t238-batch-protocol:
+	bash scripts/race-t238-batch-protocol.sh
+
+.PHONY: vet-t238-batch-protocol
+vet-t238-batch-protocol:
+	bash scripts/vet-t238-batch-protocol.sh
+
+.PHONY: stage-t238-batch-protocol
+stage-t238-batch-protocol:
+	bash scripts/stage-t238-batch-protocol.sh
+
+.PHONY: commit-t238-batch-protocol
+commit-t238-batch-protocol:
+	bash scripts/commit-t238-batch-protocol.sh
+
+.PHONY: push-t238-batch-protocol
+push-t238-batch-protocol:
+	bash scripts/push-t238-batch-protocol.sh

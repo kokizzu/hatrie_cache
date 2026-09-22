@@ -44,6 +44,19 @@ var compactPeerCancellationCommand = []byte("_hat.peer.cancel.v1")
 // calls may run concurrently up to MaxInFlight.
 type CompactPeerHandler func(context.Context, CompactFrame) (CompactFrame, error)
 
+// CompactPeerBatchRequest describes one request in an ordered batch. The
+// session writes every request before waiting for the first response, while
+// CallBatch returns responses in this slice's order.
+type CompactPeerBatchRequest struct {
+	Command []byte
+	Payload []byte
+}
+
+type compactPeerBatchPending struct {
+	request CompactFrame
+	pending *CompactPendingResponse
+}
+
 // CompactPeerSessionOptions configures one opt-in compact peer connection.
 // Protocol bounds frame decoding before allocation; MaxInFlight bounds
 // pending calls and server handler concurrency. A nil Handler is valid for a
@@ -192,6 +205,76 @@ func (session *CompactPeerSession) Call(ctx context.Context, command, payload []
 		return CompactFrame{}, fmt.Errorf("%w: %s", ErrCompactPeerRemote, response.Payload)
 	}
 	return response, nil
+}
+
+// CallBatch sends all requests before waiting for responses and returns the
+// correlated responses in request order. The wire format remains a sequence
+// of ordinary compact frames, so peers that only implement Call continue to
+// interoperate. A failed or canceled batch removes every pending request.
+func (session *CompactPeerSession) CallBatch(ctx context.Context, requests []CompactPeerBatchRequest) ([]CompactFrame, error) {
+	if session == nil {
+		return nil, ErrCompactPeerClosed
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := session.Err(); err != nil {
+		return nil, err
+	}
+	if len(requests) == 0 {
+		return []CompactFrame{}, nil
+	}
+	pending := make([]compactPeerBatchPending, 0, len(requests))
+	for _, item := range requests {
+		request, response, err := session.multiplex.Request(item.Command, item.Payload)
+		if err != nil {
+			for _, registered := range pending {
+				session.multiplex.Cancel(registered.request.RequestID)
+			}
+			return nil, err
+		}
+		pending = append(pending, compactPeerBatchPending{request: request, pending: response})
+	}
+	sent := 0
+	cleaned := false
+	cleanup := func() {
+		if cleaned {
+			return
+		}
+		cleaned = true
+		for index, registered := range pending {
+			session.multiplex.Cancel(registered.request.RequestID)
+			if index < sent {
+				session.sendRequestCancellation(registered.request.RequestID)
+			}
+		}
+	}
+	if err := session.writeBatchPending(pending); err != nil {
+		session.fail(err)
+		cleanup()
+		return nil, err
+	}
+	sent = len(pending)
+	responses := make([]CompactFrame, len(pending))
+	for index, registered := range pending {
+		response, err := registered.pending.Wait(ctx)
+		if err != nil {
+			cleanup()
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return nil, err
+		}
+		if response.Kind == CompactError {
+			cleanup()
+			return nil, fmt.Errorf("%w: %s", ErrCompactPeerRemote, response.Payload)
+		}
+		responses[index] = response
+	}
+	return responses, nil
 }
 
 // CallTemplate sends a request using a prepared command template. For plain
@@ -401,6 +484,27 @@ func (session *CompactPeerSession) writeError(request CompactFrame, err error) {
 func (session *CompactPeerSession) write(frame CompactFrame) error {
 	session.writeMu.Lock()
 	defer session.writeMu.Unlock()
+	return session.writeFrameLocked(frame)
+}
+
+func (session *CompactPeerSession) writeBatchPending(frames []compactPeerBatchPending) error {
+	if len(frames) == 0 {
+		return nil
+	}
+	session.writeMu.Lock()
+	defer session.writeMu.Unlock()
+	if err := session.Err(); err != nil {
+		return err
+	}
+	for _, frame := range frames {
+		if err := session.writeFrameLocked(frame.request); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (session *CompactPeerSession) writeFrameLocked(frame CompactFrame) error {
 	if err := session.Err(); err != nil {
 		return err
 	}

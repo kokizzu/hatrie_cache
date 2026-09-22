@@ -35836,3 +35836,39 @@ correctness and workload-isolation control, not a performance optimization.
 The default path remains budget-free. See
 [C233_QUERY_CPU_BUDGET.md](C233_QUERY_CPU_BUDGET.md) for limitations and API
 semantics.
+
+## T238: Batched Binary Protocol Requests
+
+Command: `make benchmark-t238-batch-protocol` (five samples, `-benchmem`,
+Linux/amd64, AMD Ryzen 9 5950X). Each operation contains eight independent
+requests. The service-latency variants add 100 microseconds of handler work to
+show the case where sending the whole batch before waiting can overlap remote
+work. The sequential path is the existing one-at-a-time `Call` loop.
+
+```text
+Batch, no service latency:       53770 51205 48795 49110 48536 ns/op
+                                 4674  4673  4674  4674  4673 B/op
+                                 58    58    58    58    58 allocs/op
+Sequential, no latency:          47393 47169 47346 47078 46930 ns/op
+                                 3328  3329  3329  3328  3328 B/op
+                                 56    56    56    56    56 allocs/op
+Batch, 100 us service latency:   1127711 1130003 1130554 1129519 1126055 ns/op
+                                 5451    5456    5448    5442    5449 B/op
+                                 66      66      66      66      66 allocs/op
+Sequential, 100 us latency:      8559619 8562133 8521604 8572713 8551787 ns/op
+                                 4106    4102    4103    4099    4098 B/op
+                                 64      64      64      64      64 allocs/op
+```
+
+| Workload | Batch median | Sequential median | Relative result |
+| --- | ---: | ---: | --- |
+| No service latency | 49,110 ns/op, 4,674 B/op, 58 allocs | 47,169 ns/op, 3,328 B/op, 56 allocs | 1.04x slower, 1.40x bytes, 2 extra allocs |
+| 100 us service latency | 1,129,519 ns/op, 5,449 B/op, 66 allocs | 8,559,619 ns/op, 4,102 B/op, 64 allocs | 7.58x faster, 1.33x bytes, 2 extra allocs |
+
+The result is a targeted latency win, not a universal replacement for
+`Call`: zero-latency local work is modestly slower and uses more temporary
+memory, while independent remote work overlaps and is substantially faster.
+The final implementation removed one internal frame-slice allocation versus
+the first draft, reducing the no-latency batch from a 5,314 B/op, 59-alloc
+draft to 4,674 B/op and 58 allocs/op. No wire-size reduction is claimed because
+the feature deliberately keeps the existing per-request frame format.
