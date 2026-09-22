@@ -49,8 +49,7 @@ func cloneSQLPlanSnapshotSteps(steps []ExplainStep) []ExplainStep {
 		cloned[index].Alternatives = append([]ExplainAlternative(nil), step.Alternatives...)
 		cloned[index].Notices = append([]ExplainNotice(nil), step.Notices...)
 		if step.Pruning != nil {
-			pruning := *step.Pruning
-			cloned[index].Pruning = &pruning
+			cloned[index].Pruning = cloneExplainPruning(step.Pruning)
 		}
 		cloned[index].Lineage = make([]ColumnLineage, len(step.Lineage))
 		for lineageIndex, lineage := range step.Lineage {

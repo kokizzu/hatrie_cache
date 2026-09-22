@@ -59,12 +59,27 @@ type ExplainStep struct {
 // segment pruning decision observed by EXPLAIN ANALYZE. It is omitted for
 // operators that do not perform pruning.
 type ExplainPruning struct {
-	TotalRows                 int     `json:"total_rows"`
-	SkippedRows               int     `json:"skipped_rows"`
-	ScannedRows               int     `json:"scanned_rows"`
-	MatchedRows               int     `json:"matched_rows"`
-	ResidualRows              int     `json:"residual_rows"`
-	ResidualFalsePositiveRate float64 `json:"residual_false_positive_rate"`
+	TotalRows                 int                      `json:"total_rows"`
+	SkippedRows               int                      `json:"skipped_rows"`
+	ScannedRows               int                      `json:"scanned_rows"`
+	MatchedRows               int                      `json:"matched_rows"`
+	ResidualRows              int                      `json:"residual_rows"`
+	ResidualFalsePositiveRate float64                  `json:"residual_false_positive_rate"`
+	MarksExamined             int                      `json:"marks_examined,omitempty"`
+	RejectedMarks             int                      `json:"rejected_marks,omitempty"`
+	Decisions                 []ExplainPruningDecision `json:"decisions,omitempty"`
+	DecisionsTruncated        bool                     `json:"decisions_truncated,omitempty"`
+}
+
+// ExplainPruningDecision describes one bounded data-skipping mark decision.
+// A skip action means the index rejected the mark; a scan action means the
+// mark may contain a match and was retained for residual row filtering.
+type ExplainPruningDecision struct {
+	Mark     int    `json:"mark"`
+	RowStart int    `json:"row_start"`
+	RowCount int    `json:"row_count"`
+	Action   string `json:"action"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 // ExplainAlternative describes an optimizer strategy considered for one plan

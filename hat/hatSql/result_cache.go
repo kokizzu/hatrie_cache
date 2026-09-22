@@ -545,6 +545,7 @@ func cloneResultCachePlanStep(step ExplainStep) ExplainStep {
 	clone.EstimateErrorRows = cloneResultCacheInt(step.EstimateErrorRows)
 	clone.EstimateErrorPercent = cloneResultCacheFloat64(step.EstimateErrorPercent)
 	clone.ElapsedNanos = cloneResultCacheInt64(step.ElapsedNanos)
+	clone.Pruning = cloneExplainPruning(step.Pruning)
 	return clone
 }
 

@@ -143,7 +143,7 @@ func TestCH056UnicodeCILikeNGramDoesNotSkipCaseVariantSegment(t *testing.T) {
 		RowsPerSegment:          1,
 		StringNGramBloomFilters: map[string][]ColumnarStringNGramBloomSegment{"value": {segment}},
 	}
-	result, matched, scanned := sqlColumnarStringNGramMaterialize(query, batch, []string{"value"}, segments, "value", "%needle%", "needle", false)
+	result, matched, scanned, _ := sqlColumnarStringNGramMaterialize(query, batch, []string{"value"}, segments, "value", "%needle%", "needle", false)
 	if matched != 1 || scanned != 1 || len(result.Rows) != 1 {
 		t.Fatalf("UnicodeCI NGram LIKE result = %#v, matched=%d scanned=%d, want one row", result, matched, scanned)
 	}

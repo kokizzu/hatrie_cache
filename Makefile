@@ -25326,3 +25326,35 @@ commit-c230-memory-overcommit:
 .PHONY: push-c230-memory-overcommit
 push-c230-memory-overcommit:
 	bash ./scripts/push-c230-memory-overcommit.sh
+
+.PHONY: test-c236-explain
+test-c236-explain:
+	bash ./scripts/test-c236-explain.sh
+
+.PHONY: benchmark-c236-before-after
+benchmark-c236-before-after:
+	bash ./scripts/benchmark-c236-before-after.sh
+
+.PHONY: format-c236-explain
+format-c236-explain:
+	bash ./scripts/format-c236-explain.sh
+
+.PHONY: race-c236-explain
+race-c236-explain:
+	bash ./scripts/race-c236-explain.sh
+
+.PHONY: vet-c236-explain
+vet-c236-explain:
+	bash ./scripts/vet-c236-explain.sh
+
+.PHONY: stage-c236-explain
+stage-c236-explain:
+	bash ./scripts/stage-c236-explain.sh
+
+.PHONY: commit-c236-explain
+commit-c236-explain:
+	bash ./scripts/commit-c236-explain.sh
+
+.PHONY: push-c236-explain
+push-c236-explain:
+	bash ./scripts/push-c236-explain.sh

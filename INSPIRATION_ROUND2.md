@@ -69,7 +69,7 @@ operator control remain the preferred deployment model.
 - [x] C233 Per-query CPU-time budgets with cooperative cancellation; see [C233_QUERY_CPU_BUDGET.md](C233_QUERY_CPU_BUDGET.md) and [BENCHMARK.md](BENCHMARK.md#c233-query-cpu-time-budget).
 - [x] C234 [Query profiler records for stage time, bytes, and allocations](C234_QUERY_PROFILER.md).
 - [x] C235 [Read/write task profiler aggregation by table part and column](C235_READ_WRITE_PROFILER.md).
-- [ ] C236 Explain output for data-skipping-index decisions and rejected marks.
+- [x] C236 Explain output for data-skipping-index decisions and rejected marks; EXPLAIN ANALYZE now exposes bounded per-mark skip/scan decisions, reasons, complete examined/rejected counts, and truncation state for columnar pruning paths. See C236_EXPLAIN_SKIP_DECISIONS.md and `make test-c236-explain`.
 - [ ] C237 Explain output for projection selection and estimated I/O cost.
 - [ ] C238 Mutation queue progress with rows remaining and elapsed estimates.
 - [ ] C239 Part-merge backlog, amplification, and age metrics.

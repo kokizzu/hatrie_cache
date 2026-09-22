@@ -8498,11 +8498,49 @@ type sqlExecutionMetrics struct {
 	indexPending bool
 }
 
+const maxSQLExplainPruningDecisions = 64
+
+type sqlExplainPruningTrace struct {
+	decisions          []ExplainPruningDecision
+	marksExamined      int
+	rejectedMarks      int
+	decisionsTruncated bool
+}
+
+func (trace *sqlExplainPruningTrace) record(mark, rowStart, rowCount int, skipped bool, reason string) {
+	if trace == nil {
+		return
+	}
+	trace.marksExamined++
+	if skipped {
+		trace.rejectedMarks++
+	}
+	if len(trace.decisions) >= maxSQLExplainPruningDecisions {
+		trace.decisionsTruncated = true
+		return
+	}
+	action := "scan"
+	if skipped {
+		action = "skip"
+	}
+	trace.decisions = append(trace.decisions, ExplainPruningDecision{
+		Mark:     mark,
+		RowStart: rowStart,
+		RowCount: rowCount,
+		Action:   action,
+		Reason:   reason,
+	})
+}
+
 func (metrics *sqlExecutionMetrics) record(node, detail string, inputRows, outputRows int, started time.Time) {
 	metrics.recordBytes(node, detail, inputRows, outputRows, -1, -1, started)
 }
 
 func (metrics *sqlExecutionMetrics) recordPruning(node, detail string, totalRows, skippedRows, scannedRows, matchedRows int, started time.Time) {
+	metrics.recordPruningWithTrace(node, detail, totalRows, skippedRows, scannedRows, matchedRows, started, nil)
+}
+
+func (metrics *sqlExecutionMetrics) recordPruningWithTrace(node, detail string, totalRows, skippedRows, scannedRows, matchedRows int, started time.Time, trace *sqlExplainPruningTrace) {
 	if metrics == nil {
 		return
 	}
@@ -8519,7 +8557,7 @@ func (metrics *sqlExecutionMetrics) recordPruning(node, detail string, totalRows
 	}
 	detail = fmt.Sprintf("%s skipped_rows=%d scanned_rows=%d matched_rows=%d residual_rows=%d residual_false_positive_rate=%.2f%%", detail, skippedRows, scannedRows, matchedRows, residualRows, falsePositiveRate)
 	metrics.record(node, detail, totalRows, skippedRows, started)
-	metrics.steps[len(metrics.steps)-1].Pruning = &ExplainPruning{
+	pruning := &ExplainPruning{
 		TotalRows:                 totalRows,
 		SkippedRows:               skippedRows,
 		ScannedRows:               scannedRows,
@@ -8527,6 +8565,13 @@ func (metrics *sqlExecutionMetrics) recordPruning(node, detail string, totalRows
 		ResidualRows:              residualRows,
 		ResidualFalsePositiveRate: falsePositiveRate,
 	}
+	if trace != nil {
+		pruning.MarksExamined = trace.marksExamined
+		pruning.RejectedMarks = trace.rejectedMarks
+		pruning.Decisions = append([]ExplainPruningDecision(nil), trace.decisions...)
+		pruning.DecisionsTruncated = trace.decisionsTruncated
+	}
+	metrics.steps[len(metrics.steps)-1].Pruning = pruning
 }
 
 func (metrics *sqlExecutionMetrics) recordBytes(node, detail string, inputRows, outputRows, inputBytes, outputBytes int, started time.Time) {
@@ -9011,10 +9056,10 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		return result, true, nil
 	} else if field, value, equality := sqlColumnarStringEqualityPredicate(q.where, q.from.alias); equality {
 		filterStarted := time.Now()
-		result, matched, scanned := sqlColumnarStringBloomMaterialize(q, batch, projectionFields, segments, field, value, metrics != nil)
+		result, matched, scanned, pruningTrace := sqlColumnarStringBloomMaterialize(q, batch, projectionFields, segments, field, value, metrics != nil)
 		if metrics != nil {
 			if skippedRows := batch.Rows - scanned; skippedRows > 0 {
-				metrics.recordPruning("COLUMNAR BLOOM SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, scanned, matched, filterStarted)
+				metrics.recordPruningWithTrace("COLUMNAR BLOOM SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, scanned, matched, filterStarted, pruningTrace)
 			}
 			metrics.record("COLUMNAR STRING FILTER", sqlExplainExpression(q.where), scanned, matched, filterStarted)
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
@@ -9022,10 +9067,10 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		return result, true, nil
 	} else if field, values, in := sqlColumnarStringLiteralINPredicate(q.where, q.from.alias); in {
 		filterStarted := time.Now()
-		result, matched, scanned := sqlColumnarStringBloomINMaterialize(q, batch, projectionFields, segments, field, values, metrics != nil)
+		result, matched, scanned, pruningTrace := sqlColumnarStringBloomINMaterialize(q, batch, projectionFields, segments, field, values, metrics != nil)
 		if metrics != nil {
 			if skippedRows := batch.Rows - scanned; skippedRows > 0 {
-				metrics.recordPruning("COLUMNAR BLOOM SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, scanned, matched, filterStarted)
+				metrics.recordPruningWithTrace("COLUMNAR BLOOM SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, scanned, matched, filterStarted, pruningTrace)
 			}
 			metrics.record("COLUMNAR STRING IN FILTER", sqlExplainExpression(q.where), scanned, matched, filterStarted)
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
@@ -9037,8 +9082,9 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		literal, useNGram := sqlColumnarLikeNGramLiteral(pattern)
 		var result SQLQueryResult
 		var matched, scanned int
+		var pruningTrace *sqlExplainPruningTrace
 		if useNGram {
-			result, matched, scanned = sqlColumnarStringNGramMaterialize(q, batch, projectionFields, segments, field, pattern, literal, metrics != nil)
+			result, matched, scanned, pruningTrace = sqlColumnarStringNGramMaterialize(q, batch, projectionFields, segments, field, pattern, literal, metrics != nil)
 		} else {
 			result, matched = sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
 				candidate, _ := batch.Value(field, rowIndex)
@@ -9048,7 +9094,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		}
 		if metrics != nil {
 			if skippedRows := batch.Rows - scanned; useNGram && skippedRows > 0 {
-				metrics.recordPruning("COLUMNAR NGRAM SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, scanned, matched, filterStarted)
+				metrics.recordPruningWithTrace("COLUMNAR NGRAM SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, scanned, matched, filterStarted, pruningTrace)
 			}
 			metrics.record("COLUMNAR LIKE FILTER", sqlExplainExpression(q.where), scanned, matched, filterStarted)
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
@@ -9073,10 +9119,10 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 	} else if predicates, numeric := sqlColumnarNumericConjunction(q.where, q.from.alias); numeric {
 		predicates = sqlColumnarOrderNumericPredicates(segments, predicates)
 		filterStarted := time.Now()
-		result, matched, scanned := sqlColumnarNumericMaterialize(q, batch, projectionFields, segments, predicates, metrics != nil)
+		result, matched, scanned, pruningTrace := sqlColumnarNumericMaterialize(q, batch, projectionFields, segments, predicates, metrics != nil)
 		if metrics != nil {
 			if skippedRows := batch.Rows - scanned; skippedRows > 0 {
-				metrics.recordPruning("COLUMNAR NUMERIC SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, scanned, matched, filterStarted)
+				metrics.recordPruningWithTrace("COLUMNAR NUMERIC SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, scanned, matched, filterStarted, pruningTrace)
 			}
 			metrics.record("COLUMNAR NUMERIC FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
@@ -9453,6 +9499,10 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 		return true
 	}
 	skippedRows := 0
+	var pruningTrace *sqlExplainPruningTrace
+	if metrics != nil && len(orderFields) == 1 && segments != nil && segments.RowsPerSegment > 0 {
+		pruningTrace = &sqlExplainPruningTrace{}
+	}
 	if len(orderFields) == 1 && segments != nil && segments.RowsPerSegment > 0 {
 		for start := 0; start < batch.Rows; start += segments.RowsPerSegment {
 			end := start + segments.RowsPerSegment
@@ -9462,9 +9512,11 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 			if candidates.Len() == capacity {
 				if threshold, numeric := sqlNumber(candidates.items[0].key); numeric && !sqlColumnarTopNNumericSegmentMayBeat(segments, start/segments.RowsPerSegment, orderFields[0], q.orderBy[0].desc, threshold) {
 					skippedRows += end - start
+					pruningTrace.record(start/segments.RowsPerSegment, start, end-start, true, "topn_bound_excludes")
 					continue
 				}
 			}
+			pruningTrace.record(start/segments.RowsPerSegment, start, end-start, false, "topn_may_beat")
 			if !scanRows(start, end) {
 				return SQLQueryResult{}, false, nil
 			}
@@ -9473,7 +9525,7 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 		return SQLQueryResult{}, false, nil
 	}
 	if metrics != nil && skippedRows > 0 {
-		metrics.recordPruning("COLUMNAR TOP-N SEGMENT SKIP", sqlExplainOrders(q.orderBy), batch.Rows, skippedRows, batch.Rows-skippedRows, matchedRows, started)
+		metrics.recordPruningWithTrace("COLUMNAR TOP-N SEGMENT SKIP", sqlExplainOrders(q.orderBy), batch.Rows, skippedRows, batch.Rows-skippedRows, matchedRows, started, pruningTrace)
 	}
 	sort.SliceStable(candidates.items, func(left, right int) bool {
 		return sqlTopNStreamBefore(candidates.items[left], candidates.items[right], q.orderBy)
@@ -9948,9 +10000,13 @@ func sqlColumnarStreamMaterialize(q *sqlQuery, batch ColumnarBatch, projectionFi
 // sqlColumnarStringBloomMaterialize scans only segments whose optional Bloom
 // filter might contain value. A filter miss is definitive; an unavailable
 // sidecar or Bloom hit retains the ordinary direct string comparison.
-func sqlColumnarStringBloomMaterialize(q *sqlQuery, batch ColumnarBatch, projectionFields []string, segments *ColumnarNumericSegments, field, value string, scanAll bool) (SQLQueryResult, int, int) {
+func sqlColumnarStringBloomMaterialize(q *sqlQuery, batch ColumnarBatch, projectionFields []string, segments *ColumnarNumericSegments, field, value string, scanAll bool) (SQLQueryResult, int, int, *sqlExplainPruningTrace) {
 	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}
 	matched, scanned := 0, 0
+	var pruningTrace *sqlExplainPruningTrace
+	if scanAll {
+		pruningTrace = &sqlExplainPruningTrace{}
+	}
 	rowsPerSegment := batch.Rows
 	filters := []ColumnarStringBloomSegment(nil)
 	if segments != nil && segments.RowsPerSegment > 0 {
@@ -9963,13 +10019,19 @@ func sqlColumnarStringBloomMaterialize(q *sqlQuery, batch ColumnarBatch, project
 			break
 		}
 		segmentIndex := start / rowsPerSegment
-		if segmentIndex < len(filters) && !filters[segmentIndex].mayContainProbe(probe) {
-			continue
-		}
 		end := start + rowsPerSegment
 		if end > batch.Rows {
 			end = batch.Rows
 		}
+		if segmentIndex < len(filters) && !filters[segmentIndex].mayContainProbe(probe) {
+			pruningTrace.record(segmentIndex, start, end-start, true, "bloom_excludes")
+			continue
+		}
+		reason := "bloom_unavailable"
+		if segmentIndex < len(filters) {
+			reason = "bloom_may_match"
+		}
+		pruningTrace.record(segmentIndex, start, end-start, false, reason)
 		scanned += end - start
 		for rowIndex := start; rowIndex < end; rowIndex++ {
 			if !scanAll && q.limit >= 0 && len(result.Rows) >= q.limit {
@@ -9992,15 +10054,19 @@ func sqlColumnarStringBloomMaterialize(q *sqlQuery, batch ColumnarBatch, project
 			result.Rows = append(result.Rows, row)
 		}
 	}
-	return result, matched, scanned
+	return result, matched, scanned, pruningTrace
 }
 
 // sqlColumnarStringBloomINMaterialize skips only segments that cannot contain
 // any literal. Every visited row still uses exact string equality, so Bloom
 // false positives cannot change query results.
-func sqlColumnarStringBloomINMaterialize(q *sqlQuery, batch ColumnarBatch, projectionFields []string, segments *ColumnarNumericSegments, field string, values []string, scanAll bool) (SQLQueryResult, int, int) {
+func sqlColumnarStringBloomINMaterialize(q *sqlQuery, batch ColumnarBatch, projectionFields []string, segments *ColumnarNumericSegments, field string, values []string, scanAll bool) (SQLQueryResult, int, int, *sqlExplainPruningTrace) {
 	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}
 	matched, scanned := 0, 0
+	var pruningTrace *sqlExplainPruningTrace
+	if scanAll {
+		pruningTrace = &sqlExplainPruningTrace{}
+	}
 	rowsPerSegment := batch.Rows
 	filters := []ColumnarStringBloomSegment(nil)
 	if segments != nil && segments.RowsPerSegment > 0 {
@@ -10016,6 +10082,10 @@ func sqlColumnarStringBloomINMaterialize(q *sqlQuery, batch ColumnarBatch, proje
 			break
 		}
 		segmentIndex := start / rowsPerSegment
+		end := start + rowsPerSegment
+		if end > batch.Rows {
+			end = batch.Rows
+		}
 		if segmentIndex < len(filters) {
 			mayContain := false
 			for _, probe := range probes {
@@ -10025,13 +10095,15 @@ func sqlColumnarStringBloomINMaterialize(q *sqlQuery, batch ColumnarBatch, proje
 				}
 			}
 			if !mayContain {
+				pruningTrace.record(segmentIndex, start, end-start, true, "bloom_excludes")
 				continue
 			}
 		}
-		end := start + rowsPerSegment
-		if end > batch.Rows {
-			end = batch.Rows
+		reason := "bloom_unavailable"
+		if segmentIndex < len(filters) {
+			reason = "bloom_may_match"
 		}
+		pruningTrace.record(segmentIndex, start, end-start, false, reason)
 		scanned += end - start
 		for rowIndex := start; rowIndex < end; rowIndex++ {
 			if !scanAll && q.limit >= 0 && len(result.Rows) >= q.limit {
@@ -10064,7 +10136,7 @@ func sqlColumnarStringBloomINMaterialize(q *sqlQuery, batch ColumnarBatch, proje
 			result.Rows = append(result.Rows, row)
 		}
 	}
-	return result, matched, scanned
+	return result, matched, scanned, pruningTrace
 }
 
 func sqlColumnarLikeNGramLiteral(pattern string) (string, bool) {
@@ -10081,9 +10153,13 @@ func sqlColumnarLikeNGramLiteral(pattern string) (string, bool) {
 // sqlColumnarStringNGramMaterialize skips only segments whose trigrams prove
 // they cannot contain literal. The ordinary LIKE evaluator remains the final
 // authority, preserving false-positive and wildcard behavior.
-func sqlColumnarStringNGramMaterialize(q *sqlQuery, batch ColumnarBatch, projectionFields []string, segments *ColumnarNumericSegments, field, pattern, literal string, scanAll bool) (SQLQueryResult, int, int) {
+func sqlColumnarStringNGramMaterialize(q *sqlQuery, batch ColumnarBatch, projectionFields []string, segments *ColumnarNumericSegments, field, pattern, literal string, scanAll bool) (SQLQueryResult, int, int, *sqlExplainPruningTrace) {
 	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}
 	matched, scanned := 0, 0
+	var pruningTrace *sqlExplainPruningTrace
+	if scanAll {
+		pruningTrace = &sqlExplainPruningTrace{}
+	}
 	rowsPerSegment := batch.Rows
 	filters := []ColumnarStringNGramBloomSegment(nil)
 	if segments != nil && segments.RowsPerSegment > 0 {
@@ -10100,13 +10176,19 @@ func sqlColumnarStringNGramMaterialize(q *sqlQuery, batch ColumnarBatch, project
 			break
 		}
 		segmentIndex := start / rowsPerSegment
-		if segmentIndex < len(filters) && !filters[segmentIndex].MayContainSubstring(literal) {
-			continue
-		}
 		end := start + rowsPerSegment
 		if end > batch.Rows {
 			end = batch.Rows
 		}
+		if segmentIndex < len(filters) && !filters[segmentIndex].MayContainSubstring(literal) {
+			pruningTrace.record(segmentIndex, start, end-start, true, "ngram_excludes")
+			continue
+		}
+		reason := "ngram_unavailable"
+		if segmentIndex < len(filters) {
+			reason = "ngram_may_match"
+		}
+		pruningTrace.record(segmentIndex, start, end-start, false, reason)
 		scanned += end - start
 		for rowIndex := start; rowIndex < end; rowIndex++ {
 			if !scanAll && q.limit >= 0 && len(result.Rows) >= q.limit {
@@ -10128,7 +10210,7 @@ func sqlColumnarStringNGramMaterialize(q *sqlQuery, batch ColumnarBatch, project
 			result.Rows = append(result.Rows, row)
 		}
 	}
-	return result, matched, scanned
+	return result, matched, scanned, pruningTrace
 }
 
 // sqlColumnarStreamMaterializeWithScan keeps complete match counts for
@@ -10159,10 +10241,10 @@ func sqlColumnarStreamMaterializeWithScan(q *sqlQuery, batch ColumnarBatch, proj
 
 // sqlColumnarNumericMaterialize uses validated numeric bounds as definitive
 // segment rejection while retaining the row matcher for every admitted row.
-func sqlColumnarNumericMaterialize(q *sqlQuery, batch ColumnarBatch, projectionFields []string, segments *ColumnarNumericSegments, predicates []sqlColumnarNumericFilter, scanAll bool) (SQLQueryResult, int, int) {
+func sqlColumnarNumericMaterialize(q *sqlQuery, batch ColumnarBatch, projectionFields []string, segments *ColumnarNumericSegments, predicates []sqlColumnarNumericFilter, scanAll bool) (SQLQueryResult, int, int, *sqlExplainPruningTrace) {
 	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}
 	if batch.Rows <= 0 {
-		return result, 0, 0
+		return result, 0, 0, nil
 	}
 	rowsPerSegment := batch.Rows
 	if segments != nil && segments.RowsPerSegment > 0 {
@@ -10170,18 +10252,24 @@ func sqlColumnarNumericMaterialize(q *sqlQuery, batch ColumnarBatch, projectionF
 	}
 	kernels, packedNumeric := sqlColumnarNumericPredicateKernels(batch, predicates)
 	matched, scanned := 0, 0
+	var pruningTrace *sqlExplainPruningTrace
+	if scanAll {
+		pruningTrace = &sqlExplainPruningTrace{}
+	}
 	for start := 0; start < batch.Rows; start += rowsPerSegment {
 		if !scanAll && q.limit >= 0 && len(result.Rows) >= q.limit {
 			break
 		}
 		segmentIndex := start / rowsPerSegment
-		if !sqlColumnarNumericSegmentMayMatch(segments, segmentIndex, predicates) {
-			continue
-		}
 		end := start + rowsPerSegment
 		if end > batch.Rows {
 			end = batch.Rows
 		}
+		if !sqlColumnarNumericSegmentMayMatch(segments, segmentIndex, predicates) {
+			pruningTrace.record(segmentIndex, start, end-start, true, "numeric_minmax_excludes")
+			continue
+		}
+		pruningTrace.record(segmentIndex, start, end-start, false, "numeric_minmax_may_match")
 		scanned += end - start
 		for rowIndex := start; rowIndex < end; rowIndex++ {
 			if !scanAll && q.limit >= 0 && len(result.Rows) >= q.limit {
@@ -10223,7 +10311,7 @@ func sqlColumnarNumericMaterialize(q *sqlQuery, batch ColumnarBatch, projectionF
 			result.Rows = append(result.Rows, row)
 		}
 	}
-	return result, matched, scanned
+	return result, matched, scanned, pruningTrace
 }
 
 func sqlColumnarMaterializeMatches(q *sqlQuery, batch ColumnarBatch, projectionFields []string, matches []int) SQLQueryResult {
@@ -10365,6 +10453,10 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 	matched := 0
 	scannedRows := 0
 	filterStarted := time.Now()
+	var pruningTrace *sqlExplainPruningTrace
+	if metrics != nil {
+		pruningTrace = &sqlExplainPruningTrace{}
+	}
 	scanRows := func(start, end int) error {
 		for rowIndex := start; rowIndex < end; rowIndex++ {
 			if control != nil {
@@ -10429,15 +10521,43 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 		if !sparsePrimary {
 			segmentEnd = (batch.Rows + segments.RowsPerSegment - 1) / segments.RowsPerSegment
 		}
+		if pruningTrace != nil && sparsePrimary {
+			segmentCount := (batch.Rows + segments.RowsPerSegment - 1) / segments.RowsPerSegment
+			for mark := 0; mark < segmentStart; mark++ {
+				start := mark * segments.RowsPerSegment
+				end := start + segments.RowsPerSegment
+				if end > batch.Rows {
+					end = batch.Rows
+				}
+				pruningTrace.record(mark, start, end-start, true, "primary_mark_range_excludes")
+			}
+			for mark := segmentEnd; mark < segmentCount; mark++ {
+				start := mark * segments.RowsPerSegment
+				end := start + segments.RowsPerSegment
+				if end > batch.Rows {
+					end = batch.Rows
+				}
+				pruningTrace.record(mark, start, end-start, true, "primary_mark_range_excludes")
+			}
+		}
 		for segmentIndex := segmentStart; segmentIndex < segmentEnd; segmentIndex++ {
 			start := segmentIndex * segments.RowsPerSegment
-			if !sqlColumnarNumericSegmentMayMatch(segments, segmentIndex, predicates) || dictionaryFilter && !sqlColumnarDictionarySegmentMayMatch(segments, segmentIndex, filterDictionaryField, filterOperator, filterCode, filterFound) || dictionaryINFilter && !sqlColumnarDictionaryINSegmentMayMatch(segments, segmentIndex, filterDictionaryINField, filterDictionaryINCodes) {
-				continue
-			}
 			end := start + segments.RowsPerSegment
 			if end > batch.Rows {
 				end = batch.Rows
 			}
+			numericMayMatch := sqlColumnarNumericSegmentMayMatch(segments, segmentIndex, predicates)
+			dictionaryMayMatch := !dictionaryFilter || sqlColumnarDictionarySegmentMayMatch(segments, segmentIndex, filterDictionaryField, filterOperator, filterCode, filterFound)
+			dictionaryINMayMatch := !dictionaryINFilter || sqlColumnarDictionaryINSegmentMayMatch(segments, segmentIndex, filterDictionaryINField, filterDictionaryINCodes)
+			if !numericMayMatch || !dictionaryMayMatch || !dictionaryINMayMatch {
+				reason := "numeric_minmax_excludes"
+				if numericMayMatch {
+					reason = "dictionary_excludes"
+				}
+				pruningTrace.record(segmentIndex, start, end-start, true, reason)
+				continue
+			}
+			pruningTrace.record(segmentIndex, start, end-start, false, "numeric_minmax_may_match")
 			if err := scanRows(start, end); err != nil {
 				return SQLQueryResult{}, true, err
 			}
@@ -10453,7 +10573,7 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 			filterName = "COLUMNAR DICTIONARY IN FILTER"
 		}
 		if skippedRows := batch.Rows - scannedRows; skippedRows > 0 {
-			metrics.recordPruning("COLUMNAR SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, scannedRows, matched, filterStarted)
+			metrics.recordPruningWithTrace("COLUMNAR SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, scannedRows, matched, filterStarted, pruningTrace)
 		}
 		metrics.record(filterName, sqlExplainExpression(q.where), scannedRows, matched, filterStarted)
 	}
@@ -10682,6 +10802,10 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 	matched := 0
 	scannedRows := 0
 	sparsePrimary := false
+	var pruningTrace *sqlExplainPruningTrace
+	if metrics != nil {
+		pruningTrace = &sqlExplainPruningTrace{}
+	}
 	if metadataAggregates || dictionaryCountMetadata {
 		if control != nil {
 			if err := control.check(); err != nil {
@@ -10744,15 +10868,43 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 			if !sparsePrimary {
 				segmentEnd = (batch.Rows + segments.RowsPerSegment - 1) / segments.RowsPerSegment
 			}
+			if pruningTrace != nil && sparsePrimary {
+				segmentCount := (batch.Rows + segments.RowsPerSegment - 1) / segments.RowsPerSegment
+				for mark := 0; mark < segmentStart; mark++ {
+					start := mark * segments.RowsPerSegment
+					end := start + segments.RowsPerSegment
+					if end > batch.Rows {
+						end = batch.Rows
+					}
+					pruningTrace.record(mark, start, end-start, true, "primary_mark_range_excludes")
+				}
+				for mark := segmentEnd; mark < segmentCount; mark++ {
+					start := mark * segments.RowsPerSegment
+					end := start + segments.RowsPerSegment
+					if end > batch.Rows {
+						end = batch.Rows
+					}
+					pruningTrace.record(mark, start, end-start, true, "primary_mark_range_excludes")
+				}
+			}
 			for segmentIndex := segmentStart; segmentIndex < segmentEnd; segmentIndex++ {
 				start := segmentIndex * segments.RowsPerSegment
-				if !sqlColumnarNumericSegmentMayMatch(segments, segmentIndex, predicates) || dictionaryFilter && !sqlColumnarDictionarySegmentMayMatch(segments, segmentIndex, filterDictionaryField, filterOperator, filterCode, filterFound) || dictionaryINFilter && !sqlColumnarDictionaryINSegmentMayMatch(segments, segmentIndex, filterDictionaryINField, filterDictionaryINCodes) {
-					continue
-				}
 				end := start + segments.RowsPerSegment
 				if end > batch.Rows {
 					end = batch.Rows
 				}
+				numericMayMatch := sqlColumnarNumericSegmentMayMatch(segments, segmentIndex, predicates)
+				dictionaryMayMatch := !dictionaryFilter || sqlColumnarDictionarySegmentMayMatch(segments, segmentIndex, filterDictionaryField, filterOperator, filterCode, filterFound)
+				dictionaryINMayMatch := !dictionaryINFilter || sqlColumnarDictionaryINSegmentMayMatch(segments, segmentIndex, filterDictionaryINField, filterDictionaryINCodes)
+				if !numericMayMatch || !dictionaryMayMatch || !dictionaryINMayMatch {
+					reason := "numeric_minmax_excludes"
+					if numericMayMatch {
+						reason = "dictionary_excludes"
+					}
+					pruningTrace.record(segmentIndex, start, end-start, true, reason)
+					continue
+				}
+				pruningTrace.record(segmentIndex, start, end-start, false, "numeric_minmax_may_match")
 				if err := scanRows(start, end); err != nil {
 					return SQLQueryResult{}, true, err
 				}
@@ -10773,7 +10925,7 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 			if sparsePrimary {
 				node = "COLUMNAR PRIMARY MARK SKIP"
 			}
-			metrics.recordPruning(node, sqlExplainExpression(q.where), batch.Rows, skippedRows, scannedRows, matched, filterStarted)
+			metrics.recordPruningWithTrace(node, sqlExplainExpression(q.where), batch.Rows, skippedRows, scannedRows, matched, filterStarted, pruningTrace)
 		}
 		metrics.record(filterName, sqlExplainExpression(q.where), scannedRows, matched, filterStarted)
 	}
@@ -13318,6 +13470,16 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 			row["matched_rows"] = step.Pruning.MatchedRows
 			row["residual_rows"] = step.Pruning.ResidualRows
 			row["residual_false_positive_rate"] = step.Pruning.ResidualFalsePositiveRate
+			if step.Pruning.MarksExamined > 0 {
+				row["marks_examined"] = step.Pruning.MarksExamined
+				row["rejected_marks"] = step.Pruning.RejectedMarks
+			}
+			if len(step.Pruning.Decisions) > 0 {
+				row["decisions"] = append([]ExplainPruningDecision(nil), step.Pruning.Decisions...)
+			}
+			if step.Pruning.DecisionsTruncated {
+				row["decisions_truncated"] = true
+			}
 		}
 		result.Rows = append(result.Rows, row)
 	}

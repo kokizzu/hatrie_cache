@@ -36024,3 +36024,20 @@ up. The feature is disabled by default; its value is bounded waiting under
 memory pressure, cancellation while queued, and lease release after query
 completion. It uses the existing bounded cluster admission queues rather than
 adding a second per-query memory tracker.
+
+## C236 Explain Data-Skipping Decisions
+
+Linux/amd64, AMD Ryzen 9 5950X, five 2-second benchmark samples per case with
+`GOMAXPROCS=1`. The benchmark uses `EXPLAIN ANALYZE` over a segmented numeric
+columnar source and compares the pushed C230 baseline with bounded per-mark
+decision tracing.
+
+| Path | Raw samples (ns/op) | Median | Memory | Relative result |
+| --- | --- | ---: | ---: | --- |
+| C230 baseline | 26,626, 27,140, 27,600, 26,168, 27,779 | 27,140 | 17,026 B/op, 141 allocs/op | baseline |
+| C236 decision trace | 27,621, 28,033, 29,538, 28,318, 30,518 | 28,318 | 17,546 B/op, 147 allocs/op | 1.04x CPU, 1.03x bytes, 1.04x allocs |
+
+This is an EXPLAIN-only diagnostic cost. Normal query execution does not
+collect the trace. The added memory is bounded by 64 retained decisions per
+pruning step while the aggregate examined and rejected mark counts remain
+complete.
