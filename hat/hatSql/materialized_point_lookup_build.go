@@ -150,6 +150,16 @@ func (views *MaterializedViews) StartPointLookupIndexBuild(ctx context.Context, 
 		cancel()
 		return nil, fmt.Errorf("%w: %q", ErrMaterializedViewPointLookupIndexExists, definition.Name)
 	}
+	if retirement, exists := views.pointLookupRetirements[definition.Name]; exists && retirement != nil {
+		views.mu.Unlock()
+		cancel()
+		return nil, fmt.Errorf("%w: %q", ErrMaterializedViewPointLookupIndexRetirementInProgress, definition.Name)
+	}
+	if state := views.pointLookupReaders[definition.Name]; state != nil && state.retiring {
+		views.mu.Unlock()
+		cancel()
+		return nil, fmt.Errorf("%w: %q", ErrMaterializedViewPointLookupIndexRetirementInProgress, definition.Name)
+	}
 	if build, exists := views.pointLookupBuilds[definition.Name]; exists && build != nil {
 		views.mu.Unlock()
 		cancel()
@@ -233,6 +243,10 @@ func (views *MaterializedViews) runPointLookupIndexBuild(ctx context.Context, bu
 		return
 	}
 	views.pointLookups[definition.Name] = index
+	if views.pointLookupReaders == nil {
+		views.pointLookupReaders = make(map[string]*materializedViewPointLookupReaderState)
+	}
+	views.pointLookupReaders[definition.Name] = &materializedViewPointLookupReaderState{indexName: definition.Name}
 	delete(views.pointLookupBuilds, definition.Name)
 	views.mu.Unlock()
 	build.state.finish(MaterializedViewPointLookupBuildStateReady, nil)

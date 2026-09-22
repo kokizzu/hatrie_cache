@@ -63,16 +63,18 @@ type MaterializedView struct {
 // MaterializedViews stores named query-result snapshots. It is safe for
 // concurrent reads and refreshes.
 type MaterializedViews struct {
-	mu                sync.RWMutex
-	views             map[string]materializedView
-	dependents        map[string][]string
-	pointLookups      map[string]materializedViewPointLookup
-	pointLookupBuilds map[string]*MaterializedViewPointLookupBuild
-	maxRows           int
-	maxBytes          int64
-	rows              int
-	bytes             int64
-	nextGeneration    uint64
+	mu                     sync.RWMutex
+	views                  map[string]materializedView
+	dependents             map[string][]string
+	pointLookups           map[string]materializedViewPointLookup
+	pointLookupBuilds      map[string]*MaterializedViewPointLookupBuild
+	pointLookupReaders     map[string]*materializedViewPointLookupReaderState
+	pointLookupRetirements map[string]*MaterializedViewPointLookupRetirement
+	maxRows                int
+	maxBytes               int64
+	rows                   int
+	bytes                  int64
+	nextGeneration         uint64
 }
 
 type materializedView struct {
@@ -99,12 +101,14 @@ func NewMaterializedViewsWithOptions(options MaterializedViewsOptions) (*Materia
 		return nil, fmt.Errorf("materialized view storage limits must not be negative")
 	}
 	return &MaterializedViews{
-		views:             make(map[string]materializedView),
-		dependents:        make(map[string][]string),
-		pointLookups:      make(map[string]materializedViewPointLookup),
-		pointLookupBuilds: make(map[string]*MaterializedViewPointLookupBuild),
-		maxRows:           options.MaxRows,
-		maxBytes:          options.MaxBytes,
+		views:                  make(map[string]materializedView),
+		dependents:             make(map[string][]string),
+		pointLookups:           make(map[string]materializedViewPointLookup),
+		pointLookupBuilds:      make(map[string]*MaterializedViewPointLookupBuild),
+		pointLookupReaders:     make(map[string]*materializedViewPointLookupReaderState),
+		pointLookupRetirements: make(map[string]*MaterializedViewPointLookupRetirement),
+		maxRows:                options.MaxRows,
+		maxBytes:               options.MaxBytes,
 	}, nil
 }
 
@@ -236,6 +240,12 @@ func (views *MaterializedViews) Drop(name string) error {
 	for indexName, index := range views.pointLookups {
 		if index.definition.ViewName == name {
 			delete(views.pointLookups, indexName)
+			if state := views.pointLookupReaders[indexName]; state != nil {
+				state.retiring = true
+				if state.active == 0 {
+					delete(views.pointLookupReaders, indexName)
+				}
+			}
 		}
 	}
 	views.rows -= view.storedRows

@@ -25796,3 +25796,31 @@ commit-m219-background-point-lookup:
 
 push-m219-background-point-lookup:
 	bash scripts/push-m219-background-point-lookup.sh
+format-m220-point-lookup-retirement:
+	bash scripts/format-m220-point-lookup-retirement.sh
+
+test-m220-point-lookup-retirement:
+	bash scripts/test-m220-point-lookup-retirement.sh
+
+benchmark-m220-point-lookup-retirement:
+	bash scripts/benchmark-m220-point-lookup-retirement.sh
+
+race-m220-point-lookup-retirement:
+	bash scripts/race-m220-point-lookup-retirement.sh
+
+test-m220-related-materialized:
+	bash scripts/test-m220-related-materialized.sh
+
+vet-m220-point-lookup-retirement:
+	bash scripts/vet-m220-point-lookup-retirement.sh
+stage-m220-point-lookup-retirement:
+	bash scripts/stage-m220-point-lookup-retirement.sh
+
+commit-m220-point-lookup-retirement:
+	bash scripts/commit-m220-point-lookup-retirement.sh
+
+push-m220-point-lookup-retirement:
+	bash scripts/push-m220-point-lookup-retirement.sh
+
+status-m220-point-lookup-retirement:
+	bash scripts/status-m220-point-lookup-retirement.sh

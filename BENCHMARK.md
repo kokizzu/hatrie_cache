@@ -36164,3 +36164,19 @@ lower total CPU. Total bytes are about 0.1% higher and allocations about
 0.04% higher; total time is approximately equal within run variance.
 Raw samples and semantics are recorded in
 [M219_BACKGROUND_POINT_LOOKUP_BUILD.md](M219_BACKGROUND_POINT_LOOKUP_BUILD.md).
+
+## M220: Safe point lookup retirement
+
+Workload: 10,000 rows, key `9999`, ten iterations per sample, five samples,
+AMD Ryzen 9 5950X. Retirement setup and index construction are outside the
+timed retirement loop.
+
+| Operation | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Existing one-shot lookup | 740.1 | 376 | 4 | baseline |
+| Leased reader lookup | 596.0 | 376 | 4 | same bytes and allocations |
+| Retirement with no readers | 5,512 | 456 | 4 | O(1) one-off lifecycle cost |
+
+M220 is a safety/lifecycle feature, not a query-throughput optimization. See
+[M220_POINT_LOOKUP_RETIREMENT.md](M220_POINT_LOOKUP_RETIREMENT.md) for raw
+samples and reader-drain semantics.

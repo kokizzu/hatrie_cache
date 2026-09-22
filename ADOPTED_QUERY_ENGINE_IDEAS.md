@@ -1147,3 +1147,13 @@ partial or stale rows. Progress publication is batched every 64 rows to keep
 the total build overhead small. See
 [M219_BACKGROUND_POINT_LOOKUP_BUILD.md](M219_BACKGROUND_POINT_LOOKUP_BUILD.md)
 for correctness and measured tradeoffs.
+
+## M220: Safe Point Lookup Retirement
+
+M220 adds explicit point-lookup reader leases and asynchronous retirement.
+`StartPointLookupIndexRetirement` rejects new readers, keeps existing readers
+on an immutable snapshot, and exposes an active-reader drain frontier before
+releasing the index. `DropPointLookupIndex` uses the same drain protocol while
+remaining synchronous. See
+[M220_POINT_LOOKUP_RETIREMENT.md](M220_POINT_LOOKUP_RETIREMENT.md) for
+correctness and measured lifecycle cost.

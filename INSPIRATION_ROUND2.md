@@ -106,7 +106,7 @@ operator control remain the preferred deployment model.
 - [x] M217 Indexes that store complete maintained view results for point lookups; added opt-in maintained point lookup indexes to `MaterializedViews` with atomic refresh integration. See [M217_MATERIALIZED_POINT_LOOKUP.md](M217_MATERIALIZED_POINT_LOOKUP.md).
 - [x] M218 Planner selection of point lookup versus arrangement scan; added the opt-in `MaterializedViewPointLookupResolver` and benchmarked point-vs-scan execution. See [M218_MATERIALIZED_POINT_LOOKUP_PLANNER.md](M218_MATERIALIZED_POINT_LOOKUP_PLANNER.md).
 - [x] M219 Background index creation with observable build frontier; added opt-in asynchronous maintained point-lookup builds with atomic publication, stale-snapshot rejection, cancellation, and measurable progress. See [M219_BACKGROUND_POINT_LOOKUP_BUILD.md](M219_BACKGROUND_POINT_LOOKUP_BUILD.md).
-- [ ] M220 Safe index removal after dependent readers drain.
+- [x] M220 Safe index removal after dependent readers drain; added point-lookup reader leases, observable retirement state, stale-reader isolation, and a synchronous drop wrapper that waits for drain. See [M220_POINT_LOOKUP_RETIREMENT.md](M220_POINT_LOOKUP_RETIREMENT.md).
 - [ ] M221 Isolated compute clusters with independent resource budgets.
 - [ ] M222 Replicated compute workers for highly available maintained indexes.
 - [ ] M223 Hydration state machines that distinguish cold, hydrating, and ready views.

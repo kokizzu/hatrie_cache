@@ -54,8 +54,14 @@ func (views *MaterializedViews) CreatePointLookupIndex(definition MaterializedVi
 	if _, exists := views.pointLookups[definition.Name]; exists {
 		return fmt.Errorf("%w: %q", ErrMaterializedViewPointLookupIndexExists, definition.Name)
 	}
+	if retirement, exists := views.pointLookupRetirements[definition.Name]; exists && retirement != nil {
+		return fmt.Errorf("%w: %q", ErrMaterializedViewPointLookupIndexRetirementInProgress, definition.Name)
+	}
 	if _, exists := views.pointLookupBuilds[definition.Name]; exists {
 		return fmt.Errorf("%w: %q", ErrMaterializedViewPointLookupBuildInProgress, definition.Name)
+	}
+	if state := views.pointLookupReaders[definition.Name]; state != nil && state.retiring {
+		return fmt.Errorf("%w: %q", ErrMaterializedViewPointLookupIndexRetirementInProgress, definition.Name)
 	}
 	view, exists := views.views[definition.ViewName]
 	if !exists {
@@ -66,25 +72,21 @@ func (views *MaterializedViews) CreatePointLookupIndex(definition MaterializedVi
 		return err
 	}
 	views.pointLookups[definition.Name] = index
+	if views.pointLookupReaders == nil {
+		views.pointLookupReaders = make(map[string]*materializedViewPointLookupReaderState)
+	}
+	views.pointLookupReaders[definition.Name] = &materializedViewPointLookupReaderState{indexName: definition.Name}
 	return nil
 }
 
 // DropPointLookupIndex removes one maintained point lookup index.
 func (views *MaterializedViews) DropPointLookupIndex(name string) error {
-	if views == nil {
-		return fmt.Errorf("materialized views are nil")
+	retirement, err := views.StartPointLookupIndexRetirement(name)
+	if err != nil {
+		return err
 	}
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return fmt.Errorf("materialized view point lookup index name is required")
-	}
-	views.mu.Lock()
-	defer views.mu.Unlock()
-	if _, exists := views.pointLookups[name]; !exists {
-		return fmt.Errorf("%w: %q", ErrMaterializedViewPointLookupIndexMissing, name)
-	}
-	delete(views.pointLookups, name)
-	return nil
+	_, err = retirement.Wait(context.Background())
+	return err
 }
 
 // LookupPoint returns all complete rows matching one indexed point key. The
