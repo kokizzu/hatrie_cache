@@ -144,7 +144,7 @@ operator control remain the preferred deployment model.
 - [x] T202 Automatic leader election for a replica set. `hatReplication.ReplicaSetLeaderElection` provides opt-in quorum-gated heartbeat expiry, deterministic candidate selection, and generation-fenced commit; see [T202_REPLICA_SET_LEADER_ELECTION.md](T202_REPLICA_SET_LEADER_ELECTION.md).
 - [x] T203 Strict leader fencing against stale writers after failover. `hatReplication.ReplicaSetLeaderWriteFence` gates exact node/term/fencing-token credentials and serializes failover advancement with local write callbacks; see [T203_LEADER_WRITE_FENCE.md](T203_LEADER_WRITE_FENCE.md).
 - [x] T204 Supervised failover with explicit operator override and recovery state. `hatReplication.SupervisedFailoverCoordinator` requires named approval/override, fences commit generations, tracks caught-up recovery or failure, and requires explicit reset; see [T204_SUPERVISED_FAILOVER.md](T204_SUPERVISED_FAILOVER.md).
-- [ ] T205 LSN-based replication lag and apply-throughput metrics.
+- [x] T205 LSN-based replication lag and apply-throughput metrics. `hatReplication.ReplicationProgressMetrics` is opt-in, bounded, monotone, and derives LSN/byte rates from caller-fed observations; see [T205_REPLICATION_PROGRESS_METRICS.md](T205_REPLICATION_PROGRESS_METRICS.md) and [BENCHMARK.md#t205-replication-progress-metrics](BENCHMARK.md#t205-replication-progress-metrics).
 - [ ] T206 Deterministic replica bootstrap and join workflow.
 - [ ] T207 Replica eviction, rejoin, and stale-state recovery protocol.
 - [ ] T208 Anonymous replicas that do not participate in quorum decisions.

@@ -104,6 +104,7 @@ security guidance before exposing it on a network.
 - Opt-in per-space synchronous replication quorum for critical writes: [T201_PER_SPACE_SYNC_QUORUM.md](T201_PER_SPACE_SYNC_QUORUM.md)
 - Opt-in strict leader write fencing after failover: [T203_LEADER_WRITE_FENCE.md](T203_LEADER_WRITE_FENCE.md), with CPU and allocation measurements in [BENCHMARK.md](BENCHMARK.md#t203-strict-leader-write-fencing)
 - Opt-in supervised failover with named approval/override and recovery state: [T204_SUPERVISED_FAILOVER.md](T204_SUPERVISED_FAILOVER.md), with lifecycle measurements in [BENCHMARK.md](BENCHMARK.md#t204-supervised-failover-lifecycle)
+- Opt-in LSN-based replication lag and apply-throughput metrics with bounded target retention: [T205_REPLICATION_PROGRESS_METRICS.md](T205_REPLICATION_PROGRESS_METRICS.md), with CPU and allocation measurements in [BENCHMARK.md](BENCHMARK.md#t205-replication-progress-metrics)
 - Opt-in replica-set leader election with heartbeat expiry, quorum selection, and generation-fenced commit: [T202_REPLICA_SET_LEADER_ELECTION.md](T202_REPLICA_SET_LEADER_ELECTION.md), with control-plane measurements in [BENCHMARK.md](BENCHMARK.md#t202-replica-set-leader-election)
 - ClickHouse-style typed-table decompressed column-block cache: [TYPED_TABLE_DECOMPRESSED_BLOCK_CACHE.md](TYPED_TABLE_DECOMPRESSED_BLOCK_CACHE.md)
 - 50-item adoption backlog for each inspiration source: [INSPIRATION_BACKLOG.md](INSPIRATION_BACKLOG.md)

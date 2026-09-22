@@ -23243,6 +23243,9 @@ push-tu33-function-grants:
 audit-hatrie-tmp:
 	bash scripts/audit-hatrie-tmp.sh
 
+inspect-hatrie-tmp-recursive:
+	bash scripts/inspect-hatrie-tmp-recursive.sh
+
 format-m223-materialized-hydration:
 	bash scripts/format-m223-materialized-hydration.sh
 
@@ -26925,6 +26928,39 @@ inspect-t204-context:
 	bash scripts/inspect-t204-context.sh
 
 .PHONY: test-t204 benchmark-t204 format-t204 race-t204 vet-t204 test-t204-package verify-docs-t204 stage-t204 commit-t204 push-t204
+test-t205:
+	bash scripts/test-t205.sh
+
+benchmark-t205-baseline:
+	bash scripts/benchmark-t205-baseline.sh
+
+benchmark-t205:
+	bash scripts/benchmark-t205.sh
+
+format-t205:
+	bash scripts/format-t205.sh
+
+race-t205:
+	bash scripts/race-t205.sh
+
+vet-t205:
+	bash scripts/vet-t205.sh
+
+test-t205-package:
+	bash scripts/test-t205-package.sh
+
+verify-docs-t205:
+	bash scripts/verify-docs-t205.sh
+
+stage-t205:
+	bash scripts/stage-t205.sh
+
+commit-t205:
+	bash scripts/commit-t205.sh
+
+push-t205:
+	bash scripts/push-t205.sh
+
 test-t204:
 	bash scripts/test-t204.sh
 

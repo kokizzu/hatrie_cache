@@ -36869,3 +36869,33 @@ Override lifecycle:  239.5 239.6 245.4 237.8 237.9; 0; 0
 
 API boundaries and recovery safety rules are in
 [T204_SUPERVISED_FAILOVER.md](T204_SUPERVISED_FAILOVER.md).
+
+<a id="t205-replication-progress-metrics"></a>
+## T205 Replication Progress Metrics
+
+Commands: `make benchmark-t205-baseline` and `make benchmark-t205`. Five
+samples were collected on Linux/amd64 with an AMD Ryzen 9 5950X. The direct
+arithmetic row is a lower-bound control; the `Observe` row updates an existing
+target, and the snapshot row creates a detached one-target monitoring view.
+
+| Workload | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Direct lag/rate arithmetic control | 0.5175 | 0 | 0 | 1.00x |
+| Existing-target `Observe` | 58.78 | 0 | 0 | 113.58x control |
+| One-target `Snapshot` | 186.0 | 80 | 1 | 359.42x control |
+
+The collector pays no default runtime cost because it is opt-in and is not
+attached to the transport or applier automatically. Once enabled, the hot
+observation path is allocation-free for known targets and the snapshot cost is
+the deliberate detached-slice allocation needed for safe monitoring export.
+The bounded target map prevents target-label cardinality from becoming an
+unbounded memory sink. API and configuration details are in
+[T205_REPLICATION_PROGRESS_METRICS.md](T205_REPLICATION_PROGRESS_METRICS.md).
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+Direct arithmetic: 0.5252 0.5063 0.5175 0.4955 0.5263; 0; 0
+Observe target:    64.19 57.30 58.78 60.00 56.72; 0; 0
+Snapshot target:  177.2 187.1 186.6 177.3 186.0; 80; 1
+```
