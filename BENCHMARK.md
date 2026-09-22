@@ -35783,3 +35783,28 @@ bounded stage aggregation add measurable CPU time. That is an intentional
 observability tradeoff; the default path remains profiler-free and does not
 read runtime memory statistics. See [C234_QUERY_PROFILER.md](C234_QUERY_PROFILER.md)
 for semantics, limits, and verification commands.
+
+## C235: Read/Write Task Profiler
+
+Command: `make benchmark-c235-read-write-profiler` (five samples,
+`-benchmem`, Linux/amd64, AMD Ryzen 9 5950X). The no-op path is a loop over the
+same counters without profiler calls; the record path aggregates one repeated
+read task into a bounded profiler entry.
+
+```text
+No-op:  0.4743 0.4758 0.4709 0.4672 0.4865 ns/op
+        0 0 0 0 0 B/op
+        0 0 0 0 0 allocs/op
+Record: 99.48 104.6 97.84 97.01 97.89 ns/op
+        0 0 0 0 0 B/op
+        0 0 0 0 0 allocs/op
+```
+
+| Path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| No-op counter baseline | 0.4743 | 0 | 0 | baseline |
+| Repeated bounded read record | 97.89 | 0 | 0 | 206.4x slower than no-op, opt-in only |
+
+The profiler performs no work unless a storage adapter calls it. It is not
+installed in the SQL query path automatically because the generic resolver
+contract does not know physical part or column I/O boundaries.

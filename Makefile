@@ -24899,6 +24899,30 @@ commit-c234-query-profiler:
 push-c234-query-profiler:
 	bash scripts/push-c234-query-profiler.sh
 
+test-c235-read-write-profiler:
+	bash scripts/test-c235-read-write-profiler.sh
+
+benchmark-c235-read-write-profiler:
+	bash scripts/benchmark-c235-read-write-profiler.sh
+
+format-c235-read-write-profiler:
+	bash scripts/format-c235-read-write-profiler.sh
+
+race-c235-read-write-profiler:
+	bash scripts/race-c235-read-write-profiler.sh
+
+vet-c235-read-write-profiler:
+	bash scripts/vet-c235-read-write-profiler.sh
+
+stage-c235-read-write-profiler:
+	bash scripts/stage-c235-read-write-profiler.sh
+
+commit-c235-read-write-profiler:
+	bash scripts/commit-c235-read-write-profiler.sh
+
+push-c235-read-write-profiler:
+	bash scripts/push-c235-read-write-profiler.sh
+
 .PHONY: test-c213-typed-hash-join
 test-c213-typed-hash-join:
 	bash scripts/test-c213-typed-hash-join.sh
