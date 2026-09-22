@@ -8797,6 +8797,23 @@ commit-t211:
 push-t211:
 	bash ./scripts/push-t211.sh
 
+.PHONY: cleanup-hatrie-audit-plan cleanup-hatrie-audit-apply
+cleanup-hatrie-audit-plan: audit-hatrie-tmp
+	bash ./scripts/cleanup-hatrie-tmp-audit.sh plan
+
+cleanup-hatrie-audit-apply:
+	bash ./scripts/cleanup-hatrie-tmp-audit.sh apply
+
+.PHONY: stage-tmp-cleanup commit-tmp-cleanup push-tmp-cleanup
+stage-tmp-cleanup:
+	bash ./scripts/stage-tmp-cleanup.sh
+
+commit-tmp-cleanup:
+	bash ./scripts/commit-tmp-cleanup.sh
+
+push-tmp-cleanup:
+	bash ./scripts/push-tmp-cleanup.sh
+
 .PHONY: test-m052c-native-dataflow
 test-m052c-native-dataflow:
 	bash ./scripts/test-m052c-native-dataflow.sh
