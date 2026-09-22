@@ -36439,3 +36439,20 @@ The parent used 16,730 B/op and 127 allocs/op. M238 adds two allocations and
 64 bytes to carry the structured `FILTER_PUSHDOWN` notice; ordinary query
 execution is unchanged. Raw behavior and commands are in
 [M238_EXPLAIN_PUSHDOWN.md](M238_EXPLAIN_PUSHDOWN.md).
+
+## M239 Explain Logical Timestamp And Frontier Requirements
+
+Five `-benchmem` samples were collected per path on Linux amd64, AMD Ryzen 9
+5950X. The baseline is M238 (`a553a620`); the temporal benchmark source was
+copied into the baseline worktree for a comparable before/after workload. CPU
+is noisy for this diagnostic path, so no CPU speedup is claimed.
+
+| Workload | M238 median ns/op | M239 median ns/op | M239 B/op | M239 allocs/op | M239 vs M238 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Default `EXPLAIN` | 26,924 | 22,246 | 16,793 | 129 | 0 B/op, 0 allocs/op; within run variance |
+| Opt-in temporal `EXPLAIN` | 9,914 | 8,560 | 9,312 | 33 | +120 B/op, +3 allocs/op |
+
+The default explain path has no measured allocation or memory change. The
+opt-in path pays the bounded cost of rendering two machine-readable notice
+details. Raw samples and exact commands are in
+[M239_EXPLAIN_FRONTIER.md](M239_EXPLAIN_FRONTIER.md).

@@ -13264,7 +13264,12 @@ func sqlCTEOutputRows(cte sqlCTE, result SQLQueryResult) ([]SQLRow, error) {
 
 func explainSQLQuery(source string, query *sqlQuery, resolver SQLSourceResolver, options SQLQueryOptions, control *sqlExecutionControl) (SQLQueryResult, error) {
 	if query.pipeline {
-		return explainSQLPipelineQuery(query, resolver)
+		result, err := explainSQLPipelineQuery(query, resolver)
+		if err != nil {
+			return SQLQueryResult{}, err
+		}
+		annotateSQLExplainTemporalRequirements(result.Plan, options)
+		return result, nil
 	}
 	steps := sqlExplainSteps(query)
 	var estimatedSteps []SQLExplainStep
@@ -13281,6 +13286,7 @@ func explainSQLQuery(source string, query *sqlQuery, resolver SQLSourceResolver,
 				steps = append(steps, SQLExplainStep{Node: "PROJECTION SELECTION", Detail: projectionExplainDetail(diagnostics), Projection: &diagnostics})
 			}
 		}
+		annotateSQLExplainTemporalRequirements(steps, options)
 	}
 	hasArrangementMetadata := sqlExplainHasArrangementMetadata(steps)
 	hasExplainCost := sqlExplainHasCost(steps)
@@ -13341,6 +13347,7 @@ func explainSQLQuery(source string, query *sqlQuery, resolver SQLSourceResolver,
 	if query.explainCost {
 		result.Plan = CostSQLExplainSteps(result.Plan, SQLExplainCostOptions{})
 	}
+	annotateSQLExplainTemporalRequirements(result.Plan, options)
 	result.Rows = result.Rows[:0]
 	for _, step := range result.Plan {
 		rowCapacity := 3

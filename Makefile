@@ -26388,6 +26388,39 @@ commit-m238-explain:
 push-m238-explain:
 	bash scripts/push-m238-explain.sh
 
+test-m239-explain:
+	bash scripts/test-m239-explain.sh test
+
+test-m239-explain-package:
+	bash scripts/test-m239-explain.sh package
+
+race-m239-explain:
+	bash scripts/test-m239-explain.sh race
+
+vet-m239-explain:
+	bash scripts/test-m239-explain.sh vet
+
+regression-m239-explain:
+	bash scripts/test-m239-explain.sh regression
+
+verify-docs-m239-explain:
+	bash scripts/test-m239-explain.sh docs
+
+format-m239-explain:
+	bash scripts/test-m239-explain.sh format
+
+benchmark-m239-explain:
+	bash scripts/benchmark-m239-explain.sh
+
+stage-m239-explain:
+	bash scripts/stage-m239-explain.sh
+
+commit-m239-explain:
+	bash scripts/commit-m239-explain.sh
+
+push-m239-explain:
+	bash scripts/push-m239-explain.sh
+
 format-m233-sink-retry:
 	bash scripts/m233-sink-retry.sh format
 

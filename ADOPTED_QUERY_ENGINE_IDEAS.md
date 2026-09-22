@@ -1314,3 +1314,14 @@ before joins. Arrangement reuse remains represented by the existing bounded
 `SQLArrangementMetadata.Reused` field, avoiding duplicate diagnostic payload.
 The added cost is limited to two allocations and about 64 bytes on the
 diagnostic `EXPLAIN` path. See [M238_EXPLAIN_PUSHDOWN.md](M238_EXPLAIN_PUSHDOWN.md).
+
+## M239 Explain Logical Timestamp And Frontier Requirements
+
+The Materialize-style rule that a plan should expose its logical-time contract
+is adopted in `EXPLAIN`. Opt-in `AsOfFrontier` and
+`RequireSourceFrontier`/`RequiredSourceFrontier` options now emit stable
+`LOGICAL_TIMESTAMP` and `FRONTIER_REQUIREMENT` notices on the source scan for
+both regular and analyzed plans. The default path remains unchanged; the
+temporal diagnostic path measured three extra allocations and 120 bytes for
+the two rendered details. See
+[M239_EXPLAIN_FRONTIER.md](M239_EXPLAIN_FRONTIER.md).
