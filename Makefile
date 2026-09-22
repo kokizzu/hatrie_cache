@@ -23851,6 +23851,25 @@ race-c247-gorilla-codec:
 cleanup-hatrie-tmp-metadata:
 	bash scripts/audit-hatrie-tmp.sh clean-metadata
 
+.PHONY: cleanup-go-build-tmp-plan cleanup-go-build-tmp-apply
+
+cleanup-go-build-tmp-plan:
+	bash scripts/cleanup-go-build-tmp.sh plan
+
+cleanup-go-build-tmp-apply:
+	bash scripts/cleanup-go-build-tmp.sh apply
+
+.PHONY: stage-cleanup-go-build-tmp commit-cleanup-go-build-tmp push-cleanup-go-build-tmp
+
+stage-cleanup-go-build-tmp:
+	bash scripts/stage-cleanup-go-build-tmp.sh
+
+commit-cleanup-go-build-tmp:
+	bash scripts/commit-cleanup-go-build-tmp.sh
+
+push-cleanup-go-build-tmp:
+	bash scripts/push-cleanup-go-build-tmp.sh
+
 .PHONY: stage-m240-dataflow commit-m240-dataflow push-m240-dataflow
 
 stage-m240-dataflow:
