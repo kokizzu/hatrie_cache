@@ -37306,3 +37306,13 @@ With three 3-second samples on an AMD Ryzen 9 5950X, a ready-context
 `0 allocs/op`. An already-canceled context measured `20.30 ns/op`, `0 B/op`,
 and `0 allocs/op`. The safe point is opt-in and does not change transactions
 that never call it. See [TT033_MVCC_COOPERATIVE_YIELD.md](TT033_MVCC_COOPERATIVE_YIELD.md).
+## T034: Early Transaction Conflict Detection
+
+With three 3-second samples on an AMD Ryzen 9 5950X, a transaction that
+created a snapshot and staged one valid `INSERT` measured a default median of
+`4,230 ns/op`, `4,267 B/op`, and `14 allocs/op`. Enabling
+`EarlyConflictDetection` measured `4,085 ns/op`, `4,248 B/op`, and
+`14 allocs/op`. The early-detection run did not inject a competing mutation,
+so this is a no-conflict overhead measurement. The difference is within normal
+run-to-run noise and is not treated as a speedup; the opt-in checks added no
+measured allocation cost. See [TT034_EARLY_TRANSACTION_CONFLICTS.md](TT034_EARLY_TRANSACTION_CONFLICTS.md).

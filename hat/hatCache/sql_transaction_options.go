@@ -15,6 +15,10 @@ var ErrSQLTransactionReadOnly = errors.New("SQL transaction is read-only")
 // clock timeout expires before an operation can complete.
 var ErrSQLTransactionTimeout = errors.New("SQL transaction timed out")
 
+// ErrSQLTransactionConflict is returned when a transaction observes a live
+// mutation after its snapshot was captured.
+var ErrSQLTransactionConflict = errors.New("SQL transaction conflict")
+
 // SQLTransactionIsolation controls how a SQLTransaction coordinates with
 // concurrent command-path mutations.
 type SQLTransactionIsolation uint8
@@ -66,6 +70,10 @@ type SQLTransactionOptions struct {
 	// Timeout bounds the transaction after its private snapshot is captured. A
 	// zero value disables the timeout and preserves the default fast path.
 	Timeout time.Duration
+	// EarlyConflictDetection aborts the transaction when a live mutation is
+	// observed before or after a staged mutation. It is disabled by the zero
+	// value so the existing commit-time conflict behavior remains unchanged.
+	EarlyConflictDetection bool
 }
 
 func (options SQLTransactionOptions) normalized() (SQLTransactionOptions, error) {

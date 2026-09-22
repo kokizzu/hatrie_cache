@@ -15,19 +15,21 @@ import (
 // command SQL. Queries and staged writes run against a private snapshot; commit
 // is rejected if any live mutation occurred after that snapshot.
 type SQLTransaction struct {
-	mu                   sync.Mutex
-	live                 *HatTrie
-	snapshot             *HatTrie
-	epoch                uint64
-	isolation            SQLTransactionIsolation
-	readOnly             bool
-	deadline             time.Time
-	timedOut             bool
-	serializableLockHeld bool
-	staged               []CacheCommandRequest
-	savepoints           []sqlTransactionSavepoint
-	nextScopeID          uint64
-	closed               bool
+	mu                     sync.Mutex
+	live                   *HatTrie
+	snapshot               *HatTrie
+	epoch                  uint64
+	isolation              SQLTransactionIsolation
+	readOnly               bool
+	earlyConflictDetection bool
+	deadline               time.Time
+	timedOut               bool
+	conflicted             bool
+	serializableLockHeld   bool
+	staged                 []CacheCommandRequest
+	savepoints             []sqlTransactionSavepoint
+	nextScopeID            uint64
+	closed                 bool
 }
 
 type sqlTransactionSavepoint struct {
@@ -98,13 +100,14 @@ func BeginSQLTransactionWithOptions(trie *HatTrie, options SQLTransactionOptions
 		deadline = time.Now().Add(options.Timeout)
 	}
 	return &SQLTransaction{
-		live:                 trie,
-		snapshot:             snapshot,
-		epoch:                epoch,
-		isolation:            options.Isolation,
-		readOnly:             options.ReadOnly,
-		deadline:             deadline,
-		serializableLockHeld: serializableLockHeld,
+		live:                   trie,
+		snapshot:               snapshot,
+		epoch:                  epoch,
+		isolation:              options.Isolation,
+		readOnly:               options.ReadOnly,
+		earlyConflictDetection: options.EarlyConflictDetection,
+		deadline:               deadline,
+		serializableLockHeld:   serializableLockHeld,
 	}, nil
 }
 
@@ -134,6 +137,9 @@ func (transaction *SQLTransaction) Execute(source string) (SQLMutationResult, er
 	if err := transaction.checkTimeoutLocked(); err != nil {
 		return SQLMutationResult{}, err
 	}
+	if err := transaction.checkEarlyConflictLocked(); err != nil {
+		return SQLMutationResult{}, err
+	}
 	if transaction.readOnly {
 		return SQLMutationResult{}, ErrSQLTransactionReadOnly
 	}
@@ -156,11 +162,17 @@ func (transaction *SQLTransaction) Execute(source string) (SQLMutationResult, er
 	if err := transaction.checkTimeoutLocked(); err != nil {
 		return SQLMutationResult{}, err
 	}
+	if err := transaction.checkEarlyConflictLocked(); err != nil {
+		return SQLMutationResult{}, err
+	}
 	response := transaction.snapshot.ExecuteCommand(CacheCommandRequest{Command: "BATCH", Atomic: true, Batch: payloads})
 	if !response.OK {
 		return SQLMutationResult{Response: response}, fmt.Errorf("SQL transaction mutation failed: %s", response.Message)
 	}
 	if err := transaction.checkTimeoutLocked(); err != nil {
+		return SQLMutationResult{}, err
+	}
+	if err := transaction.checkEarlyConflictLocked(); err != nil {
 		return SQLMutationResult{}, err
 	}
 	transaction.staged = append(transaction.staged, payloads...)
@@ -203,8 +215,14 @@ func (transaction *SQLTransaction) Commit() error {
 		return err
 	}
 	response := transaction.live.executeSQLTransactionBatch(transaction.epoch, transaction.staged)
+	if !response.OK && strings.HasPrefix(response.Message, "SQL transaction conflict:") {
+		transaction.conflicted = true
+	}
 	transaction.closeLocked()
 	if !response.OK {
+		if transaction.conflicted {
+			return fmt.Errorf("%w%s", ErrSQLTransactionConflict, strings.TrimPrefix(response.Message, "SQL transaction conflict"))
+		}
 		return fmt.Errorf("%s", response.Message)
 	}
 	return nil
@@ -391,9 +409,21 @@ func (transaction *SQLTransaction) checkTimeoutLocked() error {
 	return ErrSQLTransactionTimeout
 }
 
+func (transaction *SQLTransaction) checkEarlyConflictLocked() error {
+	if !transaction.earlyConflictDetection || atomic.LoadUint64(&transaction.live.mutationEpoch) == transaction.epoch {
+		return nil
+	}
+	transaction.conflicted = true
+	transaction.closeLocked()
+	return ErrSQLTransactionConflict
+}
+
 func (transaction *SQLTransaction) closedError() error {
 	if transaction.timedOut {
 		return ErrSQLTransactionTimeout
+	}
+	if transaction.conflicted {
+		return ErrSQLTransactionConflict
 	}
 	return fmt.Errorf("SQL transaction is closed")
 }

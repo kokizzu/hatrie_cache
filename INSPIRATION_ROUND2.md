@@ -173,7 +173,7 @@ operator control remain the preferred deployment model.
 - [x] T231 After-replace audit hooks with transaction identity. `hatDataStructure.MemtxTable` emits an opt-in `AfterReplace` audit callback with a table-local transaction identity and the committed old/new event. See [TT031_AFTER_REPLACE_AUDIT.md](TT031_AFTER_REPLACE_AUDIT.md).
 - [x] T232 Atomic transaction scopes with nested rollback boundaries. `hatCache.SQLTransaction.Scope` and `BeginScope` provide nested rollback boundaries, preserve handled outer work, and clean up callback panics. See [TT032_ATOMIC_TRANSACTION_SCOPES.md](TT032_ATOMIC_TRANSACTION_SCOPES.md).
 - [x] T233 MVCC transactions that permit cooperative yields. `hatCache.SQLTransaction.Yield(ctx)` releases the transaction mutex across a scheduler handoff, checks cancellation and timeout state, and leaves cancellation policy to the caller. See [TT033_MVCC_COOPERATIVE_YIELD.md](TT033_MVCC_COOPERATIVE_YIELD.md).
-- [ ] T234 Early conflict detection for competing transactional writes.
+- [x] T234 Early conflict detection for competing transactional writes. `hatCache.SQLTransactionOptions.EarlyConflictDetection` aborts stale staged writes before private work continues; the default remains commit-time-only detection. See [TT034_EARLY_TRANSACTION_CONFLICTS.md](TT034_EARLY_TRANSACTION_CONFLICTS.md).
 - [ ] T235 Cooperative fiber workers for nonblocking application tasks.
 - [ ] T236 Low-overhead mailbox channels between independent workers.
 - [ ] T237 Connection pools with health checks and reconnect backoff.

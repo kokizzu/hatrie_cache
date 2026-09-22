@@ -27738,3 +27738,43 @@ commit-t233:
 .PHONY: push-t233
 push-t233:
 	bash scripts/push-t233.sh
+
+.PHONY: format-t234
+format-t234:
+	bash scripts/format-t234.sh
+
+.PHONY: test-t234
+test-t234:
+	bash scripts/test-t234.sh
+
+.PHONY: test-t234-package
+test-t234-package:
+	bash scripts/test-t234-package.sh
+
+.PHONY: benchmark-t234
+benchmark-t234:
+	bash scripts/benchmark-t234.sh
+
+.PHONY: race-t234
+race-t234:
+	bash scripts/race-t234.sh
+
+.PHONY: vet-t234
+vet-t234:
+	bash scripts/vet-t234.sh
+
+.PHONY: verify-t234-docs
+verify-t234-docs:
+	bash scripts/verify-t234-docs.sh
+
+.PHONY: stage-t234
+stage-t234:
+	bash scripts/stage-t234.sh
+
+.PHONY: commit-t234
+commit-t234:
+	bash scripts/commit-t234.sh
+
+.PHONY: push-t234
+push-t234:
+	bash scripts/push-t234.sh
