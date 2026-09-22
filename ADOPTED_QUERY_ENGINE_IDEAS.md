@@ -1196,3 +1196,13 @@ reports observed work, source cardinality estimates, remaining work, and
 explicit unknown-estimate state without retaining row payloads. See
 [M224_MATERIALIZED_HYDRATION_PROGRESS.md](M224_MATERIALIZED_HYDRATION_PROGRESS.md)
 and [BENCHMARK.md](BENCHMARK.md#m224-materialized-hydration-progress).
+
+## M225 Persisted Shard Leases
+
+Tarantool-style explicit ownership fencing is adopted as an opt-in
+`hatReplication.ShardLeaseRegistry`. It rejects duplicate unexpired owners,
+retains monotone fencing tokens through release and restore, and exposes a
+strict deterministic binary snapshot. This is a lease registry, not a
+distributed consensus protocol; the embedding service still owns durable
+atomic writes and enforcement of the fencing token at the state-store boundary.
+See [M225_PERSISTED_SHARD_LEASES.md](M225_PERSISTED_SHARD_LEASES.md).

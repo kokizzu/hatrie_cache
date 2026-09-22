@@ -25949,3 +25949,47 @@ commit-m224-materialized-hydration-progress:
 .PHONY: push-m224-materialized-hydration-progress
 push-m224-materialized-hydration-progress:
 	bash scripts/push-m224-materialized-hydration-progress.sh
+
+.PHONY: format-m225-shard-leases
+format-m225-shard-leases:
+	bash scripts/m225-shard-leases.sh format
+
+.PHONY: test-m225-shard-leases
+test-m225-shard-leases:
+	bash scripts/m225-shard-leases.sh test
+
+.PHONY: benchmark-m225-shard-leases
+benchmark-m225-shard-leases:
+	bash scripts/m225-shard-leases.sh benchmark
+
+.PHONY: measure-m225-shard-lease-size
+measure-m225-shard-lease-size:
+	bash scripts/m225-shard-leases.sh size
+
+.PHONY: race-m225-shard-leases
+race-m225-shard-leases:
+	bash scripts/m225-shard-leases.sh race
+
+.PHONY: vet-m225-shard-leases
+vet-m225-shard-leases:
+	bash scripts/m225-shard-leases.sh vet
+
+.PHONY: test-m225-shard-lease-package
+test-m225-shard-lease-package:
+	bash scripts/m225-shard-leases.sh package
+
+.PHONY: verify-m225-shard-lease-docs
+verify-m225-shard-lease-docs:
+	bash scripts/m225-shard-leases.sh docs
+
+.PHONY: stage-m225-shard-leases
+stage-m225-shard-leases:
+	bash scripts/stage-m225-shard-leases.sh
+
+.PHONY: commit-m225-shard-leases
+commit-m225-shard-leases:
+	bash scripts/commit-m225-shard-leases.sh
+
+.PHONY: push-m225-shard-leases
+push-m225-shard-leases:
+	bash scripts/push-m225-shard-leases.sh

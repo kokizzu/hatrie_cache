@@ -36242,3 +36242,21 @@ legacy `SourceResolver` hydration path on 256 rows, five samples per case:
 The new ownership contract avoids a duplicate source-row copy in this
 workload. Raw samples and interpretation are in
 [M224_MATERIALIZED_HYDRATION_PROGRESS.md](M224_MATERIALIZED_HYDRATION_PROGRESS.md).
+
+## M225 Persisted Shard Leases
+
+The workload serialized a 256-shard lease snapshot. Five samples were run for
+each operation. HSL1 is the feature path; JSON is a control using the same
+snapshot values.
+
+| Operation | HSL1 ns/op | JSON ns/op | HSL1 B/op | JSON B/op | HSL1 allocs/op | JSON allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Marshal | 42,673 | 119,776 | 62,040 | 37,058 | 12 | 258 | 2.81x CPU |
+| Unmarshal | 47,458 | 315,084 | 45,784 | 43,920 | 522 | 529 | 6.64x CPU |
+
+HSL1 was 10,257 bytes versus JSON at 23,991 bytes, or 2.34x smaller. The
+feature uses more marshal heap bytes and slightly more unmarshal heap bytes in
+exchange for strict validation, lower wire/storage size, and much lower CPU.
+Lease acquisition and release measured 192.1 ns/op with zero allocations.
+Raw samples and persistence caveats are in
+[M225_PERSISTED_SHARD_LEASES.md](M225_PERSISTED_SHARD_LEASES.md).
