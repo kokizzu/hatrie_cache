@@ -124,7 +124,7 @@ operator control remain the preferred deployment model.
 - [x] M235 Dependency graph invalidation for affected indexes and views only. `MaterializedViews` maintains a reverse dependency index and `RefreshChanged` visits only affected views.
 - [x] M236 On-demand refresh of only invalidated maintained objects. `RefreshChanged` skips maintained objects whose dependencies were not changed.
 - [x] M237 Lazy hydration triggered by the first reader with cancellation support. See [M237_LAZY_HYDRATION.md](M237_LAZY_HYDRATION.md).
-- [ ] M238 Explain output for filter pushdown and arrangement reuse.
+- [x] M238 Explain output for filter pushdown and arrangement reuse. `EXPLAIN` now emits a `FILTER_PUSHDOWN` notice, while `Arrangements[].Reused` exposes arrangement reuse. See [M238_EXPLAIN_PUSHDOWN.md](M238_EXPLAIN_PUSHDOWN.md).
 - [ ] M239 Explain output for logical timestamp and frontier requirements.
 - [ ] M240 Raw dataflow explain output for operator and exchange topology.
 - [ ] M241 Optimizer trace showing rule applications and rejected alternatives.

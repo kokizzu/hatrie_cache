@@ -13512,6 +13512,7 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 	}
 	if query.prewhere.kind != "" {
 		prewhereStep := SQLExplainStep{Node: prefix + "PREWHERE", Detail: sqlExplainExpression(query.prewhere)}
+		prewhereStep.Notices = []ExplainNotice{{Code: "FILTER_PUSHDOWN", Detail: "predicate evaluated during source scan"}}
 		sqlSetExplainCardinalityEstimate(&prewhereStep, prewhereEstimate)
 		*steps = append(*steps, prewhereStep)
 	}
@@ -13521,6 +13522,13 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 			currentEstimate = whereEstimate
 		}
 		whereStep := SQLExplainStep{Node: prefix + "FILTER", Detail: sqlExplainExpression(query.where)}
+		if whereBeforeJoins {
+			detail := "predicate pushed into source scan"
+			if len(query.joins) > 0 {
+				detail = "predicate pushed before joins"
+			}
+			whereStep.Notices = []ExplainNotice{{Code: "FILTER_PUSHDOWN", Detail: detail}}
+		}
 		sqlSetExplainCardinalityEstimate(&whereStep, whereEstimate)
 		*steps = append(*steps, whereStep)
 	}

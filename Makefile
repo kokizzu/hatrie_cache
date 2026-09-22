@@ -26354,6 +26354,40 @@ commit-m237-lazy-hydration:
 push-m237-lazy-hydration:
 	bash scripts/push-m237-lazy-hydration.sh
 
+.PHONY: test-m238-explain test-m238-explain-package race-m238-explain vet-m238-explain regression-m238-explain verify-docs-m238-explain format-m238-explain benchmark-m238-explain stage-m238-explain commit-m238-explain push-m238-explain
+test-m238-explain:
+	bash scripts/test-m238-explain.sh test
+
+test-m238-explain-package:
+	bash scripts/test-m238-explain.sh package
+
+race-m238-explain:
+	bash scripts/test-m238-explain.sh race
+
+vet-m238-explain:
+	bash scripts/test-m238-explain.sh vet
+
+regression-m238-explain:
+	bash scripts/test-m238-explain.sh regression
+
+verify-docs-m238-explain:
+	bash scripts/test-m238-explain.sh docs
+
+format-m238-explain:
+	bash scripts/test-m238-explain.sh format
+
+benchmark-m238-explain:
+	bash scripts/benchmark-m238-explain.sh
+
+stage-m238-explain:
+	bash scripts/stage-m238-explain.sh
+
+commit-m238-explain:
+	bash scripts/commit-m238-explain.sh
+
+push-m238-explain:
+	bash scripts/push-m238-explain.sh
+
 format-m233-sink-retry:
 	bash scripts/m233-sink-retry.sh format
 

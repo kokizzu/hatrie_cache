@@ -1304,3 +1304,13 @@ waiting reader may cancel independently. Existing `Get` and explicit
 `392 B/op` and `5 allocs/op` as `Get`; five benchmark medians were 598.5 ns/op
 for `Get` and 606.3 ns/op for `GetOrHydrate`. See
 [M237_LAZY_HYDRATION.md](M237_LAZY_HYDRATION.md).
+
+## M238 Explain Filter Pushdown And Arrangement Reuse
+
+The ClickHouse-style explainability of physical execution choices is adopted
+for SQL filter pushdown. Safe base predicates now carry a machine-readable
+`FILTER_PUSHDOWN` notice explaining whether they run during the source scan or
+before joins. Arrangement reuse remains represented by the existing bounded
+`SQLArrangementMetadata.Reused` field, avoiding duplicate diagnostic payload.
+The added cost is limited to two allocations and about 64 bytes on the
+diagnostic `EXPLAIN` path. See [M238_EXPLAIN_PUSHDOWN.md](M238_EXPLAIN_PUSHDOWN.md).

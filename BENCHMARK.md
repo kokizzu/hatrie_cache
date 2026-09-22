@@ -36423,3 +36423,19 @@ The allocation profile is unchanged and the small latency difference is within
 run variance. Shared cold-reader correctness and cancellation are covered by
 the focused test and race targets. Raw behavior and commands are in
 [M237_LAZY_HYDRATION.md](M237_LAZY_HYDRATION.md).
+
+## M238 Explain Filter Pushdown And Arrangement Reuse
+
+Five 500ms samples were collected on Linux amd64, AMD Ryzen 9 5950X by
+comparing the parent commit with the M238 tree. CPU is noisy for this short
+diagnostic workload, so the table records the median without claiming a speed
+gain.
+
+| Path | Parent median ns/op | M238 median ns/op | M238 B/op | M238 allocs/op | CPU ratio |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `EXPLAIN` with join, pushed `WHERE`, and reused arrangement | 34,844 | 29,125 | 16,794 | 129 | 0.84x |
+
+The parent used 16,730 B/op and 127 allocs/op. M238 adds two allocations and
+64 bytes to carry the structured `FILTER_PUSHDOWN` notice; ordinary query
+execution is unchanged. Raw behavior and commands are in
+[M238_EXPLAIN_PUSHDOWN.md](M238_EXPLAIN_PUSHDOWN.md).
