@@ -2,6 +2,7 @@
 set -euo pipefail
 
 plan=".hatrie-tmp-cleanup.plan"
+test_plan="/tmp/hatrie-cache-test-tmp.plan"
 mode="${1:-preview}"
 
 plan_has_actions() {
@@ -18,15 +19,23 @@ plan_has_actions() {
   return 1
 }
 
+show_plan() {
+  local path="$1"
+  if [ -f "$path" ]; then
+    while IFS= read -r line; do
+      printf '%s\n' "$line"
+    done < "$path"
+  else
+    printf 'no cleanup plan present: %s\n' "$path"
+  fi
+}
+
 case "$mode" in
   show)
-    if [ -f "$plan" ]; then
-      while IFS= read -r line; do
-        printf '%s\n' "$line"
-      done < "$plan"
-    else
-      printf 'no Hatrie cleanup plan present\n'
-    fi
+    show_plan "$plan"
+    ;;
+  show-test)
+    show_plan "$test_plan"
     ;;
   preview)
     if [ -f "$plan" ]; then

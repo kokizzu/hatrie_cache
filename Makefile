@@ -26135,6 +26135,62 @@ cleanup-hatrie-plan-preview:
 show-hatrie-plan:
 	bash scripts/cleanup-hatrie-plan.sh show
 
+.PHONY: show-hatrie-test-plan
+show-hatrie-test-plan:
+	bash scripts/cleanup-hatrie-plan.sh show-test
+
+.PHONY: show-inspiration-round2
+show-inspiration-round2:
+	bash scripts/show-inspiration-round2.sh
+
+.PHONY: inspect-m229-source-schema
+inspect-m229-source-schema:
+	bash scripts/m229-source-schema.sh inspect
+
+.PHONY: format-m229-source-schema
+format-m229-source-schema:
+	bash scripts/m229-source-schema.sh format
+
+.PHONY: test-m229-source-schema
+test-m229-source-schema:
+	bash scripts/m229-source-schema.sh test
+
+.PHONY: benchmark-m229-source-schema
+benchmark-m229-source-schema:
+	bash scripts/m229-source-schema.sh benchmark
+
+.PHONY: race-m229-source-schema
+race-m229-source-schema:
+	bash scripts/m229-source-schema.sh race
+
+.PHONY: vet-m229-source-schema
+vet-m229-source-schema:
+	bash scripts/m229-source-schema.sh vet
+
+.PHONY: test-m229-package
+test-m229-package:
+	bash scripts/m229-source-schema.sh package
+
+.PHONY: docs-m229-source-schema
+docs-m229-source-schema:
+	bash scripts/m229-source-schema.sh docs
+
+.PHONY: status-m229-source-schema
+status-m229-source-schema:
+	bash scripts/status-m229-source-schema.sh
+
+.PHONY: stage-m229-source-schema
+stage-m229-source-schema:
+	bash scripts/stage-m229-source-schema.sh
+
+.PHONY: commit-m229-source-schema
+commit-m229-source-schema:
+	bash scripts/commit-m229-source-schema.sh
+
+.PHONY: push-m229-source-schema
+push-m229-source-schema:
+	bash scripts/push-m229-source-schema.sh
+
 .PHONY: cleanup-hatrie-plan
 cleanup-hatrie-plan:
 	bash scripts/cleanup-hatrie-plan.sh apply

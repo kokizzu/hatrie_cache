@@ -1225,6 +1225,15 @@ and first live frontier together, rejects partial or regressed recovery, and
 persists the coupled boundary in compact CBS1 form. See
 [M227_ATOMIC_SNAPSHOT_FRONTIER.md](M227_ATOMIC_SNAPSHOT_FRONTIER.md).
 
+## M229 Source Schema Evolution
+
+The rolling schema compatibility pattern from Materialize and ClickHouse is
+adopted as an opt-in typed `ChangefeedSchema`. `SpaceChangefeed` accepts
+nullable or defaulted additive fields, rejects removals and type changes, and
+keeps the legacy exact-version path as the default. The schema gate runs at
+subscribe/evolve time, not for every event. See
+[M229_SOURCE_SCHEMA_EVOLUTION.md](M229_SOURCE_SCHEMA_EVOLUTION.md).
+
 ## M228 Exactly-Once Source Restart
 
 The committed-offset restart pattern from Materialize source progress and

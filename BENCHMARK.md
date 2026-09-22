@@ -36294,6 +36294,23 @@ CBS1 was 38 bytes versus JSON at 104 bytes, or 2.74x smaller. Raw samples and
 the recovery semantics are in
 [M227_ATOMIC_SNAPSHOT_FRONTIER.md](M227_ATOMIC_SNAPSHOT_FRONTIER.md).
 
+## M229 Source Schema Evolution
+
+Five samples were run per operation on Linux amd64, AMD Ryzen 9 5950X. The
+schema check workload used 256 existing fields and eight additive fields.
+
+| Operation | Result | B/op | allocs/op | Improvement / tradeoff |
+| --- | ---: | ---: | ---: | --- |
+| 256-to-264 field evolution check | 145.5 us/op | 114.7 KB | 15 | bounded control-plane validation |
+| Producer/consumer compatibility check | 95.0 us/op | 81.8 KB | 11 | bounded control-plane validation |
+| Legacy exact-version publish | 224.6 ns/op | 16 | 2 | baseline |
+| Typed additive-schema publish | 218.7 ns/op | 16 | 2 | 1.03x, no allocation cost |
+
+The first implementation checked typed compatibility on every event and was
+17% slower in the same workload; the final path validates once at subscription
+and evolution time. Details are in
+[M229_SOURCE_SCHEMA_EVOLUTION.md](M229_SOURCE_SCHEMA_EVOLUTION.md).
+
 ## M228 Exactly-Once Source Restart
 
 The workload persisted one committed batch plus one pending batch. Five samples

@@ -67,6 +67,7 @@ type SpaceChangefeedEvent struct {
 type SpaceChangefeedOptions struct {
 	Space          string
 	SchemaVersion  string
+	Schema         *ChangefeedSchema
 	MaxEvents      int
 	MaxSubscribers int
 	MaxBytes       int64
@@ -80,6 +81,7 @@ type SpaceChangefeedOptions struct {
 type SpaceChangefeedSubscribeOptions struct {
 	Checkpoint            ChangefeedCheckpoint
 	ExpectedSchemaVersion string
+	ExpectedSchema        *ChangefeedSchema
 	Buffer                int
 }
 
@@ -96,13 +98,14 @@ type SpaceChangefeedStats struct {
 }
 
 type spaceChangefeedSubscription struct {
-	feed       *SpaceChangefeed
-	events     chan SpaceChangefeedEvent
-	done       chan struct{}
-	checkpoint uint64
-	lastSent   uint64
-	err        error
-	closed     bool
+	feed                  *SpaceChangefeed
+	events                chan SpaceChangefeedEvent
+	done                  chan struct{}
+	checkpoint            uint64
+	lastSent              uint64
+	expectedSchemaVersion string
+	err                   error
+	closed                bool
 }
 
 // SpaceChangefeed is a bounded, named-space changefeed with explicit schema
@@ -117,6 +120,7 @@ type SpaceChangefeed struct {
 	maxSubscribers int
 	maxBytes       int64
 	maxEventBytes  int
+	schema         *ChangefeedSchema
 	events         []SpaceChangefeedEvent
 	eventHead      int
 	eventCount     int
@@ -134,9 +138,23 @@ func NewSpaceChangefeed(options SpaceChangefeedOptions) (*SpaceChangefeed, error
 	if err != nil {
 		return nil, err
 	}
-	schemaVersion, err := normalizeSpaceChangefeedName(options.SchemaVersion, ErrSpaceChangefeedSchemaRequired)
-	if err != nil {
-		return nil, err
+	var schemaVersion string
+	var schema *ChangefeedSchema
+	if options.Schema != nil {
+		normalizedSchema, schemaErr := normalizeChangefeedSchema(*options.Schema)
+		if schemaErr != nil {
+			return nil, schemaErr
+		}
+		if strings.TrimSpace(options.SchemaVersion) != "" && strings.TrimSpace(options.SchemaVersion) != normalizedSchema.Version {
+			return nil, ErrSpaceChangefeedSchemaMismatch
+		}
+		schemaVersion = normalizedSchema.Version
+		schema = &normalizedSchema
+	} else {
+		schemaVersion, err = normalizeSpaceChangefeedName(options.SchemaVersion, ErrSpaceChangefeedSchemaRequired)
+		if err != nil {
+			return nil, err
+		}
 	}
 	maxEvents := options.MaxEvents
 	if maxEvents == 0 {
@@ -164,6 +182,7 @@ func NewSpaceChangefeed(options SpaceChangefeedOptions) (*SpaceChangefeed, error
 		maxSubscribers: maxSubscribers,
 		maxBytes:       maxBytes,
 		maxEventBytes:  maxEventBytes,
+		schema:         schema,
 		subscribers:    make(map[*spaceChangefeedSubscription]struct{}),
 	}, nil
 }
@@ -186,6 +205,44 @@ func (feed *SpaceChangefeed) SchemaVersion() string {
 	feed.mu.Lock()
 	defer feed.mu.Unlock()
 	return feed.schemaVersion
+}
+
+// Schema returns a copy of the typed schema when this feed was created with
+// additive schema evolution enabled.
+func (feed *SpaceChangefeed) Schema() (ChangefeedSchema, bool) {
+	if feed == nil {
+		return ChangefeedSchema{}, false
+	}
+	feed.mu.Lock()
+	defer feed.mu.Unlock()
+	if feed.schema == nil {
+		return ChangefeedSchema{}, false
+	}
+	return cloneChangefeedSchema(*feed.schema), true
+}
+
+// EvolveSchema atomically installs an additive typed schema. String-only
+// feeds retain their legacy exact-version behavior and must opt in at create.
+func (feed *SpaceChangefeed) EvolveSchema(next ChangefeedSchema) (ChangefeedSchemaCompatibility, error) {
+	if feed == nil {
+		return ChangefeedSchemaCompatibility{}, ErrSpaceChangefeedNil
+	}
+	feed.mu.Lock()
+	defer feed.mu.Unlock()
+	if feed.schema == nil {
+		return ChangefeedSchemaCompatibility{}, ErrSpaceChangefeedSchemaEvolutionUnavailable
+	}
+	normalized, err := normalizeChangefeedSchema(next)
+	if err != nil {
+		return ChangefeedSchemaCompatibility{}, err
+	}
+	compatibility, err := checkChangefeedSchemaEvolutionNormalized(*feed.schema, normalized)
+	if err != nil {
+		return ChangefeedSchemaCompatibility{}, err
+	}
+	feed.schema = &normalized
+	feed.schemaVersion = normalized.Version
+	return compatibility, nil
 }
 
 // Publish appends one event and returns its monotone feed sequence. The caller
@@ -212,6 +269,10 @@ func (feed *SpaceChangefeed) Publish(event SpaceChangefeedEvent) (uint64, error)
 	feed.appendEventLocked(normalized, eventBytes)
 	for subscription := range feed.subscribers {
 		if subscription.closed {
+			continue
+		}
+		if !feed.subscriptionAcceptsSchemaLocked(subscription, normalized.SchemaVersion) {
+			feed.closeSubscriptionLocked(subscription, ErrSpaceChangefeedSchemaMismatch)
 			continue
 		}
 		select {
@@ -247,7 +308,21 @@ func (feed *SpaceChangefeed) Subscribe(ctx context.Context, options SpaceChangef
 		return nil, ErrSpaceChangefeedSubscriberLimit
 	}
 	expected := strings.TrimSpace(options.ExpectedSchemaVersion)
-	if expected != "" && expected != feed.schemaVersion {
+	if options.ExpectedSchema != nil {
+		normalizedSchema, schemaErr := normalizeChangefeedSchema(*options.ExpectedSchema)
+		if schemaErr != nil {
+			return nil, schemaErr
+		}
+		if expected != "" && expected != normalizedSchema.Version {
+			return nil, ErrSpaceChangefeedSchemaMismatch
+		}
+		if feed.schema == nil {
+			return nil, ErrSpaceChangefeedSchemaMismatch
+		}
+		if schemaErr := checkChangefeedSchemaCompatibilityNormalized(*feed.schema, normalizedSchema); schemaErr != nil {
+			return nil, fmt.Errorf("%w: %v", ErrSpaceChangefeedSchemaMismatch, schemaErr)
+		}
+	} else if expected != "" && expected != feed.schemaVersion {
 		return nil, fmt.Errorf("%w: expected=%q actual=%q", ErrSpaceChangefeedSchemaMismatch, expected, feed.schemaVersion)
 	}
 	checkpoint := options.Checkpoint
@@ -280,11 +355,12 @@ func (feed *SpaceChangefeed) Subscribe(ctx context.Context, options SpaceChangef
 		return nil, fmt.Errorf("%w: replay=%d buffer=%d", ErrSpaceChangefeedReplayLimit, replayCount, buffer)
 	}
 	subscription := &spaceChangefeedSubscription{
-		feed:       feed,
-		events:     make(chan SpaceChangefeedEvent, buffer),
-		done:       make(chan struct{}),
-		checkpoint: checkpoint.Sequence,
-		lastSent:   checkpoint.Sequence,
+		feed:                  feed,
+		events:                make(chan SpaceChangefeedEvent, buffer),
+		done:                  make(chan struct{}),
+		checkpoint:            checkpoint.Sequence,
+		lastSent:              checkpoint.Sequence,
+		expectedSchemaVersion: expected,
 	}
 	for index := 0; index < feed.eventCount; index++ {
 		event := feed.eventAtLocked(index)
@@ -366,6 +442,10 @@ func (feed *SpaceChangefeed) normalizeEventLocked(event SpaceChangefeedEvent) (S
 		After:         cloneBytes(event.After),
 	}
 	return normalized, bytes, nil
+}
+
+func (feed *SpaceChangefeed) subscriptionAcceptsSchemaLocked(subscription *spaceChangefeedSubscription, version string) bool {
+	return subscription.expectedSchemaVersion == "" || subscription.expectedSchemaVersion == version
 }
 
 func (feed *SpaceChangefeed) appendEventLocked(event SpaceChangefeedEvent, eventBytes int64) {
