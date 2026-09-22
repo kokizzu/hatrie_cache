@@ -36930,3 +36930,36 @@ Bootstrap advance:26.27 26.28 26.25 26.22 27.00; 0; 0
 Prepare + abort:  936.2 918.2 989.5 959.7 996.5; 680; 5
 Snapshot 128:   14517 15154 15050 15394 15108; 13185; 2
 ```
+
+<a id="t207-replica-eviction-rejoin-and-stale-state-recovery"></a>
+## T207 Replica Eviction, Rejoin, and Stale-State Recovery
+
+Commands: `make benchmark-t207-baseline` and `make benchmark-t207`. Five
+samples were collected on Linux/amd64 with an AMD Ryzen 9 5950X. The ordinary
+join retry is the existing T206 idempotency path. T207 measures the matching
+evicted-identity rejoin retry and a detached recovery snapshot containing 128
+eviction tombstones.
+
+| Workload | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Existing ordinary join retry | 662.4 | 296 | 4 | 1.00x |
+| T207 rejoin retry | 800.0 | 328 | 4 | 1.21x |
+| Existing 128-member snapshot | 14,138 | 13,184 | 2 | 1.00x |
+| T207 128-eviction recovery snapshot | 13,661 | 13,184 | 2 | 0.97x |
+
+The rejoin path costs 20.8% more CPU and 32 more bytes per idempotent retry,
+because it validates the tombstone and retains a separate pending decision.
+That cost is limited to eviction/rejoin control traffic; ordinary writes and
+WAL apply do not call it. The recovery snapshot has identical allocation and
+memory behavior to the existing snapshot and was 3.4% lower in this sample.
+The complete protocol and security boundary are documented in
+[T207_REPLICA_EVICTION_RECOVERY.md](T207_REPLICA_EVICTION_RECOVERY.md).
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+Existing join retry:       663.8 627.4 631.2 662.4 665.6; 296; 4
+T207 rejoin retry:          810.8 809.6 794.1 770.8 800.0; 328; 4
+Existing snapshot 128:    14138 14152 13857 14141 14085; 13184; 2
+T207 recovery snapshot:   13958 13361 14301 13661 12850; 13184; 2
+```

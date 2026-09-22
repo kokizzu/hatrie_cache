@@ -15,10 +15,14 @@ const (
 	DefaultReplicaJoinAdmissionMaxMembers = 256
 	// DefaultReplicaJoinAdmissionMaxCandidates bounds source candidates in one join request.
 	DefaultReplicaJoinAdmissionMaxCandidates = 64
+	// DefaultReplicaJoinAdmissionMaxEvictions bounds retained stale-state fences.
+	DefaultReplicaJoinAdmissionMaxEvictions = 256
 	// MaxReplicaJoinAdmissionMaxMembers prevents an accidental unbounded membership map.
 	MaxReplicaJoinAdmissionMaxMembers = 1 << 16
 	// MaxReplicaJoinAdmissionMaxCandidates prevents an accidental unbounded candidate list.
 	MaxReplicaJoinAdmissionMaxCandidates = 1 << 12
+	// MaxReplicaJoinAdmissionMaxEvictions prevents unbounded stale-state history.
+	MaxReplicaJoinAdmissionMaxEvictions = 1 << 16
 	// MaxReplicaJoinNodeIDBytes bounds stable node identities.
 	MaxReplicaJoinNodeIDBytes = 256
 	// MaxReplicaJoinAddressBytes bounds transport endpoint addresses.
@@ -48,6 +52,16 @@ var (
 	ErrReplicaJoinAdmissionBootstrapNotActive = errors.New("hatReplication: replica join bootstrap is not active")
 	// ErrReplicaJoinAdmissionBootstrapMismatch identifies a bootstrap state for another decision.
 	ErrReplicaJoinAdmissionBootstrapMismatch = errors.New("hatReplication: replica join bootstrap plan mismatch")
+	// ErrReplicaJoinAdmissionMemberNotFound identifies an eviction for an unknown node.
+	ErrReplicaJoinAdmissionMemberNotFound = errors.New("hatReplication: replica join member is not found")
+	// ErrReplicaJoinAdmissionNotEvicted identifies a rejoin for an identity without a tombstone.
+	ErrReplicaJoinAdmissionNotEvicted = errors.New("hatReplication: replica join identity has no eviction tombstone")
+	// ErrReplicaJoinAdmissionEvictionRequired identifies an identity fenced by an eviction tombstone.
+	ErrReplicaJoinAdmissionEvictionRequired = errors.New("hatReplication: replica join requires the eviction rejoin protocol")
+	// ErrReplicaJoinAdmissionStaleEviction identifies a stale rejoin epoch.
+	ErrReplicaJoinAdmissionStaleEviction = errors.New("hatReplication: replica join eviction epoch is stale")
+	// ErrReplicaJoinAdmissionEvictionLimit indicates that bounded tombstone capacity is full.
+	ErrReplicaJoinAdmissionEvictionLimit = errors.New("hatReplication: replica join eviction history limit reached")
 )
 
 // ReplicaJoinAdmissionOptions bounds one admission registry. Zero values select
@@ -56,6 +70,7 @@ var (
 type ReplicaJoinAdmissionOptions struct {
 	MaxMembers    int
 	MaxCandidates int
+	MaxEvictions  int
 }
 
 // ReplicaJoinCandidate describes one possible snapshot/WAL source.
@@ -122,9 +137,13 @@ type ReplicaJoinAdmission struct {
 	mu            sync.RWMutex
 	maxMembers    int
 	maxCandidates int
+	maxEvictions  int
 	generation    uint64
+	evictionEpoch uint64
 	members       map[string]ReplicaJoinMember
 	pending       map[string]replicaJoinPending
+	evicted       map[string]ReplicaEviction
+	rejoinPending map[string]replicaRejoinPending
 }
 
 // NewReplicaJoinAdmission creates a bounded join admission registry.
@@ -137,14 +156,21 @@ func NewReplicaJoinAdmission(options ReplicaJoinAdmissionOptions) (*ReplicaJoinA
 	if maxCandidates == 0 {
 		maxCandidates = DefaultReplicaJoinAdmissionMaxCandidates
 	}
-	if maxMembers < 1 || maxMembers > MaxReplicaJoinAdmissionMaxMembers || maxCandidates < 1 || maxCandidates > MaxReplicaJoinAdmissionMaxCandidates {
+	maxEvictions := options.MaxEvictions
+	if maxEvictions == 0 {
+		maxEvictions = DefaultReplicaJoinAdmissionMaxEvictions
+	}
+	if maxMembers < 1 || maxMembers > MaxReplicaJoinAdmissionMaxMembers || maxCandidates < 1 || maxCandidates > MaxReplicaJoinAdmissionMaxCandidates || maxEvictions < 1 || maxEvictions > MaxReplicaJoinAdmissionMaxEvictions {
 		return nil, ErrReplicaJoinAdmissionInvalid
 	}
 	return &ReplicaJoinAdmission{
 		maxMembers:    maxMembers,
 		maxCandidates: maxCandidates,
+		maxEvictions:  maxEvictions,
 		members:       make(map[string]ReplicaJoinMember, maxMembers),
 		pending:       make(map[string]replicaJoinPending),
+		evicted:       make(map[string]ReplicaEviction),
+		rejoinPending: make(map[string]replicaRejoinPending),
 	}, nil
 }
 
@@ -165,6 +191,9 @@ func (admission *ReplicaJoinAdmission) Prepare(request ReplicaJoinRequest) (Repl
 	if _, exists := admission.members[normalized.JoinerID]; exists {
 		return ReplicaJoinDecision{}, ErrReplicaJoinAdmissionAlreadyPresent
 	}
+	if _, exists := admission.evicted[normalized.JoinerID]; exists {
+		return ReplicaJoinDecision{}, ErrReplicaJoinAdmissionEvictionRequired
+	}
 	if pending, exists := admission.pending[normalized.JoinerID]; exists {
 		if reflect.DeepEqual(pending.request, normalized) {
 			return pending.decision, nil
@@ -181,7 +210,17 @@ func (admission *ReplicaJoinAdmission) Prepare(request ReplicaJoinRequest) (Repl
 			return ReplicaJoinDecision{}, fmt.Errorf("%w: pending node %q", ErrReplicaJoinAdmissionAddressInUse, nodeID)
 		}
 	}
-	if len(admission.members)+len(admission.pending) >= admission.maxMembers {
+	for nodeID, pending := range admission.rejoinPending {
+		if pending.request.Address == normalized.Address {
+			return ReplicaJoinDecision{}, fmt.Errorf("%w: pending rejoin node %q", ErrReplicaJoinAdmissionAddressInUse, nodeID)
+		}
+	}
+	for nodeID, eviction := range admission.evicted {
+		if eviction.Address == normalized.Address {
+			return ReplicaJoinDecision{}, fmt.Errorf("%w: evicted node %q", ErrReplicaJoinAdmissionAddressInUse, nodeID)
+		}
+	}
+	if len(admission.members)+len(admission.pending)+len(admission.rejoinPending) >= admission.maxMembers {
 		return ReplicaJoinDecision{}, ErrReplicaJoinAdmissionLimit
 	}
 	source, err := selectReplicaJoinSource(normalized)
@@ -287,7 +326,7 @@ func (admission *ReplicaJoinAdmission) Snapshot() ReplicaJoinAdmissionSnapshot {
 	snapshot := ReplicaJoinAdmissionSnapshot{
 		Generation: admission.generation,
 		Members:    make([]ReplicaJoinMember, 0, len(ids)),
-		Pending:    len(admission.pending),
+		Pending:    len(admission.pending) + len(admission.rejoinPending),
 	}
 	for _, nodeID := range ids {
 		snapshot.Members = append(snapshot.Members, admission.members[nodeID])

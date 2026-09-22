@@ -27077,3 +27077,35 @@ commit-t202:
 
 push-t202:
 	bash scripts/push-t202.sh
+test-t207:
+	bash scripts/test-t207.sh
+
+benchmark-t207-baseline:
+	bash scripts/benchmark-t207-baseline.sh
+
+benchmark-t207:
+	bash scripts/benchmark-t207.sh
+
+race-t207:
+	bash scripts/race-t207.sh
+
+vet-t207:
+	bash scripts/vet-t207.sh
+
+format-t207:
+	bash scripts/format-t207.sh
+
+test-t207-package:
+	bash scripts/test-t207.sh
+
+verify-docs-t207:
+	bash scripts/verify-docs-t207.sh
+
+stage-t207:
+	bash scripts/stage-t207.sh
+
+commit-t207:
+	bash scripts/commit-t207.sh
+
+push-t207:
+	bash scripts/push-t207.sh
