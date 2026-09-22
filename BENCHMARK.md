@@ -50,6 +50,29 @@ The median difference is within benchmark noise; the split has no measured
 CPU, allocation, or retained-memory regression. It adds three fields to the
 structured monitoring payload. See [M243_ARRANGEMENT_MEMORY_METRICS.md](M243_ARRANGEMENT_MEMORY_METRICS.md).
 
+## M244 Compaction Debt At The Logical Frontier
+
+Five `-benchmem` samples were collected for `TypedTableAggregateArrangement.Stats()`
+using the same benchmark file in the M243 parent and current worktrees on
+Linux amd64, AMD Ryzen 9 5950X.
+
+| Version | Median ns/op | B/op | Allocs/op |
+| --- | ---: | ---: | ---: |
+| M243 parent | 1,311 | 0 | 0 |
+| M244 current | 1,331 | 0 | 0 |
+
+Raw samples:
+
+```text
+parent: 1311 1297 1312 1308 1353 ns/op; 0 B/op; 0 allocs/op
+current: 1394 1300 1370 1331 1212 ns/op; 0 B/op; 0 allocs/op
+```
+
+The current median is 20 ns/op higher, about 1.5% slower, with no allocation
+change. The metric adds one monitoring JSON field and no write-path allocation;
+the bounded cost is limited to the explicit stats call. See
+[M244_COMPACTION_DEBT.md](M244_COMPACTION_DEBT.md).
+
 ## MZ-026 Adaptive Dictionary Arrangements
 
 Five samples per case on Linux amd64, AMD Ryzen 9 5950X, building a 4,096-row

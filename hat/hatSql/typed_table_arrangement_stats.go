@@ -13,6 +13,7 @@ type TypedTableAggregateArrangementStats struct {
 	Checkpoint          uint64 `json:"checkpoint"`
 	SourceSequence      uint64 `json:"source_sequence"`
 	CompactedThrough    uint64 `json:"compacted_through"`
+	CompactionDebt      uint64 `json:"compaction_debt"`
 	Groups              int    `json:"groups"`
 	DistinctValues      int    `json:"distinct_values"`
 	CompactionCount     uint64 `json:"compaction_count"`
@@ -88,12 +89,15 @@ func typedTableAggregateArrangementStats(key string, references int, aggregate *
 		}
 	}
 	memory := estimateTypedTableAggregateMemory(aggregate)
+	// TypedTable keeps compactedThrough within the current source frontier.
+	compactionDebt := sourceSequence - compactedThrough
 	return TypedTableAggregateArrangementStats{
 		DefinitionKey:       key,
 		References:          references,
 		Checkpoint:          aggregate.checkpoint,
 		SourceSequence:      sourceSequence,
 		CompactedThrough:    compactedThrough,
+		CompactionDebt:      compactionDebt,
 		Groups:              aggregate.groupCount,
 		DistinctValues:      distinctValues,
 		CompactionCount:     aggregate.compactionCount,

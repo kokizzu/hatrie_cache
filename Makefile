@@ -26669,3 +26669,44 @@ commit-m243:
 push-m243:
 
 	bash scripts/push-m243.sh
+
+.PHONY: test-m244
+test-m244:
+
+	bash scripts/test-m244.sh
+.PHONY: benchmark-m244
+benchmark-m244:
+
+	bash scripts/benchmark-m244.sh
+.PHONY: format-m244
+format-m244:
+
+	bash scripts/format-m244.sh
+.PHONY: test-m244-package
+test-m244-package:
+
+	bash scripts/test-m244-package.sh
+.PHONY: race-m244
+race-m244:
+
+	bash scripts/race-m244.sh
+.PHONY: vet-m244
+vet-m244:
+
+	bash scripts/vet-m244.sh
+.PHONY: verify-docs-m244
+verify-docs-m244:
+
+	bash scripts/verify-docs-m244.sh
+.PHONY: stage-m244
+stage-m244:
+
+	bash scripts/stage-m244.sh
+.PHONY: commit-m244
+commit-m244:
+
+	bash scripts/commit-m244.sh
+.PHONY: push-m244
+push-m244:
+
+	bash scripts/push-m244.sh

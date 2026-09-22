@@ -130,7 +130,7 @@ operator control remain the preferred deployment model.
 - [x] M241 Optimizer trace showing rule applications and rejected alternatives. `SQLQueryOptions.OptimizerTrace` is default-off, and optimizer rules can emit structured rejected alternatives through `RejectAlternative`. See [M241_OPTIMIZER_TRACE.md](M241_OPTIMIZER_TRACE.md).
 - [x] M242 Per-operator update, batch, and frontier metrics. `SQLQueryOptions.OperatorMetrics` is default-off and emits an optional `QueryEvent.OperatorMetrics` sidecar. See [M242_OPERATOR_METRICS.md](M242_OPERATOR_METRICS.md).
 - [x] M243 Arrangement memory metrics split by key, value, and trace history. `TypedTableAggregateArrangementStats` exposes `EstimatedKeyBytes`, `EstimatedValueBytes`, and `EstimatedTraceBytes` while preserving `EstimatedBytes`. See [M243_ARRANGEMENT_MEMORY_METRICS.md](M243_ARRANGEMENT_MEMORY_METRICS.md).
-- [ ] M244 Compaction debt metrics measured against the current logical frontier.
+- [x] M244 Compaction debt metrics measured against the current logical frontier. `TypedTableAggregateArrangementStats.CompactionDebt` reports `max(0, SourceSequence-CompactedThrough)` without changing compaction behavior. See [M244_COMPACTION_DEBT.md](M244_COMPACTION_DEBT.md).
 - [ ] M245 Timestamp throughput and input-to-output latency metrics.
 - [ ] M246 Per-object history-retention policies with bounded storage accounting.
 - [ ] M247 Resume errors that identify when a requested frontier has expired.
