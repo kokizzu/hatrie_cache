@@ -8923,6 +8923,42 @@ push-t215:
 test-t216:
 	bash ./scripts/test-t216.sh
 
+.PHONY: test-t217
+test-t217:
+	bash ./scripts/test-t217.sh
+
+.PHONY: format-t217
+format-t217:
+	bash ./scripts/format-t217.sh
+
+.PHONY: benchmark-t217
+benchmark-t217:
+	bash ./scripts/benchmark-t217.sh
+
+.PHONY: race-t217
+race-t217:
+	bash ./scripts/race-t217.sh
+
+.PHONY: vet-t217
+vet-t217:
+	bash ./scripts/vet-t217.sh
+
+.PHONY: verify-docs-t217
+verify-docs-t217:
+	bash ./scripts/verify-docs-t217.sh
+
+.PHONY: stage-t217
+stage-t217:
+	bash ./scripts/stage-t217.sh
+
+.PHONY: commit-t217
+commit-t217:
+	bash ./scripts/commit-t217.sh
+
+.PHONY: push-t217
+push-t217:
+	bash ./scripts/push-t217.sh
+
 .PHONY: format-t216
 format-t216:
 	bash ./scripts/format-t216.sh

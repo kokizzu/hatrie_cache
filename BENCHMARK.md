@@ -37205,3 +37205,34 @@ element. Compaction remains explicit maintenance work: raw samples were
 changing logical values or the backup format. The
 scheduler does not start background work, so existing defaults and ordinary
 read/write paths remain unchanged.
+
+<a id="t217-in-memory-columnar-space"></a>
+## T217 In-Memory Columnar Space
+
+Commands:
+
+```text
+make test-t217
+make race-t217
+make vet-t217
+make benchmark-t217
+```
+
+T217 adds an opt-in `hatDataStructure.ColumnarSpace` with fixed typed buffers,
+lazy null validity, packed booleans, and offset-backed strings and bytes. The
+benchmark compares 4,096 rows with `id`, `score`, and `region` against the
+existing row-shaped `[]map[string]interface{}` representation. Three
+`-benchmem` samples were collected on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Workload | Columnar samples | Row-map samples | Relative result |
+| --- | --- | --- | --- |
+| Build CPU | `615,510 612,346 619,238 ns/op` | `1,457,907 1,408,646 1,401,240 ns/op` | about `2.3x` faster |
+| Build heap | `305,494-305,499 B/op` | `1,606,959-1,606,962 B/op` | about `5.3x` lower |
+| Build allocations | `4,126` | `24,322` | about `5.9x` fewer |
+| Project one `int64` column | `1071 1075 1089 ns/op` | `33757 34027 34244 ns/op` | about `32x` faster |
+
+The retained-buffer probe reports `122,884` bytes for the columnar buffers. Its
+row-map control reports only a `102,400`-byte scalar payload estimate and
+excludes map headers, interface words, and allocator overhead, so it is not a
+total RSS comparison. The feature is append-only and volatile; no SQL,
+backup, replication, or existing row-storage default changes.
