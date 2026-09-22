@@ -26850,6 +26850,36 @@ commit-m248:
 .PHONY: push-m248
 push-m248:
 	bash scripts/push-m248.sh
+.PHONY: test-m250
+test-m250:
+	bash scripts/test-m250.sh
+.PHONY: benchmark-m250
+benchmark-m250:
+	bash scripts/benchmark-m250.sh
+.PHONY: format-m250
+format-m250:
+	bash scripts/format-m250.sh
+.PHONY: race-m250
+race-m250:
+	bash scripts/race-m250.sh
+.PHONY: vet-m250
+vet-m250:
+	bash scripts/vet-m250.sh
+.PHONY: test-m250-package
+test-m250-package:
+	bash scripts/test-m250-package.sh
+.PHONY: verify-docs-m250
+verify-docs-m250:
+	bash scripts/verify-docs-m250.sh
+.PHONY: stage-m250
+stage-m250:
+	bash scripts/stage-m250.sh
+.PHONY: commit-m250
+commit-m250:
+	bash scripts/commit-m250.sh
+.PHONY: push-m250
+push-m250:
+	bash scripts/push-m250.sh
 .PHONY: verify-docs-m248
 verify-docs-m248:
 	bash scripts/verify-docs-m248.sh

@@ -136,7 +136,7 @@ operator control remain the preferred deployment model.
 - [x] M247 Resume errors that identify when a requested frontier has expired. `FrontierRetentionExpiredError` preserves the old sentinel while exposing the frontier ID, requested as-of, and observed bounds; see [M247_FRONTIER_EXPIRY_ERRORS.md](M247_FRONTIER_EXPIRY_ERRORS.md).
 - [x] M248 Reusable maintained-result cache for identical read expressions. NewMaintainedResultCache coalesces bounded concurrent misses while preserving source-version and dependency invalidation fences; see M248_MAINTAINED_RESULT_CACHE.md.
 - [x] M249 Consistency fencing between a point read and a subsequent subscription; see [M249_READ_FENCE.md](M249_READ_FENCE.md).
-- [ ] M250 Temporal join alignment that waits for both input frontiers.
+- [x] M250 Temporal join alignment that waits for both input frontiers. `SQLTemporalJoinFrontierAlignment` waits for both input barriers concurrently and returns a safe common frontier; see [M250_TEMPORAL_JOIN_FRONTIER_ALIGNMENT.md](M250_TEMPORAL_JOIN_FRONTIER_ALIGNMENT.md).
 
 ## Tarantool: 50 Additional Ideas
 

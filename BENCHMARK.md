@@ -36703,3 +36703,33 @@ The default and trace-off allocation profiles are unchanged. Opt-in tracing
 adds seven allocations and 565 B/op in this fixture. See
 [M241_OPTIMIZER_TRACE.md](M241_OPTIMIZER_TRACE.md) and rerun with
 `make benchmark-m241`.
+
+<a id="m250-temporal-join-frontier-alignment"></a>
+## M250 Temporal Join Frontier Alignment
+
+Command: `make benchmark-m250`. Five default benchmark samples were collected
+on Linux/amd64 with an AMD Ryzen 9 5950X. The aligned path waits through
+`SQLTemporalJoinFrontierAlignment`; the sequential baseline waits on the left
+and right `SQLSourceFrontierBarrier` instances independently. Both fixtures
+have already-ready inputs, so this measures the hot coordination path rather
+than source-delivery latency.
+
+| Workload | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Sequential left/right waits | 6.568 | 0 | 0 | 1.00x |
+| Aligned temporal-join wait | 5.282 | 0 | 0 | 1.24x faster |
+
+The aligned ready path is about 19.6% faster than two independent ready waits
+and adds no allocations or retained memory. The focused correctness test also
+holds the result while one input is at frontier `4`, then returns only after
+both inputs reach target `5`; it reports left `9`, right `5`, common `5`.
+The behind-input path starts two waiters and a cancellation channel, so it has
+an intentional coordination cost only when the alignment is not already ready.
+Existing SQL queries and source barriers are unchanged unless callers opt in.
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+Sequential left/right waits: 6.266 6.568 6.367 6.697 6.645; 0; 0
+Aligned temporal-join wait:  5.302 5.282 4.955 4.899 5.753; 0; 0
+```
