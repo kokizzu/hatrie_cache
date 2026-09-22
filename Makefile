@@ -24840,3 +24840,43 @@ commit-m064-recursive-dataflow:
 .PHONY: push-m064-recursive-dataflow
 push-m064-recursive-dataflow:
 	bash scripts/push-m064-recursive-dataflow.sh
+
+.PHONY: report-open-inspiration
+report-open-inspiration:
+	bash scripts/report-open-inspiration.sh
+
+.PHONY: test-c213-typed-hash-join
+test-c213-typed-hash-join:
+	bash scripts/test-c213-typed-hash-join.sh
+
+.PHONY: benchmark-c213-typed-hash-join
+benchmark-c213-typed-hash-join:
+	bash scripts/benchmark-c213-typed-hash-join.sh
+
+.PHONY: format-c213-typed-hash-join
+format-c213-typed-hash-join:
+	bash scripts/format-c213-typed-hash-join.sh
+
+.PHONY: verify-c213-typed-hash-join
+verify-c213-typed-hash-join:
+	bash scripts/verify-c213-typed-hash-join.sh
+
+.PHONY: race-c213-typed-hash-join
+race-c213-typed-hash-join:
+	bash scripts/race-c213-typed-hash-join.sh
+
+.PHONY: vet-c213-typed-hash-join
+vet-c213-typed-hash-join:
+	bash scripts/vet-c213-typed-hash-join.sh
+
+.PHONY: stage-c213-typed-hash-join
+stage-c213-typed-hash-join:
+	bash scripts/stage-c213-typed-hash-join.sh
+
+.PHONY: commit-c213-typed-hash-join
+commit-c213-typed-hash-join:
+	bash scripts/commit-c213-typed-hash-join.sh
+
+.PHONY: push-c213-typed-hash-join
+push-c213-typed-hash-join:
+	bash scripts/push-c213-typed-hash-join.sh

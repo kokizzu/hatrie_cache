@@ -313,3 +313,14 @@ checked same-position delta updates for `COUNT` and `SUM(int64)`. The existing
 append-only constructor and default behavior remain unchanged. Automatic SQL
 planner selection, arbitrary late-data arrangements, and distributed frontier
 coordination remain open.
+
+### C213: Typed Hash-Join Buckets
+
+The ordinary equality-hash-join path now reuses the existing typed numeric,
+string, and boolean probe index rather than allocating canonical string keys.
+The SQL surface and fallback planner behavior are unchanged. Duplicate keys,
+NULL handling, left-join null extension, and cross-type numeric equality are
+covered by focused tests. The five-sample benchmark is 1.13x faster with 2.0%
+lower transient bytes and 14.2% fewer allocations. See
+[C213_TYPED_HASH_JOIN.md](C213_TYPED_HASH_JOIN.md) and
+[BENCHMARK.md](BENCHMARK.md#c213-typed-hash-join-buckets).

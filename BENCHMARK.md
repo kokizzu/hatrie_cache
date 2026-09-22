@@ -35682,3 +35682,28 @@ limits, raw samples, and interpretation.
 | Current default raw v1 | 415,888 | 351,660 | 196 | 119,217 | 1.11x faster | 1.00x |
 | Explicit Auto / BestSpeed | 11,496,941 | 58,011,656 | 1,228 | 9,025 | 24.9x slower | 13.2x smaller |
 | Explicit Flate / HuffmanOnly | 7,688,601 | 35,688,752 | 1,133 | 46,225 | 16.7x slower | 2.58x smaller |
+
+## C213: Typed Hash-Join Buckets
+
+Command: `make benchmark-c213-typed-hash-join` (five samples, `-benchmem`,
+Linux/amd64, AMD Ryzen 9 5950X). The workload is a 2,048-row ordinary SQL
+equality join on each side with 1,024 numeric keys and duplicate matches.
+
+```text
+Before: 4328332, 4157993, 4188634, 4002143, 4078349 ns/op
+        5020329, 5020329, 5020328, 5020328, 5020324 B/op
+        28737, 28737, 28737, 28737, 28737 allocs/op
+After:  3885053, 3678614, 3598832, 3692651, 3613665 ns/op
+        4922363, 4922320, 4922322, 4922323, 4922324 B/op
+        24642, 24642, 24642, 24642, 24642 allocs/op
+```
+
+| Path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Canonical string-key hash join | 4,157,993 | 5,020,328 | 28,737 | baseline |
+| Typed numeric/string/boolean hash join | 3,678,614 | 4,922,323 | 24,642 | 1.13x faster, 2.0% fewer bytes, 14.2% fewer allocations |
+
+The typed path is limited to the existing equality-hash-join branch. Other
+join algorithms and unsupported key values retain their prior behavior. Full
+correctness and race/vet commands are recorded in
+[C213_TYPED_HASH_JOIN.md](C213_TYPED_HASH_JOIN.md).

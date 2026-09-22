@@ -1013,3 +1013,13 @@ caller input, and provides allocation-free `QueryInto` and `Visit` paths.
 Mutable updates, SQL planner integration, persistence, and replication remain
 deferred. See [TT021_PACKED_RTREE.md](TT021_PACKED_RTREE.md) and
 [BENCHMARK.md](BENCHMARK.md#tt-021-packed-r-tree-spatial-index).
+
+## C213: Typed Hash-Join Buckets
+
+ClickHouse-style type-specialized equality keys are adopted in the ordinary
+SQL hash-join path. Numeric payloads, native strings, and booleans use their
+own compact probe structures instead of canonical string-key encoding. The
+optimization preserves the existing join selection and fallback behavior; the
+measured fixture is 1.13x faster, uses 2.0% fewer transient bytes, and uses
+14.2% fewer allocations. See [C213_TYPED_HASH_JOIN.md](C213_TYPED_HASH_JOIN.md)
+and [BENCHMARK.md](BENCHMARK.md#c213-typed-hash-join-buckets).

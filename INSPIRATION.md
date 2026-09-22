@@ -1058,3 +1058,9 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   invalid-value batches retain the existing rebuild/error path. See
   [INCREMENTAL_MUTABLE_RANGE_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_WINDOW.md)
   and [BENCHMARK.md](BENCHMARK.md#m065af-batched-mutable-range-aggregate-fast-path).
+- [x] C213 ClickHouse-style typed equality-hash-join buckets. Ordinary hash
+  joins reuse the existing typed numeric/string/boolean probe index instead
+  of canonical string-key encoding, preserving duplicate, NULL, and left-join
+  semantics with a measured 1.13x CPU improvement, 2.0% lower transient bytes,
+  and 14.2% fewer allocations. See [C213_TYPED_HASH_JOIN.md](C213_TYPED_HASH_JOIN.md)
+  and [BENCHMARK.md](BENCHMARK.md#c213-typed-hash-join-buckets).

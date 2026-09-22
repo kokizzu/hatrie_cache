@@ -12139,29 +12139,24 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			var next []sqlExecRow
 			matchedRight := make([]bool, len(wrapped))
 			if hashJoin {
-				buckets := make(map[string][]int, len(wrapped))
+				buckets := newSQLJoinHashIndex(len(wrapped))
 				for rightIndex, row := range wrapped {
 					if err := control.addJoinWork(1); err != nil {
 						return SQLQueryResult{}, err
 					}
-					if key, ok := sqlHashJoinKey(sqlField(row, join.source.alias, rightField)); ok {
-						buckets[key] = append(buckets[key], rightIndex)
-					}
+					buckets.Add(sqlField(row, join.source.alias, rightField), rightIndex)
 				}
 				for _, left := range rows {
 					matched := false
-					key, ok := sqlHashJoinKey(sqlField(left, leftQualifier, leftField))
-					if ok {
-						for _, rightIndex := range buckets[key] {
-							if err := control.addJoinWork(1); err != nil {
-								return SQLQueryResult{}, err
-							}
-							matched = true
-							next = append(next, mergeSQLRows(left, wrapped[rightIndex]))
-							matchedRight[rightIndex] = true
-							if len(next) > maxRows {
-								return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxRows)
-							}
+					for _, rightIndex := range buckets.Lookup(sqlField(left, leftQualifier, leftField)) {
+						if err := control.addJoinWork(1); err != nil {
+							return SQLQueryResult{}, err
+						}
+						matched = true
+						next = append(next, mergeSQLRows(left, wrapped[rightIndex]))
+						matchedRight[rightIndex] = true
+						if len(next) > maxRows {
+							return SQLQueryResult{}, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxRows)
 						}
 					}
 					if (join.kind == "LEFT" || join.kind == "FULL") && !matched {
@@ -12225,7 +12220,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			}
 			node := "JOIN"
 			if hashJoin {
-				node = "HASH JOIN"
+				node = "TYPED HASH JOIN"
 			}
 			metrics.record(node, detail, inputRows, len(next), started)
 			rows = next
