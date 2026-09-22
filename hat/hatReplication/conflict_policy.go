@@ -12,6 +12,7 @@ var (
 	ErrConflictPolicySpaceRequired = errors.New("hatriecache: conflict policy space is required")
 	ErrConflictPolicyRegistryNil   = errors.New("hatriecache: conflict policy registry is nil")
 	ErrConflictRejected            = errors.New("hatriecache: conflict rejected")
+	ErrConflictHookInvalid         = errors.New("hatriecache: conflict hook decision is invalid")
 )
 
 const (
@@ -33,11 +34,36 @@ const (
 	ConflictPolicyReject
 )
 
+// ConflictHookDecision controls how a conflict hook resolves a distinct pair
+// of versions. UsePolicy delegates to the configured policy mode.
+type ConflictHookDecision uint8
+
+const (
+	ConflictHookUsePolicy ConflictHookDecision = iota
+	ConflictHookUseLeft
+	ConflictHookUseRight
+	ConflictHookReject
+)
+
+// ConflictHookContext contains immutable metadata for one distinct conflict.
+// ConflictVersion.NodeID is the source identity and Sequence is that source's
+// write sequence, so hooks can make master-master decisions without values.
+type ConflictHookContext struct {
+	Space string
+	Left  ConflictVersion
+	Right ConflictVersion
+}
+
+// ConflictHook observes a conflict and chooses a winner or delegates to the
+// configured policy. Callbacks must not mutate shared registry state.
+type ConflictHook func(ConflictHookContext) (ConflictHookDecision, error)
+
 // ConflictPolicy configures conflict behavior for one named space. Source
 // priority is ordered highest-first and is copied when installed in a registry.
 type ConflictPolicy struct {
 	Mode           ConflictPolicyMode
 	SourcePriority []string
+	Hook           ConflictHook
 }
 
 // ConflictPolicyRegistry stores an optional default and per-space overrides.
@@ -45,8 +71,8 @@ type ConflictPolicy struct {
 // code before applying a conflicting write.
 type ConflictPolicyRegistry struct {
 	mu             sync.RWMutex
-	defaultPolicy  ConflictPolicy
-	spaceOverrides map[string]ConflictPolicy
+	defaultPolicy  *ConflictPolicy
+	spaceOverrides map[string]*ConflictPolicy
 }
 
 // NewConflictPolicyRegistry validates an explicit default policy. An empty
@@ -56,7 +82,7 @@ func NewConflictPolicyRegistry(defaultPolicy ConflictPolicy) (*ConflictPolicyReg
 	if err != nil {
 		return nil, err
 	}
-	return &ConflictPolicyRegistry{defaultPolicy: normalized}, nil
+	return &ConflictPolicyRegistry{defaultPolicy: &normalized}, nil
 }
 
 // Set installs or replaces the policy for one named space.
@@ -76,12 +102,12 @@ func (registry *ConflictPolicyRegistry) Set(space string, policy ConflictPolicy)
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
 	if registry.spaceOverrides == nil {
-		registry.spaceOverrides = make(map[string]ConflictPolicy)
+		registry.spaceOverrides = make(map[string]*ConflictPolicy)
 	}
 	if _, exists := registry.spaceOverrides[space]; !exists && len(registry.spaceOverrides) >= MaxConflictPolicySpaces {
 		return fmt.Errorf("%w: maximum spaces %d exceeded", ErrConflictPolicyInvalid, MaxConflictPolicySpaces)
 	}
-	registry.spaceOverrides[space] = normalized
+	registry.spaceOverrides[space] = &normalized
 	return nil
 }
 
@@ -116,9 +142,15 @@ func (registry *ConflictPolicyRegistry) Resolve(space string, left, right Confli
 	policy, exists := registry.spaceOverrides[space]
 	if !exists {
 		policy = registry.defaultPolicy
+		if policy == nil {
+			policy = &ConflictPolicy{}
+		}
 	}
 	registry.mu.RUnlock()
-	return resolveConflictWithPolicy(policy, left, right)
+	if policy.Hook == nil {
+		return resolveConflictWithPolicy(policy, left, right)
+	}
+	return resolveConflictWithHook(space, policy, left, right)
 }
 
 func normalizeConflictPolicy(policy ConflictPolicy) (ConflictPolicy, error) {
@@ -127,7 +159,7 @@ func normalizeConflictPolicy(policy ConflictPolicy) (ConflictPolicy, error) {
 		if len(policy.SourcePriority) != 0 {
 			return ConflictPolicy{}, fmt.Errorf("%w: source priority is only valid with source-priority mode", ErrConflictPolicyInvalid)
 		}
-		return ConflictPolicy{Mode: policy.Mode}, nil
+		return ConflictPolicy{Mode: policy.Mode, Hook: policy.Hook}, nil
 	case ConflictPolicySourcePriority:
 		if len(policy.SourcePriority) == 0 || len(policy.SourcePriority) > MaxConflictPolicySources {
 			return ConflictPolicy{}, fmt.Errorf("%w: source priority must contain 1..%d sources", ErrConflictPolicyInvalid, MaxConflictPolicySources)
@@ -145,13 +177,39 @@ func normalizeConflictPolicy(policy ConflictPolicy) (ConflictPolicy, error) {
 			}
 			sources[index] = source
 		}
-		return ConflictPolicy{Mode: policy.Mode, SourcePriority: sources}, nil
+		return ConflictPolicy{Mode: policy.Mode, SourcePriority: sources, Hook: policy.Hook}, nil
 	default:
 		return ConflictPolicy{}, fmt.Errorf("%w: unsupported mode %d", ErrConflictPolicyInvalid, policy.Mode)
 	}
 }
 
-func resolveConflictWithPolicy(policy ConflictPolicy, left, right ConflictVersion) (ConflictVersion, error) {
+func resolveConflictWithHook(space string, policy *ConflictPolicy, left, right ConflictVersion) (ConflictVersion, error) {
+	comparison, err := CompareConflictVersions(left, right)
+	if err != nil {
+		return ConflictVersion{}, err
+	}
+	if comparison == 0 {
+		return left, nil
+	}
+	decision, err := policy.Hook(ConflictHookContext{Space: space, Left: left, Right: right})
+	if err != nil {
+		return ConflictVersion{}, err
+	}
+	switch decision {
+	case ConflictHookUsePolicy:
+		return resolveConflictWithPolicy(policy, left, right)
+	case ConflictHookUseLeft:
+		return left, nil
+	case ConflictHookUseRight:
+		return right, nil
+	case ConflictHookReject:
+		return ConflictVersion{}, ErrConflictRejected
+	default:
+		return ConflictVersion{}, ErrConflictHookInvalid
+	}
+}
+
+func resolveConflictWithPolicy(policy *ConflictPolicy, left, right ConflictVersion) (ConflictVersion, error) {
 	switch policy.Mode {
 	case ConflictPolicyLastWriteWins:
 		return ResolveConflictVersion(left, right)

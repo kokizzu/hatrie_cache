@@ -8741,6 +8741,50 @@ verify-sql-set-operation-all:
 inspect-goal-state:
 	bash ./scripts/inspect-goal-state.sh
 
+.PHONY: test-t210
+test-t210:
+	bash ./scripts/test-t210.sh
+
+.PHONY: benchmark-t210-baseline
+benchmark-t210-baseline:
+	bash ./scripts/benchmark-t210-baseline.sh
+
+.PHONY: benchmark-t210
+benchmark-t210:
+	bash ./scripts/benchmark-t210.sh
+
+.PHONY: format-t210
+format-t210:
+	bash ./scripts/format-t210.sh
+
+.PHONY: test-t210-package
+test-t210-package:
+	bash ./scripts/test-t210-package.sh
+
+.PHONY: race-t210
+race-t210:
+	bash ./scripts/race-t210.sh
+
+.PHONY: vet-t210
+vet-t210:
+	bash ./scripts/vet-t210.sh
+
+.PHONY: verify-docs-t210
+verify-docs-t210:
+	bash ./scripts/verify-docs-t210.sh
+
+.PHONY: stage-t210
+stage-t210:
+	bash ./scripts/stage-t210.sh
+
+.PHONY: commit-t210
+commit-t210:
+	bash ./scripts/commit-t210.sh
+
+.PHONY: push-t210
+push-t210:
+	bash ./scripts/push-t210.sh
+
 .PHONY: test-m052c-native-dataflow
 test-m052c-native-dataflow:
 	bash ./scripts/test-m052c-native-dataflow.sh
@@ -27129,6 +27173,7 @@ vet-t208:
 
 test-t208-package:
 	bash scripts/test-t208.sh
+
 
 verify-docs-t208:
 	bash scripts/verify-docs-t208.sh

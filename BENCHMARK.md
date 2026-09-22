@@ -36995,3 +36995,37 @@ T208 voter quorum:      1691 1664 1727 1663 1675; 544; 10
 Existing snapshot 128: 13615 13950 13820 13646 13631; 14592; 2
 T208 role roster 128:   11353 11299 11978 11425 11371; 6912; 3
 ```
+## T210 Master-Master Conflict Hooks
+
+The baseline is the existing conflict-policy registry without a hook. The
+after default path keeps the hook nil; the after hooked path invokes an
+allocation-free callback that delegates to the same policy. Five
+`-benchmem` samples were collected on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+Commands:
+
+```text
+make benchmark-t210-baseline
+make benchmark-t210
+```
+
+| Path | Raw ns/op samples | Median ns/op | Memory/op | Allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Before, default resolver | `11.25 11.65 12.23 11.41 12.08` | `11.65` | `0 B` | `0` | `1.00x` |
+| After, default resolver | `11.59 11.27 11.37 12.24 12.55` | `11.59` | `0 B` | `0` | `0.99x` |
+| After, hook delegates to policy | `16.67 16.74 16.31 16.91 17.17` | `16.74` | `0 B` | `0` | `1.44x` |
+
+The default path has no allocation change and is effectively unchanged in
+this sub-20 ns benchmark. The explicit hook adds about `5.09 ns/op` with no
+allocation, which is the opt-in cost for
+the callback boundary and source/sequence decision context. There is no
+default behavior change and hooks remain disabled unless configured.
+
+Focused correctness checks:
+
+```text
+make test-t210
+make test-t210-package
+make race-t210
+make vet-t210
+```
