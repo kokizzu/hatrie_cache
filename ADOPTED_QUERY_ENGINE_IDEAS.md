@@ -1380,3 +1380,4 @@ one rejected alternative. See [M241_OPTIMIZER_TRACE.md](M241_OPTIMIZER_TRACE.md)
 | T229 | Tarantool | before-replace validation/conflict hooks | Optional typed atomic validation and normalization on `MemtxTable` inserts/upserts | [TT029_BEFORE_REPLACE.md](TT029_BEFORE_REPLACE.md) |
 | T230 | Tarantool | on-replace changefeed hooks | Ordered typed old/new tuple images after successful `MemtxTable` writes | [TT030_ON_REPLACE_CHANGEFEED.md](TT030_ON_REPLACE_CHANGEFEED.md) |
 | T231 | Tarantool | after-replace audit hooks | Successful `MemtxTable` writes expose ordered table-local transaction identities and old/new images | [TT031_AFTER_REPLACE_AUDIT.md](TT031_AFTER_REPLACE_AUDIT.md) |
+| T232 | Tarantool | atomic transaction scopes | Importable SQL transactions support nested callback boundaries with local rollback and panic cleanup | [TT032_ATOMIC_TRANSACTION_SCOPES.md](TT032_ATOMIC_TRANSACTION_SCOPES.md) |

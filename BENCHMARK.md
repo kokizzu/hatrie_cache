@@ -37287,3 +37287,15 @@ With three 3-second samples on an AMD Ryzen 9 5950X, the T231 baseline
 and `0 allocs/op`, so the table-local transaction identity costs about 25.3%
 CPU only when explicitly enabled. A pointer-event variant was rejected after
 it measured `48 B/op` and `1 alloc/op`.
+## T032: Atomic Transaction Scopes
+
+In a low-contention run with three 3-second samples on an AMD Ryzen 9 5950X,
+the manual savepoint sequence measured a median `7,693,559 ns/op`, `543,584 B/op`, and `351 allocs/op`.
+The equivalent `SQLTransaction.Scope` callback measured `7,596,640 ns/op`,
+`544,520 B/op`, and `354 allocs/op`. The scoped API was effectively CPU-neutral
+in this low-contention run, about 1.3% faster, with an opt-in cost of `936 B/op`
+and 3 allocations. Repeated runs during concurrent filesystem-heavy work were
+highly variable, so the small CPU difference is not treated as a performance
+claim. Both paths use the existing filesystem-backed snapshot clone; the
+feature improves nested rollback ergonomics and panic cleanup rather than
+making snapshot savepoints cheaper. See [TT032_ATOMIC_TRANSACTION_SCOPES.md](TT032_ATOMIC_TRANSACTION_SCOPES.md).

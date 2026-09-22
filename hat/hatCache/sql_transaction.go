@@ -26,6 +26,7 @@ type SQLTransaction struct {
 	serializableLockHeld bool
 	staged               []CacheCommandRequest
 	savepoints           []sqlTransactionSavepoint
+	nextScopeID          uint64
 	closed               bool
 }
 
@@ -225,6 +226,10 @@ func (transaction *SQLTransaction) Rollback() error {
 func (transaction *SQLTransaction) Savepoint(name string) error {
 	transaction.mu.Lock()
 	defer transaction.mu.Unlock()
+	return transaction.savepointLocked(name)
+}
+
+func (transaction *SQLTransaction) savepointLocked(name string) error {
 	if transaction.closed {
 		return transaction.closedError()
 	}

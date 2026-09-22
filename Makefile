@@ -27649,3 +27649,53 @@ commit-t231:
 .PHONY: push-t231
 push-t231:
 	bash ./scripts/push-t231.sh
+.PHONY: inspect-t232
+inspect-t232:
+	bash scripts/inspect-t232.sh
+
+.PHONY: status-t232
+status-t232:
+	bash scripts/status-t232.sh
+.PHONY: format-t232
+format-t232:
+	bash scripts/format-t232.sh
+
+.PHONY: test-t232
+test-t232:
+	bash scripts/test-t232.sh
+
+.PHONY: test-t232-package
+test-t232-package:
+	bash scripts/test-t232-package.sh
+
+.PHONY: test-t232-regression
+test-t232-regression:
+	bash scripts/test-t232-regression.sh
+
+.PHONY: benchmark-t232
+benchmark-t232:
+	bash scripts/benchmark-t232.sh
+
+.PHONY: race-t232
+race-t232:
+	bash scripts/race-t232.sh
+
+.PHONY: vet-t232
+vet-t232:
+	bash scripts/vet-t232.sh
+
+.PHONY: verify-t232-docs
+verify-t232-docs:
+	bash scripts/verify-t232-docs.sh
+
+.PHONY: stage-t232
+stage-t232:
+	bash scripts/stage-t232.sh
+
+.PHONY: commit-t232
+commit-t232:
+	bash scripts/commit-t232.sh
+
+.PHONY: push-t232
+push-t232:
+	bash scripts/push-t232.sh

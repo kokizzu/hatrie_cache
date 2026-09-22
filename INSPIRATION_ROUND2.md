@@ -171,7 +171,7 @@ operator control remain the preferred deployment model.
 - [x] T229 Before-replace triggers for validation and conflict policy. `hatDataStructure.MemtxTable` exposes an opt-in typed `BeforeReplace` hook that can reject or normalize atomic inserts/upserts. See [TT029_BEFORE_REPLACE.md](TT029_BEFORE_REPLACE.md).
 - [x] T230 On-replace changefeed hooks with old and new tuple images. `hatDataStructure.MemtxTable` emits an ordered opt-in `OnReplace` event after successful inserts/upserts with old and new typed images. See [TT030_ON_REPLACE_CHANGEFEED.md](TT030_ON_REPLACE_CHANGEFEED.md).
 - [x] T231 After-replace audit hooks with transaction identity. `hatDataStructure.MemtxTable` emits an opt-in `AfterReplace` audit callback with a table-local transaction identity and the committed old/new event. See [TT031_AFTER_REPLACE_AUDIT.md](TT031_AFTER_REPLACE_AUDIT.md).
-- [ ] T232 Atomic transaction scopes with nested rollback boundaries.
+- [x] T232 Atomic transaction scopes with nested rollback boundaries. `hatCache.SQLTransaction.Scope` and `BeginScope` provide nested rollback boundaries, preserve handled outer work, and clean up callback panics. See [TT032_ATOMIC_TRANSACTION_SCOPES.md](TT032_ATOMIC_TRANSACTION_SCOPES.md).
 - [ ] T233 MVCC transactions that permit cooperative yields.
 - [ ] T234 Early conflict detection for competing transactional writes.
 - [ ] T235 Cooperative fiber workers for nonblocking application tasks.
