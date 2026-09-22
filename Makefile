@@ -23259,6 +23259,46 @@ commit-hatrie-tmp-inventory:
 push-hatrie-tmp-inventory:
 	bash scripts/push-hatrie-tmp-inventory.sh
 
+.PHONY: test-t246-priority-queue
+test-t246-priority-queue:
+	bash scripts/test-t246-priority-queue.sh
+
+.PHONY: benchmark-t246-priority-queue
+benchmark-t246-priority-queue:
+	bash scripts/benchmark-t246-priority-queue.sh
+
+.PHONY: benchmark-t246-priority-queue-baseline
+benchmark-t246-priority-queue-baseline:
+	bash scripts/benchmark-t246-priority-queue-baseline.sh
+
+.PHONY: test-t246-priority-queue-package
+test-t246-priority-queue-package:
+	bash scripts/test-t246-priority-queue-package.sh
+
+.PHONY: race-t246-priority-queue
+race-t246-priority-queue:
+	bash scripts/race-t246-priority-queue.sh
+
+.PHONY: vet-t246-priority-queue
+vet-t246-priority-queue:
+	bash scripts/vet-t246-priority-queue.sh
+
+.PHONY: stage-t246-priority-queue
+stage-t246-priority-queue:
+	bash scripts/stage-t246-priority-queue.sh
+
+.PHONY: commit-t246-priority-queue
+commit-t246-priority-queue:
+	bash scripts/commit-t246-priority-queue.sh
+
+.PHONY: push-t246-priority-queue
+push-t246-priority-queue:
+	bash scripts/push-t246-priority-queue.sh
+
+.PHONY: format-t246-priority-queue
+format-t246-priority-queue:
+	bash scripts/format-t246-priority-queue.sh
+
 .PHONY: format-t047-cluster-write-commit test-t047-cluster-write-commit test-t047-replication-package benchmark-t047-cluster-write-commit race-t047-cluster-write-commit vet-t047-cluster-write-commit review-t047 stage-t047 commit-t047 push-t047
 
 format-t047-cluster-write-commit:

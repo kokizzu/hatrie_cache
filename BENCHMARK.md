@@ -35872,3 +35872,26 @@ The final implementation removed one internal frame-slice allocation versus
 the first draft, reducing the no-latency batch from a 5,314 B/op, 59-alloc
 draft to 4,674 B/op and 58 allocs/op. No wire-size reduction is claimed because
 the feature deliberately keeps the existing per-request frame format.
+
+## T246: Priority Queue Starvation Bounds
+
+Command: `make benchmark-t246-priority-queue` (three samples,
+`-benchmem`, Linux/amd64, AMD Ryzen 9 5950X). The strict-priority path keeps
+the fairness option disabled. The bounded path uses `StarvationAfter: 64`.
+
+```text
+PriorityVisibilityQueueLeaseAck: 136.2 139.0 137.4 ns/op, 0 B/op, 0 allocs/op
+T246 starvation strict stream:    142.9 134.4 135.3 ns/op, 0 B/op, 0 allocs/op
+T246 starvation bounded stream:  137.4 133.8 131.6 ns/op, 0 B/op, 0 allocs/op
+T246 resident strict (256):      177.8 179.6 182.5 ns/op, 0 B/op, 0 allocs/op
+T246 resident bounded (256):     900.6 876.7 866.4 ns/op, 0 B/op, 0 allocs/op
+```
+
+The five-sample baseline captured before implementation was
+`130.8, 125.0, 124.4, 126.1, 119.7 ns/op`, with zero bytes and allocations.
+A same-source controlled baseline after implementation, hiding only the new
+test file, was `135.6, 139.7, 135.7, 137.6, 136.9 ns/op`. This makes the
+default strict path effectively allocation-neutral and within run-to-run CPU
+noise. The enabled fairness scan is intentionally slower for a 256-item
+resident queue, but it provides a hard starvation bound and remains opt-in.
+See [T246_PRIORITY_QUEUE_STARVATION.md](T246_PRIORITY_QUEUE_STARVATION.md).

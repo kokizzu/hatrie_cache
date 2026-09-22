@@ -228,7 +228,7 @@ func TestPriorityVisibilityQueueBinaryRejectsTruncatedAndOversizedRecords(t *tes
 	}
 
 	malformed = append([]byte(nil), payload...)
-	binary.LittleEndian.PutUint32(malformed[priorityVisibilityQueueHeaderSize+37:], ^uint32(0))
+	binary.LittleEndian.PutUint32(malformed[priorityVisibilityQueueHeaderSize+priorityVisibilityQueueRecordHeaderSize:], ^uint32(0))
 	refreshPriorityVisibilityQueueChecksum(malformed)
 	if _, err := UnmarshalPriorityVisibilityQueue(malformed, codec); err == nil {
 		t.Fatal("UnmarshalPriorityVisibilityQueue accepted an oversized value length")

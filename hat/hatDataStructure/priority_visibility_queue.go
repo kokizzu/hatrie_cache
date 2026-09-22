@@ -13,12 +13,16 @@ import (
 )
 
 const (
-	priorityVisibilityQueueFormatVersion    byte = 1
-	priorityVisibilityQueueHeaderSize            = 52
-	priorityVisibilityQueueChecksumSize          = 4
-	priorityVisibilityQueueMaxEntries            = 1_000_000
-	priorityVisibilityQueueMaxValueBytes         = 64 << 20
-	priorityVisibilityQueueMaxSnapshotBytes      = 512 << 20
+	priorityVisibilityQueueFormatVersion          byte = 2
+	priorityVisibilityQueueLegacyFormatVersion    byte = 1
+	priorityVisibilityQueueLegacyHeaderSize            = 52
+	priorityVisibilityQueueHeaderSize                  = 60
+	priorityVisibilityQueueLegacyRecordHeaderSize      = 37
+	priorityVisibilityQueueRecordHeaderSize            = 41
+	priorityVisibilityQueueChecksumSize                = 4
+	priorityVisibilityQueueMaxEntries                  = 1_000_000
+	priorityVisibilityQueueMaxValueBytes               = 64 << 20
+	priorityVisibilityQueueMaxSnapshotBytes            = 512 << 20
 )
 
 var priorityVisibilityQueueMagic = [4]byte{'H', 'P', 'Q', '1'}
@@ -35,6 +39,17 @@ var (
 type PriorityVisibilityQueueCodec[T any] struct {
 	Encode func(T) ([]byte, error)
 	Decode func([]byte) (T, error)
+}
+
+// PriorityVisibilityQueueOptions configures a priority visibility queue.
+// StarvationAfter is the maximum number of leases that may bypass one ready
+// item before the queue selects it, regardless of priority. Zero preserves
+// strict priority ordering and disables the fairness scan.
+type PriorityVisibilityQueueOptions struct {
+	Capacity          int
+	VisibilityTimeout time.Duration
+	Epoch             uint64
+	StarvationAfter   uint32
 }
 
 // PriorityVisibilityQueueLeaseToken identifies a lease across a process or
@@ -63,11 +78,12 @@ type PriorityVisibilityQueueLease[T any] struct {
 }
 
 type priorityVisibilityQueueEntry[T any] struct {
-	id       uint64
-	priority int64
-	sequence uint64
-	value    T
-	attempts uint32
+	id              uint64
+	priority        int64
+	sequence        uint64
+	value           T
+	attempts        uint32
+	starvationSkips uint32
 }
 
 type priorityVisibilityQueueLease[T any] struct {
@@ -89,23 +105,25 @@ type priorityVisibilityQueueExpiryHeap struct {
 // PriorityVisibilityQueueSnapshotItem is one pending item in a queue
 // snapshot. A zero ReadyAt means the item is immediately ready.
 type PriorityVisibilityQueueSnapshotItem[T any] struct {
-	ID       uint64
-	Priority int64
-	ReadyAt  time.Time
-	Sequence uint64
-	Value    T
-	Attempts uint32
+	ID              uint64
+	Priority        int64
+	ReadyAt         time.Time
+	Sequence        uint64
+	Value           T
+	Attempts        uint32
+	StarvationSkips uint32
 }
 
 // PriorityVisibilityQueueLeaseSnapshot is one active lease in a queue
 // snapshot.
 type PriorityVisibilityQueueLeaseSnapshot[T any] struct {
-	ID         uint64
-	Priority   int64
-	Sequence   uint64
-	Value      T
-	Attempts   uint32
-	LeaseUntil time.Time
+	ID              uint64
+	Priority        int64
+	Sequence        uint64
+	Value           T
+	Attempts        uint32
+	LeaseUntil      time.Time
+	StarvationSkips uint32
 }
 
 // PriorityVisibilityQueueSnapshot is an in-memory checkpoint of a
@@ -116,6 +134,7 @@ type PriorityVisibilityQueueSnapshot[T any] struct {
 	Epoch             uint64
 	NextID            uint64
 	NextSequence      uint64
+	StarvationAfter   uint32
 	Pending           []PriorityVisibilityQueueSnapshotItem[T]
 	Leases            []PriorityVisibilityQueueLeaseSnapshot[T]
 }
@@ -137,19 +156,39 @@ type PriorityVisibilityQueue[T any] struct {
 	capacity          int
 	visibilityTimeout time.Duration
 	epoch             uint64
+	starvationAfter   uint32
 }
 
 // NewPriorityVisibilityQueue creates a priority visibility queue. A
 // non-positive capacity means unbounded and a non-positive timeout selects
 // DefaultVisibilityQueueTimeout.
 func NewPriorityVisibilityQueue[T any](capacity int, visibilityTimeout time.Duration) *PriorityVisibilityQueue[T] {
-	return NewPriorityVisibilityQueueWithEpoch[T](capacity, visibilityTimeout, DefaultVisibilityQueueEpoch)
+	return NewPriorityVisibilityQueueWithOptions[T](PriorityVisibilityQueueOptions{
+		Capacity:          capacity,
+		VisibilityTimeout: visibilityTimeout,
+		Epoch:             DefaultVisibilityQueueEpoch,
+	})
 }
 
 // NewPriorityVisibilityQueueWithEpoch creates a priority visibility queue with
 // an explicit lease epoch. Restore a queue with a new epoch when old process
 // or storage tokens must be rejected.
 func NewPriorityVisibilityQueueWithEpoch[T any](capacity int, visibilityTimeout time.Duration, epoch uint64) *PriorityVisibilityQueue[T] {
+	return NewPriorityVisibilityQueueWithOptions[T](PriorityVisibilityQueueOptions{
+		Capacity:          capacity,
+		VisibilityTimeout: visibilityTimeout,
+		Epoch:             epoch,
+	})
+}
+
+// NewPriorityVisibilityQueueWithOptions creates a priority visibility queue
+// with optional starvation protection. A zero Capacity is unbounded, a
+// non-positive VisibilityTimeout selects the package default, and a zero
+// Epoch selects the default epoch.
+func NewPriorityVisibilityQueueWithOptions[T any](options PriorityVisibilityQueueOptions) *PriorityVisibilityQueue[T] {
+	capacity := options.Capacity
+	visibilityTimeout := options.VisibilityTimeout
+	epoch := options.Epoch
 	if capacity < 0 {
 		capacity = 0
 	}
@@ -165,6 +204,7 @@ func NewPriorityVisibilityQueueWithEpoch[T any](capacity int, visibilityTimeout 
 		capacity:          capacity,
 		visibilityTimeout: visibilityTimeout,
 		epoch:             epoch,
+		starvationAfter:   options.StarvationAfter,
 	}
 }
 
@@ -471,6 +511,39 @@ func (queue *PriorityVisibilityQueue[T]) readyPop() (priorityVisibilityQueueEntr
 	if len(queue.ready) == 0 {
 		return priorityVisibilityQueueEntry[T]{}, false
 	}
+	if queue.starvationAfter == 0 {
+		return queue.readyPopStrict()
+	}
+	index := queue.starvationIndex()
+	if index < 0 {
+		index = 0
+	}
+	root := queue.ready[index]
+	last := len(queue.ready) - 1
+	lastEntry := queue.ready[last]
+	var zero priorityVisibilityQueueEntry[T]
+	queue.ready[last] = zero
+	queue.ready = queue.ready[:last]
+	if index < len(queue.ready) {
+		queue.ready[index] = lastEntry
+		if index > 0 && priorityVisibilityQueueEntryBeforeAny(queue.ready[index], queue.ready[(index-1)/4]) {
+			queue.readySiftUp(index)
+		} else {
+			queue.readySiftDown(index)
+		}
+	}
+	if queue.starvationAfter > 0 {
+		for index := range queue.ready {
+			if queue.ready[index].starvationSkips != ^uint32(0) {
+				queue.ready[index].starvationSkips++
+			}
+		}
+	}
+	root.starvationSkips = 0
+	return root, true
+}
+
+func (queue *PriorityVisibilityQueue[T]) readyPopStrict() (priorityVisibilityQueueEntry[T], bool) {
 	root := queue.ready[0]
 	last := len(queue.ready) - 1
 	lastEntry := queue.ready[last]
@@ -482,6 +555,23 @@ func (queue *PriorityVisibilityQueue[T]) readyPop() (priorityVisibilityQueueEntr
 		queue.readySiftDown(0)
 	}
 	return root, true
+}
+
+func (queue *PriorityVisibilityQueue[T]) starvationIndex() int {
+	if queue.starvationAfter == 0 {
+		return -1
+	}
+	forced := -1
+	for index, entry := range queue.ready {
+		if entry.starvationSkips < queue.starvationAfter {
+			continue
+		}
+		if forced < 0 || entry.starvationSkips > queue.ready[forced].starvationSkips ||
+			(entry.starvationSkips == queue.ready[forced].starvationSkips && entry.sequence < queue.ready[forced].sequence) {
+			forced = index
+		}
+	}
+	return forced
 }
 
 func (queue *PriorityVisibilityQueue[T]) readySiftUp(index int) {
@@ -636,38 +726,42 @@ func (queue *PriorityVisibilityQueue[T]) Snapshot() PriorityVisibilityQueueSnaps
 		Epoch:             queue.Epoch(),
 		NextID:            queue.nextID,
 		NextSequence:      queue.nextSequence,
+		StarvationAfter:   queue.starvationAfter,
 		Pending:           make([]PriorityVisibilityQueueSnapshotItem[T], 0, queue.PendingLen()),
 		Leases:            make([]PriorityVisibilityQueueLeaseSnapshot[T], 0, len(queue.leases)),
 	}
 	for _, entry := range queue.ready {
 		snapshot.Pending = append(snapshot.Pending, PriorityVisibilityQueueSnapshotItem[T]{
-			ID:       entry.id,
-			Priority: entry.priority,
-			Sequence: entry.sequence,
-			Value:    entry.value,
-			Attempts: entry.attempts,
+			ID:              entry.id,
+			Priority:        entry.priority,
+			Sequence:        entry.sequence,
+			Value:           entry.value,
+			Attempts:        entry.attempts,
+			StarvationSkips: entry.starvationSkips,
 		})
 	}
 	if queue.delayed != nil {
 		for _, item := range queue.delayed.items {
 			snapshot.Pending = append(snapshot.Pending, PriorityVisibilityQueueSnapshotItem[T]{
-				ID:       item.Value.id,
-				Priority: item.Value.priority,
-				ReadyAt:  item.ReadyAt,
-				Sequence: item.Value.sequence,
-				Value:    item.Value.value,
-				Attempts: item.Value.attempts,
+				ID:              item.Value.id,
+				Priority:        item.Value.priority,
+				ReadyAt:         item.ReadyAt,
+				Sequence:        item.Value.sequence,
+				Value:           item.Value.value,
+				Attempts:        item.Value.attempts,
+				StarvationSkips: item.Value.starvationSkips,
 			})
 		}
 	}
 	for _, lease := range queue.leases {
 		snapshot.Leases = append(snapshot.Leases, PriorityVisibilityQueueLeaseSnapshot[T]{
-			ID:         lease.entry.id,
-			Priority:   lease.entry.priority,
-			Sequence:   lease.entry.sequence,
-			Value:      lease.entry.value,
-			Attempts:   lease.entry.attempts,
-			LeaseUntil: lease.until,
+			ID:              lease.entry.id,
+			Priority:        lease.entry.priority,
+			Sequence:        lease.entry.sequence,
+			Value:           lease.entry.value,
+			Attempts:        lease.entry.attempts,
+			LeaseUntil:      lease.until,
+			StarvationSkips: lease.entry.starvationSkips,
 		})
 	}
 	sort.Slice(snapshot.Pending, func(left, right int) bool {
@@ -754,7 +848,12 @@ func RestorePriorityVisibilityQueue[T any](snapshot PriorityVisibilityQueueSnaps
 	if epoch == 0 {
 		epoch = snapshot.Epoch
 	}
-	queue := NewPriorityVisibilityQueueWithEpoch[T](snapshot.Capacity, snapshot.VisibilityTimeout, epoch)
+	queue := NewPriorityVisibilityQueueWithOptions[T](PriorityVisibilityQueueOptions{
+		Capacity:          snapshot.Capacity,
+		VisibilityTimeout: snapshot.VisibilityTimeout,
+		Epoch:             epoch,
+		StarvationAfter:   snapshot.StarvationAfter,
+	})
 	queue.nextID = snapshot.NextID
 	queue.nextSequence = snapshot.NextSequence
 	pending := append([]PriorityVisibilityQueueSnapshotItem[T](nil), snapshot.Pending...)
@@ -769,11 +868,12 @@ func RestorePriorityVisibilityQueue[T any](snapshot PriorityVisibilityQueueSnaps
 	})
 	for _, item := range pending {
 		entry := priorityVisibilityQueueEntry[T]{
-			id:       item.ID,
-			priority: item.Priority,
-			sequence: item.Sequence,
-			value:    item.Value,
-			attempts: item.Attempts,
+			id:              item.ID,
+			priority:        item.Priority,
+			sequence:        item.Sequence,
+			value:           item.Value,
+			attempts:        item.Attempts,
+			starvationSkips: item.StarvationSkips,
 		}
 		if item.ReadyAt.IsZero() {
 			queue.readyPush(entry)
@@ -783,11 +883,12 @@ func RestorePriorityVisibilityQueue[T any](snapshot PriorityVisibilityQueueSnaps
 	}
 	for _, item := range snapshot.Leases {
 		entry := priorityVisibilityQueueEntry[T]{
-			id:       item.ID,
-			priority: item.Priority,
-			sequence: item.Sequence,
-			value:    item.Value,
-			attempts: item.Attempts,
+			id:              item.ID,
+			priority:        item.Priority,
+			sequence:        item.Sequence,
+			value:           item.Value,
+			attempts:        item.Attempts,
+			starvationSkips: item.StarvationSkips,
 		}
 		queue.leases[item.ID] = priorityVisibilityQueueLease[T]{
 			entry:       entry,
@@ -826,13 +927,14 @@ func (queue *PriorityVisibilityQueue[T]) MarshalSnapshot(codec PriorityVisibilit
 	binary.LittleEndian.PutUint64(header[36:44], snapshot.NextSequence)
 	binary.LittleEndian.PutUint32(header[44:48], uint32(len(snapshot.Pending)))
 	binary.LittleEndian.PutUint32(header[48:52], uint32(len(snapshot.Leases)))
+	binary.LittleEndian.PutUint32(header[52:56], snapshot.StarvationAfter)
 	encoded = append(encoded, header...)
 	for _, item := range snapshot.Pending {
 		value, err := codec.Encode(item.Value)
 		if err != nil {
 			return nil, fmt.Errorf("hatriecache: encode pending priority visibility queue value: %w", err)
 		}
-		encoded, err = appendPriorityVisibilityQueueRecord(encoded, item.ID, item.Priority, item.Sequence, item.Attempts, item.ReadyAt, value)
+		encoded, err = appendPriorityVisibilityQueueRecord(encoded, item.ID, item.Priority, item.Sequence, item.Attempts, item.StarvationSkips, item.ReadyAt, value)
 		if err != nil {
 			return nil, err
 		}
@@ -842,7 +944,7 @@ func (queue *PriorityVisibilityQueue[T]) MarshalSnapshot(codec PriorityVisibilit
 		if err != nil {
 			return nil, fmt.Errorf("hatriecache: encode leased priority visibility queue value: %w", err)
 		}
-		encoded, err = appendPriorityVisibilityQueueRecord(encoded, item.ID, item.Priority, item.Sequence, item.Attempts, item.LeaseUntil, value)
+		encoded, err = appendPriorityVisibilityQueueRecord(encoded, item.ID, item.Priority, item.Sequence, item.Attempts, item.StarvationSkips, item.LeaseUntil, value)
 		if err != nil {
 			return nil, err
 		}
@@ -857,22 +959,23 @@ func (queue *PriorityVisibilityQueue[T]) MarshalSnapshot(codec PriorityVisibilit
 	return encoded, nil
 }
 
-func appendPriorityVisibilityQueueRecord(destination []byte, id uint64, priority int64, sequence uint64, attempts uint32, timestamp time.Time, value []byte) ([]byte, error) {
+func appendPriorityVisibilityQueueRecord(destination []byte, id uint64, priority int64, sequence uint64, attempts, starvationSkips uint32, timestamp time.Time, value []byte) ([]byte, error) {
 	if len(value) > priorityVisibilityQueueMaxValueBytes {
 		return nil, errors.New("hatriecache: priority visibility queue value is too large")
 	}
-	if len(destination) > priorityVisibilityQueueMaxSnapshotBytes-priorityVisibilityQueueChecksumSize-37-len(value) {
+	if len(destination) > priorityVisibilityQueueMaxSnapshotBytes-priorityVisibilityQueueChecksumSize-priorityVisibilityQueueRecordHeaderSize-len(value) {
 		return nil, errPriorityVisibilityQueueSnapshotTooBig
 	}
-	var fixed [37]byte
+	var fixed [priorityVisibilityQueueRecordHeaderSize]byte
 	binary.LittleEndian.PutUint64(fixed[0:8], id)
 	binary.LittleEndian.PutUint64(fixed[8:16], uint64(priority))
 	binary.LittleEndian.PutUint64(fixed[16:24], sequence)
 	binary.LittleEndian.PutUint32(fixed[24:28], attempts)
+	binary.LittleEndian.PutUint32(fixed[28:32], starvationSkips)
 	if timestamp.IsZero() {
-		fixed[28] = 1
+		fixed[32] = 1
 	} else {
-		binary.LittleEndian.PutUint64(fixed[29:37], uint64(timestamp.UnixNano()))
+		binary.LittleEndian.PutUint64(fixed[33:41], uint64(timestamp.UnixNano()))
 	}
 	destination = append(destination, fixed[:]...)
 	var length [4]byte
@@ -897,7 +1000,7 @@ func unmarshalPriorityVisibilityQueueSnapshot[T any](data []byte, codec Priority
 	if codec.Decode == nil {
 		return PriorityVisibilityQueueSnapshot[T]{}, errPriorityVisibilityQueueNilCodec
 	}
-	if len(data) < priorityVisibilityQueueHeaderSize+priorityVisibilityQueueChecksumSize || len(data) > priorityVisibilityQueueMaxSnapshotBytes {
+	if len(data) < priorityVisibilityQueueLegacyHeaderSize+priorityVisibilityQueueChecksumSize || len(data) > priorityVisibilityQueueMaxSnapshotBytes {
 		return PriorityVisibilityQueueSnapshot[T]{}, errPriorityVisibilityQueueInvalidFormat
 	}
 	payload := data[:len(data)-priorityVisibilityQueueChecksumSize]
@@ -905,7 +1008,26 @@ func unmarshalPriorityVisibilityQueueSnapshot[T any](data []byte, codec Priority
 	if gotChecksum := crc32.Checksum(payload, crc32.IEEETable); gotChecksum != wantChecksum {
 		return PriorityVisibilityQueueSnapshot[T]{}, errors.New("hatriecache: priority visibility queue checksum mismatch")
 	}
-	if string(payload[:4]) != string(priorityVisibilityQueueMagic[:]) || payload[4] != priorityVisibilityQueueFormatVersion || payload[5] != 0 || payload[6] != 0 || payload[7] != 0 {
+	if string(payload[:4]) != string(priorityVisibilityQueueMagic[:]) || payload[5] != 0 || payload[6] != 0 || payload[7] != 0 {
+		return PriorityVisibilityQueueSnapshot[T]{}, errPriorityVisibilityQueueInvalidFormat
+	}
+	version := payload[4]
+	headerSize := priorityVisibilityQueueLegacyHeaderSize
+	recordHeaderSize := priorityVisibilityQueueLegacyRecordHeaderSize
+	var starvationAfter uint32
+	switch version {
+	case priorityVisibilityQueueLegacyFormatVersion:
+	case priorityVisibilityQueueFormatVersion:
+		if len(payload) < priorityVisibilityQueueHeaderSize {
+			return PriorityVisibilityQueueSnapshot[T]{}, errPriorityVisibilityQueueInvalidFormat
+		}
+		if payload[56] != 0 || payload[57] != 0 || payload[58] != 0 || payload[59] != 0 {
+			return PriorityVisibilityQueueSnapshot[T]{}, errPriorityVisibilityQueueInvalidFormat
+		}
+		headerSize = priorityVisibilityQueueHeaderSize
+		recordHeaderSize = priorityVisibilityQueueRecordHeaderSize
+		starvationAfter = binary.LittleEndian.Uint32(payload[52:56])
+	default:
 		return PriorityVisibilityQueueSnapshot[T]{}, errPriorityVisibilityQueueInvalidFormat
 	}
 	capacity := binary.LittleEndian.Uint32(payload[8:12])
@@ -927,40 +1049,43 @@ func unmarshalPriorityVisibilityQueueSnapshot[T any](data []byte, codec Priority
 		Epoch:             binary.LittleEndian.Uint64(payload[20:28]),
 		NextID:            binary.LittleEndian.Uint64(payload[28:36]),
 		NextSequence:      binary.LittleEndian.Uint64(payload[36:44]),
+		StarvationAfter:   starvationAfter,
 		Pending:           make([]PriorityVisibilityQueueSnapshotItem[T], 0, pendingCount),
 		Leases:            make([]PriorityVisibilityQueueLeaseSnapshot[T], 0, leaseCount),
 	}
 	if snapshot.Epoch == 0 || timeout <= 0 {
 		return PriorityVisibilityQueueSnapshot[T]{}, errPriorityVisibilityQueueInvalidFormat
 	}
-	position := priorityVisibilityQueueHeaderSize
+	position := headerSize
 	for index := uint32(0); index < pendingCount; index++ {
-		id, priority, sequence, attempts, timestamp, value, next, err := readPriorityVisibilityQueueRecord(payload, position, codec)
+		id, priority, sequence, attempts, starvationSkips, timestamp, value, next, err := readPriorityVisibilityQueueRecord(payload, position, recordHeaderSize, codec)
 		if err != nil {
 			return PriorityVisibilityQueueSnapshot[T]{}, fmt.Errorf("hatriecache: decode pending priority visibility queue record %d: %w", index, err)
 		}
 		snapshot.Pending = append(snapshot.Pending, PriorityVisibilityQueueSnapshotItem[T]{
-			ID:       id,
-			Priority: priority,
-			ReadyAt:  timestamp,
-			Sequence: sequence,
-			Value:    value,
-			Attempts: attempts,
+			ID:              id,
+			Priority:        priority,
+			ReadyAt:         timestamp,
+			Sequence:        sequence,
+			Value:           value,
+			Attempts:        attempts,
+			StarvationSkips: starvationSkips,
 		})
 		position = next
 	}
 	for index := uint32(0); index < leaseCount; index++ {
-		id, priority, sequence, attempts, timestamp, value, next, err := readPriorityVisibilityQueueRecord(payload, position, codec)
+		id, priority, sequence, attempts, starvationSkips, timestamp, value, next, err := readPriorityVisibilityQueueRecord(payload, position, recordHeaderSize, codec)
 		if err != nil {
 			return PriorityVisibilityQueueSnapshot[T]{}, fmt.Errorf("hatriecache: decode leased priority visibility queue record %d: %w", index, err)
 		}
 		snapshot.Leases = append(snapshot.Leases, PriorityVisibilityQueueLeaseSnapshot[T]{
-			ID:         id,
-			Priority:   priority,
-			Sequence:   sequence,
-			Value:      value,
-			Attempts:   attempts,
-			LeaseUntil: timestamp,
+			ID:              id,
+			Priority:        priority,
+			Sequence:        sequence,
+			Value:           value,
+			Attempts:        attempts,
+			LeaseUntil:      timestamp,
+			StarvationSkips: starvationSkips,
 		})
 		position = next
 	}
@@ -973,35 +1098,47 @@ func unmarshalPriorityVisibilityQueueSnapshot[T any](data []byte, codec Priority
 	return snapshot, nil
 }
 
-func readPriorityVisibilityQueueRecord[T any](payload []byte, position int, codec PriorityVisibilityQueueCodec[T]) (uint64, int64, uint64, uint32, time.Time, T, int, error) {
+func readPriorityVisibilityQueueRecord[T any](payload []byte, position, recordHeaderSize int, codec PriorityVisibilityQueueCodec[T]) (uint64, int64, uint64, uint32, uint32, time.Time, T, int, error) {
 	var zero T
-	if position < 0 || len(payload)-position < 41 {
-		return 0, 0, 0, 0, time.Time{}, zero, 0, errPriorityVisibilityQueueInvalidFormat
+	if recordHeaderSize != priorityVisibilityQueueLegacyRecordHeaderSize && recordHeaderSize != priorityVisibilityQueueRecordHeaderSize {
+		return 0, 0, 0, 0, 0, time.Time{}, zero, 0, errPriorityVisibilityQueueInvalidFormat
+	}
+	minimumRecordSize := recordHeaderSize + 4
+	if position < 0 || len(payload)-position < minimumRecordSize {
+		return 0, 0, 0, 0, 0, time.Time{}, zero, 0, errPriorityVisibilityQueueInvalidFormat
 	}
 	id := binary.LittleEndian.Uint64(payload[position : position+8])
 	priority := int64(binary.LittleEndian.Uint64(payload[position+8 : position+16]))
 	sequence := binary.LittleEndian.Uint64(payload[position+16 : position+24])
 	attempts := binary.LittleEndian.Uint32(payload[position+24 : position+28])
-	timestampFlag := payload[position+28]
+	starvationSkips := uint32(0)
+	timestampOffset := 28
+	if recordHeaderSize == priorityVisibilityQueueRecordHeaderSize {
+		starvationSkips = binary.LittleEndian.Uint32(payload[position+28 : position+32])
+		timestampOffset = 32
+	}
+	timestampFlag := payload[position+timestampOffset]
 	if timestampFlag > 1 {
-		return 0, 0, 0, 0, time.Time{}, zero, 0, errPriorityVisibilityQueueInvalidFormat
+		return 0, 0, 0, 0, 0, time.Time{}, zero, 0, errPriorityVisibilityQueueInvalidFormat
 	}
 	var timestamp time.Time
 	if timestampFlag == 0 {
-		nanos := int64(binary.LittleEndian.Uint64(payload[position+29 : position+37]))
+		timestampStart := position + timestampOffset + 1
+		nanos := int64(binary.LittleEndian.Uint64(payload[timestampStart : timestampStart+8]))
 		timestamp = time.Unix(0, nanos).UTC()
 	}
-	valueLength := binary.LittleEndian.Uint32(payload[position+37 : position+41])
-	if valueLength > priorityVisibilityQueueMaxValueBytes || uint64(valueLength) > uint64(len(payload)-position-41) {
-		return 0, 0, 0, 0, time.Time{}, zero, 0, errPriorityVisibilityQueueInvalidFormat
+	valueLengthOffset := position + recordHeaderSize
+	valueLength := binary.LittleEndian.Uint32(payload[valueLengthOffset : valueLengthOffset+4])
+	if valueLength > priorityVisibilityQueueMaxValueBytes || uint64(valueLength) > uint64(len(payload)-valueLengthOffset-4) {
+		return 0, 0, 0, 0, 0, time.Time{}, zero, 0, errPriorityVisibilityQueueInvalidFormat
 	}
-	valueStart := position + 41
+	valueStart := valueLengthOffset + 4
 	valueEnd := valueStart + int(valueLength)
 	value, err := codec.Decode(payload[valueStart:valueEnd])
 	if err != nil {
-		return 0, 0, 0, 0, time.Time{}, zero, 0, fmt.Errorf("decode value: %w", err)
+		return 0, 0, 0, 0, 0, time.Time{}, zero, 0, fmt.Errorf("decode value: %w", err)
 	}
-	return id, priority, sequence, attempts, timestamp, value, valueEnd, nil
+	return id, priority, sequence, attempts, starvationSkips, timestamp, value, valueEnd, nil
 }
 
 // SavePriorityVisibilityQueue atomically writes a CRC-protected binary
