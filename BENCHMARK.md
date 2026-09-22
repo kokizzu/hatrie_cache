@@ -37029,3 +37029,40 @@ make test-t210-package
 make race-t210
 make vet-t210
 ```
+
+## T212 Replica-Acknowledgment WAL Retention
+
+The baseline is segmented pruning without a replica acknowledgment registry.
+The after default path sets `ReplicaRetentionCapacity` to zero. The protected
+path enables eight replica acknowledgments and retains the same segmented
+history until the slowest acknowledgment advances. Five `-benchmem` samples
+were collected on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+Commands:
+
+```text
+make benchmark-t212-baseline
+make benchmark-t212
+```
+
+| Path | Raw ns/op samples | Median ns/op | Memory/op | Allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Before, existing prune | `40023 39133 40599 39309 39565` | `39565` | `15577 B` | `141` | `1.00x` |
+| After, capacity 0 | `39639 39298 39675 39055 39036` | `39298` | `15046 B` | `141` | `0.99x` |
+| After, eight replica floor | `40083 40135 40114 40318 38632` | `40114` | `15562 B` | `141` | `1.01x vs before; 1.02x vs default` |
+| Eight-replica in-memory floor lookup | `65.77 66.32 66.04 63.76 62.65` | `65.77` | `0 B` | `0` | opt-in lookup only |
+
+Capacity `0` adds no map allocation and showed no allocation regression. The
+enabled floor adds about 2.1% CPU and 516 bytes per prune call versus the
+capacity-0 after path in this workload. That is an explicit opt-in cost for
+protecting WAL required by the slowest registered replica; reopening an enabled
+journal remains protected until fresh acknowledgments arrive.
+
+Focused correctness checks:
+
+```text
+make test-t212
+make test-t212-package
+make race-t212
+make vet-t212
+```

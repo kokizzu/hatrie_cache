@@ -90,6 +90,7 @@ const (
 	MaxCommandJournalRetainedSegments        = hatJournal.MaxRetainedSegments
 	DefaultCommandJournalRetainedBytes       = hatJournal.DefaultRetainedBytes
 	MaxCommandJournalRetainedBytes           = hatJournal.MaxRetainedBytes
+	MaxReplicaRetentionCapacity              = hatJournal.MaxReplicaRetentionCapacity
 	DefaultCommandJournalIdempotencyCapacity = hatJournal.DefaultIdempotencyCapacity
 	MaxCommandJournalIdempotencyCapacity     = hatJournal.MaxIdempotencyCapacity
 )
@@ -205,44 +206,47 @@ type commandJournalJob struct {
 }
 
 type CommandJournal struct {
-	mu                    sync.Mutex
-	snapshotMu            sync.Mutex
-	submitMu              sync.RWMutex
-	replayProgressMu      sync.RWMutex
-	closeOnce             sync.Once
-	path                  string
-	format                CommandJournalFormat
-	encryption            hatJournal.EncryptionOptions
-	encryptor             *hatJournal.RecordEncryptor
-	file                  *os.File
-	closed                bool
-	accepting             bool
-	nextSequence          uint64
-	sequenceExhausted     bool
-	groupCommitWindow     time.Duration
-	groupCommitMaxBatch   int
-	adaptiveGroupCommit   bool
-	segmentMaxBytes       int64
-	segmentCompression    CommandJournalSegmentCompression
-	retainedSegments      int
-	retainedBytes         int64
-	compactedThrough      uint64
-	activeSegmentStart    uint64
-	groupCommitJobs       chan *commandJournalJob
-	groupCommitDone       chan struct{}
-	closeDone             chan struct{}
-	subscriptionWakeMu    sync.Mutex
-	subscriptionWake      chan struct{}
-	subscriptionCount     uint64
-	subscriptions         map[*CommandJournalSubscription]struct{}
-	closeErr              error
-	syncHook              func() error
-	writeHook             func([]byte) (int, error)
-	recordBatchChunkBytes int
-	outboxRetainFrom      uint64
-	projectionWatermarks  map[string]uint64
-	idempotency           commandIdempotencyState
-	replayProgress        *commandJournalReplayProgressState
+	mu                          sync.Mutex
+	snapshotMu                  sync.Mutex
+	submitMu                    sync.RWMutex
+	replayProgressMu            sync.RWMutex
+	closeOnce                   sync.Once
+	path                        string
+	format                      CommandJournalFormat
+	encryption                  hatJournal.EncryptionOptions
+	encryptor                   *hatJournal.RecordEncryptor
+	file                        *os.File
+	closed                      bool
+	accepting                   bool
+	nextSequence                uint64
+	sequenceExhausted           bool
+	groupCommitWindow           time.Duration
+	groupCommitMaxBatch         int
+	adaptiveGroupCommit         bool
+	segmentMaxBytes             int64
+	segmentCompression          CommandJournalSegmentCompression
+	retainedSegments            int
+	retainedBytes               int64
+	replicaRetentionCapacity    int
+	replicaRetentionAcks        map[string]uint64
+	replicaRetentionInitialized bool
+	compactedThrough            uint64
+	activeSegmentStart          uint64
+	groupCommitJobs             chan *commandJournalJob
+	groupCommitDone             chan struct{}
+	closeDone                   chan struct{}
+	subscriptionWakeMu          sync.Mutex
+	subscriptionWake            chan struct{}
+	subscriptionCount           uint64
+	subscriptions               map[*CommandJournalSubscription]struct{}
+	closeErr                    error
+	syncHook                    func() error
+	writeHook                   func([]byte) (int, error)
+	recordBatchChunkBytes       int
+	outboxRetainFrom            uint64
+	projectionWatermarks        map[string]uint64
+	idempotency                 commandIdempotencyState
+	replayProgress              *commandJournalReplayProgressState
 }
 
 type commandJournalAppendState struct {
@@ -338,25 +342,29 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 		return nil, err
 	}
 	journal := &CommandJournal{
-		path:                  path,
-		format:                format,
-		encryption:            options.Encryption,
-		encryptor:             encryptor,
-		file:                  file,
-		accepting:             true,
-		groupCommitWindow:     options.GroupCommitWindow,
-		groupCommitMaxBatch:   options.GroupCommitMaxBatch,
-		adaptiveGroupCommit:   options.AdaptiveGroupCommit,
-		segmentMaxBytes:       options.SegmentMaxBytes,
-		segmentCompression:    options.SegmentCompression,
-		retainedSegments:      options.RetainedSegments,
-		retainedBytes:         options.RetainedBytes,
-		compactedThrough:      compactedThrough,
-		recordBatchChunkBytes: defaultCommandJournalRecordBatchChunkBytes,
-		outboxRetainFrom:      earliestOutboxSequence,
-		subscriptionWake:      make(chan struct{}),
-		closeDone:             make(chan struct{}),
-		idempotency:           idempotency,
+		path:                     path,
+		format:                   format,
+		encryption:               options.Encryption,
+		encryptor:                encryptor,
+		file:                     file,
+		accepting:                true,
+		groupCommitWindow:        options.GroupCommitWindow,
+		groupCommitMaxBatch:      options.GroupCommitMaxBatch,
+		adaptiveGroupCommit:      options.AdaptiveGroupCommit,
+		segmentMaxBytes:          options.SegmentMaxBytes,
+		segmentCompression:       options.SegmentCompression,
+		retainedSegments:         options.RetainedSegments,
+		retainedBytes:            options.RetainedBytes,
+		replicaRetentionCapacity: options.ReplicaRetentionCapacity,
+		compactedThrough:         compactedThrough,
+		recordBatchChunkBytes:    defaultCommandJournalRecordBatchChunkBytes,
+		outboxRetainFrom:         earliestOutboxSequence,
+		subscriptionWake:         make(chan struct{}),
+		closeDone:                make(chan struct{}),
+		idempotency:              idempotency,
+	}
+	if options.ReplicaRetentionCapacity > 0 {
+		journal.replicaRetentionAcks = make(map[string]uint64, options.ReplicaRetentionCapacity)
 	}
 	journal.advanceSequenceLocked(maxSequence)
 	if journal.nextSequence == 0 && !journal.sequenceExhausted {
@@ -1959,6 +1967,9 @@ func (journal *CommandJournal) compactLocked(throughSequence uint64) error {
 	}
 	if projectionThrough, protected := journal.projectionRetentionThroughLocked(); protected && throughSequence > projectionThrough {
 		throughSequence = projectionThrough
+	}
+	if replicaThrough, protected := journal.replicaRetentionThroughLocked(); protected && throughSequence > replicaThrough {
+		throughSequence = replicaThrough
 	}
 	if err := journal.closeAppendFileLocked(); err != nil {
 		return err

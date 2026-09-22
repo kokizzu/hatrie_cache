@@ -8797,6 +8797,43 @@ commit-t211:
 push-t211:
 	bash ./scripts/push-t211.sh
 
+.PHONY: test-t212 benchmark-t212-baseline benchmark-t212
+test-t212:
+	bash ./scripts/test-t212.sh
+
+benchmark-t212-baseline:
+	bash ./scripts/benchmark-t212-baseline.sh
+
+benchmark-t212:
+	bash ./scripts/benchmark-t212.sh
+
+.PHONY: format-t212
+format-t212:
+	bash ./scripts/format-t212.sh
+
+.PHONY: test-t212-package race-t212 vet-t212 verify-docs-t212
+test-t212-package:
+	bash ./scripts/test-t212-package.sh
+
+race-t212:
+	bash ./scripts/race-t212.sh
+
+vet-t212:
+	bash ./scripts/vet-t212.sh
+
+verify-docs-t212:
+	bash ./scripts/verify-docs-t212.sh
+
+.PHONY: stage-t212 commit-t212 push-t212
+stage-t212:
+	bash ./scripts/stage-t212.sh
+
+commit-t212:
+	bash ./scripts/commit-t212.sh
+
+push-t212:
+	bash ./scripts/push-t212.sh
+
 .PHONY: cleanup-hatrie-audit-plan cleanup-hatrie-audit-apply
 cleanup-hatrie-audit-plan: audit-hatrie-tmp
 	bash ./scripts/cleanup-hatrie-tmp-audit.sh plan

@@ -325,6 +325,9 @@ func (journal *CommandJournal) pruneSegmentsLocked() error {
 		if projectionThrough, protected := journal.projectionRetentionThroughLocked(); protected && segment.end > projectionThrough {
 			break
 		}
+		if replicaThrough, protected := journal.replicaRetentionThroughLocked(); protected && segment.end > replicaThrough {
+			break
+		}
 		if err := os.Remove(segment.path); err != nil {
 			return err
 		}

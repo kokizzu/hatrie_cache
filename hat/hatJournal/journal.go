@@ -76,16 +76,18 @@ func ParseFormat(value string) (Format, error) {
 }
 
 const (
-	DefaultGroupCommitWindow   time.Duration = 0
-	DefaultGroupCommitMaxBatch               = 64
-	MaxGroupCommitBatch                      = 4096
-	DefaultSegmentMaxBytes     int64         = 64 << 20
-	DefaultRetainedSegments                  = 16
-	MaxRetainedSegments                      = 1024
-	DefaultRetainedBytes       int64         = 0
-	MaxRetainedBytes           int64         = 1 << 40
-	DefaultIdempotencyCapacity               = 0
-	MaxIdempotencyCapacity                   = 1 << 20
+	DefaultGroupCommitWindow        time.Duration = 0
+	DefaultGroupCommitMaxBatch                    = 64
+	MaxGroupCommitBatch                           = 4096
+	DefaultSegmentMaxBytes          int64         = 64 << 20
+	DefaultRetainedSegments                       = 16
+	MaxRetainedSegments                           = 1024
+	DefaultRetainedBytes            int64         = 0
+	MaxRetainedBytes                int64         = 1 << 40
+	DefaultReplicaRetentionCapacity               = 0
+	MaxReplicaRetentionCapacity                   = 1024
+	DefaultIdempotencyCapacity                    = 0
+	MaxIdempotencyCapacity                        = 1 << 20
 )
 
 // Options configures journal encoding, durable group commit, and optional
@@ -101,8 +103,11 @@ type Options struct {
 	SegmentMaxBytes     int64
 	RetainedSegments    int
 	RetainedBytes       int64
-	IdempotencyCapacity int
-	Encryption          EncryptionOptions
+	// ReplicaRetentionCapacity enables a bounded, caller-fed replica
+	// acknowledgement floor in the cache integration. Zero keeps it off.
+	ReplicaRetentionCapacity int
+	IdempotencyCapacity      int
+	Encryption               EncryptionOptions
 }
 
 // ValidateOptions verifies journal options and returns a copy with a
@@ -139,6 +144,12 @@ func ValidateOptions(options Options) (Options, error) {
 	}
 	if options.RetainedBytes > MaxRetainedBytes {
 		return Options{}, fmt.Errorf("hatJournal: retained bytes must be <= %d", MaxRetainedBytes)
+	}
+	if options.ReplicaRetentionCapacity < 0 {
+		return Options{}, errors.New("hatJournal: replica retention capacity must be non-negative")
+	}
+	if options.ReplicaRetentionCapacity > MaxReplicaRetentionCapacity {
+		return Options{}, fmt.Errorf("hatJournal: replica retention capacity must be <= %d", MaxReplicaRetentionCapacity)
 	}
 	if options.SegmentMaxBytes > 0 && options.RetainedSegments == 0 {
 		return Options{}, errors.New("hatJournal: retained segments must be positive when segmentation is enabled")
