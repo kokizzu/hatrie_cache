@@ -143,7 +143,7 @@ operator control remain the preferred deployment model.
 - [x] T201 Per-space synchronous replication quorum for critical records only. `hatReplication.PerSpaceWriteQuorum` applies durable quorum acknowledgements only to explicitly configured critical spaces and leaves unconfigured spaces asynchronous; see [T201_PER_SPACE_SYNC_QUORUM.md](T201_PER_SPACE_SYNC_QUORUM.md).
 - [x] T202 Automatic leader election for a replica set. `hatReplication.ReplicaSetLeaderElection` provides opt-in quorum-gated heartbeat expiry, deterministic candidate selection, and generation-fenced commit; see [T202_REPLICA_SET_LEADER_ELECTION.md](T202_REPLICA_SET_LEADER_ELECTION.md).
 - [x] T203 Strict leader fencing against stale writers after failover. `hatReplication.ReplicaSetLeaderWriteFence` gates exact node/term/fencing-token credentials and serializes failover advancement with local write callbacks; see [T203_LEADER_WRITE_FENCE.md](T203_LEADER_WRITE_FENCE.md).
-- [ ] T204 Supervised failover with explicit operator override and recovery state.
+- [x] T204 Supervised failover with explicit operator override and recovery state. `hatReplication.SupervisedFailoverCoordinator` requires named approval/override, fences commit generations, tracks caught-up recovery or failure, and requires explicit reset; see [T204_SUPERVISED_FAILOVER.md](T204_SUPERVISED_FAILOVER.md).
 - [ ] T205 LSN-based replication lag and apply-throughput metrics.
 - [ ] T206 Deterministic replica bootstrap and join workflow.
 - [ ] T207 Replica eviction, rejoin, and stale-state recovery protocol.

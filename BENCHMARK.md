@@ -36839,3 +36839,33 @@ Leader advance:      19.73 20.54 20.22 20.60 20.27; 0; 0
 
 The API boundary, default-off behavior, and remote-store limitation are in
 [T203_LEADER_WRITE_FENCE.md](T203_LEADER_WRITE_FENCE.md).
+
+<a id="t204-supervised-failover-lifecycle"></a>
+## T204 Supervised Failover Lifecycle
+
+Command: `make benchmark-t204`. Five `GOMAXPROCS=1` samples were collected on
+Linux/amd64 with an AMD Ryzen 9 5950X. The existing evaluator is a one-decision
+control. Each T204 row executes a complete proposal, named operator action,
+commit, recovery completion, and explicit reset.
+
+| Workload | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Existing automatic-failover evaluation | 78.60 | 0 | 0 | 1.00x |
+| Complete supervised approval lifecycle | 237.6 | 0 | 0 | 3.02x control |
+| Complete supervised override lifecycle | 239.5 | 0 | 0 | 3.05x control |
+
+The extra control-plane work records operator intent, generation fences every
+transition, verifies the exact recovered candidate/token, and requires an
+explicit reset after success or failure. Both complete lifecycles remain
+allocation-free, and the feature is default-off.
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+Existing evaluator: 78.13 84.54 79.00 76.54 78.60; 0; 0
+Approval lifecycle:  237.6 230.3 239.6 236.6 246.5; 0; 0
+Override lifecycle:  239.5 239.6 245.4 237.8 237.9; 0; 0
+```
+
+API boundaries and recovery safety rules are in
+[T204_SUPERVISED_FAILOVER.md](T204_SUPERVISED_FAILOVER.md).
