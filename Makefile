@@ -23243,6 +23243,22 @@ push-tu33-function-grants:
 audit-hatrie-tmp:
 	bash scripts/audit-hatrie-tmp.sh
 
+.PHONY: audit-hatrie-tmp-inventory
+audit-hatrie-tmp-inventory:
+	bash scripts/audit-hatrie-tmp-inventory.sh
+
+.PHONY: stage-hatrie-tmp-inventory
+stage-hatrie-tmp-inventory:
+	bash scripts/stage-hatrie-tmp-inventory.sh
+
+.PHONY: commit-hatrie-tmp-inventory
+commit-hatrie-tmp-inventory:
+	bash scripts/commit-hatrie-tmp-inventory.sh
+
+.PHONY: push-hatrie-tmp-inventory
+push-hatrie-tmp-inventory:
+	bash scripts/push-hatrie-tmp-inventory.sh
+
 .PHONY: format-t047-cluster-write-commit test-t047-cluster-write-commit test-t047-replication-package benchmark-t047-cluster-write-commit race-t047-cluster-write-commit vet-t047-cluster-write-commit review-t047 stage-t047 commit-t047 push-t047
 
 format-t047-cluster-write-commit:
