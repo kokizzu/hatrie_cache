@@ -36359,3 +36359,17 @@ is the feature path; JSON is a control using the same snapshot structure.
 
 Raw samples, the atomic durability boundary, and the retry semantics are in
 [M231_EXACTLY_ONCE_UPSERT_SINK.md](M231_EXACTLY_ONCE_UPSERT_SINK.md).
+
+## M232 Sink Progress Envelopes
+
+Five samples were run per operation on Linux amd64, AMD Ryzen 9 5950X. SPG1
+uses one coupled envelope containing 32 upsert records; JSON is a control.
+
+| Operation | SPG1 median | JSON median | Improvement | SPG1 B/op | SPG1 allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Emit one record | 171.9 ns/op | n/a | emitter state-machine cost | 96 | 3 |
+| Marshal 32 records | 2,571 ns/op | 6,492 ns/op | 2.52x CPU, 2.30x lower B/op, 2x fewer allocs | 1,024 | 1 |
+| Unmarshal 32 records | 4,247 ns/op | 36,975 ns/op | 8.71x CPU, 1.91x lower B/op, 1.13x fewer allocs | 3,464 | 98 |
+
+Raw samples and the no-progress-only-message invariant are in
+[M232_SINK_PROGRESS_ENVELOPES.md](M232_SINK_PROGRESS_ENVELOPES.md).

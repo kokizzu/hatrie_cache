@@ -26227,6 +26227,39 @@ commit-m231-sink:
 push-m231-sink:
 	bash scripts/push-m231-sink.sh
 
+inspect-m232-sink-progress:
+	bash scripts/m232-sink-progress.sh inspect
+
+format-m232-sink-progress:
+	bash scripts/m232-sink-progress.sh format
+
+test-m232-sink-progress:
+	bash scripts/m232-sink-progress.sh test
+
+benchmark-m232-sink-progress:
+	bash scripts/m232-sink-progress.sh benchmark
+
+test-m232-sink-progress-package:
+	bash scripts/m232-sink-progress.sh package
+
+race-m232-sink-progress:
+	bash scripts/m232-sink-progress.sh race
+
+vet-m232-sink-progress:
+	bash scripts/m232-sink-progress.sh vet
+
+status-m232-sink-progress:
+	bash scripts/status-m232-sink-progress.sh
+
+stage-m232-sink-progress:
+	bash scripts/stage-m232-sink-progress.sh
+
+commit-m232-sink-progress:
+	bash scripts/commit-m232-sink-progress.sh
+
+push-m232-sink-progress:
+	bash scripts/push-m232-sink-progress.sh
+
 .PHONY: inspect-m229-source-schema
 inspect-m229-source-schema:
 	bash scripts/m229-source-schema.sh inspect

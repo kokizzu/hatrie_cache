@@ -1264,3 +1264,11 @@ resume, and skip decisions, rejects gaps and conflicting retries, and stores a
 bounded pending upsert in compact `uos1` state. The embedding service still
 owns the atomic write between the external destination and the snapshot. See
 [M231_EXACTLY_ONCE_UPSERT_SINK.md](M231_EXACTLY_ONCE_UPSERT_SINK.md).
+
+## M232 Sink Progress Envelopes
+
+The Materialize-style rule that a frontier only advances with a corresponding
+dataflow output is adopted as `SinkProgressEnvelope` and
+`SinkProgressEmitter`. They reject progress-only messages, preserve monotone
+frontiers, and encode output plus progress together in compact SPG1. See
+[M232_SINK_PROGRESS_ENVELOPES.md](M232_SINK_PROGRESS_ENVELOPES.md).
