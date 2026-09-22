@@ -26710,3 +26710,41 @@ commit-m244:
 push-m244:
 
 	bash scripts/push-m244.sh
+.PHONY: test-m245
+test-m245:
+	bash scripts/test-m245.sh
+.PHONY: format-m245
+format-m245:
+	bash scripts/format-m245.sh
+
+.PHONY: benchmark-m245
+benchmark-m245:
+	bash scripts/benchmark-m245.sh
+
+.PHONY: race-m245
+race-m245:
+	bash scripts/race-m245.sh
+
+.PHONY: vet-m245
+vet-m245:
+	bash scripts/vet-m245.sh
+
+.PHONY: test-m245-package
+test-m245-package:
+	bash scripts/test-m245-package.sh
+
+.PHONY: verify-docs-m245
+verify-docs-m245:
+	bash scripts/verify-docs-m245.sh
+
+.PHONY: stage-m245
+stage-m245:
+	bash scripts/stage-m245.sh
+
+.PHONY: commit-m245
+commit-m245:
+	bash scripts/commit-m245.sh
+
+.PHONY: push-m245
+push-m245:
+	bash scripts/push-m245.sh

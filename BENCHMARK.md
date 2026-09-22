@@ -73,6 +73,31 @@ change. The metric adds one monitoring JSON field and no write-path allocation;
 the bounded cost is limited to the explicit stats call. See
 [M244_COMPACTION_DEBT.md](M244_COMPACTION_DEBT.md).
 
+## M245 Timestamp Throughput And Input-to-Output Latency
+
+Five `-benchmem` samples were collected on Linux amd64, AMD Ryzen 9 5950X.
+The parent/current comparison uses the existing query observer benchmark; the
+timestamp row measures the new opt-in observation path.
+
+| Path | Median ns/op | B/op | Allocs/op | Result |
+| --- | ---: | ---: | ---: | --- |
+| M244 parent query observer | 10.13 | 0 | 0 | baseline |
+| M245 current query observer | 10.30 | 0 | 0 | 1.02x time; within noise |
+| M245 timestamp observer | 9.453 | 0 | 0 | opt-in path; allocation-free |
+
+Raw samples:
+
+```text
+parent query: 10.13 9.920 9.891 10.54 10.67 ns/op; 0 B/op; 0 allocs/op
+current query: 10.30 10.95 10.59 9.845 10.05 ns/op; 0 B/op; 0 allocs/op
+timestamp: 11.02 10.40 9.226 8.739 9.453 ns/op; 0 B/op; 0 allocs/op
+```
+
+The current query-observer median is 0.17 ns/op higher, or about 1.7%, with
+unchanged allocations. That difference is below the useful precision of this
+short lock-and-counter benchmark. The new path adds no allocation and is
+entirely caller-driven. See [M245_TIMESTAMP_TELEMETRY.md](M245_TIMESTAMP_TELEMETRY.md).
+
 ## MZ-026 Adaptive Dictionary Arrangements
 
 Five samples per case on Linux amd64, AMD Ryzen 9 5950X, building a 4,096-row

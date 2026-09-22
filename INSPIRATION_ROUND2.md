@@ -131,7 +131,7 @@ operator control remain the preferred deployment model.
 - [x] M242 Per-operator update, batch, and frontier metrics. `SQLQueryOptions.OperatorMetrics` is default-off and emits an optional `QueryEvent.OperatorMetrics` sidecar. See [M242_OPERATOR_METRICS.md](M242_OPERATOR_METRICS.md).
 - [x] M243 Arrangement memory metrics split by key, value, and trace history. `TypedTableAggregateArrangementStats` exposes `EstimatedKeyBytes`, `EstimatedValueBytes`, and `EstimatedTraceBytes` while preserving `EstimatedBytes`. See [M243_ARRANGEMENT_MEMORY_METRICS.md](M243_ARRANGEMENT_MEMORY_METRICS.md).
 - [x] M244 Compaction debt metrics measured against the current logical frontier. `TypedTableAggregateArrangementStats.CompactionDebt` reports `max(0, SourceSequence-CompactedThrough)` without changing compaction behavior. See [M244_COMPACTION_DEBT.md](M244_COMPACTION_DEBT.md).
-- [ ] M245 Timestamp throughput and input-to-output latency metrics.
+- [x] M245 Timestamp throughput and input-to-output latency metrics. `SQLTelemetry.ObserveSQLTimestamp` exports update/batch throughput counters, monotone logical timestamp gauges, and guarded input-to-output freshness latency. See [M245_TIMESTAMP_TELEMETRY.md](M245_TIMESTAMP_TELEMETRY.md).
 - [ ] M246 Per-object history-retention policies with bounded storage accounting.
 - [ ] M247 Resume errors that identify when a requested frontier has expired.
 - [ ] M248 Reusable maintained-result cache for identical read expressions.

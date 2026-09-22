@@ -13,26 +13,49 @@ var defaultSQLTelemetryLatencyBounds = []float64{0.001, 0.005, 0.01, 0.05, 0.1, 
 type SQLTelemetry struct {
 	mu sync.Mutex
 
-	bounds  []float64
-	buckets []uint64
+	bounds                  []float64
+	buckets                 []uint64
+	timestampLatencyBounds  []float64
+	timestampLatencyBuckets []uint64
 	SQLTelemetrySnapshot
 }
 
 // SQLTelemetrySnapshot contains cumulative query telemetry counters. Working
 // bytes are planner-visible operator input/output bytes, not Go heap usage.
 type SQLTelemetrySnapshot struct {
-	QueriesTotal      uint64
-	ErrorsTotal       uint64
-	CanceledTotal     uint64
-	SlowTotal         uint64
-	IndexUsesTotal    uint64
-	SpillUsesTotal    uint64
-	ResultBytesTotal  uint64
-	WorkingBytesTotal uint64
-	LatencyNanosTotal uint64
-	LatencyCount      uint64
-	LatencyBounds     []float64
-	LatencyBuckets    []uint64
+	QueriesTotal                   uint64
+	ErrorsTotal                    uint64
+	CanceledTotal                  uint64
+	SlowTotal                      uint64
+	IndexUsesTotal                 uint64
+	SpillUsesTotal                 uint64
+	ResultBytesTotal               uint64
+	WorkingBytesTotal              uint64
+	LatencyNanosTotal              uint64
+	LatencyCount                   uint64
+	LatencyBounds                  []float64
+	LatencyBuckets                 []uint64
+	TimestampObservationsTotal     uint64
+	TimestampUpdatesTotal          uint64
+	TimestampBatchesTotal          uint64
+	LatestInputTimestamp           uint64
+	LatestOutputTimestamp          uint64
+	InputToOutputLatencyNanosTotal uint64
+	InputToOutputLatencyCount      uint64
+	InputToOutputLatencyBounds     []float64
+	InputToOutputLatencyBuckets    []uint64
+}
+
+// SQLTimestampTelemetryEvent describes one logical timestamp's progress
+// through an input-to-output path. Timestamp values are opaque logical units;
+// Unix-nano values are wall-clock samples used only for freshness latency.
+type SQLTimestampTelemetryEvent struct {
+	InputTimestamp   uint64 `json:"input_timestamp,omitempty"`
+	OutputTimestamp  uint64 `json:"output_timestamp,omitempty"`
+	Updates          uint64 `json:"updates,omitempty"`
+	Batches          uint64 `json:"batches,omitempty"`
+	InputAtUnixNano  int64  `json:"input_at_unix_nano,omitempty"`
+	OutputAtUnixNano int64  `json:"output_at_unix_nano,omitempty"`
 }
 
 // SQLTelemetryMetric is an SDK-neutral OpenTelemetry metric point. Exporters
@@ -47,7 +70,13 @@ type SQLTelemetryMetric struct {
 // NewSQLTelemetry creates a telemetry observer with practical latency buckets.
 func NewSQLTelemetry() *SQLTelemetry {
 	bounds := append([]float64(nil), defaultSQLTelemetryLatencyBounds...)
-	return &SQLTelemetry{bounds: bounds, buckets: make([]uint64, len(bounds))}
+	timestampLatencyBounds := append([]float64(nil), defaultSQLTelemetryLatencyBounds...)
+	return &SQLTelemetry{
+		bounds:                  bounds,
+		buckets:                 make([]uint64, len(bounds)),
+		timestampLatencyBounds:  timestampLatencyBounds,
+		timestampLatencyBuckets: make([]uint64, len(timestampLatencyBounds)),
+	}
 }
 
 // ObserveSQLQuery implements SQLQueryObserver.
@@ -93,6 +122,39 @@ func (telemetry *SQLTelemetry) ObserveSQLQuery(event SQLQueryEvent) {
 	}
 }
 
+// ObserveSQLTimestamp records logical progress without changing query
+// execution. Counter rates can be used as timestamp throughput, while the
+// optional wall-clock pair measures input-to-output freshness latency.
+func (telemetry *SQLTelemetry) ObserveSQLTimestamp(event SQLTimestampTelemetryEvent) {
+	if telemetry == nil {
+		return
+	}
+	telemetry.mu.Lock()
+	defer telemetry.mu.Unlock()
+	telemetry.TimestampObservationsTotal++
+	telemetry.TimestampUpdatesTotal += event.Updates
+	telemetry.TimestampBatchesTotal += event.Batches
+	if event.InputTimestamp > telemetry.LatestInputTimestamp {
+		telemetry.LatestInputTimestamp = event.InputTimestamp
+	}
+	if event.OutputTimestamp > telemetry.LatestOutputTimestamp {
+		telemetry.LatestOutputTimestamp = event.OutputTimestamp
+	}
+	if event.InputAtUnixNano <= 0 || event.OutputAtUnixNano < event.InputAtUnixNano {
+		return
+	}
+	latencyNanos := uint64(event.OutputAtUnixNano - event.InputAtUnixNano)
+	telemetry.InputToOutputLatencyNanosTotal += latencyNanos
+	telemetry.InputToOutputLatencyCount++
+	seconds := float64(latencyNanos) / 1e9
+	for index, bound := range telemetry.timestampLatencyBounds {
+		if seconds <= bound {
+			telemetry.timestampLatencyBuckets[index]++
+			break
+		}
+	}
+}
+
 // Snapshot returns a stable copy for application metrics endpoints.
 func (telemetry *SQLTelemetry) Snapshot() SQLTelemetrySnapshot {
 	if telemetry == nil {
@@ -103,6 +165,8 @@ func (telemetry *SQLTelemetry) Snapshot() SQLTelemetrySnapshot {
 	snapshot := telemetry.SQLTelemetrySnapshot
 	snapshot.LatencyBounds = append([]float64(nil), telemetry.bounds...)
 	snapshot.LatencyBuckets = append([]uint64(nil), telemetry.buckets...)
+	snapshot.InputToOutputLatencyBounds = append([]float64(nil), telemetry.timestampLatencyBounds...)
+	snapshot.InputToOutputLatencyBuckets = append([]uint64(nil), telemetry.timestampLatencyBuckets...)
 	return snapshot
 }
 
@@ -118,23 +182,13 @@ func (telemetry *SQLTelemetry) PrometheusMetrics() string {
 	writeSQLTelemetryCounter(&out, "hatrie_sql_query_spill_uses_total", "SQL query operators using external spill work.", snapshot.SpillUsesTotal)
 	writeSQLTelemetryCounter(&out, "hatrie_sql_query_result_bytes_total", "SQL result bytes emitted or materialized.", snapshot.ResultBytesTotal)
 	writeSQLTelemetryCounter(&out, "hatrie_sql_query_working_bytes_total", "Planner-visible SQL operator input and output bytes.", snapshot.WorkingBytesTotal)
-	out.WriteString("# HELP hatrie_sql_query_latency_seconds SQL query completion latency.\n# TYPE hatrie_sql_query_latency_seconds histogram\n")
-	var cumulative uint64
-	for index, bound := range snapshot.LatencyBounds {
-		cumulative += snapshot.LatencyBuckets[index]
-		out.WriteString("hatrie_sql_query_latency_seconds_bucket{le=\"")
-		out.WriteString(strconv.FormatFloat(bound, 'f', -1, 64))
-		out.WriteString("\"} ")
-		out.WriteString(strconv.FormatUint(cumulative, 10))
-		out.WriteByte('\n')
-	}
-	out.WriteString("hatrie_sql_query_latency_seconds_bucket{le=\"+Inf\"} ")
-	out.WriteString(strconv.FormatUint(snapshot.LatencyCount, 10))
-	out.WriteString("\nhatrie_sql_query_latency_seconds_sum ")
-	out.WriteString(strconv.FormatFloat(float64(snapshot.LatencyNanosTotal)/1e9, 'f', -1, 64))
-	out.WriteString("\nhatrie_sql_query_latency_seconds_count ")
-	out.WriteString(strconv.FormatUint(snapshot.LatencyCount, 10))
-	out.WriteByte('\n')
+	writeSQLTelemetryHistogram(&out, "hatrie_sql_query_latency_seconds", "SQL query completion latency.", snapshot.LatencyBounds, snapshot.LatencyBuckets, snapshot.LatencyCount, snapshot.LatencyNanosTotal)
+	writeSQLTelemetryCounter(&out, "hatrie_sql_timestamp_observations_total", "Logical timestamp progress observations.", snapshot.TimestampObservationsTotal)
+	writeSQLTelemetryCounter(&out, "hatrie_sql_timestamp_updates_total", "Updates associated with logical timestamp progress.", snapshot.TimestampUpdatesTotal)
+	writeSQLTelemetryCounter(&out, "hatrie_sql_timestamp_batches_total", "Batches associated with logical timestamp progress.", snapshot.TimestampBatchesTotal)
+	writeSQLTelemetryGauge(&out, "hatrie_sql_timestamp_input", "Latest logical input timestamp observed.", snapshot.LatestInputTimestamp)
+	writeSQLTelemetryGauge(&out, "hatrie_sql_timestamp_output", "Latest logical output timestamp observed.", snapshot.LatestOutputTimestamp)
+	writeSQLTelemetryHistogram(&out, "hatrie_sql_input_to_output_latency_seconds", "Input-to-output freshness latency.", snapshot.InputToOutputLatencyBounds, snapshot.InputToOutputLatencyBuckets, snapshot.InputToOutputLatencyCount, snapshot.InputToOutputLatencyNanosTotal)
 	return out.String()
 }
 
@@ -150,7 +204,59 @@ func (telemetry *SQLTelemetry) OpenTelemetryMetrics() []SQLTelemetryMetric {
 		{Name: "hatrie.sql.query.result_bytes", Unit: "By", Value: float64(snapshot.ResultBytesTotal)},
 		{Name: "hatrie.sql.query.working_bytes", Unit: "By", Value: float64(snapshot.WorkingBytesTotal)},
 		{Name: "hatrie.sql.query.latency", Unit: "s", Value: float64(snapshot.LatencyNanosTotal) / 1e9},
+		{Name: "hatrie.sql.timestamp.observations", Unit: "1", Value: float64(snapshot.TimestampObservationsTotal)},
+		{Name: "hatrie.sql.timestamp.updates", Unit: "1", Value: float64(snapshot.TimestampUpdatesTotal)},
+		{Name: "hatrie.sql.timestamp.batches", Unit: "1", Value: float64(snapshot.TimestampBatchesTotal)},
+		{Name: "hatrie.sql.timestamp.input", Unit: "1", Value: float64(snapshot.LatestInputTimestamp)},
+		{Name: "hatrie.sql.timestamp.output", Unit: "1", Value: float64(snapshot.LatestOutputTimestamp)},
+		{Name: "hatrie.sql.timestamp.input_to_output_latency", Unit: "s", Value: float64(snapshot.InputToOutputLatencyNanosTotal) / 1e9},
 	}
+}
+
+func writeSQLTelemetryHistogram(out *strings.Builder, name, help string, bounds []float64, buckets []uint64, count, sumNanos uint64) {
+	out.WriteString("# HELP ")
+	out.WriteString(name)
+	out.WriteByte(' ')
+	out.WriteString(help)
+	out.WriteString("\n# TYPE ")
+	out.WriteString(name)
+	out.WriteString(" histogram\n")
+	var cumulative uint64
+	for index, bound := range bounds {
+		cumulative += buckets[index]
+		out.WriteString(name)
+		out.WriteString("_bucket{le=\"")
+		out.WriteString(strconv.FormatFloat(bound, 'f', -1, 64))
+		out.WriteString("\"} ")
+		out.WriteString(strconv.FormatUint(cumulative, 10))
+		out.WriteByte('\n')
+	}
+	out.WriteString(name)
+	out.WriteString("_bucket{le=\"+Inf\"} ")
+	out.WriteString(strconv.FormatUint(count, 10))
+	out.WriteByte('\n')
+	out.WriteString(name)
+	out.WriteString("_sum ")
+	out.WriteString(strconv.FormatFloat(float64(sumNanos)/1e9, 'f', -1, 64))
+	out.WriteByte('\n')
+	out.WriteString(name)
+	out.WriteString("_count ")
+	out.WriteString(strconv.FormatUint(count, 10))
+	out.WriteByte('\n')
+}
+
+func writeSQLTelemetryGauge(out *strings.Builder, name, help string, value uint64) {
+	out.WriteString("# HELP ")
+	out.WriteString(name)
+	out.WriteByte(' ')
+	out.WriteString(help)
+	out.WriteString("\n# TYPE ")
+	out.WriteString(name)
+	out.WriteString(" gauge\n")
+	out.WriteString(name)
+	out.WriteByte(' ')
+	out.WriteString(strconv.FormatUint(value, 10))
+	out.WriteByte('\n')
 }
 
 func writeSQLTelemetryCounter(out *strings.Builder, name, help string, value uint64) {

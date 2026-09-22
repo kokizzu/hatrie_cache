@@ -96,6 +96,7 @@ security guidance before exposing it on a network.
 - Opt-in per-operator SQL update, batch, and frontier metrics: [M242_OPERATOR_METRICS.md](M242_OPERATOR_METRICS.md)
 - Typed-table arrangement memory metrics split by key, value, and trace state: [M243_ARRANGEMENT_MEMORY_METRICS.md](M243_ARRANGEMENT_MEMORY_METRICS.md)
 - Typed-table arrangement compaction debt at the logical frontier: [M244_COMPACTION_DEBT.md](M244_COMPACTION_DEBT.md)
+- Opt-in timestamp throughput and input-to-output freshness telemetry: [M245_TIMESTAMP_TELEMETRY.md](M245_TIMESTAMP_TELEMETRY.md)
 - ClickHouse-style typed-table decompressed column-block cache: [TYPED_TABLE_DECOMPRESSED_BLOCK_CACHE.md](TYPED_TABLE_DECOMPRESSED_BLOCK_CACHE.md)
 - 50-item adoption backlog for each inspiration source: [INSPIRATION_BACKLOG.md](INSPIRATION_BACKLOG.md)
 - Opt-in cross-source snapshot cutover coordination: [MZ010_SNAPSHOT_CUTOVER.md](MZ010_SNAPSHOT_CUTOVER.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-010-cross-source-snapshot-cutover)
