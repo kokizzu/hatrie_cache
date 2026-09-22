@@ -170,7 +170,7 @@ operator control remain the preferred deployment model.
 - [x] T228 Tuple-format schema versions with compatible readers. Existing `hatSchema.Schema.Version`, reversible migrations, and `CheckRollingCompatibility` provide explicit versioning and conservative rolling-reader checks. See `hat/hatSchema/schema.go`, `hat/hatSchema/compatibility.go`, and `hat/hatSchema/rolling_schema.go`.
 - [x] T229 Before-replace triggers for validation and conflict policy. `hatDataStructure.MemtxTable` exposes an opt-in typed `BeforeReplace` hook that can reject or normalize atomic inserts/upserts. See [TT029_BEFORE_REPLACE.md](TT029_BEFORE_REPLACE.md).
 - [x] T230 On-replace changefeed hooks with old and new tuple images. `hatDataStructure.MemtxTable` emits an ordered opt-in `OnReplace` event after successful inserts/upserts with old and new typed images. See [TT030_ON_REPLACE_CHANGEFEED.md](TT030_ON_REPLACE_CHANGEFEED.md).
-- [ ] T231 After-replace audit hooks with transaction identity.
+- [x] T231 After-replace audit hooks with transaction identity. `hatDataStructure.MemtxTable` emits an opt-in `AfterReplace` audit callback with a table-local transaction identity and the committed old/new event. See [TT031_AFTER_REPLACE_AUDIT.md](TT031_AFTER_REPLACE_AUDIT.md).
 - [ ] T232 Atomic transaction scopes with nested rollback boundaries.
 - [ ] T233 MVCC transactions that permit cooperative yields.
 - [ ] T234 Early conflict detection for competing transactional writes.

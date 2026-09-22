@@ -37279,3 +37279,11 @@ the T230 baseline `MemtxTable` update path measured a `12.34 ns/op` median and
 the enabled `OnReplace` path measured `12.98 ns/op`. Both paths measured `0 B/op`
 and `0 allocs/op`, so the ordered event hook adds about 5.2% CPU only when
 explicitly enabled.
+## T031: After-Replace Audit Hook
+
+With three 3-second samples on an AMD Ryzen 9 5950X, the T231 baseline
+`MemtxTable` update path measured a `12.29 ns/op` median and the enabled
+`AfterReplace` audit path measured `15.40 ns/op`. Both paths measured `0 B/op`
+and `0 allocs/op`, so the table-local transaction identity costs about 25.3%
+CPU only when explicitly enabled. A pointer-event variant was rejected after
+it measured `48 B/op` and `1 alloc/op`.

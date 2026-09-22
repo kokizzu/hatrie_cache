@@ -4971,3 +4971,4 @@ network or destructive storage operations. Use
 safety bounds, and measured comparison in [BENCHMARK.md](BENCHMARK.md#ch-019-replica-part-consistency-planning).
 - Optional typed before-replace validation/conflict hooks for `MemtxTable` are documented in [TT029_BEFORE_REPLACE.md](TT029_BEFORE_REPLACE.md).
 - Optional ordered typed `MemtxTable` changefeed events with old/new images: [TT030_ON_REPLACE_CHANGEFEED.md](TT030_ON_REPLACE_CHANGEFEED.md), with CPU and allocation measurements in [BENCHMARK.md](BENCHMARK.md#t030-on-replace-changefeed-hook).
+- Optional table-local transaction identities for ordered `MemtxTable` after-replace audit hooks: [TT031_AFTER_REPLACE_AUDIT.md](TT031_AFTER_REPLACE_AUDIT.md), with CPU and allocation measurements in [BENCHMARK.md](BENCHMARK.md#t031-after-replace-audit-hook).

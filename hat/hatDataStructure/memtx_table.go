@@ -50,6 +50,12 @@ type MemtxBeforeReplace[T any] func(MemtxReplaceEvent[T]) (T, error)
 // mutation order and the callback must not call back into the table.
 type MemtxOnReplace[T any] func(MemtxReplaceEvent[T])
 
+// MemtxAfterReplace consumes committed replacement images for audit or durable
+// change logging. The transaction identity is passed separately to avoid
+// copying a second wrapper value. It runs under the table write lock after
+// OnReplace.
+type MemtxAfterReplace[T any] func(transactionID uint64, event MemtxReplaceEvent[T])
+
 // MemtxTableOptions controls construction of a fixed-capacity in-memory table.
 type MemtxTableOptions struct {
 	Capacity int
@@ -61,6 +67,7 @@ type MemtxTableOptions struct {
 type MemtxTableHooks[T any] struct {
 	BeforeReplace MemtxBeforeReplace[T]
 	OnReplace     MemtxOnReplace[T]
+	AfterReplace  MemtxAfterReplace[T]
 }
 
 // MemtxEntry is a row returned by MemtxTable.ScanInto.
@@ -89,6 +96,8 @@ type MemtxTable[T any] struct {
 	live      int
 	before    MemtxBeforeReplace[T]
 	onReplace MemtxOnReplace[T]
+	after     MemtxAfterReplace[T]
+	nextTxnID uint64
 }
 
 // NewMemtxTable creates a fixed-capacity table. A zero capacity selects the
@@ -113,6 +122,7 @@ func NewMemtxTableWithHooks[T any](options MemtxTableOptions, hooks MemtxTableHo
 		free:      make([]uint32, 0, capacity),
 		before:    hooks.BeforeReplace,
 		onReplace: hooks.OnReplace,
+		after:     hooks.AfterReplace,
 	}, nil
 }
 
@@ -144,8 +154,8 @@ func (table *MemtxTable[T]) Insert(id uint64, value T) error {
 	if err := table.insertLocked(id, event.New); err != nil {
 		return err
 	}
-	if table.onReplace != nil {
-		table.onReplace(event)
+	if table.onReplace != nil || table.after != nil {
+		table.emitReplaceLocked(event)
 	}
 	return nil
 }
@@ -174,8 +184,8 @@ func (table *MemtxTable[T]) Upsert(id uint64, value T) (inserted bool, err error
 			event.New = updated
 		}
 		table.slots[position].value = event.New
-		if table.onReplace != nil {
-			table.onReplace(event)
+		if table.onReplace != nil || table.after != nil {
+			table.emitReplaceLocked(event)
 		}
 		return false, nil
 	}
@@ -197,8 +207,8 @@ func (table *MemtxTable[T]) Upsert(id uint64, value T) (inserted bool, err error
 	if err := table.insertLocked(id, event.New); err != nil {
 		return false, err
 	}
-	if table.onReplace != nil {
-		table.onReplace(event)
+	if table.onReplace != nil || table.after != nil {
+		table.emitReplaceLocked(event)
 	}
 	return true, nil
 }
@@ -296,6 +306,20 @@ func (table *MemtxTable[T]) Reset() {
 
 func (table *MemtxTable[T]) hasCapacityLocked() bool {
 	return len(table.free) > 0 || table.next < uint32(len(table.slots))
+}
+
+func (table *MemtxTable[T]) emitReplaceLocked(event MemtxReplaceEvent[T]) {
+	if table.onReplace != nil {
+		table.onReplace(event)
+	}
+	if table.after == nil {
+		return
+	}
+	table.nextTxnID++
+	if table.nextTxnID == 0 {
+		table.nextTxnID = 1
+	}
+	table.after(table.nextTxnID, event)
 }
 
 func (table *MemtxTable[T]) insertLocked(id uint64, value T) error {

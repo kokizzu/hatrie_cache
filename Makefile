@@ -27613,3 +27613,39 @@ push-t230:
 .PHONY: verify-t230-docs
 verify-t230-docs:
 	bash ./scripts/verify-t230-docs.sh
+
+.PHONY: format-t231
+format-t231:
+	bash ./scripts/format-t231.sh
+
+.PHONY: test-t231
+test-t231:
+	bash ./scripts/test-t231.sh
+
+.PHONY: benchmark-t231
+benchmark-t231:
+	bash ./scripts/benchmark-t231.sh
+
+.PHONY: race-t231
+race-t231:
+	bash ./scripts/race-t231.sh
+
+.PHONY: vet-t231
+vet-t231:
+	bash ./scripts/vet-t231.sh
+
+.PHONY: verify-t231-docs
+verify-t231-docs:
+	bash ./scripts/verify-t231-docs.sh
+
+.PHONY: stage-t231
+stage-t231:
+	bash ./scripts/stage-t231.sh
+
+.PHONY: commit-t231
+commit-t231:
+	bash ./scripts/commit-t231.sh
+
+.PHONY: push-t231
+push-t231:
+	bash ./scripts/push-t231.sh
