@@ -25,12 +25,13 @@ type MaterializedViewDefinition struct {
 
 // MaterializedViewStatus describes one immutable materialized-view snapshot.
 type MaterializedViewStatus struct {
-	Name            string
-	Dependencies    []string
-	Revision        uint64
-	RefreshedAt     time.Time
-	HydrationState  MaterializedViewHydrationState `json:"hydration_state,omitempty"`
-	IdempotencyKeys []string                       `json:"idempotency_keys,omitempty"`
+	Name              string
+	Dependencies      []string
+	Revision          uint64
+	RefreshedAt       time.Time
+	HydrationState    MaterializedViewHydrationState    `json:"hydration_state,omitempty"`
+	HydrationProgress MaterializedViewHydrationProgress `json:"hydration_progress,omitempty"`
+	IdempotencyKeys   []string                          `json:"idempotency_keys,omitempty"`
 }
 
 // MaterializedViewRefreshMetadata carries optional source-write metadata to
@@ -79,13 +80,14 @@ type MaterializedViews struct {
 }
 
 type materializedView struct {
-	definition     MaterializedViewDefinition
-	snapshot       MaterializedView
-	sourceVersions map[string]string
-	collation      SQLCollation
-	storedRows     int
-	storedBytes    int64
-	generation     uint64
+	definition        MaterializedViewDefinition
+	snapshot          MaterializedView
+	hydrationProgress *materializedViewHydrationProgressState
+	sourceVersions    map[string]string
+	collation         SQLCollation
+	storedRows        int
+	storedBytes       int64
+	generation        uint64
 }
 
 // NewMaterializedViews creates an empty materialized-view registry.
@@ -213,7 +215,11 @@ func (views *MaterializedViews) Get(name string) (MaterializedView, bool) {
 	if !exists {
 		return MaterializedView{}, false
 	}
-	return cloneMaterializedView(view.snapshot), true
+	snapshot := cloneMaterializedView(view.snapshot)
+	if view.hydrationProgress != nil {
+		snapshot.Status.HydrationProgress = view.hydrationProgress.snapshot()
+	}
+	return snapshot, true
 }
 
 // Drop removes one named materialized view and its retained storage accounting.

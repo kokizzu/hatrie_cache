@@ -25897,3 +25897,55 @@ push-m222-materialized-compute-replicas:
 
 status-m222-materialized-compute-replicas:
 	bash scripts/status-m222-materialized-compute-replicas.sh
+
+.PHONY: format-m224-materialized-hydration-progress
+format-m224-materialized-hydration-progress:
+	bash scripts/m224-materialized-hydration-progress.sh format
+
+.PHONY: test-m224-materialized-hydration-progress
+test-m224-materialized-hydration-progress:
+	bash scripts/m224-materialized-hydration-progress.sh test
+
+.PHONY: benchmark-m224-materialized-hydration-progress
+benchmark-m224-materialized-hydration-progress:
+	bash scripts/m224-materialized-hydration-progress.sh benchmark
+
+.PHONY: race-m224-materialized-hydration-progress
+race-m224-materialized-hydration-progress:
+	bash scripts/m224-materialized-hydration-progress.sh race
+
+.PHONY: vet-m224-materialized-hydration-progress
+vet-m224-materialized-hydration-progress:
+	bash scripts/m224-materialized-hydration-progress.sh vet
+
+.PHONY: test-m224-materialized-hydration-package
+test-m224-materialized-hydration-package:
+	bash scripts/m224-materialized-hydration-progress.sh package
+
+.PHONY: verify-m224-materialized-hydration-docs
+verify-m224-materialized-hydration-docs:
+	bash scripts/m224-materialized-hydration-progress.sh docs
+
+.PHONY: status-m224-materialized-hydration
+status-m224-materialized-hydration:
+	bash scripts/m224-materialized-hydration-progress.sh status
+
+.PHONY: staged-m224-materialized-hydration
+staged-m224-materialized-hydration:
+	bash scripts/m224-materialized-hydration-progress.sh staged
+
+.PHONY: diff-m224-materialized-hydration
+diff-m224-materialized-hydration:
+	bash scripts/m224-materialized-hydration-progress.sh diff
+
+.PHONY: stage-m224-materialized-hydration-progress
+stage-m224-materialized-hydration-progress:
+	bash scripts/stage-m224-materialized-hydration-progress.sh
+
+.PHONY: commit-m224-materialized-hydration-progress
+commit-m224-materialized-hydration-progress:
+	bash scripts/commit-m224-materialized-hydration-progress.sh
+
+.PHONY: push-m224-materialized-hydration-progress
+push-m224-materialized-hydration-progress:
+	bash scripts/push-m224-materialized-hydration-progress.sh

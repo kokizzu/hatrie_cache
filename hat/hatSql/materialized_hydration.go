@@ -121,6 +121,8 @@ func (views *MaterializedViews) MarkMaterializedViewCold(name string) error {
 	view.snapshot.Status.RefreshedAt = time.Time{}
 	view.snapshot.Status.IdempotencyKeys = nil
 	view.snapshot.Status.HydrationState = MaterializedViewHydrationStateCold
+	view.snapshot.Status.HydrationProgress = MaterializedViewHydrationProgress{}
+	view.hydrationProgress = nil
 	view.sourceVersions = nil
 	views.rows -= view.storedRows
 	views.bytes -= view.storedBytes
@@ -141,14 +143,37 @@ func (views *MaterializedViews) Hydrate(ctx context.Context, name string, resolv
 	if name == "" {
 		return MaterializedViewStatus{}, fmt.Errorf("materialized view name is required")
 	}
+	views.mu.RLock()
+	view, exists := views.views[name]
+	if !exists {
+		views.mu.RUnlock()
+		return MaterializedViewStatus{}, fmt.Errorf("materialized view %q does not exist", name)
+	}
+	state := materializedViewHydrationState(view.snapshot.Status)
+	switch state {
+	case MaterializedViewHydrationStateHydrating:
+		views.mu.RUnlock()
+		return MaterializedViewStatus{}, fmt.Errorf("%w: %q", ErrMaterializedViewHydrationInProgress, name)
+	case MaterializedViewHydrationStateReady:
+		views.mu.RUnlock()
+		return MaterializedViewStatus{}, fmt.Errorf("%w: %q", ErrMaterializedViewHydrationNotCold, name)
+	case MaterializedViewHydrationStateCold:
+	default:
+		views.mu.RUnlock()
+		return MaterializedViewStatus{}, fmt.Errorf("%w: %q has invalid state %q", ErrMaterializedViewHydrationNotCold, name, state)
+	}
+	definition := view.definition
+	views.mu.RUnlock()
+
+	estimatedWork, estimateAvailable, estimateExact := estimateMaterializedViewHydrationWork(resolver, definition.Dependencies)
 
 	views.mu.Lock()
-	view, exists := views.views[name]
+	view, exists = views.views[name]
 	if !exists {
 		views.mu.Unlock()
 		return MaterializedViewStatus{}, fmt.Errorf("materialized view %q does not exist", name)
 	}
-	state := materializedViewHydrationState(view.snapshot.Status)
+	state = materializedViewHydrationState(view.snapshot.Status)
 	switch state {
 	case MaterializedViewHydrationStateHydrating:
 		views.mu.Unlock()
@@ -157,22 +182,26 @@ func (views *MaterializedViews) Hydrate(ctx context.Context, name string, resolv
 		views.mu.Unlock()
 		return MaterializedViewStatus{}, fmt.Errorf("%w: %q", ErrMaterializedViewHydrationNotCold, name)
 	case MaterializedViewHydrationStateCold:
+		progress := newMaterializedViewHydrationProgressState(estimatedWork, estimateAvailable, estimateExact)
 		view.snapshot.Status.HydrationState = MaterializedViewHydrationStateHydrating
+		view.snapshot.Status.HydrationProgress = progress.snapshot()
+		view.hydrationProgress = progress
 		generation := view.generation
 		views.views[name] = view
 		views.mu.Unlock()
-		return views.hydrateMaterializedView(ctx, name, generation, view, resolver, options)
+		return views.hydrateMaterializedView(withMaterializedViewHydrationProgress(ctx, progress), name, generation, view, resolver, options, progress)
 	default:
 		views.mu.Unlock()
 		return MaterializedViewStatus{}, fmt.Errorf("%w: %q has invalid state %q", ErrMaterializedViewHydrationNotCold, name, state)
 	}
 }
 
-func (views *MaterializedViews) hydrateMaterializedView(ctx context.Context, name string, generation uint64, view materializedView, resolver SourceResolver, options QueryOptions) (MaterializedViewStatus, error) {
+func (views *MaterializedViews) hydrateMaterializedView(ctx context.Context, name string, generation uint64, view materializedView, resolver SourceResolver, options QueryOptions, progress *materializedViewHydrationProgressState) (MaterializedViewStatus, error) {
 	result, sourceVersions, err := executeMaterializedViewQuery(ctx, view.definition.Query, view.definition.Dependencies, resolver, options)
 	if err != nil {
 		return views.finishMaterializedViewHydrationFailure(name, generation, fmt.Errorf("hydrate materialized view %q: %w", name, err))
 	}
+	progress.complete()
 	result = cloneQueryResult(result)
 	storedRows := len(result.Rows)
 	storedBytes := views.storageBytes(result)
@@ -188,6 +217,8 @@ func (views *MaterializedViews) hydrateMaterializedView(ctx context.Context, nam
 	}
 	if err := views.checkStorageBudget(views.rows-current.storedRows+storedRows, views.bytes-current.storedBytes+storedBytes); err != nil {
 		current.snapshot.Status.HydrationState = MaterializedViewHydrationStateCold
+		current.snapshot.Status.HydrationProgress = MaterializedViewHydrationProgress{}
+		current.hydrationProgress = nil
 		views.views[name] = current
 		return cloneMaterializedViewStatus(current.snapshot.Status), err
 	}
@@ -202,6 +233,8 @@ func (views *MaterializedViews) hydrateMaterializedView(ctx context.Context, nam
 		refreshed, err := buildMaterializedViewPointLookup(index.definition, result)
 		if err != nil {
 			current.snapshot.Status.HydrationState = MaterializedViewHydrationStateCold
+			current.snapshot.Status.HydrationProgress = MaterializedViewHydrationProgress{}
+			current.hydrationProgress = nil
 			views.views[name] = current
 			return cloneMaterializedViewStatus(current.snapshot.Status), fmt.Errorf("hydrate materialized view point lookup %q: %w", indexName, err)
 		}
@@ -215,6 +248,8 @@ func (views *MaterializedViews) hydrateMaterializedView(ctx context.Context, nam
 	current.snapshot.Status.RefreshedAt = time.Now().UTC()
 	current.snapshot.Status.IdempotencyKeys = nil
 	current.snapshot.Status.HydrationState = MaterializedViewHydrationStateReady
+	current.snapshot.Status.HydrationProgress = progress.snapshot()
+	current.hydrationProgress = nil
 	current.sourceVersions = sourceVersions
 	current.collation = normalizedMaterializedViewCollation(options.Collation)
 	current.storedRows = storedRows
@@ -236,6 +271,8 @@ func (views *MaterializedViews) finishMaterializedViewHydrationFailure(name stri
 		return MaterializedViewStatus{}, err
 	}
 	view.snapshot.Status.HydrationState = MaterializedViewHydrationStateCold
+	view.snapshot.Status.HydrationProgress = MaterializedViewHydrationProgress{}
+	view.hydrationProgress = nil
 	views.views[name] = view
 	return cloneMaterializedViewStatus(view.snapshot.Status), err
 }

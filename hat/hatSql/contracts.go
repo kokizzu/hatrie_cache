@@ -1359,6 +1359,15 @@ type StreamSourceResolver interface {
 	StreamSQLSource(ctx context.Context, name string, key string, visit func(Row) error) error
 }
 
+// HydrationProgressSourceResolver optionally resolves a source while reporting
+// each source row to a materialized-view hydration operation. The returned
+// rows must have the same contents and order as ResolveSQLSource and remain
+// valid until the current query completes; the callback is a progress signal
+// only and its row must not be retained by the resolver.
+type HydrationProgressSourceResolver interface {
+	ResolveSQLSourceWithProgress(ctx context.Context, name string, key string, report func(Row) error) ([]Row, error)
+}
+
 // SnapshotLocker optionally coordinates a consistent source snapshot for a query.
 type SnapshotLocker interface{ LockSQLSnapshot() func() }
 

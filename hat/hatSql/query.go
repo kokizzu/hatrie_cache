@@ -140,6 +140,7 @@ type SQLColumnarNumericSegment = ColumnarNumericSegment
 type SQLColumnarNumericSegments = ColumnarNumericSegments
 type SQLSegmentedColumnarSourceResolver = SegmentedColumnarSourceResolver
 type SQLStreamSourceResolver = StreamSourceResolver
+type SQLHydrationProgressSourceResolver = HydrationProgressSourceResolver
 type SQLSnapshotLocker = SnapshotLocker
 type SQLIndexedSourceResolver = IndexedSourceResolver
 type SQLLookupSourceResolver = LookupSourceResolver
@@ -13848,7 +13849,18 @@ func resolveSQLSourceWithPartitionPredicates(source sqlSource, resolver SQLSourc
 			}
 		}
 		if !borrowed && err == nil {
-			rows, err = resolveSQLSourceContext(sqlResolverExecutionContext(control), resolver, source.kind, source.key)
+			resolutionContext := sqlResolverExecutionContext(control)
+			if progressing, ok := resolver.(HydrationProgressSourceResolver); ok {
+				rows, err = progressing.ResolveSQLSourceWithProgress(resolutionContext, source.kind, source.key, func(SQLRow) error {
+					reportMaterializedViewHydrationWork(resolutionContext)
+					return nil
+				})
+				if err == nil {
+					borrowed = true
+				}
+			} else {
+				rows, err = resolveSQLSourceContext(resolutionContext, resolver, source.kind, source.key)
+			}
 		}
 		return finishSQLSourceRows(source, control, rows, borrowed, err)
 	case "EXTERNAL":

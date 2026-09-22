@@ -36228,3 +36228,17 @@ control uses the existing synchronous `Create`; the feature path uses
 The lifecycle is opt-in; existing `Create` does not enter the cold/hydrating
 states. Raw samples and state/failure semantics are in
 [M223_MATERIALIZED_VIEW_HYDRATION.md](M223_MATERIALIZED_VIEW_HYDRATION.md).
+
+## M224 Materialized Hydration Progress
+
+The opt-in progress and cardinality resolver path was measured against the
+legacy `SourceResolver` hydration path on 256 rows, five samples per case:
+
+| Case | ns/op | B/op | allocs/op | Feature / control |
+| --- | ---: | ---: | ---: | ---: |
+| Legacy control | 274,309 | 271,052 | 1,569 | 1.00x |
+| Progress + cardinality | 233,477 | 232,332 | 1,067 | 0.85x / 0.86x / 0.68x |
+
+The new ownership contract avoids a duplicate source-row copy in this
+workload. Raw samples and interpretation are in
+[M224_MATERIALIZED_HYDRATION_PROGRESS.md](M224_MATERIALIZED_HYDRATION_PROGRESS.md).

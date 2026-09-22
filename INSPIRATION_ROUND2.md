@@ -110,7 +110,7 @@ operator control remain the preferred deployment model.
 - [x] M221 Isolated compute clusters with independent resource budgets; already covered by opt-in `hatSql.SQLClusterAdmission` with independent named-cluster and serving/maintenance budgets. See [M221_CLUSTER_COMPUTE_ISOLATION_AUDIT.md](M221_CLUSTER_COMPUTE_ISOLATION_AUDIT.md).
 - [x] M222 Replicated compute workers for highly available maintained indexes; added opt-in `MaterializedViewComputeReplicaSet` refresh fanout, health fencing, and healthy-replica point-read failover. See [M222_REPLICATED_COMPUTE_WORKERS.md](M222_REPLICATED_COMPUTE_WORKERS.md).
 - [x] M223 Hydration state machines that distinguish cold, hydrating, and ready views. See [M223_MATERIALIZED_VIEW_HYDRATION.md](M223_MATERIALIZED_VIEW_HYDRATION.md).
-- [ ] M224 Hydration progress and estimated remaining work metrics.
+- [x] M224 Hydration progress and estimated remaining work metrics. See [M224_MATERIALIZED_HYDRATION_PROGRESS.md](M224_MATERIALIZED_HYDRATION_PROGRESS.md).
 - [ ] M225 Persisted shard leases that prevent duplicate state ownership.
 - [ ] M226 Durable consensus metadata for state shard and frontier ownership.
 - [ ] M227 Source snapshot offsets coupled atomically to the first live frontier.

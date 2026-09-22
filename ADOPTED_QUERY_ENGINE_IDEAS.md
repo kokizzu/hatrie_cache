@@ -1187,3 +1187,12 @@ indexes publish atomically. Existing synchronous `Create` callers remain on
 the ready path. See
 [M223_MATERIALIZED_VIEW_HYDRATION.md](M223_MATERIALIZED_VIEW_HYDRATION.md) for
 failure transitions, generation fencing, and measured cost.
+
+## M224 Hydration Progress
+
+Materialize-inspired materialized-view hydration progress is adopted as an
+opt-in `HydrationProgressSourceResolver` contract. `MaterializedViewStatus`
+reports observed work, source cardinality estimates, remaining work, and
+explicit unknown-estimate state without retaining row payloads. See
+[M224_MATERIALIZED_HYDRATION_PROGRESS.md](M224_MATERIALIZED_HYDRATION_PROGRESS.md)
+and [BENCHMARK.md](BENCHMARK.md#m224-materialized-hydration-progress).
