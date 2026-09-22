@@ -105,7 +105,7 @@ operator control remain the preferred deployment model.
 - [x] M216 Incremental top-K arrangements with bounded replacement state; already implemented by `hatSql.IncrementalTopK`, with selected/replacement output bounded by K and full exact source indexing retained. See [M216_INCREMENTAL_TOP_K_AUDIT.md](M216_INCREMENTAL_TOP_K_AUDIT.md).
 - [x] M217 Indexes that store complete maintained view results for point lookups; added opt-in maintained point lookup indexes to `MaterializedViews` with atomic refresh integration. See [M217_MATERIALIZED_POINT_LOOKUP.md](M217_MATERIALIZED_POINT_LOOKUP.md).
 - [x] M218 Planner selection of point lookup versus arrangement scan; added the opt-in `MaterializedViewPointLookupResolver` and benchmarked point-vs-scan execution. See [M218_MATERIALIZED_POINT_LOOKUP_PLANNER.md](M218_MATERIALIZED_POINT_LOOKUP_PLANNER.md).
-- [ ] M219 Background index creation with observable build frontier.
+- [x] M219 Background index creation with observable build frontier; added opt-in asynchronous maintained point-lookup builds with atomic publication, stale-snapshot rejection, cancellation, and measurable progress. See [M219_BACKGROUND_POINT_LOOKUP_BUILD.md](M219_BACKGROUND_POINT_LOOKUP_BUILD.md).
 - [ ] M220 Safe index removal after dependent readers drain.
 - [ ] M221 Isolated compute clusters with independent resource budgets.
 - [ ] M222 Replicated compute workers for highly available maintained indexes.

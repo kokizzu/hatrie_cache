@@ -25770,3 +25770,29 @@ commit-m218-point-lookup-planner:
 
 push-m218-point-lookup-planner:
 	bash scripts/push-m218-point-lookup-planner.sh
+format-m219-background-point-lookup:
+	bash scripts/format-m219-background-point-lookup.sh
+
+test-m219-background-point-lookup:
+	bash scripts/test-m219-background-point-lookup.sh
+
+benchmark-m219-background-point-lookup:
+	bash scripts/benchmark-m219-background-point-lookup.sh
+
+race-m219-background-point-lookup:
+	bash scripts/race-m219-background-point-lookup.sh
+
+test-m219-related-materialized:
+	bash scripts/test-m219-related-materialized.sh
+
+vet-m219-background-point-lookup:
+	bash scripts/vet-m219-background-point-lookup.sh
+
+stage-m219-background-point-lookup:
+	bash scripts/stage-m219-background-point-lookup.sh
+
+commit-m219-background-point-lookup:
+	bash scripts/commit-m219-background-point-lookup.sh
+
+push-m219-background-point-lookup:
+	bash scripts/push-m219-background-point-lookup.sh

@@ -63,14 +63,16 @@ type MaterializedView struct {
 // MaterializedViews stores named query-result snapshots. It is safe for
 // concurrent reads and refreshes.
 type MaterializedViews struct {
-	mu           sync.RWMutex
-	views        map[string]materializedView
-	dependents   map[string][]string
-	pointLookups map[string]materializedViewPointLookup
-	maxRows      int
-	maxBytes     int64
-	rows         int
-	bytes        int64
+	mu                sync.RWMutex
+	views             map[string]materializedView
+	dependents        map[string][]string
+	pointLookups      map[string]materializedViewPointLookup
+	pointLookupBuilds map[string]*MaterializedViewPointLookupBuild
+	maxRows           int
+	maxBytes          int64
+	rows              int
+	bytes             int64
+	nextGeneration    uint64
 }
 
 type materializedView struct {
@@ -80,6 +82,7 @@ type materializedView struct {
 	collation      SQLCollation
 	storedRows     int
 	storedBytes    int64
+	generation     uint64
 }
 
 // NewMaterializedViews creates an empty materialized-view registry.
@@ -96,11 +99,12 @@ func NewMaterializedViewsWithOptions(options MaterializedViewsOptions) (*Materia
 		return nil, fmt.Errorf("materialized view storage limits must not be negative")
 	}
 	return &MaterializedViews{
-		views:        make(map[string]materializedView),
-		dependents:   make(map[string][]string),
-		pointLookups: make(map[string]materializedViewPointLookup),
-		maxRows:      options.MaxRows,
-		maxBytes:     options.MaxBytes,
+		views:             make(map[string]materializedView),
+		dependents:        make(map[string][]string),
+		pointLookups:      make(map[string]materializedViewPointLookup),
+		pointLookupBuilds: make(map[string]*MaterializedViewPointLookupBuild),
+		maxRows:           options.MaxRows,
+		maxBytes:          options.MaxBytes,
 	}, nil
 }
 
@@ -171,6 +175,7 @@ func (views *MaterializedViews) Create(ctx context.Context, definition Materiali
 		Revision:     1,
 		RefreshedAt:  time.Now().UTC(),
 	}
+	views.nextGeneration++
 	views.views[definition.Name] = materializedView{
 		definition:     definition,
 		collation:      normalizedMaterializedViewCollation(options.Collation),
@@ -181,6 +186,7 @@ func (views *MaterializedViews) Create(ctx context.Context, definition Materiali
 		},
 		storedRows:  storedRows,
 		storedBytes: storedBytes,
+		generation:  views.nextGeneration,
 	}
 	views.rows += storedRows
 	views.bytes += storedBytes
@@ -222,6 +228,11 @@ func (views *MaterializedViews) Drop(name string) error {
 		return fmt.Errorf("materialized view %q does not exist", name)
 	}
 	delete(views.views, name)
+	for _, build := range views.pointLookupBuilds {
+		if build != nil && build.state.viewName == name {
+			build.Cancel()
+		}
+	}
 	for indexName, index := range views.pointLookups {
 		if index.definition.ViewName == name {
 			delete(views.pointLookups, indexName)

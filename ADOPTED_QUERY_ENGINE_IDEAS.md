@@ -1136,3 +1136,14 @@ equality predicates and fall back to a complete scan for unsupported shapes or
 value conversions. On a 10k-row view, the point plan was 777.2x faster, with
 1,217.7x lower benchmark bytes and 1,334.3x fewer allocations. See
 [M218_MATERIALIZED_POINT_LOOKUP_PLANNER.md](M218_MATERIALIZED_POINT_LOOKUP_PLANNER.md).
+
+## M219: Background Point Lookup Builds
+
+M219 adds opt-in `MaterializedViews.StartPointLookupIndexBuild` with a
+`Status`/`Wait`/`Cancel` handle and an observable row frontier. The private
+index is published atomically only when the captured view revision and
+generation are still current; refreshes and cancellations cannot expose
+partial or stale rows. Progress publication is batched every 64 rows to keep
+the total build overhead small. See
+[M219_BACKGROUND_POINT_LOOKUP_BUILD.md](M219_BACKGROUND_POINT_LOOKUP_BUILD.md)
+for correctness and measured tradeoffs.

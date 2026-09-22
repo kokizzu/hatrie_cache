@@ -36146,3 +36146,21 @@ Five `-benchmem` samples ran on Linux amd64 / AMD Ryzen 9 5950X over a
 
 Raw samples and fallback semantics are recorded in
 [M218_MATERIALIZED_POINT_LOOKUP_PLANNER.md](M218_MATERIALIZED_POINT_LOOKUP_PLANNER.md).
+## M219: Background point lookup build
+
+Workload: 10,000 rows, twenty iterations per sample, five samples, AMD Ryzen 9
+5950X. `background_start` measures only the foreground request/return path;
+the worker is gated so the full build is outside that latency measurement;
+`background_total` includes the complete build and wait.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Synchronous publish | 1,788,547 | 906,811 | 19,936 | baseline |
+| Background start only | 15,173 | 10,732 | 7 | 117.9x shorter foreground return |
+| Background start plus wait | 1,740,273 | 907,876 | 19,944 | 0.97x total time |
+
+The asynchronous path is intended to reduce foreground blocking, not promise
+lower total CPU. Total bytes are about 0.1% higher and allocations about
+0.04% higher; total time is approximately equal within run variance.
+Raw samples and semantics are recorded in
+[M219_BACKGROUND_POINT_LOOKUP_BUILD.md](M219_BACKGROUND_POINT_LOOKUP_BUILD.md).

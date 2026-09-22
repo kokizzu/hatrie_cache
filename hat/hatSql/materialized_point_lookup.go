@@ -1,6 +1,7 @@
 package hatSql
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -39,16 +40,10 @@ func (views *MaterializedViews) CreatePointLookupIndex(definition MaterializedVi
 	if views == nil {
 		return fmt.Errorf("materialized views are nil")
 	}
-	definition.Name = strings.TrimSpace(definition.Name)
-	definition.ViewName = strings.TrimSpace(definition.ViewName)
-	if definition.Name == "" {
-		return fmt.Errorf("materialized view point lookup index name is required")
-	}
-	if definition.ViewName == "" {
-		return fmt.Errorf("materialized view point lookup view name is required")
-	}
-	if definition.Key == nil {
-		return fmt.Errorf("materialized view point lookup key function is required")
+	var err error
+	definition, err = normalizeMaterializedViewPointLookupDefinition(definition)
+	if err != nil {
+		return err
 	}
 
 	views.mu.Lock()
@@ -58,6 +53,9 @@ func (views *MaterializedViews) CreatePointLookupIndex(definition MaterializedVi
 	}
 	if _, exists := views.pointLookups[definition.Name]; exists {
 		return fmt.Errorf("%w: %q", ErrMaterializedViewPointLookupIndexExists, definition.Name)
+	}
+	if _, exists := views.pointLookupBuilds[definition.Name]; exists {
+		return fmt.Errorf("%w: %q", ErrMaterializedViewPointLookupBuildInProgress, definition.Name)
 	}
 	view, exists := views.views[definition.ViewName]
 	if !exists {
@@ -115,17 +113,5 @@ func (views *MaterializedViews) LookupPoint(indexName, key string) (QueryResult,
 }
 
 func buildMaterializedViewPointLookup(definition MaterializedViewPointLookupDefinition, result QueryResult) (materializedViewPointLookup, error) {
-	index := materializedViewPointLookup{
-		definition: definition,
-		columns:    append([]string(nil), result.Columns...),
-		rows:       make(map[string][]Row, len(result.Rows)),
-	}
-	for rowIndex, row := range result.Rows {
-		key, err := definition.Key(row)
-		if err != nil {
-			return materializedViewPointLookup{}, fmt.Errorf("materialized view point lookup %q row %d: %w", definition.Name, rowIndex, err)
-		}
-		index.rows[key] = append(index.rows[key], row)
-	}
-	return index, nil
+	return buildMaterializedViewPointLookupWithProgress(context.Background(), definition, result, nil)
 }
