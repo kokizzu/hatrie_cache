@@ -98,6 +98,37 @@ unchanged allocations. That difference is below the useful precision of this
 short lock-and-counter benchmark. The new path adds no allocation and is
 entirely caller-driven. See [M245_TIMESTAMP_TELEMETRY.md](M245_TIMESTAMP_TELEMETRY.md).
 
+## M246 Per-Object History-Retention Policies
+
+Five `-benchmem` samples were collected on Linux amd64, AMD Ryzen 9 5950X.
+The parent is M245 (`6d341b7b`); the current revision is M246. The parent-side
+benchmark fixture is identical to the current no-policy fixture.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative time | Tradeoff |
+| --- | ---: | ---: | ---: | ---: | --- |
+| M245 parent `Snapshot` without policy | 61.99 | 0 | 0 | 1.00x | baseline |
+| M246 current `Snapshot` without policy | 62.09 | 0 | 0 | 1.00x | no measurable default-path regression |
+| M246 current `PolicySnapshot` | 58.67 | 0 | 0 | opt-in | policy read path; allocation-free |
+| M246 current `SetUsage` | 66.06 | 0 | 0 | opt-in | replacement update; allocation-free |
+| Existing MZ04 lease snapshot, parent | 66.77 | 0 | 0 | 1.00x | compatibility baseline |
+| Existing MZ04 lease snapshot, current | 67.17 | 0 | 0 | 1.01x | within run-to-run noise |
+
+Raw samples, in the order emitted by `make benchmark-m246`:
+
+```text
+parent Snapshot without policy: 65.69 64.18 61.99 59.95 55.68 ns/op; 0 B/op; 0 allocs/op
+current Snapshot without policy: 61.58 61.70 62.52 63.06 62.09 ns/op; 0 B/op; 0 allocs/op
+current PolicySnapshot: 59.01 58.67 56.33 58.92 55.00 ns/op; 0 B/op; 0 allocs/op
+current SetUsage: 61.00 68.13 65.99 67.09 66.06 ns/op; 0 B/op; 0 allocs/op
+parent MZ04 lease snapshot: 61.64 63.85 66.77 66.78 67.30 ns/op; 0 B/op; 0 allocs/op
+current MZ04 lease snapshot: 66.33 67.40 67.17 67.90 64.18 ns/op; 0 B/op; 0 allocs/op
+```
+
+The measured design keeps the old `Snapshot` result layout and cost. Policy
+state is lazy and bounded by `MaxPolicies`; only explicitly configured objects
+pay for the policy map and sidecar reads. See
+[M246_FRONTIER_RETENTION_POLICY.md](M246_FRONTIER_RETENTION_POLICY.md).
+
 ## MZ-026 Adaptive Dictionary Arrangements
 
 Five samples per case on Linux amd64, AMD Ryzen 9 5950X, building a 4,096-row

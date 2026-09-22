@@ -41,6 +41,9 @@ type FrontierRetentionOptions struct {
 	// MaxLeases is the maximum number of active leases. Zero uses
 	// DefaultFrontierRetentionMaxLeases.
 	MaxLeases int
+	// MaxPolicies is the maximum number of configured per-frontier retention
+	// policies. Zero uses DefaultFrontierRetentionMaxPolicies.
+	MaxPolicies int
 }
 
 // FrontierRetentionLease identifies one active as-of retention request.
@@ -75,14 +78,16 @@ type frontierRetentionState struct {
 // FrontierRegistry. It does not compact data itself; callers must consult the
 // safe boundary before deleting historical versions.
 type FrontierRetentionRegistry struct {
-	frontiers  *FrontierRegistry
-	mu         sync.RWMutex
-	maxLeases  int
-	nextID     uint64
-	leaseCount int
-	closed     bool
-	states     map[string]*frontierRetentionState
-	notify     chan struct{}
+	frontiers   *FrontierRegistry
+	mu          sync.RWMutex
+	maxLeases   int
+	maxPolicies int
+	nextID      uint64
+	leaseCount  int
+	closed      bool
+	states      map[string]*frontierRetentionState
+	policies    map[string]frontierRetentionPolicyState
+	notify      chan struct{}
 }
 
 // NewFrontierRetentionRegistry creates an as-of retention registry bound to
@@ -98,10 +103,18 @@ func NewFrontierRetentionRegistry(frontiers *FrontierRegistry, options FrontierR
 	if maxLeases < 1 || maxLeases > maxFrontierRetentionLeases {
 		return nil, ErrFrontierRetentionOptionsInvalid
 	}
+	maxPolicies := options.MaxPolicies
+	if maxPolicies == 0 {
+		maxPolicies = DefaultFrontierRetentionMaxPolicies
+	}
+	if maxPolicies < 1 || maxPolicies > maxFrontierRetentionPolicies {
+		return nil, ErrFrontierRetentionOptionsInvalid
+	}
 	return &FrontierRetentionRegistry{
-		frontiers: frontiers,
-		maxLeases: maxLeases,
-		states:    make(map[string]*frontierRetentionState),
+		frontiers:   frontiers,
+		maxLeases:   maxLeases,
+		maxPolicies: maxPolicies,
+		states:      make(map[string]*frontierRetentionState),
 	}, nil
 }
 
@@ -401,6 +414,7 @@ func (registry *FrontierRetentionRegistry) Close() error {
 	}
 	registry.closed = true
 	registry.states = nil
+	registry.policies = nil
 	registry.leaseCount = 0
 	registry.signalLocked()
 	registry.mu.Unlock()
