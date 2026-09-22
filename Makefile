@@ -8883,6 +8883,42 @@ commit-t214:
 push-t214:
 	bash ./scripts/push-t214.sh
 
+.PHONY: test-t215
+test-t215:
+	bash ./scripts/test-t215.sh
+
+.PHONY: format-t215
+format-t215:
+	bash ./scripts/format-t215.sh
+
+.PHONY: benchmark-t215
+benchmark-t215:
+	bash ./scripts/benchmark-t215.sh
+
+.PHONY: race-t215
+race-t215:
+	bash ./scripts/race-t215.sh
+
+.PHONY: vet-t215
+vet-t215:
+	bash ./scripts/vet-t215.sh
+
+.PHONY: verify-docs-t215
+verify-docs-t215:
+	bash ./scripts/verify-docs-t215.sh
+
+.PHONY: stage-t215
+stage-t215:
+	bash ./scripts/stage-t215.sh
+
+.PHONY: commit-t215
+commit-t215:
+	bash ./scripts/commit-t215.sh
+
+.PHONY: push-t215
+push-t215:
+	bash ./scripts/push-t215.sh
+
 .PHONY: benchmark-t213-baseline
 benchmark-t213-baseline:
 	bash ./scripts/benchmark-t213-baseline.sh

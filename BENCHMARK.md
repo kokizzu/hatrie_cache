@@ -37134,3 +37134,36 @@ make test-t214
 make race-t214
 make vet-t214
 ```
+
+## T215 Per-Space Memtx Versus On-Disk Storage Policy
+
+T215 adds `hatDataStructure.StorageSpace`. The direct-map baseline and memtx
+path both clone returned values, matching the public isolation contract. The
+on-disk sample reads flushed cold values from the existing CRC-protected spill
+segment. Three `-benchmem` samples were collected on Linux/amd64 with an AMD
+Ryzen 9 5950X.
+
+Command:
+
+```text
+make benchmark-t215
+```
+
+| Path | Raw ns/op samples | Median ns/op | Memory/op | Allocs/op | Relative to map baseline |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Direct map, cloned value | `42.03 42.09 44.33` | `42.09` | `16 B` | `1` | `1.00x` |
+| `StorageSpace` memtx | `42.81 42.79 43.16` | `42.81` | `16 B` | `1` | `1.02x cost` |
+| `StorageSpace` on-disk, cold read | `911.9 899.9 917.3` | `911.9` | `48 B` | `1` | `21.66x cost` |
+
+The default memtx policy is effectively neutral for this lookup workload. The
+on-disk policy is intentionally slower for cold reads, but bounds resident
+value memory and supports restart recovery. It is therefore a per-space
+durability/memory option, not a latency optimization.
+
+Focused correctness checks:
+
+```text
+make test-t215
+make race-t215
+make vet-t215
+```
