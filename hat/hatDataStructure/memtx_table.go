@@ -19,9 +19,42 @@ var (
 	ErrMemtxTableFull            = errors.New("memtx table is full")
 )
 
+// MemtxReplaceOperation identifies the write shape presented to a
+// BeforeReplace hook.
+type MemtxReplaceOperation uint8
+
+const (
+	MemtxReplaceInsert MemtxReplaceOperation = iota + 1
+	MemtxReplaceUpdate
+)
+
+// MemtxReplaceEvent is the immutable decision input for a BeforeReplace
+// hook. Old is the currently stored value when Exists is true; New is the
+// caller's proposed value. The hook runs while the table write lock is held,
+// so it must not call back into the table.
+type MemtxReplaceEvent[T any] struct {
+	ID        uint64
+	Old       T
+	New       T
+	Exists    bool
+	Operation MemtxReplaceOperation
+}
+
+// MemtxBeforeReplace validates or normalizes a proposed insert/update. An
+// error aborts the write without changing the table; the returned value is
+// stored when the hook succeeds.
+type MemtxBeforeReplace[T any] func(MemtxReplaceEvent[T]) (T, error)
+
 // MemtxTableOptions controls construction of a fixed-capacity in-memory table.
 type MemtxTableOptions struct {
 	Capacity int
+}
+
+// MemtxTableHooks contains optional callbacks for a typed MemtxTable. Hooks
+// are kept separate from MemtxTableOptions so existing callers retain the
+// non-generic options type.
+type MemtxTableHooks[T any] struct {
+	BeforeReplace MemtxBeforeReplace[T]
 }
 
 // MemtxEntry is a row returned by MemtxTable.ScanInto.
@@ -48,11 +81,18 @@ type MemtxTable[T any] struct {
 	free      []uint32
 	next      uint32
 	live      int
+	before    MemtxBeforeReplace[T]
 }
 
 // NewMemtxTable creates a fixed-capacity table. A zero capacity selects the
 // package default.
 func NewMemtxTable[T any](options MemtxTableOptions) (*MemtxTable[T], error) {
+	return NewMemtxTableWithHooks[T](options, MemtxTableHooks[T]{})
+}
+
+// NewMemtxTableWithHooks creates a fixed-capacity table with optional typed
+// mutation hooks.
+func NewMemtxTableWithHooks[T any](options MemtxTableOptions, hooks MemtxTableHooks[T]) (*MemtxTable[T], error) {
 	capacity := options.Capacity
 	if capacity == 0 {
 		capacity = DefaultMemtxTableCapacity
@@ -64,6 +104,7 @@ func NewMemtxTable[T any](options MemtxTableOptions) (*MemtxTable[T], error) {
 		slots:     make([]memtxSlot[T], capacity),
 		positions: make(map[uint64]uint32, capacity),
 		free:      make([]uint32, 0, capacity),
+		before:    hooks.BeforeReplace,
 	}, nil
 }
 
@@ -77,6 +118,20 @@ func (table *MemtxTable[T]) Insert(id uint64, value T) error {
 	if _, exists := table.positions[id]; exists {
 		return ErrMemtxTableDuplicateID
 	}
+	if !table.hasCapacityLocked() {
+		return ErrMemtxTableFull
+	}
+	if table.before != nil {
+		var err error
+		value, err = table.before(MemtxReplaceEvent[T]{
+			ID:        id,
+			New:       value,
+			Operation: MemtxReplaceInsert,
+		})
+		if err != nil {
+			return err
+		}
+	}
 	return table.insertLocked(id, value)
 }
 
@@ -89,8 +144,35 @@ func (table *MemtxTable[T]) Upsert(id uint64, value T) (inserted bool, err error
 	table.mu.Lock()
 	defer table.mu.Unlock()
 	if position, exists := table.positions[id]; exists {
+		if table.before != nil {
+			updated, err := table.before(MemtxReplaceEvent[T]{
+				ID:        id,
+				Old:       table.slots[position].value,
+				New:       value,
+				Exists:    true,
+				Operation: MemtxReplaceUpdate,
+			})
+			if err != nil {
+				return false, err
+			}
+			value = updated
+		}
 		table.slots[position].value = value
 		return false, nil
+	}
+	if !table.hasCapacityLocked() {
+		return false, ErrMemtxTableFull
+	}
+	if table.before != nil {
+		updated, err := table.before(MemtxReplaceEvent[T]{
+			ID:        id,
+			New:       value,
+			Operation: MemtxReplaceInsert,
+		})
+		if err != nil {
+			return false, err
+		}
+		value = updated
 	}
 	if err := table.insertLocked(id, value); err != nil {
 		return false, err
@@ -187,6 +269,10 @@ func (table *MemtxTable[T]) Reset() {
 	table.free = table.free[:0]
 	table.next = 0
 	table.live = 0
+}
+
+func (table *MemtxTable[T]) hasCapacityLocked() bool {
+	return len(table.free) > 0 || table.next < uint32(len(table.slots))
 }
 
 func (table *MemtxTable[T]) insertLocked(id uint64, value T) error {

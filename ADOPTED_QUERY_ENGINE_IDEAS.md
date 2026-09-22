@@ -1377,3 +1377,4 @@ materialized query results, has stable format
 optimizer-without-trace allocation profile. The opt-in fixture measured
 `12,421 B/op`, `51 allocs/op`, and a `570`-byte JSON payload for one rule and
 one rejected alternative. See [M241_OPTIMIZER_TRACE.md](M241_OPTIMIZER_TRACE.md).
+| T229 | Tarantool | before-replace validation/conflict hooks | Optional typed atomic validation and normalization on `MemtxTable` inserts/upserts | [TT029_BEFORE_REPLACE.md](TT029_BEFORE_REPLACE.md) |

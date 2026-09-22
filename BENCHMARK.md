@@ -37264,3 +37264,11 @@ Command: `make benchmark-t219` on an AMD Ryzen 9 5950X, three samples, with
 
 Raw samples and the immutable/mutable tradeoff are recorded in
 [T219_PACKED_HASH_INDEX.md](T219_PACKED_HASH_INDEX.md).
+## T029: Before-Replace Hook
+
+The default `MemtxTable` update path remains allocation-free after adding the
+opt-in hook. On an AMD Ryzen 9 5950X, medians from five benchmark samples were
+`11.43 ns/op` before the change, `10.75 ns/op` after the change with no hook,
+and `12.92 ns/op` with the hook enabled. All paths measured `0 B/op` and
+`0 allocs/op`. The enabled hook therefore costs about 20.2% CPU for validation
+and normalization while imposing no allocation or memory-retention cost.

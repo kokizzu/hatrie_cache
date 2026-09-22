@@ -4969,3 +4969,4 @@ and emits deterministic copy, replace, or quarantine actions without performing
 network or destructive storage operations. Use
 [CH019_REPLICA_PART_CHECKS.md](CH019_REPLICA_PART_CHECKS.md) for the API,
 safety bounds, and measured comparison in [BENCHMARK.md](BENCHMARK.md#ch-019-replica-part-consistency-planning).
+- Optional typed before-replace validation/conflict hooks for `MemtxTable` are documented in [TT029_BEFORE_REPLACE.md](TT029_BEFORE_REPLACE.md).

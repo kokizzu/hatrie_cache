@@ -13038,9 +13038,6 @@ commit-mz024:
 push-mz024:
 	bash ./scripts/push-mz024.sh
 
-.PHONY: audit-inspiration
-audit-inspiration:
-	bash ./scripts/audit-inspiration.sh
 
 .PHONY: test-ch050-row-binary-stream-red
 test-ch050-row-binary-stream-red:
@@ -27533,3 +27530,50 @@ commit-t208:
 
 push-t208:
 	bash scripts/push-t208.sh
+.PHONY: audit-inspiration
+audit-inspiration:
+	bash ./scripts/audit-inspiration.sh "$(CANDIDATE)"
+
+.PHONY: benchmark-t229-before
+benchmark-t229-before:
+	bash ./scripts/benchmark-t229-before.sh
+
+.PHONY: test-t229
+test-t229:
+	bash ./scripts/test-t229.sh
+
+.PHONY: benchmark-t229
+benchmark-t229:
+	bash ./scripts/benchmark-t229.sh
+
+.PHONY: verify-t229-docs
+verify-t229-docs:
+	bash ./scripts/verify-t229-docs.sh
+
+.PHONY: format-t229
+format-t229:
+	bash ./scripts/format-t229.sh
+
+.PHONY: test-t229-package
+test-t229-package:
+	bash ./scripts/test-t229-package.sh
+
+.PHONY: race-t229
+race-t229:
+	bash ./scripts/race-t229.sh
+
+.PHONY: vet-t229
+vet-t229:
+	bash ./scripts/vet-t229.sh
+
+.PHONY: stage-t229
+stage-t229:
+	bash ./scripts/stage-t229.sh
+
+.PHONY: commit-t229
+commit-t229:
+	bash ./scripts/commit-t229.sh
+
+.PHONY: push-t229
+push-t229:
+	bash ./scripts/push-t229.sh
