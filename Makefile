@@ -24764,3 +24764,34 @@ commit-mz045-arrangement-cache:
 .PHONY: push-mz045-arrangement-cache
 push-mz045-arrangement-cache:
 	bash scripts/push-mz045-arrangement-cache.sh
+.PHONY: test-t047-quorum-ledger
+test-t047-quorum-ledger:
+	bash scripts/test-t047-quorum-ledger.sh
+
+.PHONY: format-t047-quorum-ledger
+format-t047-quorum-ledger:
+	bash scripts/format-t047-quorum-ledger.sh
+
+.PHONY: race-t047-quorum-ledger
+race-t047-quorum-ledger:
+	bash scripts/race-t047-quorum-ledger.sh
+
+.PHONY: vet-t047-quorum-ledger
+vet-t047-quorum-ledger:
+	bash scripts/vet-t047-quorum-ledger.sh
+
+.PHONY: status-t047-quorum-ledger
+status-t047-quorum-ledger:
+	bash scripts/status-t047-quorum-ledger.sh
+
+.PHONY: stage-t047-quorum-ledger
+stage-t047-quorum-ledger:
+	bash scripts/stage-t047-quorum-ledger.sh
+
+.PHONY: commit-t047-quorum-ledger
+commit-t047-quorum-ledger:
+	bash scripts/commit-t047-quorum-ledger.sh
+
+.PHONY: push-t047-quorum-ledger
+push-t047-quorum-ledger:
+	bash scripts/push-t047-quorum-ledger.sh

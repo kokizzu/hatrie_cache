@@ -35471,33 +35471,49 @@ remain caller-owned. See [CH019_REPLICA_PART_CHECKS.md](CH019_REPLICA_PART_CHECK
 
 Command: `make benchmark-t047-cluster-write-commit`.
 
-This compares the new opt-in two-phase coordinator with the existing
-one-phase `ExecuteWriteQuorum` call over three nodes. Callbacks are local
-no-ops, so the measurement isolates coordinator overhead and intentionally
-does not model network latency or participant durability.
+This compares the opt-in two-phase coordinator and its durable-ledger variant
+with the existing one-phase `ExecuteWriteQuorum` call over three nodes.
+Callbacks are local no-ops. The ledger path includes its synchronous file
+commit cost; it is intentionally not a data-plane throughput path.
 
 Machine: AMD Ryzen 9 5950X, Linux amd64, three samples.
 
 Raw output:
 
 ```text
-BenchmarkTU047ClusterWriteCommit-32      335950  3345 ns/op  1248 B/op  18 allocs/op
-BenchmarkTU047ClusterWriteCommit-32      356312  3402 ns/op  1248 B/op  18 allocs/op
-BenchmarkTU047ClusterWriteCommit-32      349149  3303 ns/op  1248 B/op  18 allocs/op
-BenchmarkTU047ExistingWriteQuorum-32     779157  1614 ns/op   544 B/op  10 allocs/op
-BenchmarkTU047ExistingWriteQuorum-32     674365  1572 ns/op   544 B/op  10 allocs/op
-BenchmarkTU047ExistingWriteQuorum-32     738970  1469 ns/op   544 B/op  10 allocs/op
+Baseline before ledger implementation:
+BenchmarkTU047ClusterWriteCommit-32      372814  3357 ns/op  1248 B/op  18 allocs/op
+BenchmarkTU047ClusterWriteCommit-32      324398  3305 ns/op  1248 B/op  18 allocs/op
+BenchmarkTU047ClusterWriteCommit-32      403659  3267 ns/op  1248 B/op  18 allocs/op
+BenchmarkTU047ExistingWriteQuorum-32     775946  1806 ns/op   544 B/op  10 allocs/op
+BenchmarkTU047ExistingWriteQuorum-32     639102  1710 ns/op   544 B/op  10 allocs/op
+BenchmarkTU047ExistingWriteQuorum-32     740600  1751 ns/op   544 B/op  10 allocs/op
+
+After ledger implementation:
+BenchmarkTU047ClusterWriteCommitWithLedger-32       88 13313734 ns/op 19726 B/op 192 allocs/op
+BenchmarkTU047ClusterWriteCommitWithLedger-32       96 13089762 ns/op 19680 B/op 191 allocs/op
+BenchmarkTU047ClusterWriteCommitWithLedger-32       86 13620039 ns/op 19761 B/op 192 allocs/op
+BenchmarkTU047ClusterWriteCommit-32             348504     3108 ns/op  1248 B/op  18 allocs/op
+BenchmarkTU047ClusterWriteCommit-32             360446     2956 ns/op  1248 B/op  18 allocs/op
+BenchmarkTU047ClusterWriteCommit-32             377559     3047 ns/op  1248 B/op  18 allocs/op
+BenchmarkTU047ExistingWriteQuorum-32            853300     1447 ns/op   544 B/op  10 allocs/op
+BenchmarkTU047ExistingWriteQuorum-32            755248     1446 ns/op   544 B/op  10 allocs/op
+BenchmarkTU047ExistingWriteQuorum-32            760678     1452 ns/op   544 B/op  10 allocs/op
 ```
 
-| Path | Median ns/op | B/op | allocs/op | Relative time |
+| Path | Median ns/op | B/op | allocs/op | Relative time in after run |
 | --- | ---: | ---: | ---: | ---: |
-| `ExecuteClusterWriteCommit` | 3,345 | 1,248 | 18 | 2.13x |
-| Existing `ExecuteWriteQuorum` | 1,572 | 544 | 10 | 1.00x |
+| `ExecuteClusterWriteCommitWithLedger` | 13,313,734 | 19,726 | 192 | 9,201x |
+| `ExecuteClusterWriteCommit` | 3,047 | 1,248 | 18 | 2.11x |
+| Existing `ExecuteWriteQuorum` | 1,447 | 544 | 10 | 1.00x |
 
-The two-phase path is about 2.1x slower, uses 2.29x the transient bytes, and
-uses 1.8x the allocations in this local control-plane benchmark. It remains
-opt-in because the additional prepare barrier and explicit unknown-outcome
-handling are the feature; ordinary writes retain the existing path.
+The existing in-memory two-phase path remains unchanged. The durable ledger is
+about 9,201x slower, 36.3x higher in transient bytes, and 19.2x higher in
+allocations than the existing quorum path in this local benchmark. That is an
+intentional durability tradeoff, not a performance improvement; it remains
+opt-in and must not be placed on ordinary data-plane writes. The pre-change
+in-memory path itself was unchanged by the feature, within normal benchmark
+variance.
 
 <a id="c154e-durable-rolling-schema-checkpoint"></a>
 ## C154e Durable Rolling-Schema Checkpoint
