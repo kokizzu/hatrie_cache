@@ -159,14 +159,14 @@ operator control remain the preferred deployment model.
 - [x] T217 In-memory columnar storage for analytical spaces. `hatDataStructure.ColumnarSpace` provides fixed typed buffers, lazy null bitmaps, packed booleans, offset-backed strings/bytes, atomic row validation, and detached snapshots without changing existing defaults. See [T217_IN_MEMORY_COLUMNAR_SPACE.md](T217_IN_MEMORY_COLUMNAR_SPACE.md) and [BENCHMARK.md#t217-in-memory-columnar-space](BENCHMARK.md#t217-in-memory-columnar-space).
 - [x] T218 Multi-part TREE indexes with ordered prefix and range scans. `hatDataStructure.MultiPartTreeIndex` publishes immutable sorted parts, locates bounds per part, and k-way merges the results; it is opt-in and does not replace the existing single-vector `OrderedIndex`. See [T218_MULTI_PART_TREE_INDEX.md](T218_MULTI_PART_TREE_INDEX.md) and [BENCHMARK.md#t218-multi-part-tree-index](BENCHMARK.md#t218-multi-part-tree-index).
 - [x] T219 HASH indexes for constant-time exact lookups. `hatDataStructure.PackedHashIndex` adds an immutable flat open-addressed exact-match table for read-heavy snapshots; the existing mutable `HashIndex` remains unchanged. See [T219_PACKED_HASH_INDEX.md](T219_PACKED_HASH_INDEX.md) and [BENCHMARK.md#t219-packed-hash-index](BENCHMARK.md#t219-packed-hash-index).
-- [ ] T220 RTREE indexes for spatial bounding-box searches.
-- [ ] T221 BITSET indexes for low-cardinality membership predicates.
-- [ ] T222 Multikey indexes over array-valued fields.
-- [ ] T223 Functional indexes over derived field expressions.
-- [ ] T224 Partial indexes restricted by a validated predicate.
-- [ ] T225 Covering indexes that return projected fields without row fetches.
-- [ ] T226 Explicit index hints with planner diagnostics.
-- [ ] T227 Per-field nullability, type, and constraint validation.
+- [x] T220 RTREE indexes for spatial bounding-box searches. Already adopted by `RTree`, `PackedRTree`, `MutablePackedRTree`, `RTreeSpaceCatalog`, and the SQL `RTreeSpatialSource`; see [TT021_PACKED_RTREE.md](TT021_PACKED_RTREE.md), [TU25_RTREE_SPACE_CATALOG.md](TU25_RTREE_SPACE_CATALOG.md), and [TR027_RTREE_SPATIAL_INDEX.md](TR027_RTREE_SPATIAL_INDEX.md).
+- [x] T221 BITSET indexes for low-cardinality membership predicates. Already adopted by the typed `hatDataStructure.BitmapIndex[K]`; see [TR026_BITMAP_INDEX.md](TR026_BITMAP_INDEX.md).
+- [x] T222 Multikey indexes over array-valued fields. Already adopted by the string and typed tuple multikey indexes; see [SQL_MULTIKEY_INDEX.md](SQL_MULTIKEY_INDEX.md) and [TU23_TYPED_MULTIKEY_INDEX.md](TU23_TYPED_MULTIKEY_INDEX.md).
+- [x] T223 Functional indexes over derived field expressions. Already adopted by the generation-checked `MaterializedSource.BuildFunctionalIndex`; see [TR023_FUNCTIONAL_INDEX.md](TR023_FUNCTIONAL_INDEX.md).
+- [x] T224 Partial indexes restricted by a validated predicate. Already adopted by the conditional index catalog with fenced rebuild and atomic replacement; see [TU24_CONDITIONAL_INDEX_CATALOG.md](TU24_CONDITIONAL_INDEX_CATALOG.md).
+- [x] T225 Covering indexes that return projected fields without row fetches. Already adopted for opt-in materialized-source equality indexes; see [TR024_COVERING_INDEX.md](TR024_COVERING_INDEX.md).
+- [x] T226 Explicit index hints with planner diagnostics. Already adopted with force/forbid modes and deterministic candidate inspection; see [TU26_INDEX_STRATEGY_INSPECTION.md](TU26_INDEX_STRATEGY_INSPECTION.md).
+- [x] T227 Per-field nullability, type, and constraint validation. Already adopted by `hatSchema.Column`, `hatSchema.Schema.Validate`, `hatSchema.ValidateRows`, and named NOT NULL, UNIQUE, CHECK, and foreign-key constraints.
 - [ ] T228 Tuple-format schema versions with compatible readers.
 - [ ] T229 Before-replace triggers for validation and conflict policy.
 - [ ] T230 On-replace changefeed hooks with old and new tuple images.

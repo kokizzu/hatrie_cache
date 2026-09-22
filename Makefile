@@ -8999,6 +8999,18 @@ commit-t219:
 push-t219:
 	bash ./scripts/push-t219.sh
 
+.PHONY: stage-round2-reconcile
+stage-round2-reconcile:
+	bash ./scripts/stage-round2-reconcile.sh
+
+.PHONY: commit-round2-reconcile
+commit-round2-reconcile:
+	bash ./scripts/commit-round2-reconcile.sh
+
+.PHONY: push-round2-reconcile
+push-round2-reconcile:
+	bash ./scripts/push-round2-reconcile.sh
+
 .PHONY: format-t217
 format-t217:
 	bash ./scripts/format-t217.sh
