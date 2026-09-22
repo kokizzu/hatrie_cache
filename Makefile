@@ -25214,3 +25214,43 @@ commit-t250-durable-sequence:
 .PHONY: push-t250-durable-sequence
 push-t250-durable-sequence:
 	bash scripts/push-t250-durable-sequence.sh
+
+.PHONY: inspect-inspiration-ledger
+inspect-inspiration-ledger:
+	bash scripts/inspect-inspiration-ledger.sh
+
+.PHONY: test-c231-workload-group
+test-c231-workload-group:
+	bash scripts/test-c231-workload-group.sh
+
+.PHONY: format-c231-workload-group
+format-c231-workload-group:
+	bash scripts/format-c231-workload-group.sh
+
+.PHONY: benchmark-c231-workload-group
+benchmark-c231-workload-group:
+	bash scripts/benchmark-c231-workload-group.sh
+
+.PHONY: test-c231-workload-group-package
+test-c231-workload-group-package:
+	bash scripts/test-c231-workload-group-package.sh
+
+.PHONY: race-c231-workload-group
+race-c231-workload-group:
+	bash scripts/race-c231-workload-group.sh
+
+.PHONY: vet-c231-workload-group
+vet-c231-workload-group:
+	bash scripts/vet-c231-workload-group.sh
+
+.PHONY: stage-c231-workload-group
+stage-c231-workload-group:
+	bash scripts/stage-c231-workload-group.sh
+
+.PHONY: commit-c231-workload-group
+commit-c231-workload-group:
+	bash scripts/commit-c231-workload-group.sh
+
+.PHONY: push-c231-workload-group
+push-c231-workload-group:
+	bash scripts/push-c231-workload-group.sh

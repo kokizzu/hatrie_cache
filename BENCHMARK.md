@@ -1,5 +1,22 @@
 # Benchmark
 
+## C231 SQL Workload Groups
+
+Linux/amd64, AMD Ryzen 9 5950X, five samples per case.
+The before values were captured before adding per-class budget accounting; the
+after values are from the final implementation.
+
+| Case | Before samples (ns/op) | Before median | After samples (ns/op) | After median | Memory after | Relative result |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Legacy `Acquire` | 26.36, 23.87, 25.47, 24.29, 26.38 | 25.47 | 23.31, 23.60, 24.34, 23.96, 24.31 | 23.96 | 0 B/op, 0 allocs/op | 1.06x faster |
+| Legacy `Run` | 50.73, 51.41, 50.71, 53.68, 51.87 | 51.41 | 52.73, 49.55, 50.08, 50.86, 52.07 | 50.86 | 0 B/op, 0 allocs/op | 1.01x faster |
+| `AcquireWithMemory` | n/a | n/a | 112.8, 112.2, 111.0, 111.3, 115.5 | 112.2 | 64 B/op, 2 allocs/op | opt-in lease |
+| `RunWithMemory` | n/a | n/a | 55.51, 53.88, 57.33, 56.77, 55.61 | 55.61 | 0 B/op, 0 allocs/op | opt-in, allocation-free |
+
+The default path is unchanged in memory behavior. `RunWithMemory` is the
+preferred budgeted API for hot paths because it avoids the explicit lease
+closure allocation.
+
 ## MZ-026 Adaptive Dictionary Arrangements
 
 Five samples per case on Linux amd64, AMD Ryzen 9 5950X, building a 4,096-row

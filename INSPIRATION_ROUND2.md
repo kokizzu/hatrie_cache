@@ -48,7 +48,7 @@ operator control remain the preferred deployment model.
 - [x] C216 Dictionary layout selection based on key cardinality and lookup shape; see [C216_COLUMNAR_DICTIONARY_SHAPES.md](C216_COLUMNAR_DICTIONARY_SHAPES.md).
 - [x] C217 Time-series `WITH FILL` gap generation over ordered results; see [WITH_FILL.md](WITH_FILL.md).
 - [x] C218 Interpolation policies for filled time-series values; see [C218_WITH_FILL_INTERPOLATION.md](C218_WITH_FILL_INTERPOLATION.md).
-- [ ] C219 Per-group `LIMIT BY` execution with bounded memory.
+- [x] C219 Per-group `LIMIT BY` execution with bounded memory. Already present in `hatSql/limit_by.go`, including streaming, top-N, external-sort, composite-key, and dedicated benchmark coverage.
 - [x] C220 Post-window `QUALIFY` filtering over projected window rows; selected window aliases are evaluated before `DISTINCT`, `ORDER BY`, and `LIMIT`; see [C220_QUALIFY.md](C220_QUALIFY.md).
 - [ ] C221 `WITH TIES` limit semantics for deterministic boundary results.
 - [x] C222 Approximate top-K aggregation with mergeable bounded state; importable `hatCache.TopK.Merge`, HAG1 aggregate-state round trips, and `HatTrie.MergeTopK` provide bounded partition-state union without changing existing command defaults. SQL planner integration remains open.
@@ -64,7 +64,7 @@ operator control remain the preferred deployment model.
 - [ ] C228 External sort spilling with stable run ordering.
 - [x] C229 Explicit join overflow policy for auto, reject, and bounded spill; truncation remains intentionally unsupported to preserve SQL correctness. See [C229_JOIN_OVERFLOW_POLICY.md](C229_JOIN_OVERFLOW_POLICY.md) and [BENCHMARK.md#c229-join-overflow-policy](BENCHMARK.md#c229-join-overflow-policy).
 - [ ] C230 Memory-overcommit wait queues before query cancellation.
-- [ ] C231 Workload groups with per-class concurrency and memory budgets.
+- [x] C231 Workload groups with per-class concurrency and memory budgets. `SQLWorkloadClass` now supports per-class concurrency and memory caps, with `AcquireWithMemory`, `RunWithMemory`, and `ClassStats`; see [C231_WORKLOAD_GROUPS.md](C231_WORKLOAD_GROUPS.md) and [BENCHMARK.md](BENCHMARK.md#c231-sql-workload-groups).
 - [x] C232 Query-complexity limits for rows, joins, and intermediate results.
 - [x] C233 Per-query CPU-time budgets with cooperative cancellation; see [C233_QUERY_CPU_BUDGET.md](C233_QUERY_CPU_BUDGET.md) and [BENCHMARK.md](BENCHMARK.md#c233-query-cpu-time-budget).
 - [x] C234 [Query profiler records for stage time, bytes, and allocations](C234_QUERY_PROFILER.md).
