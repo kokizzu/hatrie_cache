@@ -36456,3 +36456,25 @@ The default explain path has no measured allocation or memory change. The
 opt-in path pays the bounded cost of rendering two machine-readable notice
 details. Raw samples and exact commands are in
 [M239_EXPLAIN_FRONTIER.md](M239_EXPLAIN_FRONTIER.md).
+
+## M240 Raw Dataflow Explain With Exchange Topology
+
+Five `-benchmem` samples were collected per path with 1-second samples on
+Linux amd64, AMD Ryzen 9 5950X. The baseline is the M239 parent commit
+(`17eea223`), and the stage-aware benchmark fixture was copied into the
+baseline worktree. The first per-edge-pointer representation was rejected
+because it added 33 B/op to exchange-free graphs; the final separate exchange
+list avoids that default cost.
+
+| Path | M239 median ns/op | M240 median ns/op | M240 B/op | M240 allocs/op | M240 wire bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Legacy graph without stage changes | 1,604 | 1,542 | 1,370 | 7 | n/a |
+| Stage-aware graph with one exchange | 1,299 | 1,559 | 1,455 | 7 | n/a |
+| JSON with one exchange | 5,005 | 5,275 | 2,329 | 9 | 722 |
+| DOT with one exchange fixture | 4,948 | 4,893 | 2,726 | 33 | n/a |
+
+The exchange-enabled graph costs one allocation and about 96 B/op for the
+explicit topology. The JSON payload grows from 561 to 722 bytes because it
+now carries the stage and worker boundary. Existing plans without stage
+changes keep their previous memory and allocation profile. Raw samples and
+commands are in [M240_EXPLAIN_DATAFLOW.md](M240_EXPLAIN_DATAFLOW.md).

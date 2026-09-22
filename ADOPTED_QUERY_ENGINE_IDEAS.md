@@ -108,7 +108,7 @@ explicitly opt-in operational control.
 | ClickHouse/Materialize | Persisted freshness-keyed result cache | Adopted as explicit opt-in | `hatSql.ResultCache.Persist` and `Restore` retain only typed versioned entries in a checksummed, bounded, atomic `0600` binary snapshot. `hatCache.HatTrie` exposes the same lifecycle; missing files cold-start and corrupt files never replace live entries. [CHU09_PERSISTED_SQL_RESULT_CACHE.md](CHU09_PERSISTED_SQL_RESULT_CACHE.md), [BENCHMARK.md#ch-u09-persisted-sql-result-cache](BENCHMARK.md#ch-u09-persisted-sql-result-cache) |
 | ClickHouse / Materialize | Feedback-driven projection selection | Adopted as an explicit opt-in ranking aid | `SQLProjectionAdvisor` now retains bounded successful slow-query latency totals, and `CostRecommendations` orders caller-managed projection candidates by aggregate observed workload cost without changing planner defaults or creating views automatically. [CHU10_FEEDBACK_PROJECTION_SELECTION.md](CHU10_FEEDBACK_PROJECTION_SELECTION.md), [BENCHMARK.md#ch-u10-feedback-driven-projection-selection](BENCHMARK.md#ch-u10-feedback-driven-projection-selection) |
 | ClickHouse | Workload-driven data-skipping-index selection | Adopted as an explicit opt-in advisory selector | `SQLIndexAdvisor.SkipIndexRecommendations` ranks supported JSON path equality candidates by bounded observed elapsed time. It retains no query text or predicate values; index creation and rebuild scheduling remain explicit, and the default query path is unchanged. [CHU11_AUTOMATIC_DATA_SKIPPING_INDEX_SELECTION.md](CHU11_AUTOMATIC_DATA_SKIPPING_INDEX_SELECTION.md), [BENCHMARK.md#ch-u11-automatic-data-skipping-index-selection](BENCHMARK.md#ch-u11-automatic-data-skipping-index-selection) |
-| Materialize | Explain dataflow graph | Adopted | `BuildExplainDataflowGraph` preserves EXPLAIN steps, derives nested subplans, and emits stable pipeline/subplan edges; JSON and DOT helpers are read-only and leave the existing linear `ExplainDOT` API unchanged. |
+| Materialize | Explain dataflow graph | Adopted | `BuildExplainDataflowGraph` preserves EXPLAIN steps, derives nested subplans, and emits stable pipeline/subplan edges plus optional stage-boundary exchange edges; JSON and DOT helpers are read-only and leave the existing linear `ExplainDOT` API unchanged. |
 | Materialize | Recursive differential maintenance | Adopted as an opt-in SQL data-structure API | `NewMutableIncrementalRecursiveReachability` supports exact signed edge `INSERT`/`UPDATE`/`DELETE` maintenance, recomputes only affected source nodes, and uses direct leaf deltas for isolated terminal edges. The append-only constructor remains the zero-retention default. [INCREMENTAL_RECURSIVE_REACHABILITY.md](INCREMENTAL_RECURSIVE_REACHABILITY.md) |
 | Materialize / ClickHouse | User-defined retractable and mergeable aggregate states | Partially adopted as opt-in aggregate capabilities | `SQLRetractableAggregateState` and `SQLSerializableAggregateState` extend the existing merge/finalize contract without breaking legacy implementations. Registry constructors discover capabilities explicitly and return typed errors; automatic planner wiring and transactional rollback remain deferred. [MU031_RETRACTABLE_AGGREGATES.md](MU031_RETRACTABLE_AGGREGATES.md), [BENCHMARK.md](BENCHMARK.md#mu-031-retractable-aggregate-capabilities) |
 | Materialize / ClickHouse | UDF purity and monotonicity classification | Partially adopted as explicit function metadata | `FunctionDefinition` now carries conservative deterministic, monotonicity, and retractable declarations; registry lookup returns defensive copies and persistence retains the metadata. No language inference or automatic planner fast path is enabled. [MU032_UDF_CAPABILITIES.md](MU032_UDF_CAPABILITIES.md), [BENCHMARK.md](BENCHMARK.md#mu-032-udf-capability-classification) |
@@ -1325,3 +1325,15 @@ both regular and analyzed plans. The default path remains unchanged; the
 temporal diagnostic path measured three extra allocations and 120 bytes for
 the two rendered details. See
 [M239_EXPLAIN_FRONTIER.md](M239_EXPLAIN_FRONTIER.md).
+
+## M240 Raw Dataflow Explain With Exchange Topology
+
+The Materialize-style separation between operator flow and worker exchange
+topology is adopted in `ExplainDataflowGraph`. Existing `Edges` continue to
+describe pipeline and subplan relationships, while the optional `Exchanges`
+list records stage, worker, and worker-group boundaries. The first per-edge
+pointer design was rejected after it added 33 B/op to exchange-free graphs; the
+final separate list leaves legacy memory and allocations unchanged. The
+stage-aware fixture adds 96 B/op and one allocation, and JSON adds 161 wire
+bytes for the explicit exchange metadata. See
+[M240_EXPLAIN_DATAFLOW.md](M240_EXPLAIN_DATAFLOW.md).

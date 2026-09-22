@@ -126,7 +126,7 @@ operator control remain the preferred deployment model.
 - [x] M237 Lazy hydration triggered by the first reader with cancellation support. See [M237_LAZY_HYDRATION.md](M237_LAZY_HYDRATION.md).
 - [x] M238 Explain output for filter pushdown and arrangement reuse. `EXPLAIN` now emits a `FILTER_PUSHDOWN` notice, while `Arrangements[].Reused` exposes arrangement reuse. See [M238_EXPLAIN_PUSHDOWN.md](M238_EXPLAIN_PUSHDOWN.md).
 - [x] M239 Explain output for logical timestamp and frontier requirements. `EXPLAIN` now emits `LOGICAL_TIMESTAMP` and `FRONTIER_REQUIREMENT` notices for opt-in temporal contracts. See [M239_EXPLAIN_FRONTIER.md](M239_EXPLAIN_FRONTIER.md).
-- [ ] M240 Raw dataflow explain output for operator and exchange topology.
+- [x] M240 Raw dataflow explain output for operator and exchange topology. `ExplainDataflowGraph.Exchanges` now exposes stage-boundary worker transport while preserving pipeline and subplan edges. See [M240_EXPLAIN_DATAFLOW.md](M240_EXPLAIN_DATAFLOW.md).
 - [ ] M241 Optimizer trace showing rule applications and rejected alternatives.
 - [ ] M242 Per-operator update, batch, and frontier metrics.
 - [ ] M243 Arrangement memory metrics split by key, value, and trace history.

@@ -23851,6 +23851,17 @@ race-c247-gorilla-codec:
 cleanup-hatrie-tmp-metadata:
 	bash scripts/audit-hatrie-tmp.sh clean-metadata
 
+.PHONY: stage-m240-dataflow commit-m240-dataflow push-m240-dataflow
+
+stage-m240-dataflow:
+	bash scripts/stage-m240-dataflow.sh
+
+commit-m240-dataflow:
+	bash scripts/commit-m240-dataflow.sh
+
+push-m240-dataflow:
+	bash scripts/push-m240-dataflow.sh
+
 cleanup-hatrie-tmp-after-test:
 	bash ./scripts/cleanup-hatrie-build-tmp.sh verify
 	bash ./scripts/cleanup-hatrie-tmp-safe.sh plan
@@ -26420,6 +26431,30 @@ commit-m239-explain:
 
 push-m239-explain:
 	bash scripts/push-m239-explain.sh
+
+test-m240-dataflow:
+	bash scripts/test-m240-dataflow.sh test
+
+test-m240-dataflow-package:
+	bash scripts/test-m240-dataflow.sh package
+
+race-m240-dataflow:
+	bash scripts/test-m240-dataflow.sh race
+
+vet-m240-dataflow:
+	bash scripts/test-m240-dataflow.sh vet
+
+regression-m240-dataflow:
+	bash scripts/test-m240-dataflow.sh regression
+
+verify-docs-m240-dataflow:
+	bash scripts/test-m240-dataflow.sh docs
+
+format-m240-dataflow:
+	bash scripts/test-m240-dataflow.sh format
+
+benchmark-m240-dataflow:
+	bash scripts/benchmark-m240-dataflow.sh
 
 format-m233-sink-retry:
 	bash scripts/m233-sink-retry.sh format
