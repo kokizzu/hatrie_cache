@@ -25,6 +25,20 @@ type resultCacheDependencyKey struct {
 	key  string
 }
 
+// DefaultMaintainedResultCacheMaxInFlight bounds the number of distinct
+// expressions that can be coalesced concurrently by a maintained cache.
+const DefaultMaintainedResultCacheMaxInFlight = 64
+
+// MaintainedResultCacheOptions configures an opt-in cache for concurrent
+// identical read expressions. Capacity bounds retained results; MaxInFlight
+// bounds distinct executions waiting to publish a result. A non-positive
+// MaxInFlight uses DefaultMaintainedResultCacheMaxInFlight.
+type MaintainedResultCacheOptions struct {
+	Capacity           int
+	MaxInFlight        int
+	DependencyTracking bool
+}
+
 type ResultCache struct {
 	mu                   sync.Mutex
 	capacity             int
@@ -37,6 +51,9 @@ type ResultCache struct {
 	misses               uint64
 	bypasses             uint64
 	evictions            uint64
+	coalesced            uint64
+	maxInFlight          int
+	inflight             map[resultCacheInFlightKey]*resultCacheFlight
 }
 
 // ResultCacheStats reports cache reuse and retention outcomes. Misses count
@@ -48,6 +65,7 @@ type ResultCacheStats struct {
 	Misses    uint64
 	Bypasses  uint64
 	Evictions uint64
+	Coalesced uint64
 }
 
 // SQLResultCacheStats is the SQL-facing name for ResultCacheStats.
@@ -66,27 +84,71 @@ type resultCacheEntry struct {
 	dependencies []resultCacheDependencyKey
 }
 
+type resultCacheFlight struct {
+	done   chan struct{}
+	result QueryResult
+	err    error
+	retry  bool
+}
+
+type resultCacheInFlightKey struct {
+	mode byte
+	key  string
+}
+
 // NewResultCache creates a bounded cache. A non-positive capacity disables
 // retention while preserving Execute behavior.
 func NewResultCache(capacity int) *ResultCache {
-	return newResultCache(capacity, false)
+	return newResultCache(capacity, false, 0)
 }
 
 // NewResultCacheWithDependencies creates a cache with an opt-in source
 // dependency index. Use InvalidateDependency or InvalidateDependencies after
 // a source mutation. The default constructor does not retain this index.
 func NewResultCacheWithDependencies(capacity int) *ResultCache {
-	return newResultCache(capacity, true)
+	return newResultCache(capacity, true, 0)
 }
 
-func newResultCache(capacity int, dependencyTracking bool) *ResultCache {
+// NewMaintainedResultCache creates a typed result cache that coalesces
+// concurrent misses for the same read expression. It remains opt-in; callers
+// must attach the returned cache to SQLQueryOptions.ResultCache or use its
+// execution methods explicitly.
+func NewMaintainedResultCache(capacity int) *SQLResultCache {
+	return NewMaintainedResultCacheWithOptions(MaintainedResultCacheOptions{Capacity: capacity})
+}
+
+// NewMaintainedResultCacheWithDependencies creates a coalescing cache that
+// also supports mutation-driven dependency invalidation.
+func NewMaintainedResultCacheWithDependencies(capacity int) *SQLResultCache {
+	return NewMaintainedResultCacheWithOptions(MaintainedResultCacheOptions{
+		Capacity:           capacity,
+		DependencyTracking: true,
+	})
+}
+
+// NewMaintainedResultCacheWithOptions creates a bounded, coalescing typed
+// result cache. Distinct keys beyond MaxInFlight execute independently rather
+// than growing an unbounded wait map.
+func NewMaintainedResultCacheWithOptions(options MaintainedResultCacheOptions) *SQLResultCache {
+	maxInFlight := options.MaxInFlight
+	if maxInFlight <= 0 {
+		maxInFlight = DefaultMaintainedResultCacheMaxInFlight
+	}
+	return newResultCache(options.Capacity, options.DependencyTracking, maxInFlight)
+}
+
+func newResultCache(capacity int, dependencyTracking bool, maxInFlight int) *ResultCache {
 	cache := &ResultCache{
 		capacity:           capacity,
 		entries:            make(map[string]resultCacheEntry),
 		dependencyTracking: dependencyTracking,
+		maxInFlight:        maxInFlight,
 	}
 	if dependencyTracking {
 		cache.dependencyIndex = make(map[resultCacheDependencyKey]map[string]struct{})
+	}
+	if maxInFlight > 0 {
+		cache.inflight = make(map[resultCacheInFlightKey]*resultCacheFlight)
 	}
 	return cache
 }
@@ -120,6 +182,7 @@ func (cache *ResultCache) Stats() ResultCacheStats {
 		Misses:    atomic.LoadUint64(&cache.misses),
 		Bypasses:  atomic.LoadUint64(&cache.bypasses),
 		Evictions: atomic.LoadUint64(&cache.evictions),
+		Coalesced: atomic.LoadUint64(&cache.coalesced),
 	}
 }
 
@@ -131,6 +194,58 @@ func (cache *ResultCache) RecordBypass() {
 		return
 	}
 	atomic.AddUint64(&cache.bypasses, 1)
+}
+
+func (cache *ResultCache) beginFlightLocked(key string, mode byte) (*resultCacheFlight, bool) {
+	if cache.maxInFlight <= 0 || cache.inflight == nil {
+		return nil, false
+	}
+	flightKey := resultCacheInFlightKey{mode: mode, key: key}
+	if flight, ok := cache.inflight[flightKey]; ok {
+		if flight.done == nil {
+			flight.done = make(chan struct{})
+		}
+		return flight, false
+	}
+	if len(cache.inflight) >= cache.maxInFlight {
+		return nil, false
+	}
+	flight := &resultCacheFlight{done: make(chan struct{})}
+	cache.inflight[flightKey] = flight
+	return flight, true
+}
+
+func (cache *ResultCache) finishFlight(key string, mode byte, flight *resultCacheFlight, result QueryResult, err error, retry bool) {
+	if flight == nil {
+		return
+	}
+	cache.mu.Lock()
+	flightKey := resultCacheInFlightKey{mode: mode, key: key}
+	if current, ok := cache.inflight[flightKey]; ok && current == flight {
+		flight.result = result
+		flight.err = err
+		flight.retry = retry
+		delete(cache.inflight, flightKey)
+		if flight.done != nil {
+			close(flight.done)
+		}
+	}
+	cache.mu.Unlock()
+}
+
+func waitForResultCacheFlight(ctx context.Context, flight *resultCacheFlight) (QueryResult, error, bool) {
+	select {
+	case <-flight.done:
+		if flight.retry {
+			return QueryResult{}, nil, true
+		}
+		if flight.err != nil {
+			return flight.result, flight.err, false
+		}
+		return cloneResultCacheResult(flight.result), nil, false
+	case <-ctx.Done():
+		return QueryResult{}, ctx.Err(), false
+	}
 }
 
 // Execute reuses one result only when epoch reports the same value before and
@@ -148,32 +263,48 @@ func (cache *ResultCache) Execute(ctx context.Context, key string, epoch func() 
 	if epoch == nil {
 		return QueryResult{}, errors.New("hatSql: result cache epoch is nil")
 	}
-	before := epoch()
-	cache.mu.Lock()
-	entry, ok := cache.entries[key]
-	cache.mu.Unlock()
-	if ok && !entry.typed && entry.epoch == before {
-		atomic.AddUint64(&cache.hits, 1)
-		return cloneResultCacheResult(entry.result), nil
-	}
-	atomic.AddUint64(&cache.misses, 1)
-	result, err := execute(ctx)
-	if err != nil {
-		return result, err
-	}
-	if epoch() != before {
-		cache.RecordBypass()
+	for {
+		before := epoch()
+		cache.mu.Lock()
+		entry, ok := cache.entries[key]
+		if ok && !entry.typed && entry.epoch == before {
+			cache.mu.Unlock()
+			atomic.AddUint64(&cache.hits, 1)
+			return cloneResultCacheResult(entry.result), nil
+		}
+		flight, owner := cache.beginFlightLocked(key, 'e')
+		cache.mu.Unlock()
+		if !owner && flight != nil {
+			atomic.AddUint64(&cache.coalesced, 1)
+			result, err, retry := waitForResultCacheFlight(ctx, flight)
+			if err != nil || !retry {
+				return result, err
+			}
+			continue
+		}
+		atomic.AddUint64(&cache.misses, 1)
+		result, err := execute(ctx)
+		if err != nil {
+			cache.finishFlight(key, 'e', flight, result, err, false)
+			return result, err
+		}
+		if epoch() != before {
+			cache.finishFlight(key, 'e', flight, result, nil, true)
+			cache.RecordBypass()
+			return result, nil
+		}
+		stored, err := snapshotResultCacheResult(result)
+		if err != nil {
+			cache.finishFlight(key, 'e', flight, result, nil, true)
+			cache.RecordBypass()
+			return result, nil
+		}
+		cache.mu.Lock()
+		cache.storeEntryLocked(key, resultCacheEntry{epoch: before, result: stored})
+		cache.mu.Unlock()
+		cache.finishFlight(key, 'e', flight, stored, nil, false)
 		return result, nil
 	}
-	stored, err := snapshotResultCacheResult(result)
-	if err != nil {
-		cache.RecordBypass()
-		return result, nil
-	}
-	cache.mu.Lock()
-	cache.storeEntryLocked(key, resultCacheEntry{epoch: before, result: stored})
-	cache.mu.Unlock()
-	return result, nil
 }
 
 // ExecuteVersioned reuses one typed SQL result only while version reports the
@@ -206,41 +337,56 @@ func (cache *ResultCache) executeVersioned(ctx context.Context, key string, vers
 	if version == nil {
 		return QueryResult{}, errors.New("hatSql: result cache version is nil")
 	}
-	before, available := version()
-	if !available || before == "" {
-		cache.RecordBypass()
-		return execute(ctx)
-	}
-	cache.mu.Lock()
-	entry, ok := cache.entries[key]
-	cache.mu.Unlock()
-	dependenciesMatch := true
-	if cache.dependencyTracking && resultCacheDependenciesValid(dependencies) {
-		dependenciesMatch = resultCacheDependenciesEqualPublic(entry.dependencies, dependencies)
-	}
-	if ok && entry.typed && entry.version == before && dependenciesMatch {
-		atomic.AddUint64(&cache.hits, 1)
-		return cloneResultCacheResult(entry.result), nil
-	}
-	atomic.AddUint64(&cache.misses, 1)
-	result, err := execute(ctx)
-	if err != nil {
-		return result, err
-	}
-	after, available := version()
-	if !available || after != before {
-		cache.RecordBypass()
+	for {
+		before, available := version()
+		if !available || before == "" {
+			cache.RecordBypass()
+			return execute(ctx)
+		}
+		cache.mu.Lock()
+		entry, ok := cache.entries[key]
+		dependenciesMatch := true
+		if cache.dependencyTracking && resultCacheDependenciesValid(dependencies) {
+			dependenciesMatch = resultCacheDependenciesEqualPublic(entry.dependencies, dependencies)
+		}
+		if ok && entry.typed && entry.version == before && dependenciesMatch {
+			cache.mu.Unlock()
+			atomic.AddUint64(&cache.hits, 1)
+			return cloneResultCacheResult(entry.result), nil
+		}
+		flight, owner := cache.beginFlightLocked(key, 'v')
+		cache.mu.Unlock()
+		if !owner && flight != nil {
+			atomic.AddUint64(&cache.coalesced, 1)
+			result, err, retry := waitForResultCacheFlight(ctx, flight)
+			if err != nil || !retry {
+				return result, err
+			}
+			continue
+		}
+		atomic.AddUint64(&cache.misses, 1)
+		result, err := execute(ctx)
+		if err != nil {
+			cache.finishFlight(key, 'v', flight, result, err, false)
+			return result, err
+		}
+		after, available := version()
+		if !available || after != before {
+			cache.finishFlight(key, 'v', flight, result, nil, true)
+			cache.RecordBypass()
+			return result, nil
+		}
+		stored := cloneResultCacheResult(result)
+		entry = resultCacheEntry{version: before, typed: true, result: stored}
+		if cache.dependencyTracking && resultCacheDependenciesValid(dependencies) {
+			entry.dependencies, _ = normalizeResultCacheDependencies(dependencies)
+		}
+		cache.mu.Lock()
+		cache.storeEntryLocked(key, entry)
+		cache.mu.Unlock()
+		cache.finishFlight(key, 'v', flight, stored, nil, false)
 		return result, nil
 	}
-	stored := cloneResultCacheResult(result)
-	entry = resultCacheEntry{version: before, typed: true, result: stored}
-	if cache.dependencyTracking && resultCacheDependenciesValid(dependencies) {
-		entry.dependencies, _ = normalizeResultCacheDependencies(dependencies)
-	}
-	cache.mu.Lock()
-	cache.storeEntryLocked(key, entry)
-	cache.mu.Unlock()
-	return result, nil
 }
 
 // ExecuteWithDependencies reuses a typed result until the caller invalidates
@@ -258,34 +404,49 @@ func (cache *ResultCache) ExecuteWithDependencies(ctx context.Context, key strin
 		}
 		return execute(ctx)
 	}
-	cache.mu.Lock()
-	generation := cache.dependencyGeneration
-	entry, ok := cache.entries[key]
-	cache.mu.Unlock()
-	if ok && entry.typed && resultCacheDependenciesEqualPublic(entry.dependencies, dependencies) {
-		atomic.AddUint64(&cache.hits, 1)
-		return cloneResultCacheResult(entry.result), nil
-	}
-	atomic.AddUint64(&cache.misses, 1)
-	result, err := execute(ctx)
-	if err != nil {
-		return result, err
-	}
-	dependencyKeys, _ := normalizeResultCacheDependencies(dependencies)
-	stored := resultCacheEntry{
-		typed:        true,
-		result:       cloneResultCacheResult(result),
-		dependencies: dependencyKeys,
-	}
-	cache.mu.Lock()
-	if generation != cache.dependencyGeneration {
+	for {
+		cache.mu.Lock()
+		generation := cache.dependencyGeneration
+		entry, ok := cache.entries[key]
+		if ok && entry.typed && resultCacheDependenciesEqualPublic(entry.dependencies, dependencies) {
+			cache.mu.Unlock()
+			atomic.AddUint64(&cache.hits, 1)
+			return cloneResultCacheResult(entry.result), nil
+		}
+		flight, owner := cache.beginFlightLocked(key, 'd')
 		cache.mu.Unlock()
-		cache.RecordBypass()
+		if !owner && flight != nil {
+			atomic.AddUint64(&cache.coalesced, 1)
+			result, err, retry := waitForResultCacheFlight(ctx, flight)
+			if err != nil || !retry {
+				return result, err
+			}
+			continue
+		}
+		atomic.AddUint64(&cache.misses, 1)
+		result, err := execute(ctx)
+		if err != nil {
+			cache.finishFlight(key, 'd', flight, result, err, false)
+			return result, err
+		}
+		dependencyKeys, _ := normalizeResultCacheDependencies(dependencies)
+		stored := resultCacheEntry{
+			typed:        true,
+			result:       cloneResultCacheResult(result),
+			dependencies: dependencyKeys,
+		}
+		cache.mu.Lock()
+		if generation != cache.dependencyGeneration {
+			cache.mu.Unlock()
+			cache.finishFlight(key, 'd', flight, result, nil, true)
+			cache.RecordBypass()
+			return result, nil
+		}
+		cache.storeEntryLocked(key, stored)
+		cache.mu.Unlock()
+		cache.finishFlight(key, 'd', flight, stored.result, nil, false)
 		return result, nil
 	}
-	cache.storeEntryLocked(key, stored)
-	cache.mu.Unlock()
-	return result, nil
 }
 
 // InvalidateDependency removes every retained result that depends on the

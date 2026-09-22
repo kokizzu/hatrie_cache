@@ -26820,3 +26820,36 @@ commit-m247:
 .PHONY: push-m247
 push-m247:
 	bash scripts/push-m247.sh
+.PHONY: test-m248
+test-m248:
+	bash scripts/test-m248.sh
+.PHONY: benchmark-m248
+benchmark-m248:
+	bash scripts/benchmark-m248.sh
+.PHONY: benchmark-m248-serialized
+benchmark-m248-serialized:
+	M248_BENCH_MODE=serialized bash scripts/benchmark-m248.sh
+.PHONY: format-m248
+format-m248:
+	bash scripts/format-m248.sh
+.PHONY: race-m248
+race-m248:
+	bash scripts/race-m248.sh
+.PHONY: vet-m248
+vet-m248:
+	bash scripts/vet-m248.sh
+.PHONY: test-m248-package
+test-m248-package:
+	bash scripts/test-m248-package.sh
+.PHONY: stage-m248
+stage-m248:
+	bash scripts/stage-m248.sh
+.PHONY: commit-m248
+commit-m248:
+	bash scripts/commit-m248.sh
+.PHONY: push-m248
+push-m248:
+	bash scripts/push-m248.sh
+.PHONY: verify-docs-m248
+verify-docs-m248:
+	bash scripts/verify-docs-m248.sh

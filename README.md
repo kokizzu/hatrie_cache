@@ -99,6 +99,7 @@ security guidance before exposing it on a network.
 - Opt-in timestamp throughput and input-to-output freshness telemetry: [M245_TIMESTAMP_TELEMETRY.md](M245_TIMESTAMP_TELEMETRY.md)
 - Opt-in per-object history-retention policies with bounded usage accounting: [M246_FRONTIER_RETENTION_POLICY.md](M246_FRONTIER_RETENTION_POLICY.md)
 - Typed resume errors for expired frontier checkpoints: [M247_FRONTIER_EXPIRY_ERRORS.md](M247_FRONTIER_EXPIRY_ERRORS.md)
+- Opt-in maintained result caching coalesces concurrent identical reads with bounded in-flight state: [M248_MAINTAINED_RESULT_CACHE.md](M248_MAINTAINED_RESULT_CACHE.md)
 - ClickHouse-style typed-table decompressed column-block cache: [TYPED_TABLE_DECOMPRESSED_BLOCK_CACHE.md](TYPED_TABLE_DECOMPRESSED_BLOCK_CACHE.md)
 - 50-item adoption backlog for each inspiration source: [INSPIRATION_BACKLOG.md](INSPIRATION_BACKLOG.md)
 - Opt-in cross-source snapshot cutover coordination: [MZ010_SNAPSHOT_CUTOVER.md](MZ010_SNAPSHOT_CUTOVER.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-010-cross-source-snapshot-cutover)

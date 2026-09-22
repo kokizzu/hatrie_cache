@@ -157,6 +157,43 @@ Typed details are worth the measured cost only on a rejected resume request;
 the valid check is unchanged. See
 [M247_FRONTIER_EXPIRY_ERRORS.md](M247_FRONTIER_EXPIRY_ERRORS.md).
 
+## M248 Maintained Result Cache
+
+The ordinary constructor is the in-revision control and the maintained
+constructor is the M248 path. These benchmarks use one long-lived cache for
+the sequential miss comparison. The concurrent benchmark creates eight
+callers and uses an executor serialized by one mutex so duplicate work is
+visible.
+
+| Benchmark | Mode | Median ns/op | B/op | allocs/op | Result |
+|---|---|---:|---:|---:|---|
+| Versioned miss | ordinary cache | 446 | 360 | 4 | baseline |
+| Versioned miss | maintained cache | 733 | 648 | 6 | 1.64x slower, +80% bytes, +2 allocs |
+| 8-caller serialized duplicate miss | ordinary cache | 106,738 | 4,050 | 50 | baseline |
+| 8-caller serialized duplicate miss | maintained cache | 38,490 | 4,677 | 54 | 2.77x faster, 8x fewer executor calls |
+
+Raw samples from make benchmark-m248-serialized:
+
+~~~text
+BenchmarkResultCacheConcurrentSerializedMiss-32
+109917 ns/op 4049 B/op 50 allocs/op
+108922 ns/op 4050 B/op 50 allocs/op
+102605 ns/op 4049 B/op 50 allocs/op
+106330 ns/op 4051 B/op 50 allocs/op
+106738 ns/op 4051 B/op 50 allocs/op
+
+BenchmarkMaintainedResultCacheConcurrentSerializedMiss-32
+38490 ns/op 4677 B/op 54 allocs/op
+39706 ns/op 4678 B/op 54 allocs/op
+39322 ns/op 4677 B/op 54 allocs/op
+37936 ns/op 4677 B/op 54 allocs/op
+38309 ns/op 4676 B/op 54 allocs/op
+~~~
+
+The maintained cache is intentionally opt-in because an isolated cold miss is
+slower and allocates more. It is beneficial when concurrent callers would
+otherwise repeat an expensive or serialized read.
+
 ## MZ-026 Adaptive Dictionary Arrangements
 
 Five samples per case on Linux amd64, AMD Ryzen 9 5950X, building a 4,096-row
