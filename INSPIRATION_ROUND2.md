@@ -71,7 +71,7 @@ operator control remain the preferred deployment model.
 - [x] C235 [Read/write task profiler aggregation by table part and column](C235_READ_WRITE_PROFILER.md).
 - [x] C236 Explain output for data-skipping-index decisions and rejected marks; EXPLAIN ANALYZE now exposes bounded per-mark skip/scan decisions, reasons, complete examined/rejected counts, and truncation state for columnar pruning paths. See C236_EXPLAIN_SKIP_DECISIONS.md and `make test-c236-explain`.
 - [x] C237 Explain output for projection selection and estimated I/O cost; EXPLAIN now reports selected columnar fields, predicate/output field roles, and bounded selected-batch read estimates. See [C237_EXPLAIN_PROJECTION.md](C237_EXPLAIN_PROJECTION.md) and `make test-c237-projection`.
-- [ ] C238 Mutation queue progress with rows remaining and elapsed estimates.
+- [x] C238 Mutation queue progress with ready/pending/blocked/running/completed/failed/remaining counts and queue-lifetime elapsed/estimated-remaining nanoseconds. See [C238_MUTATION_QUEUE_PROGRESS.md](C238_MUTATION_QUEUE_PROGRESS.md) and `make test-c238-progress`.
 - [ ] C239 Part-merge backlog, amplification, and age metrics.
 - [ ] C240 Read-only backup database attachment for querying backup parts in place.
 - [ ] C241 Incremental backup chunk deduplication across snapshots.

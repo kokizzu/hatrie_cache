@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -55,6 +56,8 @@ type SQLMutationDependencyQueue struct {
 	graph        *SQLMutationDependencyGraph
 	nextSequence uint64
 	closed       bool
+	startedAt    time.Time
+	now          func() time.Time
 }
 
 // OpenSQLMutationDependencyQueue opens or creates a queue log with mode 0600.
@@ -72,7 +75,7 @@ func OpenSQLMutationDependencyQueue(path string, maxTasks int) (*SQLMutationDepe
 	if err != nil {
 		return nil, fmt.Errorf("open mutation dependency queue: %w", err)
 	}
-	queue := &SQLMutationDependencyQueue{path: path, file: file, graph: graph}
+	queue := &SQLMutationDependencyQueue{path: path, file: file, graph: graph, startedAt: time.Now().UTC(), now: time.Now}
 	sequence, replayErr := replaySQLMutationDependencyQueue(file, graph)
 	if replayErr != nil {
 		_ = file.Close()
@@ -251,6 +254,37 @@ func (queue *SQLMutationDependencyQueue) Snapshot() []SQLMutationTaskRecord {
 		return nil
 	}
 	return queue.graph.Snapshot()
+}
+
+// Progress returns queue lifecycle counts and a best-effort remaining-time
+// estimate. Timing starts when the queue is opened, so a reopened queue's
+// estimate is intentionally scoped to the current process lifetime.
+func (queue *SQLMutationDependencyQueue) Progress() SQLMutationDependencyProgress {
+	if queue == nil {
+		return SQLMutationDependencyProgress{}
+	}
+	queue.mu.Lock()
+	defer queue.mu.Unlock()
+	if queue.closed {
+		return SQLMutationDependencyProgress{}
+	}
+	progress := queue.graph.Progress()
+	now := time.Now().UTC()
+	if queue.now != nil {
+		now = queue.now()
+	}
+	if !queue.startedAt.IsZero() {
+		elapsed := now.Sub(queue.startedAt)
+		if elapsed < 0 {
+			elapsed = 0
+		}
+		progress.ElapsedNanos = elapsed.Nanoseconds()
+		if progress.Completed > 0 && progress.Remaining > 0 {
+			perTask := elapsed / time.Duration(progress.Completed)
+			progress.EstimatedRemainingNanos = (perTask * time.Duration(progress.Remaining)).Nanoseconds()
+		}
+	}
+	return progress
 }
 
 // Sync flushes the durable queue log without changing graph state.

@@ -25388,3 +25388,30 @@ commit-c237-projection:
 
 push-c237-projection:
 	bash scripts/push-c237-projection.sh
+.PHONY: test-c238-progress format-c238-progress benchmark-c238-baseline benchmark-c238-before-after
+test-c238-progress:
+	bash scripts/test-c238-progress.sh
+
+format-c238-progress:
+	bash scripts/format-c238-progress.sh
+
+benchmark-c238-baseline:
+	bash scripts/benchmark-c238-baseline.sh
+
+benchmark-c238-before-after:
+	bash scripts/benchmark-c238-before-after.sh
+.PHONY: race-c238-progress vet-c238-progress
+race-c238-progress:
+	bash scripts/race-c238-progress.sh
+
+vet-c238-progress:
+	bash scripts/vet-c238-progress.sh
+.PHONY: stage-c238-progress commit-c238-progress push-c238-progress
+stage-c238-progress:
+	bash scripts/stage-c238-progress.sh
+
+commit-c238-progress:
+	bash scripts/commit-c238-progress.sh
+
+push-c238-progress:
+	bash scripts/push-c238-progress.sh

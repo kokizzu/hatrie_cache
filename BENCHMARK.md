@@ -36057,3 +36057,18 @@ projection metadata.
 CPU is within normal sample noise; the measurable tradeoff is the bounded
 EXPLAIN result metadata. Normal query execution is unchanged, and the byte
 estimate represents only the selected columnar batch.
+
+## C238 Mutation Queue Progress
+
+Linux/amd64, AMD Ryzen 9 5950X, five 2-second benchmark samples per case with
+`GOMAXPROCS=1`. The benchmark summarizes 512 pending mutation tasks. The C237
+baseline clones every task through `Snapshot()`; C238 reads lifecycle counts
+directly under the graph read lock.
+
+| Path | Raw samples (ns/op) | Median | Memory | Relative result |
+| --- | --- | ---: | ---: | --- |
+| C237 snapshot/count baseline | 91,462, 95,144, 98,734, 90,430, 92,519 | 92,519 | 50,432 B/op, 2 allocs/op | baseline |
+| C238 `Progress()` | 9,730, 9,835, 9,709, 9,701, 9,852 | 9,730 | 0 B/op, 0 allocs/op | 9.51x faster; allocation eliminated |
+
+The estimate is a status read only; it does not change mutation scheduling or
+durability behavior.

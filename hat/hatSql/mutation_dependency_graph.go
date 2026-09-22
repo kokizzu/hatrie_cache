@@ -76,6 +76,23 @@ type SQLMutationTaskRecord struct {
 	LastError string               `json:"last_error,omitempty"`
 }
 
+// SQLMutationDependencyProgress is a point-in-time lifecycle summary. Ready
+// is the subset of Pending that can run immediately; Blocked is pending work
+// waiting for dependencies. Remaining includes failed tasks because they are
+// not complete until an operator retries or otherwise resolves them.
+type SQLMutationDependencyProgress struct {
+	Total                    int   `json:"total"`
+	Ready                    int   `json:"ready"`
+	Pending                  int   `json:"pending"`
+	Running                  int   `json:"running"`
+	Completed                int   `json:"completed"`
+	Failed                   int   `json:"failed"`
+	Blocked                  int   `json:"blocked"`
+	Remaining                int   `json:"remaining"`
+	ElapsedNanos             int64 `json:"elapsed_nanos,omitempty"`
+	EstimatedRemainingNanos  int64 `json:"estimated_remaining_nanos,omitempty"`
+}
+
 // SQLMutationDependencyGraphSnapshot is the versioned persisted graph format.
 type SQLMutationDependencyGraphSnapshot struct {
 	Version uint32                  `json:"version"`
@@ -233,6 +250,36 @@ func (graph *SQLMutationDependencyGraph) RequeueRunning() int {
 		}
 	}
 	return count
+}
+
+// Progress returns lifecycle counts without cloning task records.
+func (graph *SQLMutationDependencyGraph) Progress() SQLMutationDependencyProgress {
+	var progress SQLMutationDependencyProgress
+	if graph == nil {
+		return progress
+	}
+	graph.mu.RLock()
+	defer graph.mu.RUnlock()
+	progress.Total = len(graph.tasks)
+	for id, task := range graph.tasks {
+		switch task.State {
+		case SQLMutationTaskPending:
+			progress.Pending++
+			if _, ready := graph.readySet[id]; ready {
+				progress.Ready++
+			} else {
+				progress.Blocked++
+			}
+		case SQLMutationTaskRunning:
+			progress.Running++
+		case SQLMutationTaskCompleted:
+			progress.Completed++
+		case SQLMutationTaskFailed:
+			progress.Failed++
+		}
+	}
+	progress.Remaining = progress.Total - progress.Completed
+	return progress
 }
 
 // Task returns a snapshot of one task.
