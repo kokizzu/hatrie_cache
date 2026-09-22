@@ -25415,3 +25415,30 @@ commit-c238-progress:
 
 push-c238-progress:
 	bash scripts/push-c238-progress.sh
+.PHONY: test-c239-merge-metrics
+test-c239-merge-metrics:
+	bash scripts/test-c239-merge-metrics.sh
+.PHONY: benchmark-c239-merge-baseline
+benchmark-c239-merge-baseline:
+	bash scripts/benchmark-c239-merge-baseline.sh
+.PHONY: format-c239-merge-metrics benchmark-c239-merge-before-after race-c239-merge-metrics vet-c239-merge-metrics
+format-c239-merge-metrics:
+	bash scripts/format-c239-merge-metrics.sh
+
+benchmark-c239-merge-before-after:
+	bash scripts/benchmark-c239-merge-before-after.sh
+
+race-c239-merge-metrics:
+	bash scripts/race-c239-merge-metrics.sh
+
+vet-c239-merge-metrics:
+	bash scripts/vet-c239-merge-metrics.sh
+.PHONY: stage-c239-merge-metrics commit-c239-merge-metrics push-c239-merge-metrics
+stage-c239-merge-metrics:
+	bash scripts/stage-c239-merge-metrics.sh
+
+commit-c239-merge-metrics:
+	bash scripts/commit-c239-merge-metrics.sh
+
+push-c239-merge-metrics:
+	bash scripts/push-c239-merge-metrics.sh

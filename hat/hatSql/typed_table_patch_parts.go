@@ -18,10 +18,18 @@ type TypedTablePatchOptions struct {
 var ErrTypedTablePatchPartsDisabled = errors.New("typed table patch parts disabled")
 
 type typedTablePatchState struct {
-	deleted        typedTableDeleteBitmap
-	deletedCount   int
-	mergeThreshold int
-	mergeScheduled bool
+	deleted           typedTableDeleteBitmap
+	deletedCount      int
+	mergeThreshold    int
+	mergeScheduled    bool
+	pendingSince      time.Time
+	now               func() time.Time
+	mergeCount        uint64
+	mergeInputRows    uint64
+	mergeOutputRows   uint64
+	mergeDeletedRows  uint64
+	lastMergeAt       time.Time
+	lastMergeDuration time.Duration
 }
 
 func normalizeTypedTablePatchOptions(options TypedTablePatchOptions) TypedTablePatchOptions {
@@ -39,6 +47,13 @@ func newTypedTablePatchState(options TypedTablePatchOptions) *typedTablePatchSta
 		return nil
 	}
 	return &typedTablePatchState{mergeThreshold: options.MergeThreshold}
+}
+
+func (state *typedTablePatchState) nowUTC() time.Time {
+	if state != nil && state.now != nil {
+		return state.now()
+	}
+	return time.Now().UTC()
 }
 
 func (table *TypedTable) typedTableRowDeletedLocked(index int) bool {
@@ -90,10 +105,7 @@ func (table *TypedTable) compactTypedTablePatchPartsLocked() {
 	}
 	physicalRowsBefore := len(table.keys)
 	deletedRows := state.deletedCount
-	started := time.Time{}
-	if table.storageEvents != nil {
-		started = time.Now()
-	}
+	started := state.nowUTC()
 	table.clearColumnarLayoutsLocked()
 	write := 0
 	for read, key := range table.keys {
@@ -137,7 +149,19 @@ func (table *TypedTable) compactTypedTablePatchPartsLocked() {
 		}
 		table.rebuildTypedTableTTLExpiryIndexLocked(write)
 	}
+	finished := state.nowUTC()
+	duration := finished.Sub(started)
+	if duration < 0 {
+		duration = 0
+	}
+	state.mergeCount++
+	state.mergeInputRows += uint64(physicalRowsBefore)
+	state.mergeOutputRows += uint64(write)
+	state.mergeDeletedRows += uint64(deletedRows)
+	state.lastMergeAt = finished
+	state.lastMergeDuration = duration
+	state.pendingSince = time.Time{}
 	if table.storageEvents != nil {
-		table.recordStorageEventLocked(TypedTableStorageEventPatchPartMerged, physicalRowsBefore, write, 0, deletedRows, time.Since(started))
+		table.recordStorageEventLocked(TypedTableStorageEventPatchPartMerged, physicalRowsBefore, write, 0, deletedRows, duration)
 	}
 }

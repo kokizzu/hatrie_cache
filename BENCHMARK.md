@@ -36072,3 +36072,18 @@ directly under the graph read lock.
 
 The estimate is a status read only; it does not change mutation scheduling or
 durability behavior.
+
+## C239 Part-Merge Metrics
+
+Linux/amd64, AMD Ryzen 9 5950X, five 2-second benchmark samples per case with
+`GOMAXPROCS=1`. The workload keeps a bounded patch-part history, completes one
+merge, then leaves one pending tombstone. The C238 baseline reconstructs merge
+accounting by cloning storage events; C239 reads direct table counters.
+
+| Path | Raw samples (ns/op) | Median | Memory | Relative result |
+| --- | --- | ---: | ---: | --- |
+| C238 event-history reconstruction | 196.9, 228.6, 230.9, 216.4, 219.0 | 219.0 | 384 B/op, 1 alloc/op | baseline |
+| C239 `PartMergeMetrics()` | 67.27, 69.05, 72.23, 65.05, 72.61 | 69.05 | 0 B/op, 0 allocs/op | 3.17x faster; allocation eliminated |
+
+This measures status collection only. Merge scheduling and compaction behavior
+are unchanged.

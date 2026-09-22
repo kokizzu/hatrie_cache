@@ -823,6 +823,7 @@ func (table *TypedTable) deleteIndexLocked(index int) TypedTableChange {
 		table.patchParts.deletedCount++
 		change = table.appendChangeLocked(change)
 		if pendingDeletesBefore == 0 {
+			table.patchParts.pendingSince = table.patchParts.nowUTC()
 			physicalRows := len(table.keys)
 			table.recordStorageEventLocked(TypedTableStorageEventPatchPartCreated, physicalRows, physicalRows, table.patchParts.deletedCount, 1, 0)
 		}
