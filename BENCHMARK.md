@@ -36802,3 +36802,40 @@ The feature is kept because it adds quorum-gated, deterministic leader
 selection and stale-proposal fencing, not because the election path is faster
 than the smaller existing evaluator. Full API boundaries and default-off
 behavior are in [T202_REPLICA_SET_LEADER_ELECTION.md](T202_REPLICA_SET_LEADER_ELECTION.md).
+
+<a id="t203-strict-leader-write-fencing"></a>
+## T203 Strict Leader Write Fencing
+
+Command: `make benchmark-t203`. Five `GOMAXPROCS=1` samples were collected on
+Linux/amd64 with an AMD Ryzen 9 5950X. The plain callback is a lower-bound
+control, and the existing journal-quorum row is a three-voter validation
+control. T203 measures the local gate that actually serializes a write
+callback with failover advancement.
+
+| Workload | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Plain unfenced callback control | 0.261 | 0 | 0 | 1.00x |
+| Existing three-voter journal quorum validation | 34.81 | 0 | 0 | 133.4x control |
+| Accepted fenced write callback | 13.01 | 0 | 0 | 49.8x control |
+| Stale write rejection | 11.65 | 0 | 0 | 44.6x control |
+| Leader transition (`Advance`) | 20.27 | 0 | 0 | 77.7x control |
+
+Accepted and stale fence operations both remain allocation-free. The stale
+path initially used formatted errors and cost about `180 ns/op`, `144 B/op`, and
+`2 allocs/op`; the final sentinel-only path removes that avoidable cost. The
+plain callback ratio is only a lower bound because it does no storage work; the
+feature's safety value is exact credential rejection and callback/transition
+serialization, not a claim that fencing makes storage writes faster.
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+Plain callback:       0.3047 0.2453 0.2610 0.2632 0.2601; 0; 0
+Journal quorum:      34.64 34.78 35.60 34.81 37.40; 0; 0
+Accepted fenced:     12.85 13.08 12.55 13.01 13.42; 0; 0
+Stale rejection:     11.41 12.39 11.65 11.26 11.80; 0; 0
+Leader advance:      19.73 20.54 20.22 20.60 20.27; 0; 0
+```
+
+The API boundary, default-off behavior, and remote-store limitation are in
+[T203_LEADER_WRITE_FENCE.md](T203_LEADER_WRITE_FENCE.md).

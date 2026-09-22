@@ -26920,6 +26920,37 @@ benchmark-t202:
 verify-docs-m248:
 	bash scripts/verify-docs-m248.sh
 .PHONY: format-t202 race-t202 vet-t202 test-t202-package verify-docs-t202 stage-t202 commit-t202 push-t202
+.PHONY: test-t203 benchmark-t203 format-t203 race-t203 vet-t203 test-t203-package verify-docs-t203 stage-t203 commit-t203 push-t203
+test-t203:
+	bash scripts/test-t203.sh
+
+benchmark-t203:
+	bash scripts/benchmark-t203.sh
+
+format-t203:
+	bash scripts/format-t203.sh
+
+race-t203:
+	bash scripts/race-t203.sh
+
+vet-t203:
+	bash scripts/vet-t203.sh
+
+test-t203-package:
+	bash scripts/test-t203-package.sh
+
+verify-docs-t203:
+	bash scripts/verify-docs-t203.sh
+
+stage-t203:
+	bash scripts/stage-t203.sh
+
+commit-t203:
+	bash scripts/commit-t203.sh
+
+push-t203:
+	bash scripts/push-t203.sh
+
 format-t202:
 	bash scripts/format-t202.sh
 
