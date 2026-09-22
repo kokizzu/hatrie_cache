@@ -37250,3 +37250,17 @@ the comparison repeatedly upserts the same rows into one mutable
 
 Raw samples and the API tradeoff are recorded in
 [T218_MULTI_PART_TREE_INDEX.md](T218_MULTI_PART_TREE_INDEX.md).
+
+## T219: Packed HASH Index
+
+Command: `make benchmark-t219` on an AMD Ryzen 9 5950X, three samples, with
+65,536 integer keys. The comparison is the existing mutable map-backed
+`HashIndex` with the same exact keys.
+
+| Workload | Packed hash | Mutable `HashIndex` | Improvement |
+| --- | ---: | ---: | --- |
+| Exact lookup | 8.851 ns/op; 0 B/op; 0 allocs/op | 50.15 ns/op; 0 B/op; 0 allocs/op | 5.7x faster; allocation-neutral |
+| Build 65,536 keys | 1,136,872 ns/op; 4,210,752 B/op; 3 allocs/op | 7,222,396 ns/op; 5,859,754 B/op; 517 allocs/op | 6.3x faster; 1.4x lower heap; 172x fewer allocation events |
+
+Raw samples and the immutable/mutable tradeoff are recorded in
+[T219_PACKED_HASH_INDEX.md](T219_PACKED_HASH_INDEX.md).
