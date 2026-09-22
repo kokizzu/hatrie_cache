@@ -527,7 +527,8 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M061 Incremental view maintenance for supported typed views.
 - [x] M062 Materialized view refresh and hydration state.
 - [x] M063 Non-materialized SQL views.
-- [ ] M064 Recursive dataflow maintenance.
+- [ ] M064 Recursive dataflow maintenance remains open for full SQL planner integration.
+- [x] M064c Bounded delta-driven recursive fixed-point executor with cycle-safe ordering, cancellation, hard row/iteration limits, and before/after allocation benchmarks. See [M064_RECURSIVE_DATAFLOW.md](M064_RECURSIVE_DATAFLOW.md).
 - [x] M064a Append-only incremental transitive reachability with cycle-safe positive deltas; arbitrary deletes and updates remain rebuild-only. See [INCREMENTAL_RECURSIVE_REACHABILITY.md](INCREMENTAL_RECURSIVE_REACHABILITY.md).
 - [x] M064b Opt-in Materialize-style recursive reachability `INSERT`/`UPDATE`/`DELETE` maintenance with exact signed pair retractions, affected-source recomputation, leaf direct fast paths, cycle tests, and before/after allocation benchmarks. See [INCREMENTAL_RECURSIVE_REACHABILITY.md](INCREMENTAL_RECURSIVE_REACHABILITY.md).
 - [ ] M065 Incremental window-function maintenance.

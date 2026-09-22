@@ -24795,3 +24795,48 @@ commit-t047-quorum-ledger:
 .PHONY: push-t047-quorum-ledger
 push-t047-quorum-ledger:
 	bash scripts/push-t047-quorum-ledger.sh
+
+
+.PHONY: test-m064-recursive-dataflow
+test-m064-recursive-dataflow:
+	bash scripts/test-m064-recursive-dataflow.sh
+
+.PHONY: benchmark-m064-recursive-dataflow-before
+benchmark-m064-recursive-dataflow-before:
+	bash scripts/benchmark-m064-recursive-dataflow-before.sh
+
+.PHONY: format-m064-recursive-dataflow
+format-m064-recursive-dataflow:
+	bash scripts/format-m064-recursive-dataflow.sh
+
+.PHONY: race-m064-recursive-dataflow
+race-m064-recursive-dataflow:
+	bash scripts/race-m064-recursive-dataflow.sh
+
+.PHONY: vet-m064-recursive-dataflow
+vet-m064-recursive-dataflow:
+	bash scripts/vet-m064-recursive-dataflow.sh
+
+.PHONY: benchmark-m064-recursive-dataflow
+benchmark-m064-recursive-dataflow:
+	bash scripts/benchmark-m064-recursive-dataflow.sh
+
+.PHONY: test-m064-sql-package
+test-m064-sql-package:
+	bash scripts/test-m064-sql-package.sh
+
+.PHONY: status-m064-recursive-dataflow
+status-m064-recursive-dataflow:
+	bash scripts/status-m064-recursive-dataflow.sh
+
+.PHONY: stage-m064-recursive-dataflow
+stage-m064-recursive-dataflow:
+	bash scripts/stage-m064-recursive-dataflow.sh
+
+.PHONY: commit-m064-recursive-dataflow
+commit-m064-recursive-dataflow:
+	bash scripts/commit-m064-recursive-dataflow.sh
+
+.PHONY: push-m064-recursive-dataflow
+push-m064-recursive-dataflow:
+	bash scripts/push-m064-recursive-dataflow.sh

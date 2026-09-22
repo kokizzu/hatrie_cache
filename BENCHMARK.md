@@ -19986,6 +19986,40 @@ can approach full rebuild cost. The default append-only constructor remains
 zero-retention; in this run its control measured 2,073 ns/op, 996 B/op, and
 14 allocs/op.
 
+## M064c Delta-Driven Recursive Dataflow
+
+Commands: `make benchmark-m064-recursive-dataflow-before` and
+`make benchmark-m064-recursive-dataflow`.
+
+This benchmark compares a full-frontier recursive scan with the generic
+delta-driven fixed-point executor on the same 1,024-node graph. Every node
+points to the next one and two nodes. Graph setup is outside the timed loop.
+The raw samples below were run three times on Linux/amd64 with an AMD Ryzen 9
+5950X.
+
+```text
+Before implementation: BenchmarkM064BaselineRecursiveDataflow-32
+5,318,221 4,913,026 5,002,857 ns/op
+107,644 107,642 107,667 B/op
+1,063 1,063 1,063 allocs/op
+
+After implementation: BenchmarkM064RecursiveDataflowDelta-32
+129,265 124,724 125,060 ns/op
+111,632 111,632 111,632 B/op
+545 545 545 allocs/op
+```
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | ---: |
+| Full-frontier scan before implementation | 5,002,857 | 107,644 | 1,063 | 1.00x |
+| Delta-driven executor | 125,060 | 111,632 | 545 | 40.0x faster; 1.04x bytes; 48.7% fewer allocations |
+
+The generic executor wins substantially on CPU and allocation count while
+using 3.7% more transient bytes in this workload. Existing SQL plans remain
+unchanged; callers opt into the primitive explicitly. See
+[M064_RECURSIVE_DATAFLOW.md](M064_RECURSIVE_DATAFLOW.md) for bounds and API
+semantics.
+
 ## M065c Incremental LAG and LEAD Windows
 
 Command: `make benchmark-m065c-incremental-offset-window`.
