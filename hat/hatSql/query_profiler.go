@@ -25,6 +25,7 @@ const (
 	maxSQLQueryProfilerTotalSamples                   = 1 << 20
 	maxSQLQueryProfilerQueryIDBytes                   = 256
 	maxSQLQueryProfilerOperatorBytes                  = 256
+	sqlQueryProfilerQueryMemoryOperator               = "__query__"
 )
 
 var (
@@ -45,13 +46,15 @@ type SQLQueryProfilerOptions struct {
 	SampleEvery                uint64
 }
 
-// SQLQueryProfileSample is one privacy-safe operator observation. CPUTime and
-// BlockedTime are supplied by the caller's instrumentation; the profiler does
-// not inspect query text or collect process-wide stack traces.
+// SQLQueryProfileSample is one privacy-safe operator observation. CPUTime,
+// BlockedTime, and ElapsedTime are supplied by the caller's instrumentation;
+// the profiler does not inspect query text or collect process-wide stack
+// traces.
 type SQLQueryProfileSample struct {
 	Operator    string        `json:"operator"`
 	CPUTime     time.Duration `json:"cpu_time"`
 	BlockedTime time.Duration `json:"blocked_time"`
+	ElapsedTime time.Duration `json:"elapsed_time"`
 	Rows        uint64        `json:"rows"`
 	Bytes       uint64        `json:"bytes"`
 	Timestamp   time.Time     `json:"timestamp"`
@@ -60,23 +63,27 @@ type SQLQueryProfileSample struct {
 // SQLQueryMemorySample is one caller-supplied operator memory observation.
 // AllocatedBytes is cumulative allocation work for the observation, while
 // PeakBytes and RetainedBytes describe the operator's peak and retained
-// resident bytes. The profiler does not read process-wide runtime statistics;
-// callers provide measurements from their operator instrumentation.
+// resident bytes. HeapAllocBytes is a process-heap snapshot when the caller
+// has one; it is not an operator-retained or peak value. The profiler does not
+// read process-wide runtime statistics; callers provide measurements from
+// their operator instrumentation.
 type SQLQueryMemorySample struct {
 	AllocatedBytes uint64 `json:"allocated_bytes"`
 	PeakBytes      uint64 `json:"peak_bytes"`
 	RetainedBytes  uint64 `json:"retained_bytes"`
+	HeapAllocBytes uint64 `json:"heap_alloc_bytes"`
 }
 
 // SQLQueryOperatorMemoryProfile is a bounded aggregate for one operator.
 // AllocatedBytes is saturating, and the other byte fields retain maxima across
 // accepted observations.
 type SQLQueryOperatorMemoryProfile struct {
-	Operator         string `json:"operator"`
-	Observations     uint64 `json:"observations"`
-	AllocatedBytes   uint64 `json:"allocated_bytes"`
-	PeakBytes        uint64 `json:"peak_bytes"`
-	MaxRetainedBytes uint64 `json:"max_retained_bytes"`
+	Operator          string `json:"operator"`
+	Observations      uint64 `json:"observations"`
+	AllocatedBytes    uint64 `json:"allocated_bytes"`
+	PeakBytes         uint64 `json:"peak_bytes"`
+	MaxRetainedBytes  uint64 `json:"max_retained_bytes"`
+	MaxHeapAllocBytes uint64 `json:"max_heap_alloc_bytes"`
 }
 
 // SQLQueryMemoryProfile is a deterministic snapshot for one query. Operators
@@ -207,7 +214,7 @@ func (profiler *SQLQueryProfiler) Record(queryID string, sample SQLQueryProfileS
 	if len(sample.Operator) > maxSQLQueryProfilerOperatorBytes {
 		return false, fmt.Errorf("%w: operator exceeds %d bytes", ErrSQLQueryProfilerOperatorRequired, maxSQLQueryProfilerOperatorBytes)
 	}
-	if sample.CPUTime < 0 || sample.BlockedTime < 0 {
+	if sample.CPUTime < 0 || sample.BlockedTime < 0 || sample.ElapsedTime < 0 {
 		return false, ErrSQLQueryProfilerDurationInvalid
 	}
 	if sample.Timestamp.IsZero() {
@@ -312,9 +319,61 @@ func (profiler *SQLQueryProfiler) RecordMemory(queryID, operator string, sample 
 	if sample.RetainedBytes > operatorProfile.MaxRetainedBytes {
 		operatorProfile.MaxRetainedBytes = sample.RetainedBytes
 	}
+	if sample.HeapAllocBytes > operatorProfile.MaxHeapAllocBytes {
+		operatorProfile.MaxHeapAllocBytes = sample.HeapAllocBytes
+	}
 	state.operators[operator] = operatorProfile
 	profiler.memoryObservationCount++
 	return true, nil
+}
+
+// ObserveSQLQuery implements QueryObserver. It converts one privacy-safe SQL
+// completion event into bounded per-operator stage samples and, when the
+// executor supplied allocation counters, one query-level memory sample.
+// Profiler limits are intentionally non-fatal to query execution: malformed
+// or over-budget observations are dropped by the existing bounded methods.
+func (profiler *SQLQueryProfiler) ObserveSQLQuery(event QueryEvent) {
+	if profiler == nil || event.QueryID == "" {
+		return
+	}
+	timestamp := time.Now().UTC()
+	for _, operator := range event.Operators {
+		if operator.Node == "" {
+			continue
+		}
+		rows := uint64(0)
+		if operator.OutputRows > 0 {
+			rows = uint64(operator.OutputRows)
+		}
+		elapsed := int64(0)
+		if operator.ElapsedNanos > 0 {
+			elapsed = operator.ElapsedNanos
+		}
+		_, _ = profiler.Record(event.QueryID, SQLQueryProfileSample{
+			Operator:    operator.Node,
+			ElapsedTime: time.Duration(elapsed),
+			Rows:        rows,
+			Bytes:       sqlQueryProfilerOperatorBytes(operator),
+			Timestamp:   timestamp,
+		})
+	}
+	if event.AllocatedBytes != 0 || event.HeapAllocBytes != 0 {
+		_, _ = profiler.RecordMemory(event.QueryID, sqlQueryProfilerQueryMemoryOperator, SQLQueryMemorySample{
+			AllocatedBytes: event.AllocatedBytes,
+			HeapAllocBytes: event.HeapAllocBytes,
+		})
+	}
+}
+
+func sqlQueryProfilerOperatorBytes(operator QueryOperator) uint64 {
+	var total uint64
+	if operator.InputBytes != nil && *operator.InputBytes > 0 {
+		total = saturatingAddUint64(total, uint64(*operator.InputBytes))
+	}
+	if operator.OutputBytes != nil && *operator.OutputBytes > 0 {
+		total = saturatingAddUint64(total, uint64(*operator.OutputBytes))
+	}
+	return total
 }
 
 // Profile returns an oldest-first copy of one query profile.

@@ -77,3 +77,11 @@ The cost is paid only by callers that enable profiling and call `Record`.
 Recording is allocation-free after a query's bounded ring is initialized;
 snapshot copying allocates by design to protect the profiler's internal state.
 See the raw samples in [BENCHMARK.md](BENCHMARK.md#ch-032-query-profiler-samples).
+
+## Query Execution Integration
+
+`SQLQueryOptions.Profiler` attaches a bounded `SQLQueryProfiler` to an actual
+query execution. The executor emits one completion event after materialized or
+streamed execution, so callers do not need to add a separate observer just to
+capture stage samples. The integration and its measured overhead are recorded
+in [C234_QUERY_PROFILER.md](C234_QUERY_PROFILER.md).

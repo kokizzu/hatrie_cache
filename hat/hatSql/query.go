@@ -339,11 +339,15 @@ type SQLQueryOptions struct {
 	// Nil preserves the deterministic estimate-only planner.
 	AdaptivePlanner *AdaptivePlanner
 	// QueryID is returned with materialized results and included in every
-	// observation event. When Observer, SlowQueryRecorder, or PlanSnapshot is
+	// observation event. When Observer, Profiler, SlowQueryRecorder, or PlanSnapshot is
 	// set but QueryID is empty, execution assigns a unique ID.
 	QueryID            string
 	SlowQueryThreshold time.Duration
 	Observer           SQLQueryObserver
+	// Profiler attaches bounded per-operator stage samples and query-level
+	// allocation counters. Nil preserves the default path with no runtime
+	// memory-statistics reads or profiler work.
+	Profiler *SQLQueryProfiler
 	// IndexAdvisor records candidate index fields only for observed slow scans.
 	// Nil preserves the existing privacy-safe telemetry-only behavior.
 	IndexAdvisor *SQLIndexAdvisor
@@ -683,8 +687,11 @@ var sqlQueryIDSequence atomic.Uint64
 type sqlQueryObservation struct {
 	id                     string
 	observer               SQLQueryObserver
+	profiler               *SQLQueryProfiler
 	recorder               *SQLSlowQueryRecorder
 	started                time.Time
+	allocationStart        runtime.MemStats
+	measureAllocations     bool
 	threshold              time.Duration
 	planSnapshotEnabled    bool
 	requiredSourceFrontier *uint64
@@ -693,16 +700,21 @@ type sqlQueryObservation struct {
 
 func newSQLQueryObservation(options SQLQueryOptions) sqlQueryObservation {
 	id := strings.TrimSpace(options.QueryID)
-	if id == "" && (options.Observer != nil || options.SlowQueryRecorder != nil || options.PlanSnapshot != nil) {
+	if id == "" && (options.Observer != nil || options.Profiler != nil || options.SlowQueryRecorder != nil || options.PlanSnapshot != nil) {
 		id = fmt.Sprintf("sql-%d", sqlQueryIDSequence.Add(1))
 	}
 	observation := sqlQueryObservation{
 		id:                  id,
 		observer:            options.Observer,
+		profiler:            options.Profiler,
 		recorder:            options.SlowQueryRecorder,
 		started:             time.Now(),
+		measureAllocations:  options.Profiler != nil,
 		threshold:           options.SlowQueryThreshold,
 		planSnapshotEnabled: options.PlanSnapshot != nil,
+	}
+	if observation.measureAllocations {
+		runtime.ReadMemStats(&observation.allocationStart)
 	}
 	if observation.planSnapshotEnabled {
 		if options.RequireSourceFrontier {
@@ -735,14 +747,14 @@ func (observation sqlQueryObservation) attachPlanSnapshot(result *SQLQueryResult
 }
 
 func (observation sqlQueryObservation) resultBytes(rows []SQLRow) int {
-	if observation.observer == nil && observation.recorder == nil {
+	if observation.observer == nil && observation.profiler == nil && observation.recorder == nil {
 		return -1
 	}
 	return sqlRowsBytes(rows)
 }
 
 func (observation sqlQueryObservation) finishSummary(outputRows, outputColumns, resultBytes int, err error, steps []SQLExplainStep, source string, parameters []interface{}) {
-	if observation.observer == nil && observation.recorder == nil {
+	if observation.observer == nil && observation.profiler == nil && observation.recorder == nil {
 		return
 	}
 	event := SQLQueryEvent{
@@ -752,6 +764,12 @@ func (observation sqlQueryObservation) finishSummary(outputRows, outputColumns, 
 		OutputColumns: outputColumns,
 		ResultBytes:   resultBytes,
 		OK:            err == nil,
+	}
+	if observation.measureAllocations {
+		var allocationEnd runtime.MemStats
+		runtime.ReadMemStats(&allocationEnd)
+		event.AllocatedBytes = deltaUint64(allocationEnd.TotalAlloc, observation.allocationStart.TotalAlloc)
+		event.HeapAllocBytes = allocationEnd.HeapAlloc
 	}
 	event.Slow = observation.threshold > 0 && time.Duration(event.ElapsedNanos) >= observation.threshold
 	if err != nil {
@@ -765,7 +783,17 @@ func (observation sqlQueryObservation) finishSummary(outputRows, outputColumns, 
 	if observation.observer != nil {
 		observation.observer.ObserveSQLQuery(event)
 	}
+	if observation.profiler != nil {
+		observation.profiler.ObserveSQLQuery(event)
+	}
 	observation.recorder.record(event, source, parameters)
+}
+
+func deltaUint64(end, start uint64) uint64 {
+	if end < start {
+		return 0
+	}
+	return end - start
 }
 
 func sqlQueryOperators(steps []SQLExplainStep) []SQLQueryOperator {
@@ -953,10 +981,10 @@ func executeSQLQueryUncached(ctx context.Context, source string, query *sqlQuery
 		}
 	}
 	var metrics *sqlExecutionMetrics
-	if observation.observer != nil || observation.recorder != nil || options.AdaptivePlanner != nil || options.IndexHint.Mode != "" || options.IndexAdvisor != nil || options.IndexUseRecorder != nil {
+	if observation.observer != nil || observation.profiler != nil || observation.recorder != nil || options.AdaptivePlanner != nil || options.IndexHint.Mode != "" || options.IndexAdvisor != nil || options.IndexUseRecorder != nil {
 		metrics = &sqlExecutionMetrics{adaptive: options.AdaptivePlanner, indexHint: options.IndexHint}
 	}
-	recordNativePlan := observation.observer != nil || observation.recorder != nil
+	recordNativePlan := observation.observer != nil || observation.profiler != nil || observation.recorder != nil
 	if nativeResult, handled, nativeErr := executeSQLAutoNativeDataflow(ctx, query, resolver, options, control, recordNativePlan); handled {
 		nativeResult.QueryID = observation.id
 		if operatorSteps != nil {

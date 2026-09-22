@@ -35744,3 +35744,42 @@ sample wire value only modestly. The typed state is intentionally limited to
 signed `int64` ordering and argument values; the existing SQL scalar-flexible
 arg-extreme state remains unchanged. Full API scope and validation rules are
 recorded in [C224_ARGMAX_ARGMIN_STATE.md](C224_ARGMAX_ARGMIN_STATE.md).
+
+## C234: SQL Query Profiler Integration
+
+Command: `make benchmark-c234-query-profiler` (five samples, `-benchmem`,
+Linux/amd64, AMD Ryzen 9 5950X). The before measurements were captured before
+the `SQLQueryOptions.Profiler` integration; the after measurements include the
+same compiled query and resolver. The profiler is deliberately opt-in.
+
+```text
+Before no profiler:       264354 255788 255455 260922 263981 ns/op
+                          67596  67593  67593  67593  67593 B/op
+                          400     400     400     400     400 allocs/op
+Before observer baseline: 333307 342688 337839 331064 338018 ns/op
+                          89773  89774  89774  89777  89775 B/op
+                          1171   1171   1171   1171   1171 allocs/op
+After no profiler:        242759 246575 254877 261585 244827 ns/op
+                          67595  67593  67593  67593  67593 B/op
+                          400     400     400     400     400 allocs/op
+After observer baseline:   313245 319970 320744 366426 344830 ns/op
+                          89775  89775  89778  89776  89774 B/op
+                          1171   1171   1171   1171   1171 allocs/op
+After profiler enabled:   372272 385211 381134 386252 353620 ns/op
+                          89798  89800  89798  89800  89798 B/op
+                          1171   1171   1171   1171   1171 allocs/op
+```
+
+| Path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Before no profiler | 260,922 | 67,593 | 400 | baseline |
+| After no profiler | 246,575 | 67,593 | 400 | 1.06x faster in this run; within benchmark noise |
+| After observer baseline | 320,744 | 89,775 | 1,171 | 1.30x slower than default |
+| After profiler enabled | 381,134 | 89,798 | 1,171 | 1.55x slower than default, 1.19x slower than observer |
+
+The enabled profiler adds about 23 B/op over the observer baseline and no
+additional allocations in this workload, but its `runtime.MemStats` reads and
+bounded stage aggregation add measurable CPU time. That is an intentional
+observability tradeoff; the default path remains profiler-free and does not
+read runtime memory statistics. See [C234_QUERY_PROFILER.md](C234_QUERY_PROFILER.md)
+for semantics, limits, and verification commands.

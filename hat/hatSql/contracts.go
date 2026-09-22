@@ -30,6 +30,8 @@ type QueryEvent struct {
 	OutputRows         int             `json:"output_rows"`
 	OutputColumns      int             `json:"output_columns"`
 	ResultBytes        int             `json:"result_bytes"`
+	AllocatedBytes     uint64          `json:"allocated_bytes,omitempty"`
+	HeapAllocBytes     uint64          `json:"heap_alloc_bytes,omitempty"`
 	OK                 bool            `json:"ok"`
 	Slow               bool            `json:"slow"`
 	Canceled           bool            `json:"canceled,omitempty"`

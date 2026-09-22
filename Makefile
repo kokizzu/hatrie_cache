@@ -24872,6 +24872,33 @@ commit-c224-arg-state:
 push-c224-arg-state:
 	bash scripts/push-c224-arg-state.sh
 
+benchmark-c234-query-profiler:
+	bash scripts/benchmark-c234-query-profiler.sh
+
+test-c234-query-profiler:
+	bash scripts/test-c234-query-profiler.sh
+
+format-c234-query-profiler:
+	bash scripts/format-c234-query-profiler.sh
+
+verify-c234-query-profiler:
+	bash scripts/verify-c234-query-profiler.sh
+
+race-c234-query-profiler:
+	bash scripts/race-c234-query-profiler.sh
+
+vet-c234-query-profiler:
+	bash scripts/vet-c234-query-profiler.sh
+
+stage-c234-query-profiler:
+	bash scripts/stage-c234-query-profiler.sh
+
+commit-c234-query-profiler:
+	bash scripts/commit-c234-query-profiler.sh
+
+push-c234-query-profiler:
+	bash scripts/push-c234-query-profiler.sh
+
 .PHONY: test-c213-typed-hash-join
 test-c213-typed-hash-join:
 	bash scripts/test-c213-typed-hash-join.sh
