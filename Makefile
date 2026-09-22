@@ -25219,6 +25219,7 @@ push-t250-durable-sequence:
 inspect-inspiration-ledger:
 	bash scripts/inspect-inspiration-ledger.sh
 
+
 .PHONY: test-c231-workload-group
 test-c231-workload-group:
 	bash scripts/test-c231-workload-group.sh
@@ -25254,3 +25255,12 @@ commit-c231-workload-group:
 .PHONY: push-c231-workload-group
 push-c231-workload-group:
 	bash scripts/push-c231-workload-group.sh
+.PHONY: stage-c221-ledger commit-c221-ledger push-c221-ledger
+stage-c221-ledger:
+	bash ./scripts/stage-c221-ledger.sh
+
+commit-c221-ledger:
+	bash ./scripts/commit-c221-ledger.sh
+
+push-c221-ledger:
+	bash ./scripts/push-c221-ledger.sh

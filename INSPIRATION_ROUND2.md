@@ -50,7 +50,7 @@ operator control remain the preferred deployment model.
 - [x] C218 Interpolation policies for filled time-series values; see [C218_WITH_FILL_INTERPOLATION.md](C218_WITH_FILL_INTERPOLATION.md).
 - [x] C219 Per-group `LIMIT BY` execution with bounded memory. Already present in `hatSql/limit_by.go`, including streaming, top-N, external-sort, composite-key, and dedicated benchmark coverage.
 - [x] C220 Post-window `QUALIFY` filtering over projected window rows; selected window aliases are evaluated before `DISTINCT`, `ORDER BY`, and `LIMIT`; see [C220_QUALIFY.md](C220_QUALIFY.md).
-- [ ] C221 `WITH TIES` limit semantics for deterministic boundary results.
+- [x] C221 `WITH TIES` limit semantics for deterministic boundary results; see [LIMIT_WITH_TIES.md](LIMIT_WITH_TIES.md) and `make test-limit-with-ties-local-clean`.
 - [x] C222 Approximate top-K aggregation with mergeable bounded state; importable `hatCache.TopK.Merge`, HAG1 aggregate-state round trips, and `HatTrie.MergeTopK` provide bounded partition-state union without changing existing command defaults. SQL planner integration remains open.
 - [x] C223 Mergeable approximate distinct and quantile aggregate states; importable HLL, Count-Min, and TDigest states support validated partition merges and compact transfer. SQL aggregate `State`/`Merge` syntax remains open.
 - [x] C223a Mergeable HyperLogLog partial state; `HyperLogLog.Merge` combines same-precision partition states with per-register maxima, supports zero-value receiver adoption, and rejects invalid or mismatched states without mutation. SQL `State`/`Merge` syntax remains open under C223.
