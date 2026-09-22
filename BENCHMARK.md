@@ -37167,3 +37167,41 @@ make test-t215
 make race-t215
 make vet-t215
 ```
+
+<a id="t216-storage-compaction-scheduler"></a>
+## T216 Storage Compaction Scheduler
+
+Commands:
+
+```text
+make test-t216
+make race-t216
+make vet-t216
+make benchmark-t216
+```
+
+T216 adds a caller-driven, default-off scheduler for on-disk
+`hatDataStructure.StorageSpace` instances. It selects spaces by stale spill
+bytes, uses deterministic name order, and bounds each pass by
+`MaxSpacesPerRun`. The benchmark fixture has 256 cold entries and replacement
+records. Three `-benchmem` samples were collected on Linux/amd64 with an AMD
+Ryzen 9 5950X.
+
+The first correctness implementation calculated live disk bytes by scanning
+all entries during every `Stats` call. The final implementation maintains one
+`int64` counter during recovery, replacement, delete, spill, and compaction.
+This is a before/after CPU comparison for the same fixture:
+
+| Workload | Raw ns/op samples | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | --- | ---: | ---: | ---: | --- |
+| On-disk stats, map scan | `2076 2039 2066` | `2066` | `0` | `0` | baseline |
+| On-disk stats, maintained counter | `30.83 30.21 28.77` | `30.21` | `0` | `0` | `68.4x` faster |
+| Memtx stats control | `16.20 16.18 15.47` | `16.18` | `0` | `0` | `1.87x` vs disk counter |
+
+The maintained counter adds one fixed `int64` per spill arrangement, not per
+element. Compaction remains explicit maintenance work: raw samples were
+`1,617,077`, `1,646,612`, and `1,613,243 ns/op`, with `71,072 B/op` and
+`531 allocs/op` for the fixture. It rewrites live cold records without
+changing logical values or the backup format. The
+scheduler does not start background work, so existing defaults and ordinary
+read/write paths remain unchanged.

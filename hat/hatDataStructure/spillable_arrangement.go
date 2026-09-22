@@ -61,11 +61,14 @@ type SpillableArrangementEntry struct {
 // HotBytes counts value payload bytes only; key and index metadata remain in
 // memory so point lookups do not require a full segment scan.
 type SpillableArrangementStats struct {
-	Entries      int
-	ColdEntries  int
-	HotBytes     int64
-	DiskBytes    int64
-	SpillRecords uint64
+	Entries             int
+	ColdEntries         int
+	HotBytes            int64
+	DiskBytes           int64
+	LiveDiskBytes       int64
+	StaleDiskBytes      int64
+	CompactionDebtBytes int64
+	SpillRecords        uint64
 }
 
 // SpillableArrangement keeps keyed byte values in memory until the configured
@@ -85,6 +88,7 @@ type SpillableArrangement struct {
 	maxValueBytes  int64
 	hotBytes       int64
 	diskBytes      int64
+	liveDiskBytes  int64
 	spillRecords   uint64
 	coldEntries    int
 	generation     uint64
@@ -278,8 +282,9 @@ func (arrangement *SpillableArrangement) recoverSegment(size int64) error {
 			return ErrSpillableArrangementCorrupt
 		}
 		key := string(keyBuffer)
-		if _, exists := arrangement.entries[key]; exists {
+		if previous, exists := arrangement.entries[key]; exists {
 			arrangement.coldEntries--
+			arrangement.liveDiskBytes -= previous.ref.total
 		}
 		arrangement.generation++
 		arrangement.entries[key] = &spillableArrangementEntry{
@@ -289,6 +294,7 @@ func (arrangement *SpillableArrangement) recoverSegment(size int64) error {
 			valueHot: false,
 		}
 		arrangement.coldEntries++
+		arrangement.liveDiskBytes += recordSize
 		arrangement.spillRecords++
 		offset += recordSize
 	}
@@ -320,11 +326,13 @@ func (arrangement *SpillableArrangement) Set(key string, value []byte) error {
 	previous, existed := arrangement.entries[key]
 	previousHotBytes := arrangement.hotBytes
 	previousColdEntries := arrangement.coldEntries
+	previousLiveDiskBytes := arrangement.liveDiskBytes
 	previousQueueLength := len(arrangement.queue)
 	if existed && previous.valueHot {
 		arrangement.hotBytes -= int64(len(previous.value))
 	} else if existed {
 		arrangement.coldEntries--
+		arrangement.liveDiskBytes -= previous.ref.total
 	}
 	arrangement.generation++
 	entry := &spillableArrangementEntry{key: key, value: append([]byte(nil), value...), gen: arrangement.generation, valueHot: true}
@@ -339,6 +347,7 @@ func (arrangement *SpillableArrangement) Set(key string, value []byte) error {
 		}
 		arrangement.hotBytes = previousHotBytes
 		arrangement.coldEntries = previousColdEntries
+		arrangement.liveDiskBytes = previousLiveDiskBytes
 		arrangement.queue = arrangement.queue[:previousQueueLength]
 		return err
 	}
@@ -388,6 +397,7 @@ func (arrangement *SpillableArrangement) Delete(key string) bool {
 		arrangement.hotBytes -= int64(len(entry.value))
 	} else {
 		arrangement.coldEntries--
+		arrangement.liveDiskBytes -= entry.ref.total
 	}
 	delete(arrangement.entries, key)
 	arrangement.maybeCompactQueueLocked()
@@ -502,6 +512,7 @@ func (arrangement *SpillableArrangement) Compact() error {
 	arrangement.file = file
 	removeTemporary = false
 	arrangement.diskBytes = offset
+	arrangement.liveDiskBytes = offset
 	for _, entry := range cold {
 		entry.ref = pending[entry.key]
 	}
@@ -549,12 +560,19 @@ func (arrangement *SpillableArrangement) Stats() SpillableArrangementStats {
 	}
 	arrangement.mu.RLock()
 	defer arrangement.mu.RUnlock()
+	staleDiskBytes := arrangement.diskBytes - arrangement.liveDiskBytes
+	if staleDiskBytes < 0 {
+		staleDiskBytes = 0
+	}
 	return SpillableArrangementStats{
-		Entries:      len(arrangement.entries),
-		ColdEntries:  arrangement.coldEntries,
-		HotBytes:     arrangement.hotBytes,
-		DiskBytes:    arrangement.diskBytes,
-		SpillRecords: arrangement.spillRecords,
+		Entries:             len(arrangement.entries),
+		ColdEntries:         arrangement.coldEntries,
+		HotBytes:            arrangement.hotBytes,
+		DiskBytes:           arrangement.diskBytes,
+		LiveDiskBytes:       arrangement.liveDiskBytes,
+		StaleDiskBytes:      staleDiskBytes,
+		CompactionDebtBytes: staleDiskBytes,
+		SpillRecords:        arrangement.spillRecords,
 	}
 }
 
@@ -700,6 +718,7 @@ func (arrangement *SpillableArrangement) spillEntriesLocked(entries []*spillable
 		entry.valueHot = false
 		arrangement.hotBytes -= valueBytes
 		arrangement.coldEntries++
+		arrangement.liveDiskBytes += ref.total
 	}
 	arrangement.advanceQueueHeadLocked()
 	return nil

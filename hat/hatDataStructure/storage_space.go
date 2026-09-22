@@ -51,13 +51,16 @@ type StorageSpaceEntry struct {
 
 // StorageSpaceStats reports policy-specific resident and disk usage.
 type StorageSpaceStats struct {
-	Name         string           `json:"name"`
-	Mode         StorageSpaceMode `json:"mode"`
-	Entries      int              `json:"entries"`
-	ColdEntries  int              `json:"cold_entries"`
-	HotBytes     int64            `json:"hot_bytes"`
-	DiskBytes    int64            `json:"disk_bytes"`
-	SpillRecords uint64           `json:"spill_records"`
+	Name                string           `json:"name"`
+	Mode                StorageSpaceMode `json:"mode"`
+	Entries             int              `json:"entries"`
+	ColdEntries         int              `json:"cold_entries"`
+	HotBytes            int64            `json:"hot_bytes"`
+	DiskBytes           int64            `json:"disk_bytes"`
+	LiveDiskBytes       int64            `json:"live_disk_bytes"`
+	StaleDiskBytes      int64            `json:"stale_disk_bytes"`
+	CompactionDebtBytes int64            `json:"compaction_debt_bytes"`
+	SpillRecords        uint64           `json:"spill_records"`
 }
 
 // StorageSpace is one independent key/value space with a selectable storage
@@ -321,6 +324,9 @@ func (space *StorageSpace) Stats() StorageSpaceStats {
 		stats.ColdEntries = spillStats.ColdEntries
 		stats.HotBytes = spillStats.HotBytes
 		stats.DiskBytes = spillStats.DiskBytes
+		stats.LiveDiskBytes = spillStats.LiveDiskBytes
+		stats.StaleDiskBytes = spillStats.StaleDiskBytes
+		stats.CompactionDebtBytes = spillStats.CompactionDebtBytes
 		stats.SpillRecords = spillStats.SpillRecords
 		return stats
 	}
