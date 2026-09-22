@@ -25837,3 +25837,32 @@ push-m221-cluster-isolation:
 
 status-m221-cluster-isolation:
 	bash scripts/status-m221-cluster-isolation.sh
+format-m222-materialized-compute-replicas:
+	bash scripts/format-m222-materialized-compute-replicas.sh
+
+test-m222-materialized-compute-replicas:
+	bash scripts/test-m222-materialized-compute-replicas.sh
+
+benchmark-m222-materialized-compute-replicas:
+	bash scripts/benchmark-m222-materialized-compute-replicas.sh
+
+race-m222-materialized-compute-replicas:
+	bash scripts/race-m222-materialized-compute-replicas.sh
+
+vet-m222-materialized-compute-replicas:
+	bash scripts/vet-m222-materialized-compute-replicas.sh
+
+test-m222-related-materialized:
+	bash scripts/test-m222-related-materialized.sh
+
+stage-m222-materialized-compute-replicas:
+	bash scripts/stage-m222-materialized-compute-replicas.sh
+
+commit-m222-materialized-compute-replicas:
+	bash scripts/commit-m222-materialized-compute-replicas.sh
+
+push-m222-materialized-compute-replicas:
+	bash scripts/push-m222-materialized-compute-replicas.sh
+
+status-m222-materialized-compute-replicas:
+	bash scripts/status-m222-materialized-compute-replicas.sh

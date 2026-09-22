@@ -36197,3 +36197,18 @@ is independent per-cluster and serving/maintenance budgets with bounded
 queueing. Existing SQL callers remain on the zero-cost default-off path. Raw
 samples and the named-cluster regression test are recorded in
 [M221_CLUSTER_COMPUTE_ISOLATION_AUDIT.md](M221_CLUSTER_COMPUTE_ISOLATION_AUDIT.md).
+
+## M222: Replicated compute workers for maintained views
+
+The workload refreshes a 256-row maintained view and point-lookup index on
+Linux amd64, AMD Ryzen 9 5950X, with five `-benchmem` samples.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| One replica control | 324,490 | 295,498 | 2,067 | baseline |
+| Two replicated compute workers | 638,744 | 591,041 | 4,135 | 1.97x CPU; 2.00x bytes; 2.00x allocations |
+
+This is an opt-in availability tradeoff: each worker maintains an independent
+view and index, while the default single-registry path is unchanged. Raw
+samples and fencing/recovery semantics are recorded in
+[M222_REPLICATED_COMPUTE_WORKERS.md](M222_REPLICATED_COMPUTE_WORKERS.md).

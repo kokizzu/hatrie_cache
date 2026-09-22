@@ -1167,3 +1167,12 @@ unchanged. The added regression test verifies that a saturated `analytics`
 cluster does not block `dashboard`. See
 [M221_CLUSTER_COMPUTE_ISOLATION_AUDIT.md](M221_CLUSTER_COMPUTE_ISOLATION_AUDIT.md)
 for the measured admission cost and existing implementation boundary.
+
+## M222: Replicated Compute Workers For Maintained Views
+
+M222 adds the opt-in `MaterializedViewComputeReplicaSet`. Independent
+`MaterializedViews` registries receive the same refresh fanout, healthy
+replicas serve point lookups, and failed workers can be fenced and recovered
+without taking the set offline. The default single-registry path is unchanged.
+See [M222_REPLICATED_COMPUTE_WORKERS.md](M222_REPLICATED_COMPUTE_WORKERS.md)
+for correctness rules and the measured 1.97x two-replica refresh cost.

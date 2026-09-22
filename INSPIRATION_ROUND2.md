@@ -108,7 +108,7 @@ operator control remain the preferred deployment model.
 - [x] M219 Background index creation with observable build frontier; added opt-in asynchronous maintained point-lookup builds with atomic publication, stale-snapshot rejection, cancellation, and measurable progress. See [M219_BACKGROUND_POINT_LOOKUP_BUILD.md](M219_BACKGROUND_POINT_LOOKUP_BUILD.md).
 - [x] M220 Safe index removal after dependent readers drain; added point-lookup reader leases, observable retirement state, stale-reader isolation, and a synchronous drop wrapper that waits for drain. See [M220_POINT_LOOKUP_RETIREMENT.md](M220_POINT_LOOKUP_RETIREMENT.md).
 - [x] M221 Isolated compute clusters with independent resource budgets; already covered by opt-in `hatSql.SQLClusterAdmission` with independent named-cluster and serving/maintenance budgets. See [M221_CLUSTER_COMPUTE_ISOLATION_AUDIT.md](M221_CLUSTER_COMPUTE_ISOLATION_AUDIT.md).
-- [ ] M222 Replicated compute workers for highly available maintained indexes.
+- [x] M222 Replicated compute workers for highly available maintained indexes; added opt-in `MaterializedViewComputeReplicaSet` refresh fanout, health fencing, and healthy-replica point-read failover. See [M222_REPLICATED_COMPUTE_WORKERS.md](M222_REPLICATED_COMPUTE_WORKERS.md).
 - [ ] M223 Hydration state machines that distinguish cold, hydrating, and ready views.
 - [ ] M224 Hydration progress and estimated remaining work metrics.
 - [ ] M225 Persisted shard leases that prevent duplicate state ownership.
