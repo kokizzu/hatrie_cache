@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+rg -n 'TT030|T030|OnReplace' README.md BENCHMARK.md INSPIRATION_ROUND2.md ADOPTED_QUERY_ENGINE_IDEAS.md TT030_ON_REPLACE_CHANGEFEED.md

@@ -37272,3 +37272,10 @@ opt-in hook. On an AMD Ryzen 9 5950X, medians from five benchmark samples were
 and `12.92 ns/op` with the hook enabled. All paths measured `0 B/op` and
 `0 allocs/op`. The enabled hook therefore costs about 20.2% CPU for validation
 and normalization while imposing no allocation or memory-retention cost.
+## T030: On-Replace Changefeed Hook
+
+With a 3-second benchmark sample repeated three times on an AMD Ryzen 9 5950X,
+the T230 baseline `MemtxTable` update path measured a `12.34 ns/op` median and
+the enabled `OnReplace` path measured `12.98 ns/op`. Both paths measured `0 B/op`
+and `0 allocs/op`, so the ordered event hook adds about 5.2% CPU only when
+explicitly enabled.

@@ -27577,3 +27577,39 @@ commit-t229:
 .PHONY: push-t229
 push-t229:
 	bash ./scripts/push-t229.sh
+
+.PHONY: format-t230
+format-t230:
+	bash ./scripts/format-t230.sh
+
+.PHONY: test-t230
+test-t230:
+	bash ./scripts/test-t230.sh
+
+.PHONY: benchmark-t230
+benchmark-t230:
+	bash ./scripts/benchmark-t230.sh
+
+.PHONY: race-t230
+race-t230:
+	bash ./scripts/race-t230.sh
+
+.PHONY: vet-t230
+vet-t230:
+	bash ./scripts/vet-t230.sh
+
+.PHONY: stage-t230
+stage-t230:
+	bash ./scripts/stage-t230.sh
+
+.PHONY: commit-t230
+commit-t230:
+	bash ./scripts/commit-t230.sh
+
+.PHONY: push-t230
+push-t230:
+	bash ./scripts/push-t230.sh
+
+.PHONY: verify-t230-docs
+verify-t230-docs:
+	bash ./scripts/verify-t230-docs.sh

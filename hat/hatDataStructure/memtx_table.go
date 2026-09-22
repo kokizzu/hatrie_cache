@@ -45,6 +45,11 @@ type MemtxReplaceEvent[T any] struct {
 // stored when the hook succeeds.
 type MemtxBeforeReplace[T any] func(MemtxReplaceEvent[T]) (T, error)
 
+// MemtxOnReplace consumes a committed insert/update image. It runs under the
+// table write lock after the row has been stored, so events are emitted in
+// mutation order and the callback must not call back into the table.
+type MemtxOnReplace[T any] func(MemtxReplaceEvent[T])
+
 // MemtxTableOptions controls construction of a fixed-capacity in-memory table.
 type MemtxTableOptions struct {
 	Capacity int
@@ -55,6 +60,7 @@ type MemtxTableOptions struct {
 // non-generic options type.
 type MemtxTableHooks[T any] struct {
 	BeforeReplace MemtxBeforeReplace[T]
+	OnReplace     MemtxOnReplace[T]
 }
 
 // MemtxEntry is a row returned by MemtxTable.ScanInto.
@@ -82,6 +88,7 @@ type MemtxTable[T any] struct {
 	next      uint32
 	live      int
 	before    MemtxBeforeReplace[T]
+	onReplace MemtxOnReplace[T]
 }
 
 // NewMemtxTable creates a fixed-capacity table. A zero capacity selects the
@@ -105,6 +112,7 @@ func NewMemtxTableWithHooks[T any](options MemtxTableOptions, hooks MemtxTableHo
 		positions: make(map[uint64]uint32, capacity),
 		free:      make([]uint32, 0, capacity),
 		before:    hooks.BeforeReplace,
+		onReplace: hooks.OnReplace,
 	}, nil
 }
 
@@ -121,18 +129,25 @@ func (table *MemtxTable[T]) Insert(id uint64, value T) error {
 	if !table.hasCapacityLocked() {
 		return ErrMemtxTableFull
 	}
+	event := MemtxReplaceEvent[T]{
+		ID:        id,
+		New:       value,
+		Operation: MemtxReplaceInsert,
+	}
 	if table.before != nil {
 		var err error
-		value, err = table.before(MemtxReplaceEvent[T]{
-			ID:        id,
-			New:       value,
-			Operation: MemtxReplaceInsert,
-		})
+		event.New, err = table.before(event)
 		if err != nil {
 			return err
 		}
 	}
-	return table.insertLocked(id, value)
+	if err := table.insertLocked(id, event.New); err != nil {
+		return err
+	}
+	if table.onReplace != nil {
+		table.onReplace(event)
+	}
+	return nil
 }
 
 // Upsert inserts a row or updates the existing row. The returned bool is true
@@ -144,38 +159,46 @@ func (table *MemtxTable[T]) Upsert(id uint64, value T) (inserted bool, err error
 	table.mu.Lock()
 	defer table.mu.Unlock()
 	if position, exists := table.positions[id]; exists {
+		event := MemtxReplaceEvent[T]{
+			ID:        id,
+			Old:       table.slots[position].value,
+			New:       value,
+			Exists:    true,
+			Operation: MemtxReplaceUpdate,
+		}
 		if table.before != nil {
-			updated, err := table.before(MemtxReplaceEvent[T]{
-				ID:        id,
-				Old:       table.slots[position].value,
-				New:       value,
-				Exists:    true,
-				Operation: MemtxReplaceUpdate,
-			})
+			updated, err := table.before(event)
 			if err != nil {
 				return false, err
 			}
-			value = updated
+			event.New = updated
 		}
-		table.slots[position].value = value
+		table.slots[position].value = event.New
+		if table.onReplace != nil {
+			table.onReplace(event)
+		}
 		return false, nil
 	}
 	if !table.hasCapacityLocked() {
 		return false, ErrMemtxTableFull
 	}
+	event := MemtxReplaceEvent[T]{
+		ID:        id,
+		New:       value,
+		Operation: MemtxReplaceInsert,
+	}
 	if table.before != nil {
-		updated, err := table.before(MemtxReplaceEvent[T]{
-			ID:        id,
-			New:       value,
-			Operation: MemtxReplaceInsert,
-		})
+		updated, err := table.before(event)
 		if err != nil {
 			return false, err
 		}
-		value = updated
+		event.New = updated
 	}
-	if err := table.insertLocked(id, value); err != nil {
+	if err := table.insertLocked(id, event.New); err != nil {
 		return false, err
+	}
+	if table.onReplace != nil {
+		table.onReplace(event)
 	}
 	return true, nil
 }

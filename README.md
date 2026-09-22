@@ -4970,3 +4970,4 @@ network or destructive storage operations. Use
 [CH019_REPLICA_PART_CHECKS.md](CH019_REPLICA_PART_CHECKS.md) for the API,
 safety bounds, and measured comparison in [BENCHMARK.md](BENCHMARK.md#ch-019-replica-part-consistency-planning).
 - Optional typed before-replace validation/conflict hooks for `MemtxTable` are documented in [TT029_BEFORE_REPLACE.md](TT029_BEFORE_REPLACE.md).
+- Optional ordered typed `MemtxTable` changefeed events with old/new images: [TT030_ON_REPLACE_CHANGEFEED.md](TT030_ON_REPLACE_CHANGEFEED.md), with CPU and allocation measurements in [BENCHMARK.md](BENCHMARK.md#t030-on-replace-changefeed-hook).
