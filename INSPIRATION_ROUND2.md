@@ -189,7 +189,7 @@ operator control remain the preferred deployment model.
 - [x] T247 Queue task deduplication by client-supplied identity. `DeduplicatingPriorityVisibilityQueue[T]` rejects duplicate pending/leased keys, preserves identity through retry, expiry, snapshots, and atomic file checkpoints, and keeps the base queue unchanged; see [T247_DEDUPLICATING_QUEUE.md](T247_DEDUPLICATING_QUEUE.md) and [BENCHMARK.md](BENCHMARK.md#t247-deduplicating-priority-visibility-queue).
 - [x] T248 Retry counters and dead-letter routing for failed tasks. `RetryingDeduplicatingPriorityVisibilityQueue[T]` applies max-attempt policy to explicit and expired leases, preserves FIFO dead letters through CRC-protected atomic snapshots, and keeps the base queue unchanged; see [T248_RETRY_DEAD_LETTER.md](T248_RETRY_DEAD_LETTER.md) and [BENCHMARK.md](BENCHMARK.md#t248-retry-counters-and-dead-letter-routing).
 - [x] T249 Queue capacity, age, retry, and consumer-lag metrics. `EnableMetrics` is off by default, reports capacity/age/consumer lag/retry/dead-letter state, and preserves the opt-in flag through priority queue snapshots; see [T249_QUEUE_METRICS.md](T249_QUEUE_METRICS.md) and [BENCHMARK.md](BENCHMARK.md#t249-queue-capacity-age-retry-and-consumer-lag-metrics).
-- [ ] T250 Gap-safe sequence allocation with durable current value.
+- [x] T250 Gap-safe sequence allocation with durable current value. `hatDataStructure.DurableSequence` provides atomic in-memory allocation plus a checksummed two-slot durable file with corruption fallback; see [T250_DURABLE_SEQUENCE.md](T250_DURABLE_SEQUENCE.md) and [BENCHMARK.md](BENCHMARK.md#t250-gap-safe-sequence-allocation-with-durable-current-value).
 ## C204 Status
 
 C204 is adopted. Idempotency keys now propagate from async journal entries

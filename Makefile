@@ -25179,3 +25179,38 @@ commit-t249-queue-metrics:
 .PHONY: push-t249-queue-metrics
 push-t249-queue-metrics:
 	bash scripts/push-t249-queue-metrics.sh
+.PHONY: test-t250-durable-sequence
+test-t250-durable-sequence:
+	bash scripts/test-t250-durable-sequence.sh
+
+.PHONY: format-t250-durable-sequence
+format-t250-durable-sequence:
+	bash scripts/format-t250-durable-sequence.sh
+
+.PHONY: benchmark-t250-durable-sequence
+benchmark-t250-durable-sequence:
+	bash scripts/benchmark-t250-durable-sequence.sh
+
+.PHONY: test-t250-durable-sequence-package
+test-t250-durable-sequence-package:
+	bash scripts/test-t250-durable-sequence-package.sh
+
+.PHONY: race-t250-durable-sequence
+race-t250-durable-sequence:
+	bash scripts/race-t250-durable-sequence.sh
+
+.PHONY: vet-t250-durable-sequence
+vet-t250-durable-sequence:
+	bash scripts/vet-t250-durable-sequence.sh
+
+.PHONY: stage-t250-durable-sequence
+stage-t250-durable-sequence:
+	bash scripts/stage-t250-durable-sequence.sh
+
+.PHONY: commit-t250-durable-sequence
+commit-t250-durable-sequence:
+	bash scripts/commit-t250-durable-sequence.sh
+
+.PHONY: push-t250-durable-sequence
+push-t250-durable-sequence:
+	bash scripts/push-t250-durable-sequence.sh

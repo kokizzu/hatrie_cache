@@ -35951,6 +35951,26 @@ allocation-neutral and the controlled resident benchmark does not show an
 O(n) lease regression. The retry/dead-letter wrapper is opt-in; see
 [T248_RETRY_DEAD_LETTER.md](T248_RETRY_DEAD_LETTER.md) for limits, persistence,
 and restart fencing.
+## T250 Gap-Safe Sequence Allocation With Durable Current Value
+
+Linux/amd64, AMD Ryzen 9 5950X, five benchmark samples per case. The durable
+implementation was measured against the pre-change rename-plus-directory-sync
+implementation.
+
+| Case | Raw samples (ns/op) | Median | Memory | Relative result |
+| --- | ---: | ---: | ---: | ---: |
+| Raw atomic counter | 0.2711, 0.2600, 0.2480, 0.3006, 0.2551 | 0.2600 | 0 B/op, 0 allocs/op | 1.00x |
+| In-memory `DurableSequence` | 3.424, 3.353, 3.360, 3.460, 3.458 | 3.424 | 0 B/op, 0 allocs/op | 13.17x slower than raw |
+| `MarshalBinary` | 30.43, 30.73, 30.50, 30.13, 30.28 | 30.50 | 24 B/op, 1 alloc/op | 117.31x slower than raw |
+| Durable file allocation, before | 1,654,113 median | 1,654,113 | 1,311 B/op, 18 allocs/op | baseline |
+| Durable file allocation, after | 539,742, 510,073, 497,177, 921,157, 499,380 | 510,073 | 24 B/op, 1 alloc/op | 3.24x faster; 54.5x less B/op |
+
+The durable path still pays for one `fsync` per allocation. The two-slot
+fixed-width journal removes temporary-file and directory-sync churn while
+retaining CRC validation and recovery from one damaged slot. It guarantees no
+duplicate or regressed value after a successful persisted allocation; strict
+gap-free allocation across a crash is not possible.
+
 ## T249 Queue Capacity, Age, Retry, And Consumer-Lag Metrics
 
 Linux/amd64, AMD Ryzen 9 5950X, five samples per benchmark case:
