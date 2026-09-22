@@ -24734,3 +24734,33 @@ commit-ch004-schema:
 .PHONY: push-ch004-schema
 push-ch004-schema:
 	bash scripts/push-ch004-schema.sh
+.PHONY: test-mz045-arrangement-cache
+test-mz045-arrangement-cache:
+	bash scripts/test-mz045-arrangement-cache.sh
+.PHONY: benchmark-mz045-arrangement-cache-before
+benchmark-mz045-arrangement-cache-before:
+	bash scripts/benchmark-mz045-arrangement-cache-before.sh
+.PHONY: format-mz045-arrangement-cache
+format-mz045-arrangement-cache:
+	bash scripts/format-mz045-arrangement-cache.sh
+.PHONY: benchmark-mz045-arrangement-cache
+benchmark-mz045-arrangement-cache:
+	bash scripts/benchmark-mz045-arrangement-cache.sh
+.PHONY: race-mz045-arrangement-cache
+race-mz045-arrangement-cache:
+	bash scripts/race-mz045-arrangement-cache.sh
+.PHONY: vet-mz045-arrangement-cache
+vet-mz045-arrangement-cache:
+	bash scripts/vet-mz045-arrangement-cache.sh
+.PHONY: status-mz045-arrangement-cache
+status-mz045-arrangement-cache:
+	bash scripts/status-mz045-arrangement-cache.sh
+.PHONY: stage-mz045-arrangement-cache
+stage-mz045-arrangement-cache:
+	bash scripts/stage-mz045-arrangement-cache.sh
+.PHONY: commit-mz045-arrangement-cache
+commit-mz045-arrangement-cache:
+	bash scripts/commit-mz045-arrangement-cache.sh
+.PHONY: push-mz045-arrangement-cache
+push-mz045-arrangement-cache:
+	bash scripts/push-mz045-arrangement-cache.sh

@@ -24395,6 +24395,39 @@ BenchmarkMZ045ExplainWorkload-32  191131  6422 ns/op  4920 B/op  62 allocs/op
 BenchmarkMZ045ExplainWorkload-32  194593  6673 ns/op  4920 B/op  62 allocs/op
 ```
 
+## MZ-045 Arrangement Recommendation Cache
+
+Command: `make benchmark-mz045-arrangement-cache`.
+
+This compares direct deterministic arrangement selection with a versioned
+`SQLArrangementRecommendationCache` hit for the same source and normalized
+literal-independent workload. Five samples ran on Linux/amd64 with an AMD Ryzen
+9 5950X and `-benchmem`.
+
+| Workload | Median ns/op | B/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: |
+| Direct recommendation | 642.5 | 88 | 4 | Baseline |
+| Versioned cache hit | 197.3 | 0 | 0 | **3.26x faster** |
+
+The cache removes 88 B/op and four allocations/op. It is opt-in, bounded, and
+requires a non-empty caller-maintained metadata version; an empty version keeps
+the direct selector and does not retain a recommendation.
+
+Raw output:
+
+```text
+BenchmarkMZ045ArrangementRecommendationBaseline-32  1878783  621.9 ns/op  88 B/op  4 allocs/op
+BenchmarkMZ045ArrangementRecommendationBaseline-32  1892924  642.5 ns/op  88 B/op  4 allocs/op
+BenchmarkMZ045ArrangementRecommendationBaseline-32  1803133  659.6 ns/op  88 B/op  4 allocs/op
+BenchmarkMZ045ArrangementRecommendationBaseline-32  1808689  641.9 ns/op  88 B/op  4 allocs/op
+BenchmarkMZ045ArrangementRecommendationBaseline-32  1797999  657.2 ns/op  88 B/op  4 allocs/op
+BenchmarkMZ045ArrangementRecommendationCacheHit-32  6293534  197.3 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ045ArrangementRecommendationCacheHit-32  6154104  194.6 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ045ArrangementRecommendationCacheHit-32  6327187  218.1 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ045ArrangementRecommendationCacheHit-32  5159754  200.8 ns/op  0 B/op  0 allocs/op
+BenchmarkMZ045ArrangementRecommendationCacheHit-32  6064174  192.5 ns/op  0 B/op  0 allocs/op
+```
+
 ## TT-020 Generic Multi-Part Ordered Ranges
 
 Command: `make benchmark-tt020`.
