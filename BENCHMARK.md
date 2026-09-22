@@ -36345,3 +36345,17 @@ it scanned subscribers for every event. Caching the minimum frontier removed
 that cost to roughly measurement noise without increasing allocations. Raw
 samples and the nonblocking retry semantics are in
 [M230_SOURCE_BACKPRESSURE.md](M230_SOURCE_BACKPRESSURE.md).
+
+## M231 Exactly-Once Upsert Sink Identities
+
+Five samples were run per operation on Linux amd64, AMD Ryzen 9 5950X. UOS1
+is the feature path; JSON is a control using the same snapshot structure.
+
+| Operation | UOS1 median | JSON median | Improvement | UOS1 B/op | UOS1 allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Begin plus Commit | 401.9 ns/op | n/a | state-machine cost | 208 | 8 |
+| Snapshot marshal | 212.1 ns/op | 574.0 ns/op | 2.71x CPU, 3.20x lower B/op, 2x fewer allocs | 80 | 1 |
+| Snapshot unmarshal | 259.9 ns/op | 3,329 ns/op | 12.81x CPU, 3.73x lower B/op, 2.17x fewer allocs | 120 | 6 |
+
+Raw samples, the atomic durability boundary, and the retry semantics are in
+[M231_EXACTLY_ONCE_UPSERT_SINK.md](M231_EXACTLY_ONCE_UPSERT_SINK.md).

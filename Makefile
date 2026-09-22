@@ -26191,6 +26191,42 @@ commit-m230-backpressure:
 push-m230-backpressure:
 	bash scripts/push-m230-backpressure.sh
 
+inspect-m231-sink:
+	bash scripts/m231-sink.sh inspect
+
+inspect-m231-sink-m228:
+	bash scripts/m231-sink.sh m228
+
+format-m231-sink:
+	bash scripts/m231-sink.sh format
+
+test-m231-sink:
+	bash scripts/m231-sink.sh test
+
+benchmark-m231-sink:
+	bash scripts/m231-sink.sh benchmark
+
+test-m231-sink-package:
+	bash scripts/m231-sink.sh package
+
+race-m231-sink:
+	bash scripts/m231-sink.sh race
+
+vet-m231-sink:
+	bash scripts/m231-sink.sh vet
+
+status-m231-sink:
+	bash scripts/status-m231-sink.sh
+
+stage-m231-sink:
+	bash scripts/stage-m231-sink.sh
+
+commit-m231-sink:
+	bash scripts/commit-m231-sink.sh
+
+push-m231-sink:
+	bash scripts/push-m231-sink.sh
+
 .PHONY: inspect-m229-source-schema
 inspect-m229-source-schema:
 	bash scripts/m229-source-schema.sh inspect

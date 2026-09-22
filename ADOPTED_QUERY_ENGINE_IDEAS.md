@@ -1255,3 +1255,12 @@ subscriber exceeds `MaxLag`; it never blocks a goroutine and the default is
 unchanged. The minimum frontier is cached and exposed through
 `SpaceChangefeedStats`. See
 [M230_SOURCE_BACKPRESSURE.md](M230_SOURCE_BACKPRESSURE.md).
+
+## M231 Exactly-Once Upsert Sink Identities
+
+The sink-side durable output identity pattern from Materialize and Tarantool is
+adopted as an opt-in `ExactlyOnceUpsertSink`. It returns explicit apply,
+resume, and skip decisions, rejects gaps and conflicting retries, and stores a
+bounded pending upsert in compact `uos1` state. The embedding service still
+owns the atomic write between the external destination and the snapshot. See
+[M231_EXACTLY_ONCE_UPSERT_SINK.md](M231_EXACTLY_ONCE_UPSERT_SINK.md).

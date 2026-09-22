@@ -117,7 +117,7 @@ operator control remain the preferred deployment model.
 - [x] M228 Exactly-once source restart from a committed source offset. See [M228_EXACTLY_ONCE_SOURCE_RESTART.md](M228_EXACTLY_ONCE_SOURCE_RESTART.md).
 - [x] M229 Source schema evolution with additive field compatibility checks. See [M229_SOURCE_SCHEMA_EVOLUTION.md](M229_SOURCE_SCHEMA_EVOLUTION.md).
 - [x] M230 Source backpressure based on downstream frontier lag. See [M230_SOURCE_BACKPRESSURE.md](M230_SOURCE_BACKPRESSURE.md).
-- [ ] M231 Exactly-once upsert sinks with durable output identities.
+- [x] M231 Exactly-once upsert sinks with durable output identities. See [M231_EXACTLY_ONCE_UPSERT_SINK.md](M231_EXACTLY_ONCE_UPSERT_SINK.md).
 - [ ] M232 Sink progress checkpoints coupled to emitted frontier messages.
 - [ ] M233 Sink retry and deduplication for disconnected output connections.
 - [ ] M234 Sink backpressure and bounded pending-output memory.
