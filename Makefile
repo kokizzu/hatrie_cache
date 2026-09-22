@@ -27109,3 +27109,35 @@ commit-t207:
 
 push-t207:
 	bash scripts/push-t207.sh
+test-t208:
+	bash scripts/test-t208.sh
+
+benchmark-t208-baseline:
+	bash scripts/benchmark-t208-baseline.sh
+
+format-t208:
+	bash scripts/format-t208.sh
+
+benchmark-t208:
+	bash scripts/benchmark-t208.sh
+
+race-t208:
+	bash scripts/race-t208.sh
+
+vet-t208:
+	bash scripts/vet-t208.sh
+
+test-t208-package:
+	bash scripts/test-t208.sh
+
+verify-docs-t208:
+	bash scripts/verify-docs-t208.sh
+
+stage-t208:
+	bash scripts/stage-t208.sh
+
+commit-t208:
+	bash scripts/commit-t208.sh
+
+push-t208:
+	bash scripts/push-t208.sh

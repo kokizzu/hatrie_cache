@@ -47,6 +47,10 @@ func ExecuteWriteQuorum(ctx context.Context, nodes []string, required int, write
 	if err != nil {
 		return WriteQuorumResult{}, err
 	}
+	return executeWriteQuorumNormalized(ctx, normalized, required, write)
+}
+
+func executeWriteQuorumNormalized(ctx context.Context, normalized []string, required int, write WriteQuorumWriteFunc) (WriteQuorumResult, error) {
 	result := WriteQuorumResult{
 		Decision: WriteQuorumDecision{Total: len(normalized), Required: required},
 		Attempts: make([]WriteQuorumAttempt, len(normalized)),

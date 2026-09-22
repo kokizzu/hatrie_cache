@@ -93,6 +93,7 @@ type ReplicaJoinRequest struct {
 	StorageGeneration     uint64
 	TargetJournalSequence uint64
 	FencingToken          uint64
+	Role                  ReplicaRole
 	Candidates            []ReplicaJoinCandidate
 }
 
@@ -103,6 +104,7 @@ type ReplicaJoinDecision struct {
 	Address            string
 	SourceID           string
 	SourceAddress      string
+	Role               ReplicaRole
 	BootstrapPlan      SnapshotWALBootstrapPlan
 	TopologyGeneration uint64
 }
@@ -114,6 +116,7 @@ type ReplicaJoinMember struct {
 	SourceID          string
 	SourceAddress     string
 	StorageGeneration uint64
+	Role              ReplicaRole
 	Generation        uint64
 }
 
@@ -232,6 +235,7 @@ func (admission *ReplicaJoinAdmission) Prepare(request ReplicaJoinRequest) (Repl
 		Address:            normalized.Address,
 		SourceID:           source.NodeID,
 		SourceAddress:      source.Address,
+		Role:               normalized.Role,
 		TopologyGeneration: admission.generation + 1,
 		BootstrapPlan: SnapshotWALBootstrapPlan{
 			JoinerID:                normalized.JoinerID,
@@ -288,6 +292,7 @@ func (admission *ReplicaJoinAdmission) Commit(decision ReplicaJoinDecision, boot
 		SourceID:          decision.SourceID,
 		SourceAddress:     decision.SourceAddress,
 		StorageGeneration: decision.BootstrapPlan.StorageGeneration,
+		Role:              decision.Role,
 		Generation:        admission.generation,
 	}
 	admission.members[member.NodeID] = member
@@ -347,6 +352,9 @@ func normalizeReplicaJoinRequest(request ReplicaJoinRequest, maxCandidates int) 
 	}
 	if request.StorageGeneration == 0 || request.FencingToken == 0 {
 		return ReplicaJoinRequest{}, ErrReplicaJoinAdmissionInvalid
+	}
+	if err := validateReplicaRole(request.Role); err != nil {
+		return ReplicaJoinRequest{}, fmt.Errorf("%w: %v", ErrReplicaJoinAdmissionInvalid, err)
 	}
 	if len(request.Candidates) == 0 || len(request.Candidates) > maxCandidates {
 		return ReplicaJoinRequest{}, ErrReplicaJoinAdmissionInvalid

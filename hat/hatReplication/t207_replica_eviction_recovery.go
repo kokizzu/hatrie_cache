@@ -19,6 +19,7 @@ type ReplicaEviction struct {
 	Address            string
 	StorageGeneration  uint64
 	MemberGeneration   uint64
+	Role               ReplicaRole
 	EvictionEpoch      uint64
 	TopologyGeneration uint64
 	Reason             string
@@ -92,6 +93,7 @@ func (admission *ReplicaJoinAdmission) Evict(nodeID string, expectedMemberGenera
 		Address:            member.Address,
 		StorageGeneration:  member.StorageGeneration,
 		MemberGeneration:   member.Generation,
+		Role:               member.Role,
 		EvictionEpoch:      admission.evictionEpoch,
 		TopologyGeneration: admission.generation,
 		Reason:             normalizedReason,
@@ -127,6 +129,9 @@ func (admission *ReplicaJoinAdmission) PrepareRejoin(request ReplicaRejoinReques
 	}
 	if request.EvictionEpoch != eviction.EvictionEpoch {
 		return ReplicaRejoinDecision{}, ErrReplicaJoinAdmissionStaleEviction
+	}
+	if request.Role != eviction.Role {
+		return ReplicaRejoinDecision{}, ErrReplicaJoinAdmissionRoleMismatch
 	}
 	if pending, exists := admission.rejoinPending[normalized.JoinerID]; exists {
 		if reflect.DeepEqual(pending.request, request) {
@@ -170,6 +175,7 @@ func (admission *ReplicaJoinAdmission) PrepareRejoin(request ReplicaRejoinReques
 			Address:            normalized.Address,
 			SourceID:           source.NodeID,
 			SourceAddress:      source.Address,
+			Role:               normalized.Role,
 			TopologyGeneration: admission.generation + 1,
 			BootstrapPlan: SnapshotWALBootstrapPlan{
 				JoinerID:                normalized.JoinerID,
@@ -237,6 +243,7 @@ func (admission *ReplicaJoinAdmission) CommitRejoin(decision ReplicaRejoinDecisi
 		SourceID:          decision.SourceID,
 		SourceAddress:     decision.SourceAddress,
 		StorageGeneration: decision.BootstrapPlan.StorageGeneration,
+		Role:              decision.Role,
 		Generation:        admission.generation,
 	}
 	admission.members[member.NodeID] = member

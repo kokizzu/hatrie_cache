@@ -36963,3 +36963,35 @@ T207 rejoin retry:          810.8 809.6 794.1 770.8 800.0; 328; 4
 Existing snapshot 128:    14138 14152 13857 14141 14085; 13184; 2
 T207 recovery snapshot:   13958 13361 14301 13661 12850; 13184; 2
 ```
+
+<a id="t208-anonymous-replicas-and-voter-only-quorum"></a>
+## T208 Anonymous Replicas and Voter-Only Quorum
+
+Commands: `make benchmark-t208-baseline` and `make benchmark-t208`. Five
+samples were collected on Linux/amd64 with an AMD Ryzen 9 5950X. T208 keeps
+the existing zero-value voter behavior, adds an explicit anonymous role, and
+validates quorum targets against a detached role roster before callbacks run.
+
+| Workload | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Existing all-target quorum executor | 1,493 | 544 | 10 | 1.00x |
+| T208 voter-only quorum executor | 1,675 | 544 | 10 | 1.12x |
+| Existing 128-member snapshot | 13,646 | 14,592 | 2 | 1.00x |
+| T208 128-member role roster | 11,371 | 6,912 | 3 | 0.83x |
+
+The voter-only wrapper costs 12.2% CPU in this small control-path benchmark,
+with no additional bytes or allocations. That cost prevents an anonymous or
+unknown target from starting quorum callbacks. The role roster retains only
+sorted node IDs, so it uses 52.6% less memory than the full member snapshot at
+the cost of one additional allocation; the two exports intentionally carry
+different payloads. Full role semantics are documented in
+[T208_ANONYMOUS_REPLICAS.md](T208_ANONYMOUS_REPLICAS.md).
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+Existing quorum:       1527 1534 1493 1427 1461; 544; 10
+T208 voter quorum:      1691 1664 1727 1663 1675; 544; 10
+Existing snapshot 128: 13615 13950 13820 13646 13631; 14592; 2
+T208 role roster 128:   11353 11299 11978 11425 11371; 6912; 3
+```
