@@ -25993,3 +25993,46 @@ commit-m225-shard-leases:
 .PHONY: push-m225-shard-leases
 push-m225-shard-leases:
 	bash scripts/push-m225-shard-leases.sh
+.PHONY: format-m226-consensus-metadata
+format-m226-consensus-metadata:
+	bash scripts/m226-consensus-metadata.sh format
+
+.PHONY: test-m226-consensus-metadata
+test-m226-consensus-metadata:
+	bash scripts/m226-consensus-metadata.sh test
+
+.PHONY: benchmark-m226-consensus-metadata
+benchmark-m226-consensus-metadata:
+	bash scripts/m226-consensus-metadata.sh benchmark
+
+.PHONY: measure-m226-consensus-metadata-size
+measure-m226-consensus-metadata-size:
+	bash scripts/m226-consensus-metadata.sh size
+
+.PHONY: race-m226-consensus-metadata
+race-m226-consensus-metadata:
+	bash scripts/m226-consensus-metadata.sh race
+
+.PHONY: vet-m226-consensus-metadata
+vet-m226-consensus-metadata:
+	bash scripts/m226-consensus-metadata.sh vet
+
+.PHONY: test-m226-consensus-metadata-package
+test-m226-consensus-metadata-package:
+	bash scripts/m226-consensus-metadata.sh package
+
+.PHONY: verify-m226-consensus-metadata-docs
+verify-m226-consensus-metadata-docs:
+	bash scripts/m226-consensus-metadata.sh docs
+
+.PHONY: stage-m226-consensus-metadata
+stage-m226-consensus-metadata:
+	bash scripts/stage-m226-consensus-metadata.sh
+
+.PHONY: commit-m226-consensus-metadata
+commit-m226-consensus-metadata:
+	bash scripts/commit-m226-consensus-metadata.sh
+
+.PHONY: push-m226-consensus-metadata
+push-m226-consensus-metadata:
+	bash scripts/push-m226-consensus-metadata.sh

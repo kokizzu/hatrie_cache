@@ -1206,3 +1206,13 @@ strict deterministic binary snapshot. This is a lease registry, not a
 distributed consensus protocol; the embedding service still owns durable
 atomic writes and enforcement of the fencing token at the state-store boundary.
 See [M225_PERSISTED_SHARD_LEASES.md](M225_PERSISTED_SHARD_LEASES.md).
+
+## M226 Durable Consensus Metadata
+
+The durable restart metadata pattern from Tarantool-style Raft state and
+Materialize frontier progress is adopted as an opt-in
+`hatReplication.ShardConsensusMetadataStore`. It couples lease fencing,
+term/vote, log indexes, source frontier, and configuration generation in one
+validated monotone record with a compact HCM1 snapshot. It does not replace
+distributed consensus or durable atomic storage. See
+[M226_DURABLE_CONSENSUS_METADATA.md](M226_DURABLE_CONSENSUS_METADATA.md).

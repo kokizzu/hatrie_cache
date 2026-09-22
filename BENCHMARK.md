@@ -36260,3 +36260,20 @@ exchange for strict validation, lower wire/storage size, and much lower CPU.
 Lease acquisition and release measured 192.1 ns/op with zero allocations.
 Raw samples and persistence caveats are in
 [M225_PERSISTED_SHARD_LEASES.md](M225_PERSISTED_SHARD_LEASES.md).
+
+## M226 Durable Consensus Metadata
+
+The workload committed and serialized one shard metadata record. Five samples
+were run per operation. HCM1 is the feature path; JSON is a control using the
+same exported struct.
+
+| Operation | HCM1 ns/op | JSON ns/op | HCM1 B/op | JSON B/op | HCM1 allocs/op | JSON allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Commit | 86.33 | n/a | 0 | n/a | 0 | n/a | 0 allocations |
+| Marshal | 126.7 | 437.7 | 80 | 176 | 1 | 1 | 3.46x CPU, 2.20x lower B/op |
+| Unmarshal | 189.1 | 2,231 | 24 | 336 | 3 | 8 | 11.8x CPU, 14.0x lower B/op, 1.67x fewer allocs |
+
+HCM1 was 79 bytes versus JSON at 167 bytes, or 2.11x smaller. The capacity
+calculation was benchmarked after implementation and removed the initial
+maximum-frame allocation. Raw samples and the restart/consensus boundary are in
+[M226_DURABLE_CONSENSUS_METADATA.md](M226_DURABLE_CONSENSUS_METADATA.md).
