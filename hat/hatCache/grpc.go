@@ -61,6 +61,9 @@ type CacheGRPCOptions struct {
 	// the local command result, for single public write commands. Zero keeps the
 	// existing asynchronous or best-effort replication behavior.
 	WriteQuorum int
+	// WriteQuorumPolicy enables synchronous quorum only for matching key
+	// prefixes. Nil preserves the global WriteQuorum behavior unchanged.
+	WriteQuorumPolicy *WriteQuorumPolicy
 	// RequireReplicationSchemaCompatibility rejects missing or mismatched schema
 	// metadata on internal replication. It is disabled by default.
 	RequireReplicationSchemaCompatibility bool
@@ -437,6 +440,7 @@ func (server *CacheGRPCServer) executeGRPCCommand(ctx context.Context, request *
 		EnforceLeaderWrites:            server.options.EnforceLeaderWrites,
 		RequireHealthyReplicaReads:     server.options.RequireHealthyReplicaReads,
 		WriteQuorum:                    server.options.WriteQuorum,
+		WriteQuorumPolicy:              server.options.WriteQuorumPolicy,
 		replicationSchema:              server.options.ReplicationSchema,
 		replicationSchemaCompatibility: server.options.SchemaCompatibilityPolicy,
 		requireSchemaCompatibility:     server.options.RequireReplicationSchemaCompatibility,

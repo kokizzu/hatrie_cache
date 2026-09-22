@@ -522,7 +522,7 @@ func executePartitionedPublicCommandBatch(ctx context.Context, trie *HatTrie, re
 		}
 		return executePublicCommandBatch(ctx, set.tries[partition], request, options)
 	}
-	if options.Journal == nil && options.DirtyTracker == nil && options.Replicator == nil && !options.EnforceLeaderWrites {
+	if options.Journal == nil && options.DirtyTracker == nil && options.Replicator == nil && options.WriteQuorumPolicy == nil && !options.EnforceLeaderWrites {
 		return trie.executePartitionedPublicBatchCommand(request), false
 	}
 	partition := -1

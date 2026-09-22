@@ -23349,6 +23349,46 @@ existing wait-for-all quorum API with three targets. It returns after the
 required acknowledgements arrive or the quorum becomes impossible, and cancels
 pending context-aware callbacks. The default replication path is unchanged.
 
+<a id="t201-per-space-write-quorum"></a>
+## T201 Per-Space Write Quorum
+
+`BenchmarkT201CommandWriteQuorumResolution` compares the existing disabled
+path with an opt-in three-rule longest-prefix policy. Five runs use
+`-benchmem -count=5` on Linux/amd64 with an AMD Ryzen 9 5950X:
+
+| Mode | Run 1 | Run 2 | Run 3 | Run 4 | Run 5 | Median | Heap | Allocs | Relative time |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Policy disabled | 7.257 ns | 7.478 ns | 8.040 ns | 7.500 ns | 7.603 ns | 7.500 ns | 0 B/op | 0/op | 1.00x |
+| Configured matching key | 76.26 ns | 75.38 ns | 79.91 ns | 72.12 ns | 73.57 ns | 75.38 ns | 0 B/op | 0/op | 10.05x |
+| Configured non-matching key | 79.97 ns | 76.52 ns | 74.99 ns | 75.59 ns | 76.27 ns | 76.27 ns | 0 B/op | 0/op | 10.17x |
+
+The configured policy adds about 68-69 ns and no heap allocation to quorum
+resolution. The disabled path only checks for a nil policy and retains the
+legacy command behavior. This is a control-plane lookup benchmark; actual
+synchronous replication additionally pays the replica transport and quorum
+wait. Correctness coverage includes longest-prefix precedence, invalid rules,
+ordinary asynchronous writes, critical single writes, and atomic batches.
+
+Raw output from `make benchmark-t201`:
+
+```text
+BenchmarkT201CommandWriteQuorumResolution/Disabled-32          151552569  7.257 ns/op  0 B/op  0 allocs/op
+BenchmarkT201CommandWriteQuorumResolution/Disabled-32          150288627  7.478 ns/op  0 B/op  0 allocs/op
+BenchmarkT201CommandWriteQuorumResolution/Disabled-32          173100793  8.040 ns/op  0 B/op  0 allocs/op
+BenchmarkT201CommandWriteQuorumResolution/Disabled-32          163740666  7.500 ns/op  0 B/op  0 allocs/op
+BenchmarkT201CommandWriteQuorumResolution/Disabled-32          148131682  7.603 ns/op  0 B/op  0 allocs/op
+BenchmarkT201CommandWriteQuorumResolution/ConfiguredMatch-32   14810289   76.26 ns/op  0 B/op  0 allocs/op
+BenchmarkT201CommandWriteQuorumResolution/ConfiguredMatch-32   15249196   75.38 ns/op  0 B/op  0 allocs/op
+BenchmarkT201CommandWriteQuorumResolution/ConfiguredMatch-32   13778913   79.91 ns/op  0 B/op  0 allocs/op
+BenchmarkT201CommandWriteQuorumResolution/ConfiguredMatch-32   17262973   72.12 ns/op  0 B/op  0 allocs/op
+BenchmarkT201CommandWriteQuorumResolution/ConfiguredMatch-32   14053750   73.57 ns/op  0 B/op  0 allocs/op
+BenchmarkT201CommandWriteQuorumResolution/ConfiguredMiss-32    15746114   79.97 ns/op  0 B/op  0 allocs/op
+BenchmarkT201CommandWriteQuorumResolution/ConfiguredMiss-32    13698555   76.52 ns/op  0 B/op  0 allocs/op
+BenchmarkT201CommandWriteQuorumResolution/ConfiguredMiss-32    16834777   74.99 ns/op  0 B/op  0 allocs/op
+BenchmarkT201CommandWriteQuorumResolution/ConfiguredMiss-32    16897656   75.59 ns/op  0 B/op  0 allocs/op
+BenchmarkT201CommandWriteQuorumResolution/ConfiguredMiss-32    16007782   76.27 ns/op  0 B/op  0 allocs/op
+```
+
 Representative medians of three `-benchmem` runs on Linux, AMD Ryzen 9 5950X:
 
 | Workload | ns/op | B/op | allocs/op | Comparison |

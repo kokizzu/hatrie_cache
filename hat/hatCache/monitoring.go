@@ -150,6 +150,9 @@ type MonitoringOptions struct {
 	// the local command result, for single public write commands. Zero keeps the
 	// existing asynchronous or best-effort replication behavior.
 	WriteQuorum int
+	// WriteQuorumPolicy enables synchronous quorum only for matching key
+	// prefixes. Nil preserves the global WriteQuorum behavior unchanged.
+	WriteQuorumPolicy *WriteQuorumPolicy
 	// ReplicationSchema identifies the schema expected on internal replication.
 	ReplicationSchema ReplicationSchemaContract
 	// SchemaCompatibilityPolicy optionally accepts an explicit validated schema
@@ -359,6 +362,7 @@ type commandExecutionOptions struct {
 	EnforceLeaderWrites                 bool
 	RequireHealthyReplicaReads          bool
 	WriteQuorum                         int
+	WriteQuorumPolicy                   *WriteQuorumPolicy
 	replicationSchema                   ReplicationSchemaContract
 	replicationSchemaCompatibility      *ReplicationSchemaCompatibilityPolicy
 	requireSchemaCompatibility          bool
@@ -1965,6 +1969,7 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 		EnforceLeaderWrites:            handler.options.EnforceLeaderWrites,
 		RequireHealthyReplicaReads:     handler.options.RequireHealthyReplicaReads,
 		WriteQuorum:                    handler.options.WriteQuorum,
+		WriteQuorumPolicy:              handler.options.WriteQuorumPolicy,
 		replicationSchema:              handler.options.ReplicationSchema,
 		replicationSchemaCompatibility: handler.options.SchemaCompatibilityPolicy,
 		requireSchemaCompatibility:     handler.options.RequireReplicationSchemaCompatibility,
@@ -2138,9 +2143,9 @@ func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheComman
 	if response, rejected := rejectNonLeaderWrite(request, options.NodeName, options.Election, options.EnforceLeaderWrites); rejected {
 		return response, true
 	}
-	requiredWriteQuorum := options.WriteQuorum
-	if request.InsertQuorum > requiredWriteQuorum {
-		requiredWriteQuorum = request.InsertQuorum
+	requiredWriteQuorum, err := commandWriteQuorumForRequest(request, options)
+	if err != nil {
+		return commandError(err.Error()), true
 	}
 	if requiredWriteQuorum > 0 && commandWriteQuorumEligible(request) {
 		if err := validateCommandWriteQuorum(ctx, options, requiredWriteQuorum); err != nil {
@@ -2200,6 +2205,23 @@ func commandWriteQuorumEligible(request CacheCommandRequest) bool {
 	return commandShouldJournal(request)
 }
 
+func commandWriteQuorumForRequest(request CacheCommandRequest, options commandExecutionOptions) (int, error) {
+	required := options.WriteQuorum
+	if request.InsertQuorum > required {
+		required = request.InsertQuorum
+	}
+	if options.WriteQuorumPolicy != nil && commandWriteQuorumEligible(request) {
+		policyQuorum, err := options.WriteQuorumPolicy.RequiredForKey(request.Key)
+		if err != nil {
+			return 0, err
+		}
+		if policyQuorum > required {
+			required = policyQuorum
+		}
+	}
+	return required, nil
+}
+
 func validateCommandInsertQuorum(ctx context.Context, request CacheCommandRequest, options commandExecutionOptions) error {
 	if request.InsertQuorum < 1 {
 		return fmt.Errorf("%w: insert required=%d", hatReplication.ErrWriteQuorumInvalid, request.InsertQuorum)
@@ -2207,9 +2229,9 @@ func validateCommandInsertQuorum(ctx context.Context, request CacheCommandReques
 	if !commandWriteQuorumEligible(request) {
 		return fmt.Errorf("%w: insert quorum requires a single public write command", hatReplication.ErrWriteQuorumInvalid)
 	}
-	required := options.WriteQuorum
-	if request.InsertQuorum > required {
-		required = request.InsertQuorum
+	required, err := commandWriteQuorumForRequest(request, options)
+	if err != nil {
+		return err
 	}
 	return validateCommandWriteQuorum(ctx, options, required)
 }
@@ -2268,9 +2290,16 @@ func executePublicCommandBatch(ctx context.Context, trie *HatTrie, request Cache
 	if trie.localPartitionSet() != nil {
 		return executePartitionedPublicCommandBatch(ctx, trie, request, payloads, options)
 	}
-	batchQuorum := request.Atomic && options.WriteQuorum > 0 && atomicBatchWriteQuorumEligible(payloads)
+	batchQuorumRequired := 0
+	if request.Atomic && atomicBatchWriteQuorumEligible(payloads) {
+		batchQuorumRequired, err = atomicBatchWriteQuorumRequirement(payloads, options)
+		if err != nil {
+			return commandError(err.Error()), true
+		}
+	}
+	batchQuorum := batchQuorumRequired > 0
 	if batchQuorum {
-		if err := validateCommandWriteQuorum(ctx, options, options.WriteQuorum); err != nil {
+		if err := validateCommandWriteQuorum(ctx, options, batchQuorumRequired); err != nil {
 			return commandError(err.Error()), true
 		}
 	}
@@ -2330,7 +2359,7 @@ func executePublicCommandBatch(ctx context.Context, trie *HatTrie, request Cache
 			return response, false
 		}
 		effects.publishDirty()
-		if _, err := options.Replicator.replicatePlannedBatchWithQuorum(ctx, effects.planned, options.WriteQuorum); err != nil {
+		if _, err := options.Replicator.replicatePlannedBatchWithQuorum(ctx, effects.planned, batchQuorumRequired); err != nil {
 			response.OK = false
 			response.Message = err.Error()
 			return response, true
@@ -2351,6 +2380,23 @@ func atomicBatchWriteQuorumEligible(payloads []CacheCommandRequest) bool {
 		}
 	}
 	return true
+}
+
+func atomicBatchWriteQuorumRequirement(payloads []CacheCommandRequest, options commandExecutionOptions) (int, error) {
+	required := options.WriteQuorum
+	if options.WriteQuorumPolicy == nil {
+		return required, nil
+	}
+	for _, payload := range payloads {
+		policyQuorum, err := options.WriteQuorumPolicy.RequiredForKey(payload.Key)
+		if err != nil {
+			return 0, err
+		}
+		if policyQuorum > required {
+			required = policyQuorum
+		}
+	}
+	return required, nil
 }
 
 type publicCommandBatchRollback struct {
