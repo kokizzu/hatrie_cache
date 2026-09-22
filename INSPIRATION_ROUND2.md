@@ -66,7 +66,7 @@ operator control remain the preferred deployment model.
 - [ ] C230 Memory-overcommit wait queues before query cancellation.
 - [ ] C231 Workload groups with per-class concurrency and memory budgets.
 - [x] C232 Query-complexity limits for rows, joins, and intermediate results.
-- [ ] C233 Per-query CPU-time budgets with cooperative cancellation.
+- [x] C233 Per-query CPU-time budgets with cooperative cancellation; see [C233_QUERY_CPU_BUDGET.md](C233_QUERY_CPU_BUDGET.md) and [BENCHMARK.md](BENCHMARK.md#c233-query-cpu-time-budget).
 - [x] C234 [Query profiler records for stage time, bytes, and allocations](C234_QUERY_PROFILER.md).
 - [x] C235 [Read/write task profiler aggregation by table part and column](C235_READ_WRITE_PROFILER.md).
 - [ ] C236 Explain output for data-skipping-index decisions and rejected marks.

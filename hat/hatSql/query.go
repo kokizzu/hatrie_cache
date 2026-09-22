@@ -295,6 +295,11 @@ type SQLQueryOptions struct {
 	MutationAdmission     *SQLMutationAdmission
 	MaxRecursionDepth     int
 	DetectRecursiveCycles bool
+	// MaxCPUTime is an opt-in cooperative CPU-time budget. Operators check it
+	// at bounded execution-control checkpoints; zero keeps the default path
+	// free of CPU-time sampling. Platforms without thread CPU accounting use a
+	// monotonic elapsed-time fallback.
+	MaxCPUTime time.Duration
 	Timeout               time.Duration
 	PreparedCache         *SQLPreparedQueryCache
 	// PreparedSchemaVersion participates in the prepared-plan cache key. Set it
@@ -8203,6 +8208,11 @@ type sqlExecutionControl struct {
 	yieldEvery     uint64
 	yieldFuel      atomic.Uint64
 	yields         atomic.Uint64
+	cpuTimeBudget  time.Duration
+	cpuTimeStart   time.Duration
+	cpuWallStart   time.Time
+	cpuTimeThread  bool
+	cpuTimeChecks  atomic.Uint64
 }
 
 // sqlExecutionControlContext preserves the normal context contract while
@@ -8261,7 +8271,7 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if options.MaxRows < 0 || options.MaxIntermediateRows < 0 || options.MaxJoinWork < 0 || options.MaxJoinBytes < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxGroupMergeBytes < 0 || options.MaxGroupKeys < 0 || options.MaxSetBytes < 0 || options.MaxSpillBytes < 0 || options.MaxQuerySpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 || options.Workers < 0 || options.OperatorYieldEvery < 0 {
+	if options.MaxRows < 0 || options.MaxIntermediateRows < 0 || options.MaxJoinWork < 0 || options.MaxJoinBytes < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxGroupMergeBytes < 0 || options.MaxGroupKeys < 0 || options.MaxSetBytes < 0 || options.MaxSpillBytes < 0 || options.MaxQuerySpillBytes < 0 || options.MaxRecursionDepth < 0 || options.MaxCPUTime < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 || options.Workers < 0 || options.OperatorYieldEvery < 0 {
 		return nil, func() {}, fmt.Errorf("SQL query budgets cannot be negative")
 	}
 	if options.OperatorYieldEvery > MaxSQLOperatorYieldEvery {
@@ -8275,6 +8285,14 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 	}
 	newControl := func(controlContext context.Context) *sqlExecutionControl {
 		control := &sqlExecutionControl{ctx: controlContext, maxRows: sqlQueryMaxRows(options), options: options, sources: map[string][]SQLRow{}, operatorMemory: options.OperatorMemoryTracker}
+		if options.MaxCPUTime > 0 {
+			control.cpuTimeBudget = options.MaxCPUTime
+			control.cpuWallStart = time.Now()
+			if started, ok := sqlCurrentThreadCPUTime(); ok {
+				control.cpuTimeStart = started
+				control.cpuTimeThread = true
+			}
+		}
 		if options.MaxQuerySpillBytes > 0 {
 			control.spillQuota = newSQLSpillQuota(options.MaxQuerySpillBytes)
 		}
@@ -8319,6 +8337,9 @@ func (control *sqlExecutionControl) check() error {
 		return nil
 	}
 	if err := control.ctx.Err(); err != nil {
+		return err
+	}
+	if err := control.checkCPUTime(); err != nil {
 		return err
 	}
 	control.maybeYield()
@@ -12342,6 +12363,9 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 	started = time.Now()
 	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: make([]SQLRow, 0, len(groups))}
 	projectGroup := func(group []sqlExecRow) (sqlQueryOutput, bool, error) {
+		if err := control.check(); err != nil {
+			return sqlQueryOutput{}, false, err
+		}
 		representative := sqlExecRow{}
 		if len(group) > 0 {
 			representative = group[0]

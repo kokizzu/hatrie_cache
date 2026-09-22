@@ -24958,3 +24958,36 @@ commit-c213-typed-hash-join:
 .PHONY: push-c213-typed-hash-join
 push-c213-typed-hash-join:
 	bash scripts/push-c213-typed-hash-join.sh
+inspect-local-targets:
+	bash scripts/inspect-local-targets.sh
+.PHONY: test-c233-query-cpu-budget
+test-c233-query-cpu-budget:
+	bash scripts/test-c233-query-cpu-budget.sh
+
+.PHONY: benchmark-c233-query-cpu-budget
+benchmark-c233-query-cpu-budget:
+	bash scripts/benchmark-c233-query-cpu-budget.sh
+
+.PHONY: format-c233-query-cpu-budget
+format-c233-query-cpu-budget:
+	bash scripts/format-c233-query-cpu-budget.sh
+
+.PHONY: race-c233-query-cpu-budget
+race-c233-query-cpu-budget:
+	bash scripts/race-c233-query-cpu-budget.sh
+
+.PHONY: vet-c233-query-cpu-budget
+vet-c233-query-cpu-budget:
+	bash scripts/vet-c233-query-cpu-budget.sh
+
+.PHONY: stage-c233-query-cpu-budget
+stage-c233-query-cpu-budget:
+	bash scripts/stage-c233-query-cpu-budget.sh
+
+.PHONY: commit-c233-query-cpu-budget
+commit-c233-query-cpu-budget:
+	bash scripts/commit-c233-query-cpu-budget.sh
+
+.PHONY: push-c233-query-cpu-budget
+push-c233-query-cpu-budget:
+	bash scripts/push-c233-query-cpu-budget.sh

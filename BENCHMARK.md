@@ -35808,3 +35808,31 @@ Record: 99.48 104.6 97.84 97.01 97.89 ns/op
 The profiler performs no work unless a storage adapter calls it. It is not
 installed in the SQL query path automatically because the generic resolver
 contract does not know physical part or column I/O boundaries.
+
+## C233: Query CPU-Time Budget
+
+Command: `make benchmark-c233-query-cpu-budget` (five samples, `-benchmem`,
+Linux/amd64, AMD Ryzen 9 5950X). The disabled path uses the default zero
+budget. The enabled path sets a one-hour budget so it measures checkpoint and
+CPU-time-accounting overhead without triggering cancellation.
+
+```text
+Disabled: 2272001 2220346 2260926 2323432 2217832 ns/op
+          3511381 3511381 3511389 3511389 3511378 B/op
+          16407   16407   16407   16407   16407 allocs/op
+Enabled:  2189252 2206391 2225518 2144547 2177614 ns/op
+          3511378 3511380 3511382 3511377 3511378 B/op
+          16407   16407   16407   16407   16407 allocs/op
+```
+
+| Path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Default, budget disabled | 2,260,926 | 3,511,381 | 16,407 | baseline |
+| One-hour budget enabled | 2,189,252 | 3,511,378 | 16,407 | 1.03x lower in this run; allocation-neutral |
+
+The enabled run did not add allocations or retained bytes. Its lower median is
+within normal benchmark noise, so this feature should be treated as a
+correctness and workload-isolation control, not a performance optimization.
+The default path remains budget-free. See
+[C233_QUERY_CPU_BUDGET.md](C233_QUERY_CPU_BUDGET.md) for limitations and API
+semantics.
