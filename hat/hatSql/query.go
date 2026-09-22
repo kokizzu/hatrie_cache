@@ -223,6 +223,12 @@ type SQLQueryOptions struct {
 	// ComputeCluster selects an opt-in named SQLQueryManager compute pool.
 	// Empty preserves the existing manager default or direct execution path.
 	ComputeCluster string
+	// ClusterAdmission optionally waits for a bounded CPU/memory lease before
+	// execution. Nil preserves the existing immediate execution path.
+	ClusterAdmission *SQLClusterAdmission
+	// ClusterAdmissionRequest supplies the cluster, class, priority, CPU, and
+	// memory units reserved while this query executes.
+	ClusterAdmissionRequest SQLClusterAdmissionRequest
 	// OperatorYieldEvery inserts a cooperative runtime yield after this many
 	// execution-control checks. Zero disables scheduler yielding and preserves
 	// the existing context-check-only behavior. This is a fairness quantum, not
@@ -299,9 +305,9 @@ type SQLQueryOptions struct {
 	// at bounded execution-control checkpoints; zero keeps the default path
 	// free of CPU-time sampling. Platforms without thread CPU accounting use a
 	// monotonic elapsed-time fallback.
-	MaxCPUTime time.Duration
-	Timeout               time.Duration
-	PreparedCache         *SQLPreparedQueryCache
+	MaxCPUTime    time.Duration
+	Timeout       time.Duration
+	PreparedCache *SQLPreparedQueryCache
 	// PreparedSchemaVersion participates in the prepared-plan cache key. Set it
 	// when a schema, index, or projection change should force a fresh template.
 	PreparedSchemaVersion string
@@ -857,6 +863,11 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		observation.attachPlanSnapshot(&result, operatorSteps)
 		observation.finish(result, err, operatorSteps, source, parameters)
 	}()
+	control, cancel, controlErr := newSQLExecutionControl(ctx, options)
+	if controlErr != nil {
+		return result, controlErr
+	}
+	defer cancel()
 	var snapshotResolver SQLSourceResolver
 	var snapshotRelease func()
 	var snapshotErr error
@@ -874,11 +885,6 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 	resolver = snapshotResolver
 	release := lockSQLSnapshot(resolver)
 	defer release()
-	control, cancel, controlErr := newSQLExecutionControl(ctx, options)
-	if controlErr != nil {
-		return result, controlErr
-	}
-	defer cancel()
 	if err = control.check(); err != nil {
 		return result, err
 	}
@@ -1091,6 +1097,11 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 	if visit == nil {
 		return fmt.Errorf("SQL row callback is required")
 	}
+	control, cancel, err := newSQLExecutionControl(ctx, options)
+	if err != nil {
+		return err
+	}
+	defer cancel()
 	var snapshotResolver SQLSourceResolver
 	var snapshotRelease func()
 	var snapshotErr error
@@ -1108,11 +1119,6 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 	resolver = snapshotResolver
 	release := lockSQLSnapshot(resolver)
 	defer release()
-	control, cancel, err := newSQLExecutionControl(ctx, options)
-	if err != nil {
-		return err
-	}
-	defer cancel()
 	query, err := prepareSQLQueryForExecution(source, parameters, &options)
 	if err != nil {
 		return err
@@ -5412,6 +5418,11 @@ func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceR
 		observation.attachPlanSnapshot(&result, operatorSteps)
 		observation.finish(result, err, operatorSteps, source, parameters)
 	}()
+	control, cancel, controlErr := newSQLExecutionControl(ctx, options)
+	if controlErr != nil {
+		return result, controlErr
+	}
+	defer cancel()
 	if options.AsOfFrontier != nil {
 		snapshotResolver, snapshotRelease, snapshotErr := beginSQLAsOfSnapshot(ctx, resolver, options.AsOfFrontier)
 		if snapshotErr != nil {
@@ -5430,11 +5441,6 @@ func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceR
 	if pageSize > maxSQLPageSize {
 		return result, fmt.Errorf("SQL page_size exceeds the maximum %d", maxSQLPageSize)
 	}
-	control, cancel, controlErr := newSQLExecutionControl(ctx, options)
-	if controlErr != nil {
-		return result, controlErr
-	}
-	defer cancel()
 	query, parseErr := parseSQLQueryWithCache(source, parameters, options.PreparedCache, options.PreparedSchemaVersion)
 	if parseErr != nil {
 		return result, parseErr
@@ -8302,11 +8308,24 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 		}
 		return control
 	}
+	controlContext := ctx
+	cancel := context.CancelFunc(func() {})
 	if options.Timeout > 0 {
-		ctx, cancel := context.WithTimeout(ctx, options.Timeout)
-		return newControl(ctx), cancel, nil
+		controlContext, cancel = context.WithTimeout(ctx, options.Timeout)
 	}
-	return newControl(ctx), func() {}, nil
+	control := newControl(controlContext)
+	if options.ClusterAdmission == nil {
+		return control, cancel, nil
+	}
+	lease, err := options.ClusterAdmission.Acquire(controlContext, options.ClusterAdmissionRequest)
+	if err != nil {
+		cancel()
+		return nil, func() {}, err
+	}
+	return control, func() {
+		lease.Release()
+		cancel()
+	}, nil
 }
 
 func applySQLMaxThreads(query *sqlQuery, options *SQLQueryOptions) error {

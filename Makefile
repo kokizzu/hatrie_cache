@@ -25294,3 +25294,35 @@ commit-c228-ledger-reconciliation:
 
 push-c228-ledger-reconciliation:
 	bash ./scripts/push-c228-ledger-reconciliation.sh
+
+.PHONY: test-c230-memory-overcommit
+test-c230-memory-overcommit:
+	bash ./scripts/test-c230-memory-overcommit.sh
+
+.PHONY: format-c230-memory-overcommit
+format-c230-memory-overcommit:
+	bash ./scripts/format-c230-memory-overcommit.sh
+
+.PHONY: benchmark-c230-memory-overcommit
+benchmark-c230-memory-overcommit:
+	bash ./scripts/benchmark-c230-memory-overcommit.sh
+
+.PHONY: race-c230-memory-overcommit
+race-c230-memory-overcommit:
+	bash ./scripts/race-c230-memory-overcommit.sh
+
+.PHONY: vet-c230-memory-overcommit
+vet-c230-memory-overcommit:
+	bash ./scripts/vet-c230-memory-overcommit.sh
+
+.PHONY: stage-c230-memory-overcommit
+stage-c230-memory-overcommit:
+	bash ./scripts/stage-c230-memory-overcommit.sh
+
+.PHONY: commit-c230-memory-overcommit
+commit-c230-memory-overcommit:
+	bash ./scripts/commit-c230-memory-overcommit.sh
+
+.PHONY: push-c230-memory-overcommit
+push-c230-memory-overcommit:
+	bash ./scripts/push-c230-memory-overcommit.sh

@@ -36004,3 +36004,23 @@ versus `3,517,992` enabled, or `1.15x` (`307.1` versus `351.8` bytes/item).
 Packed Unix-nanosecond timestamps improved the metrics read from the initial
 `6,705 ns/op` to `4,090 ns/op` and reduced the initial `1.34x` retained-heap
 ratio to `1.15x`.
+
+## C230 Memory-Overcommit Query Admission
+
+Linux/amd64, AMD Ryzen 9 5950X, five benchmark samples per case. The query
+benchmark compares the existing direct path with the opt-in
+`SQLClusterAdmission` path using a serving request that fits its configured
+CPU and memory budgets. The acquire/release case isolates the admission
+overhead.
+
+| Workload | Raw samples (ns/op) | Median | Memory | Relative result |
+| --- | --- | ---: | ---: | --- |
+| Direct query | 9,320, 9,276, 9,125, 9,159, 9,748 | 9,276 | 7,912 B/op, 42 allocs/op | 1.00x |
+| Memory-admitted query | 9,679, 9,450, 9,477, 9,651, 10,269 | 9,651 | 8,032 B/op, 44 allocs/op | 1.04x CPU, 1.02x bytes, 1.05x allocs |
+| Admission acquire/release only | 221.2, 220.4, 208.4, 207.8, 219.9 | 219.9 | 96 B/op, 1 alloc/op | fixed opt-in admission cost |
+
+The small query CPU difference is benchmark noise rather than a claimed speed
+up. The feature is disabled by default; its value is bounded waiting under
+memory pressure, cancellation while queued, and lease release after query
+completion. It uses the existing bounded cluster admission queues rather than
+adding a second per-query memory tracker.
