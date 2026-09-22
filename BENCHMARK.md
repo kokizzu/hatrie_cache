@@ -37299,3 +37299,10 @@ highly variable, so the small CPU difference is not treated as a performance
 claim. Both paths use the existing filesystem-backed snapshot clone; the
 feature improves nested rollback ergonomics and panic cleanup rather than
 making snapshot savepoints cheaper. See [TT032_ATOMIC_TRANSACTION_SCOPES.md](TT032_ATOMIC_TRANSACTION_SCOPES.md).
+## T033: MVCC Cooperative Yield
+
+With three 3-second samples on an AMD Ryzen 9 5950X, a ready-context
+`SQLTransaction.Yield` measured a median `144.2 ns/op`, `0 B/op`, and
+`0 allocs/op`. An already-canceled context measured `20.30 ns/op`, `0 B/op`,
+and `0 allocs/op`. The safe point is opt-in and does not change transactions
+that never call it. See [TT033_MVCC_COOPERATIVE_YIELD.md](TT033_MVCC_COOPERATIVE_YIELD.md).

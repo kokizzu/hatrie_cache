@@ -27699,3 +27699,42 @@ commit-t232:
 .PHONY: push-t232
 push-t232:
 	bash scripts/push-t232.sh
+.PHONY: format-t233
+format-t233:
+	bash scripts/format-t233.sh
+
+.PHONY: test-t233
+test-t233:
+	bash scripts/test-t233.sh
+
+.PHONY: test-t233-package
+test-t233-package:
+	bash scripts/test-t233-package.sh
+
+.PHONY: benchmark-t233
+benchmark-t233:
+	bash scripts/benchmark-t233.sh
+
+.PHONY: race-t233
+race-t233:
+	bash scripts/race-t233.sh
+
+.PHONY: vet-t233
+vet-t233:
+	bash scripts/vet-t233.sh
+
+.PHONY: verify-t233-docs
+verify-t233-docs:
+	bash scripts/verify-t233-docs.sh
+
+.PHONY: stage-t233
+stage-t233:
+	bash scripts/stage-t233.sh
+
+.PHONY: commit-t233
+commit-t233:
+	bash scripts/commit-t233.sh
+
+.PHONY: push-t233
+push-t233:
+	bash scripts/push-t233.sh
