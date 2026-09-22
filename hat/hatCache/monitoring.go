@@ -3812,7 +3812,7 @@ func (handler *MonitoringHandler) handleJournalSnapshot(w http.ResponseWriter, r
 	path := file.Name()
 	defer os.Remove(path)
 	defer file.Close()
-	metadata, err := handler.options.Journal.WriteSnapshotWithFormat(handler.trie, file, SnapshotFormatGzipBinary)
+	manifest, err := handler.options.Journal.WriteSnapshotWithManifest(handler.trie, file, SnapshotFormatGzipBinary)
 	if err != nil {
 		handler.auditHTTP(r, AuditEvent{Action: "journal.snapshot", OK: false, Status: http.StatusInternalServerError, Message: err.Error()})
 		writeJSONStatus(w, http.StatusInternalServerError, commandError(err.Error()))
@@ -3834,12 +3834,14 @@ func (handler *MonitoringHandler) handleJournalSnapshot(w http.ResponseWriter, r
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", snapshotContentType)
 	w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
-	w.Header().Set("X-Hatrie-Journal-Sequence", strconv.FormatUint(metadata.JournalSequence, 10))
+	w.Header().Set("X-Hatrie-Journal-Sequence", strconv.FormatUint(manifest.JournalSequence, 10))
+	w.Header().Set("X-Hatrie-Snapshot-Format", string(manifest.Format))
+	w.Header().Set("X-Hatrie-Snapshot-SHA256", manifest.SHA256)
 	if _, err := io.Copy(w, file); err != nil {
 		handler.auditHTTP(r, AuditEvent{Action: "journal.snapshot", OK: false, Status: http.StatusInternalServerError, Message: err.Error()})
 		return
 	}
-	handler.auditHTTP(r, AuditEvent{Action: "journal.snapshot", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"journal_sequence": metadata.JournalSequence, "bytes": info.Size()}})
+	handler.auditHTTP(r, AuditEvent{Action: "journal.snapshot", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"journal_sequence": manifest.JournalSequence, "bytes": info.Size()}})
 }
 
 func (handler *MonitoringHandler) handleJournalCheckpoint(w http.ResponseWriter, r *http.Request) {

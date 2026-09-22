@@ -37099,3 +37099,38 @@ make test-t213
 make race-t213
 make vet-t213
 ```
+
+## T214 Streaming Snapshots Without a Shared Filesystem
+
+The baseline is the existing `PullCommandJournalSnapshot` path, which
+materializes the HTTP response to a local temporary file, fsyncs it, reopens it
+for metadata validation, and atomically renames it. The after path streams the
+same authenticated gzip-binary response directly to `io.Discard` while
+validating sequence, format, length, and SHA-256 headers. Three `-benchmem`
+samples were collected on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+Commands:
+
+```text
+make benchmark-t214-baseline
+make benchmark-t214
+```
+
+| Path | Raw ns/op samples | Median ns/op | Memory/op | Allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Before, materializing pull | `17342788 54428812 34937345` | `34937345` | `153677 B` | `655` | `1.00x` |
+| After, direct stream + digest validation | `110261 112500 110856` | `110856` | `41158 B` | `97` | `315.3x faster` |
+
+The stream path avoids local disk I/O and reduces this workload by about
+`99.7%` CPU time, `73.2%` memory/op, and `85.2%` allocations. Wire bytes are
+unchanged. The receiving replica must supply its own transactional staging and
+commit/rollback behavior because an arbitrary `io.Writer` cannot be atomically
+renamed by this library.
+
+Focused correctness checks:
+
+```text
+make test-t214
+make race-t214
+make vet-t214
+```

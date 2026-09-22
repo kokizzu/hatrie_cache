@@ -2,6 +2,8 @@ package hatCache
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -9,10 +11,17 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"hatrie_cache/hat/hatAuth"
+)
+
+var (
+	ErrSnapshotStreamMetadataInvalid = errors.New("hatriecache: streamed snapshot metadata is invalid")
+	ErrSnapshotStreamSequenceTooOld  = errors.New("hatriecache: streamed snapshot sequence is older than required")
+	ErrSnapshotStreamDigestMismatch  = errors.New("hatriecache: streamed snapshot digest mismatch")
 )
 
 const DefaultCommandJournalPullTimeout = 30 * time.Second
@@ -199,6 +208,93 @@ func PullCommandJournalSnapshot(ctx context.Context, source string, authToken st
 		minimumSequence = minimumSequences[0]
 	}
 	return writeCommandJournalSnapshotAtomic(path, response.Body, minimumSequence)
+}
+
+// StreamCommandJournalSnapshot forwards one authenticated snapshot directly
+// to writer without creating a local snapshot file. The source must provide
+// sequence, canonical format, and SHA-256 headers; callers should discard
+// their destination if the final digest check fails.
+func StreamCommandJournalSnapshot(ctx context.Context, source string, authToken string, client *http.Client, writer io.Writer, minimumSequences ...uint64) (SnapshotManifest, error) {
+	if writer == nil {
+		return SnapshotManifest{}, ErrSnapshotStreamMetadataInvalid
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if client == nil {
+		client = http.DefaultClient
+	}
+	endpoint, err := journalSnapshotEndpoint(source)
+	if err != nil {
+		return SnapshotManifest{}, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return SnapshotManifest{}, err
+	}
+	request.Header.Set("Accept", snapshotContentType)
+	request.Header.Set("Accept-Encoding", "identity")
+	setReplicationAuthHeaders(request, authToken)
+	response, err := client.Do(request)
+	if err != nil {
+		return SnapshotManifest{}, err
+	}
+	defer drainAndClose(response.Body)
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		body, readErr := readCommandJournalErrorResponseBody(response.Body)
+		if readErr != nil {
+			return SnapshotManifest{}, readErr
+		}
+		return SnapshotManifest{}, fmt.Errorf("journal snapshot source returned HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+	}
+	if contentType := strings.TrimSpace(strings.Split(response.Header.Get("Content-Type"), ";")[0]); contentType != "" && contentType != snapshotContentType {
+		return SnapshotManifest{}, fmt.Errorf("%w: content type %q", ErrSnapshotStreamMetadataInvalid, contentType)
+	}
+	sequenceText := strings.TrimSpace(response.Header.Get("X-Hatrie-Journal-Sequence"))
+	sequence, err := strconv.ParseUint(sequenceText, 10, 64)
+	if err != nil || sequenceText == "" {
+		return SnapshotManifest{}, fmt.Errorf("%w: journal sequence %q", ErrSnapshotStreamMetadataInvalid, sequenceText)
+	}
+	minimumSequence := uint64(0)
+	if len(minimumSequences) > 0 {
+		minimumSequence = minimumSequences[0]
+	}
+	if sequence < minimumSequence {
+		return SnapshotManifest{}, fmt.Errorf("%w: sequence=%d minimum=%d", ErrSnapshotStreamSequenceTooOld, sequence, minimumSequence)
+	}
+	formatText := strings.TrimSpace(response.Header.Get("X-Hatrie-Snapshot-Format"))
+	if formatText == "" {
+		return SnapshotManifest{}, fmt.Errorf("%w: snapshot format is missing", ErrSnapshotStreamMetadataInvalid)
+	}
+	format, err := ParseSnapshotFormat(formatText)
+	if err != nil {
+		return SnapshotManifest{}, fmt.Errorf("%w: %v", ErrSnapshotStreamMetadataInvalid, err)
+	}
+	expectedDigest := strings.ToLower(strings.TrimSpace(response.Header.Get("X-Hatrie-Snapshot-SHA256")))
+	if len(expectedDigest) != sha256.Size*2 {
+		return SnapshotManifest{}, fmt.Errorf("%w: snapshot digest is missing or malformed", ErrSnapshotStreamMetadataInvalid)
+	}
+	if _, err := hex.DecodeString(expectedDigest); err != nil {
+		return SnapshotManifest{}, fmt.Errorf("%w: snapshot digest is malformed", ErrSnapshotStreamMetadataInvalid)
+	}
+	digest := sha256.New()
+	written, err := io.Copy(io.MultiWriter(writer, digest), response.Body)
+	if err != nil {
+		return SnapshotManifest{}, err
+	}
+	if response.ContentLength >= 0 && written != response.ContentLength {
+		return SnapshotManifest{}, fmt.Errorf("%w: bytes=%d content-length=%d", ErrSnapshotStreamMetadataInvalid, written, response.ContentLength)
+	}
+	actualDigest := hex.EncodeToString(digest.Sum(nil))
+	if actualDigest != expectedDigest {
+		return SnapshotManifest{}, fmt.Errorf("%w: got=%s want=%s", ErrSnapshotStreamDigestMismatch, actualDigest, expectedDigest)
+	}
+	return SnapshotManifest{
+		JournalSequence: sequence,
+		Format:          format,
+		SizeBytes:       written,
+		SHA256:          actualDigest,
+	}, nil
 }
 
 func PullCommandJournalCheckpoint(ctx context.Context, source string, authToken string, client *http.Client, path string, minimumSequences ...uint64) (BackupBundleManifest, error) {

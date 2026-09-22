@@ -8838,6 +8838,51 @@ push-t212:
 test-t213:
 	bash ./scripts/test-t213.sh
 
+
+.PHONY: test-t214
+test-t214:
+	bash ./scripts/test-t214.sh
+
+.PHONY: benchmark-t214-baseline
+benchmark-t214-baseline:
+	bash ./scripts/benchmark-t214-baseline.sh
+
+.PHONY: benchmark-t214
+benchmark-t214:
+	bash ./scripts/benchmark-t214.sh
+
+.PHONY: format-t214
+format-t214:
+	bash ./scripts/format-t214.sh
+
+.PHONY: test-t214-package
+test-t214-package:
+	bash ./scripts/test-t214-package.sh
+
+.PHONY: race-t214
+race-t214:
+	bash ./scripts/race-t214.sh
+
+.PHONY: vet-t214
+vet-t214:
+	bash ./scripts/vet-t214.sh
+
+.PHONY: verify-docs-t214
+verify-docs-t214:
+	bash ./scripts/verify-docs-t214.sh
+
+.PHONY: stage-t214
+stage-t214:
+	bash ./scripts/stage-t214.sh
+
+.PHONY: commit-t214
+commit-t214:
+	bash ./scripts/commit-t214.sh
+
+.PHONY: push-t214
+push-t214:
+	bash ./scripts/push-t214.sh
+
 .PHONY: benchmark-t213-baseline
 benchmark-t213-baseline:
 	bash ./scripts/benchmark-t213-baseline.sh
