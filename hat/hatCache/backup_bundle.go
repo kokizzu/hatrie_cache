@@ -49,11 +49,16 @@ type BackupBundleOptions struct {
 	// RepositoryRetainBytes is an optional approximate physical-object budget
 	// for incremental backup retention. Zero keeps the existing count-only policy.
 	RepositoryRetainBytes int64
+	// RepositoryChunkSize enables fixed-size content-addressed chunks for
+	// large incremental repository files. Zero uses the default chunk size;
+	// DisableBackupRepositoryChunking selects legacy whole-file objects.
+	RepositoryChunkSize int
 }
 
 type BackupPartitionMetadata = hatBackup.PartitionMetadata
 type BackupBundleManifest = hatBackup.BundleManifest
 type BackupBundleFile = hatBackup.BundleFile
+type BackupBundleChunk = hatBackup.BundleChunk
 
 func ParseBackupMode(value string) (BackupMode, error) {
 	return hatBackup.ParseMode(value)

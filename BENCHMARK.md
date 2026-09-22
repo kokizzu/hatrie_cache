@@ -36121,3 +36121,37 @@ BenchmarkReadOnlyBackupRestoreAndLoad-32       4,359,116 ns/op  487955 B/op  186
 BenchmarkReadOnlyBackupRestoreAndLoad-32       4,478,377 ns/op  488296 B/op  1864 allocs/op
 BenchmarkReadOnlyBackupRestoreAndLoad-32       4,447,941 ns/op  487672 B/op  1863 allocs/op
 ```
+
+<a id="c241-incremental-backup-chunk-deduplication"></a>
+## C241 Incremental Backup Chunk Deduplication
+
+C241 adds fixed-size content-addressed chunks for large files in incremental
+backup repositories. The default is 1 MiB chunks; `RepositoryChunkSize` can
+select another value from 4 KiB through 64 MiB, and
+`DisableBackupRepositoryChunking` selects the legacy whole-file object layout.
+Small files remain whole-file objects. Restore verifies each chunk and the
+reconstructed file checksum, while retention counts unique reachable chunk
+objects.
+
+Measured with `make benchmark-c241` on Linux/amd64, AMD Ryzen 9 5950X, five
+samples per case, using 10,000 keys of 256 bytes and 1% changed per
+incremental backup. Median values are shown:
+
+| Path | Time/op | New object bytes/op | Written bytes/op | Memory/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Whole-file control | 23.438 ms | 1,101,804 | 1,105,467 | 1,491,274 B | 3,477 | baseline |
+| 1 MiB chunked default | 25.091 ms | 200,328 | 204,322 | 1,521,308 B | 3,356 | 1.07x time; 5.50x fewer new bytes; 5.41x fewer written bytes; 1.02x memory |
+
+The default spends about 7% more CPU on this fixture and reduces the new
+repository payload by about 81.9%. Fixed boundaries do not eliminate
+insertion-shift amplification; content-defined chunking remains a future
+option with additional CPU and complexity cost.
+
+### Raw C241 output
+
+```text
+Chunked1MiB:       37.673229, 25.091461, 26.378954, 25.082767, 24.838594 ms/op
+Chunked1MiB:       200328, 100164, 467432, 267104, 100164 new_object_B/op
+WholeFileControl:  24.051669, 23.078073, 24.093990, 23.411704, 23.438107 ms/op
+WholeFileControl:  1402296, 1101804, 534208, 1135192, 734536 new_object_B/op
+```
