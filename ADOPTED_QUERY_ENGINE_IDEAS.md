@@ -1283,3 +1283,13 @@ and schedules retries with deterministic capped exponential backoff. Its
 compact SRT1 snapshot makes in-flight work immediately claimable after restart.
 It does not perform network I/O or provide external durability on its own. See
 [M233_SINK_RETRY_OUTBOX.md](M233_SINK_RETRY_OUTBOX.md).
+
+## M234 Sink Backpressure
+
+The Materialize-style flow-control and Tarantool relay-backpressure patterns
+are adopted as opt-in high/low-watermark admission on `SinkRetryQueue`.
+`SinkRetryBackpressureOptions` rejects new output identities before the hard
+queue cap, clears only after both pending-count and byte watermarks recover,
+and still permits duplicate suppression and pending-record compaction. The
+default remains off; `Stats` and `BackpressureStatus` expose operational
+state. See [M234_SINK_BACKPRESSURE.md](M234_SINK_BACKPRESSURE.md).

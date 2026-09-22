@@ -26290,6 +26290,39 @@ commit-m233-sink-retry:
 push-m233-sink-retry:
 	bash scripts/push-m233-sink-retry.sh
 
+inspect-m234-sink-backpressure:
+	bash scripts/m234-sink-backpressure.sh inspect
+
+format-m234-sink-backpressure:
+	bash scripts/m234-sink-backpressure.sh format
+
+test-m234-sink-backpressure:
+	bash scripts/m234-sink-backpressure.sh test
+
+benchmark-m234-sink-backpressure:
+	bash scripts/m234-sink-backpressure.sh benchmark
+
+test-m234-sink-backpressure-package:
+	bash scripts/m234-sink-backpressure.sh package
+
+race-m234-sink-backpressure:
+	bash scripts/m234-sink-backpressure.sh race
+
+vet-m234-sink-backpressure:
+	bash scripts/m234-sink-backpressure.sh vet
+
+verify-docs-m234-sink-backpressure:
+	bash scripts/m234-sink-backpressure.sh docs
+
+stage-m234-sink-backpressure:
+	bash scripts/stage-m234-sink-backpressure.sh
+
+commit-m234-sink-backpressure:
+	bash scripts/commit-m234-sink-backpressure.sh
+
+push-m234-sink-backpressure:
+	bash scripts/push-m234-sink-backpressure.sh
+
 format-m233-sink-retry:
 	bash scripts/m233-sink-retry.sh format
 

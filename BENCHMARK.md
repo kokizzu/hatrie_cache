@@ -36390,3 +36390,19 @@ is a compatibility control.
 The binary format trades two extra marshal allocations for lower CPU and
 storage/wire size. Raw semantics, limits, and the exact benchmark command are
 in [M233_SINK_RETRY_OUTBOX.md](M233_SINK_RETRY_OUTBOX.md).
+
+## M234 Sink Backpressure
+
+Five samples were run per operation on Linux amd64, AMD Ryzen 9 5950X. The
+enabled healthy path uses high/low watermarks that are never reached; the
+rejection path holds one record at its high watermark.
+
+| Workload | Default-off median | Enabled healthy median | Result | B/op | allocs/op |
+| --- | ---: | ---: | --- | ---: | ---: |
+| Enqueue + claim + ack | 431.3 ns/op | 424.7 ns/op | 0.98x enabled/off; within run variance | 224 both | 6 both |
+| Reject a new identity while throttled | n/a | 35.23 ns/op | allocation-free admission signal | 0 | 0 |
+
+Backpressure adds no allocation in the healthy path and was not measurably
+slower in the paired benchmark. It is disabled by default and retains the M233
+hard bounds. Full semantics and the exact commands are in
+[M234_SINK_BACKPRESSURE.md](M234_SINK_BACKPRESSURE.md).

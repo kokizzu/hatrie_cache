@@ -36,11 +36,12 @@ var (
 // SinkRetryOptions bounds one retry outbox and controls its deterministic
 // exponential backoff. Zero values use the package defaults.
 type SinkRetryOptions struct {
-	Source     string
-	MaxPending int
-	MaxBytes   int64
-	BaseDelay  time.Duration
-	MaxDelay   time.Duration
+	Source       string
+	MaxPending   int
+	MaxBytes     int64
+	BaseDelay    time.Duration
+	MaxDelay     time.Duration
+	Backpressure SinkRetryBackpressureOptions
 }
 
 // SinkRetryEnqueueAction describes how Enqueue handled one output identity.
@@ -67,9 +68,11 @@ type SinkRetryDelivery struct {
 
 // SinkRetryQueueStats describes bounded memory and in-flight work.
 type SinkRetryQueueStats struct {
-	Pending  int
-	Bytes    int64
-	InFlight int
+	Pending            int
+	Bytes              int64
+	InFlight           int
+	Backpressured      bool
+	BackpressureEvents uint64
 }
 
 // SinkRetryQueueSnapshot is the durable state for one retry outbox. An
@@ -91,12 +94,14 @@ type SinkRetrySnapshotItem struct {
 // It does not perform network or filesystem I/O; callers claim work with
 // Next and acknowledge or reschedule it with Ack or Retry.
 type SinkRetryQueue struct {
-	mu        sync.Mutex
-	options   SinkRetryOptions
-	items     map[string]*sinkRetryEntry
-	ready     sinkRetryHeap
-	bytes     int64
-	nextToken uint64
+	mu                 sync.Mutex
+	options            SinkRetryOptions
+	items              map[string]*sinkRetryEntry
+	ready              sinkRetryHeap
+	bytes              int64
+	nextToken          uint64
+	backpressured      bool
+	backpressureEvents uint64
 }
 
 type sinkRetryEntry struct {
@@ -209,7 +214,12 @@ func (queue *SinkRetryQueue) Enqueue(record ExactlyOnceUpsertSinkRecord, now tim
 		existing.token = queue.nextTokenLocked()
 		queue.bytes += size - oldSize
 		heap.Push(&queue.ready, &sinkRetryReadyItem{outputID: record.OutputID, due: existing.due, token: existing.token})
+		queue.updateBackpressureLocked()
 		return queue.enqueueResultLocked(SinkRetryReplaced), nil
+	}
+	if queue.backpressured {
+		queue.backpressureEvents++
+		return SinkRetryEnqueueResult{}, ErrSinkRetryBackpressure
 	}
 	if len(queue.items) >= queue.options.MaxPending || queue.bytes+size > queue.options.MaxBytes {
 		return SinkRetryEnqueueResult{}, ErrSinkRetryQueueFull
@@ -223,6 +233,7 @@ func (queue *SinkRetryQueue) Enqueue(record ExactlyOnceUpsertSinkRecord, now tim
 	queue.items[record.OutputID] = entry
 	queue.bytes += size
 	heap.Push(&queue.ready, &sinkRetryReadyItem{outputID: record.OutputID, due: entry.due, token: entry.token})
+	queue.updateBackpressureLocked()
 	return queue.enqueueResultLocked(SinkRetryEnqueued), nil
 }
 
@@ -278,6 +289,7 @@ func (queue *SinkRetryQueue) Ack(outputID string, sequence uint64) error {
 	}
 	delete(queue.items, outputID)
 	queue.bytes -= entry.size
+	queue.updateBackpressureLocked()
 	return nil
 }
 
@@ -378,6 +390,9 @@ func (queue *SinkRetryQueue) Restore(snapshot SinkRetryQueueSnapshot) error {
 	queue.ready = ready
 	queue.bytes = totalBytes
 	queue.nextToken = nextToken
+	queue.backpressured = false
+	queue.backpressureEvents = 0
+	queue.updateBackpressureLocked()
 	queue.mu.Unlock()
 	return nil
 }
@@ -521,6 +536,11 @@ func normalizeSinkRetryOptions(options SinkRetryOptions) (SinkRetryOptions, erro
 	if options.MaxPending < 1 || options.MaxPending > MaxSinkRetryPending || options.MaxBytes < 1 || options.MaxBytes > MaxSinkRetryBytes || options.BaseDelay < 1 || options.MaxDelay < options.BaseDelay {
 		return SinkRetryOptions{}, ErrSinkRetryInvalid
 	}
+	var err error
+	options.Backpressure, err = normalizeSinkRetryBackpressureOptions(options.Backpressure, options.MaxPending, options.MaxBytes)
+	if err != nil {
+		return SinkRetryOptions{}, err
+	}
 	return options, nil
 }
 
@@ -541,7 +561,12 @@ func (queue *SinkRetryQueue) enqueueResultLocked(action SinkRetryEnqueueAction) 
 }
 
 func (queue *SinkRetryQueue) statsLocked() SinkRetryQueueStats {
-	stats := SinkRetryQueueStats{Pending: len(queue.items), Bytes: queue.bytes}
+	stats := SinkRetryQueueStats{
+		Pending:            len(queue.items),
+		Bytes:              queue.bytes,
+		Backpressured:      queue.backpressured,
+		BackpressureEvents: queue.backpressureEvents,
+	}
 	for _, entry := range queue.items {
 		if entry.inFlight {
 			stats.InFlight++
