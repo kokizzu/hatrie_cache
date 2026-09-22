@@ -37236,3 +37236,17 @@ row-map control reports only a `102,400`-byte scalar payload estimate and
 excludes map headers, interface words, and allocator overhead, so it is not a
 total RSS comparison. The feature is append-only and volatile; no SQL,
 backup, replication, or existing row-storage default changes.
+## T218: Multi-Part TREE Index
+
+Command: `make benchmark-t218` on an AMD Ryzen 9 5950X, three samples, with
+16 parts of 1,024 rows each. The multi-part build publishes each sorted batch;
+the comparison repeatedly upserts the same rows into one mutable
+`OrderedIndex`.
+
+| Workload | Multi-part | Single `OrderedIndex` | Improvement / tradeoff |
+| --- | ---: | ---: | --- |
+| Publish/build 16,384 rows | 5,993,274 ns/op; 405,600 B/op; 88 allocs/op | 1,205,656,171 ns/op; 1,639,824 B/op; 84 allocs/op | 201.1x faster; 4.0x lower build bytes; 1.05x more allocation events |
+| Prefix scan | 6,375 ns/op; 1,744 B/op; 6 allocs/op | 1,274 ns/op; 0 B/op; 0 allocs/op | 5.0x slower and allocation-bearing |
+
+Raw samples and the API tradeoff are recorded in
+[T218_MULTI_PART_TREE_INDEX.md](T218_MULTI_PART_TREE_INDEX.md).
