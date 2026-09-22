@@ -25358,3 +25358,33 @@ commit-c236-explain:
 .PHONY: push-c236-explain
 push-c236-explain:
 	bash ./scripts/push-c236-explain.sh
+.PHONY: test-c237-projection
+test-c237-projection:
+	bash scripts/test-c237-projection.sh
+.PHONY: benchmark-c237-baseline benchmark-c237-before-after
+benchmark-c237-baseline:
+	bash scripts/benchmark-c237-baseline.sh
+
+benchmark-c237-before-after:
+	bash scripts/benchmark-c237-before-after.sh
+.PHONY: inspect-c237-row-mapping
+inspect-c237-row-mapping:
+	bash scripts/inspect-c237-row-mapping.sh
+.PHONY: format-c237-projection
+format-c237-projection:
+	bash scripts/format-c237-projection.sh
+.PHONY: race-c237-projection vet-c237-projection
+race-c237-projection:
+	bash scripts/race-c237-projection.sh
+
+vet-c237-projection:
+	bash scripts/vet-c237-projection.sh
+.PHONY: stage-c237-projection commit-c237-projection push-c237-projection
+stage-c237-projection:
+	bash scripts/stage-c237-projection.sh
+
+commit-c237-projection:
+	bash scripts/commit-c237-projection.sh
+
+push-c237-projection:
+	bash scripts/push-c237-projection.sh

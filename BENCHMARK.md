@@ -36041,3 +36041,19 @@ This is an EXPLAIN-only diagnostic cost. Normal query execution does not
 collect the trace. The added memory is bounded by 64 retained decisions per
 pruning step while the aggregate examined and rejected mark counts remain
 complete.
+
+## C237 Explain Projection Selection and I/O Estimate
+
+Linux/amd64, AMD Ryzen 9 5950X, five 2-second benchmark samples per case with
+`GOMAXPROCS=1`. The benchmark uses `EXPLAIN ANALYZE` over a two-column
+columnar source and compares the C230 baseline with C237 selected-field
+projection metadata.
+
+| Path | Raw samples (ns/op) | Median | Memory | Relative result |
+| --- | --- | ---: | ---: | --- |
+| C230 baseline | 25,285, 24,497, 24,389, 23,878, 25,129 | 24,497 | 16,546 B/op, 131 allocs/op | baseline |
+| C237 projection metadata | 23,199, 23,826, 24,252, 25,493, 24,817 | 24,252 | 17,586 B/op, 138 allocs/op | 0.99x CPU, 1.06x bytes, 1.05x allocs |
+
+CPU is within normal sample noise; the measurable tradeoff is the bounded
+EXPLAIN result metadata. Normal query execution is unchanged, and the byte
+estimate represents only the selected columnar batch.

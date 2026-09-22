@@ -8595,6 +8595,13 @@ func (metrics *sqlExecutionMetrics) recordBytes(node, detail string, inputRows, 
 	metrics.steps = append(metrics.steps, step)
 }
 
+func (metrics *sqlExecutionMetrics) recordProjection(projection *ExplainProjection) {
+	if metrics == nil || projection == nil || len(metrics.steps) == 0 {
+		return
+	}
+	metrics.steps[len(metrics.steps)-1].Projection = projection
+}
+
 func (metrics *sqlExecutionMetrics) recordIndexCandidates(detail string, alternatives []SQLExplainAlternative, notices []SQLExplainNotice, inputRows, outputRows int, started time.Time) {
 	if metrics == nil {
 		return
@@ -8896,7 +8903,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 	if !sqlCanColumnarScan(q, outer) {
 		return SQLQueryResult{}, false, nil
 	}
-	fields, _, projectionFields, ok := sqlColumnarScanFields(q)
+	fields, predicateFields, projectionFields, ok := sqlColumnarScanFields(q)
 	if !ok {
 		return SQLQueryResult{}, false, nil
 	}
@@ -8920,6 +8927,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned %d values for field %q, want %d", q.from.key, batch.FieldRows(field), field, batch.Rows)
 		}
 	}
+	projection := sqlExplainColumnarProjectionFromBatch(fields, predicateFields, projectionFields, batch)
 	if conditionCacheable {
 		afterCache, afterVersion, afterCacheable, err := sqlColumnarConditionCacheVersion(q, resolver, control)
 		if err != nil {
@@ -8938,12 +8946,14 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 				}
 				metrics.record(node, sqlExplainExpression(q.where), batch.Rows, len(matches), started)
 				metrics.record("LATE MATERIALIZATION", strings.Join(projectionFields, ","), len(matches), len(result.Rows), started)
+				metrics.recordProjection(projection)
 			}
 			return result, true, nil
 		}
 	}
 	if metrics != nil {
 		metrics.record("COLUMNAR SCAN", sqlExplainSource(*q.from)+" fields="+strings.Join(fields, ","), 0, batch.Rows, started)
+		metrics.recordProjection(projection)
 	}
 
 	if q.where.kind == "" {
@@ -13373,6 +13383,7 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		}
 	}
 	hasArrangementMetadata := sqlExplainHasArrangementMetadata(steps)
+	hasProjectionMetadata := sqlExplainHasProjectionMetadata(steps)
 	hasExplainCost := sqlExplainHasCost(steps)
 	columns := []string{"node", "detail", "estimated_rows"}
 	if hasExplainCost {
@@ -13380,6 +13391,9 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 	}
 	if hasArrangementMetadata {
 		columns = append(columns, "arrangements")
+	}
+	if hasProjectionMetadata {
+		columns = append(columns, "projection")
 	}
 	result := SQLQueryResult{
 		Columns: columns,
@@ -13399,6 +13413,10 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		}
 		if hasArrangementMetadata && len(step.Arrangements) > 0 {
 			row["arrangements"] = cloneSQLArrangementMetadata(step.Arrangements)
+		}
+		if step.Projection != nil {
+			projection := cloneExplainProjection(step.Projection)
+			row["projection"] = *projection
 		}
 		result.Rows = append(result.Rows, row)
 	}
@@ -13463,6 +13481,10 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		if len(step.Arrangements) > 0 {
 			row["arrangements"] = cloneSQLArrangementMetadata(step.Arrangements)
 		}
+		if step.Projection != nil {
+			projection := cloneExplainProjection(step.Projection)
+			row["projection"] = *projection
+		}
 		if step.Pruning != nil {
 			row["total_rows"] = step.Pruning.TotalRows
 			row["skipped_rows"] = step.Pruning.SkippedRows
@@ -13485,6 +13507,7 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 	}
 	hasIndexDiagnostics := false
 	hasArrangementMetadata = sqlExplainHasArrangementMetadata(result.Plan)
+	hasProjectionMetadata = sqlExplainHasProjectionMetadata(result.Plan)
 	hasExplainCost = sqlExplainHasCost(result.Plan)
 	for _, step := range steps {
 		if step.Index != nil {
@@ -13501,6 +13524,9 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 	}
 	if hasArrangementMetadata {
 		result.Columns = append(result.Columns, "arrangements")
+	}
+	if hasProjectionMetadata {
+		result.Columns = append(result.Columns, "projection")
 	}
 	result.Columns = append(result.Columns, "total_rows", "skipped_rows", "scanned_rows", "matched_rows", "residual_rows", "residual_false_positive_rate")
 	result.Rows = append(result.Rows, SQLRow{
@@ -13548,6 +13574,7 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 		currentEstimate = whereEstimate
 	}
 	scanStep := sqlExplainSourceStep(prefix+"SCAN", *query.from, resolver)
+	scanStep.Projection = sqlExplainColumnarProjection(query, resolver)
 	sqlMarkArrangementRecommendation(scanStep.Arrangements, workload)
 	sqlSetExplainCardinalityEstimate(&scanStep, sourceEstimate)
 	*steps = append(*steps, scanStep)
@@ -13654,6 +13681,50 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 		*steps = append(*steps, SQLExplainStep{Node: prefix + "SET", Detail: kind})
 		sqlAppendExplainSteps(steps, union.query, prefix+"  ", resolver)
 	}
+}
+
+func sqlExplainColumnarProjection(query *sqlQuery, resolver SQLSourceResolver) *ExplainProjection {
+	if query == nil || query.analyze || resolver == nil || !sqlCanColumnarScan(query, nil) {
+		return nil
+	}
+	columnar, ok := resolver.(SQLColumnarSourceResolver)
+	if !ok {
+		return nil
+	}
+	fields, predicateFields, outputFields, ok := sqlColumnarScanFields(query)
+	if !ok {
+		return nil
+	}
+	batch, available, err := columnar.ResolveSQLColumnarSource(query.from.kind, query.from.key, fields)
+	if err != nil || !available {
+		return nil
+	}
+	return sqlExplainColumnarProjectionFromBatch(fields, predicateFields, outputFields, batch)
+}
+
+func sqlExplainColumnarProjectionFromBatch(fields, predicateFields, outputFields []string, batch ColumnarBatch) *ExplainProjection {
+	projection := &ExplainProjection{
+		Kind:            "columnar",
+		Fields:          fields,
+		PredicateFields: predicateFields,
+		OutputFields:    outputFields,
+	}
+	if batchBytes := typedTableColumnarBatchBytes(batch, nil); batchBytes > 0 {
+		projection.EstimatedReadBytes = batchBytes
+		if batch.Rows > 0 {
+			projection.EstimatedReadBytesPerRow = (batchBytes + batch.Rows - 1) / batch.Rows
+		}
+	}
+	return projection
+}
+
+func sqlExplainHasProjectionMetadata(steps []SQLExplainStep) bool {
+	for _, step := range steps {
+		if step.Projection != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func sqlExplainSourceStep(node string, source sqlSource, resolver SQLSourceResolver) SQLExplainStep {

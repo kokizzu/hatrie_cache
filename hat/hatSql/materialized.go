@@ -530,9 +530,21 @@ func cloneMaterializedExplainSteps(steps []ExplainStep) []ExplainStep {
 		cloned[index].EstimateErrorRows = cloneMaterializedInt(step.EstimateErrorRows)
 		cloned[index].EstimateErrorPercent = cloneMaterializedFloat64(step.EstimateErrorPercent)
 		cloned[index].ElapsedNanos = cloneMaterializedInt64(step.ElapsedNanos)
+		cloned[index].Projection = cloneExplainProjection(step.Projection)
 		cloned[index].Pruning = cloneExplainPruning(step.Pruning)
 	}
 	return cloned
+}
+
+func cloneExplainProjection(value *ExplainProjection) *ExplainProjection {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	clone.Fields = append([]string(nil), value.Fields...)
+	clone.PredicateFields = append([]string(nil), value.PredicateFields...)
+	clone.OutputFields = append([]string(nil), value.OutputFields...)
+	return &clone
 }
 
 func cloneExplainPruning(value *ExplainPruning) *ExplainPruning {

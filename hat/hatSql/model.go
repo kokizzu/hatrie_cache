@@ -43,6 +43,7 @@ type ExplainStep struct {
 	Worker               int                      `json:"worker,omitempty"`
 	Workers              int                      `json:"workers,omitempty"`
 	Lineage              []ColumnLineage          `json:"lineage,omitempty"`
+	Projection           *ExplainProjection       `json:"projection,omitempty"`
 	EstimatedRows        *int                     `json:"estimated_rows,omitempty"`
 	EstimatedCost        *int                     `json:"estimated_cost,omitempty"`
 	EstimatedMemoryBytes *int                     `json:"estimated_memory_bytes,omitempty"`
@@ -104,6 +105,19 @@ type ExplainNotice struct {
 type ColumnLineage struct {
 	Output       string   `json:"output"`
 	SourceFields []string `json:"source_fields"`
+}
+
+// ExplainProjection describes the fields selected from a columnar source for
+// one explainable scan. EstimatedReadBytes is the bounded physical-size
+// estimate of the selected batch, not a promise about remote transport or
+// compression outside the resolver.
+type ExplainProjection struct {
+	Kind                     string   `json:"kind"`
+	Fields                   []string `json:"fields"`
+	PredicateFields          []string `json:"predicate_fields,omitempty"`
+	OutputFields             []string `json:"output_fields,omitempty"`
+	EstimatedReadBytes       int      `json:"estimated_read_bytes,omitempty"`
+	EstimatedReadBytesPerRow int      `json:"estimated_read_bytes_per_row,omitempty"`
 }
 
 // QueryStats describes the measured execution emitted by EXPLAIN ANALYZE.
