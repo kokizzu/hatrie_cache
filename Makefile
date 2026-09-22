@@ -25284,3 +25284,13 @@ commit-c226-ledger-reconciliation:
 
 push-c226-ledger-reconciliation:
 	bash ./scripts/push-c226-ledger-reconciliation.sh
+
+.PHONY: stage-c228-ledger-reconciliation commit-c228-ledger-reconciliation push-c228-ledger-reconciliation
+stage-c228-ledger-reconciliation:
+	bash ./scripts/stage-c228-ledger-reconciliation.sh
+
+commit-c228-ledger-reconciliation:
+	bash ./scripts/commit-c228-ledger-reconciliation.sh
+
+push-c228-ledger-reconciliation:
+	bash ./scripts/push-c228-ledger-reconciliation.sh

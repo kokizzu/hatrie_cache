@@ -80,6 +80,53 @@ ORDER BY event.id DESC`, resolver, nil, options, func(_ []string, row hatSql.SQL
 	}
 }
 
+func TestCHU02ExternalOrderByKeepsStableTieOrderAcrossSpillRuns(t *testing.T) {
+	const rowCount = 256
+	rows := make([]hatSql.Row, rowCount)
+	for index := range rows {
+		rows[index] = hatSql.Row{
+			"id":  int64(index % 4),
+			"seq": int64(index),
+		}
+	}
+	spillDirectory := t.TempDir()
+	var result []hatSql.Row
+	err := hatSql.ExecuteSQLQueryRows(context.Background(), `
+FROM EXTERNAL('events') AS event
+SELECT event.id, event.seq
+ORDER BY event.id`, &chu02ExternalStreamResolver{rows: rows}, nil, hatSql.QueryOptions{
+		MaxSortBytes:   128,
+		SpillDirectory: spillDirectory,
+		MaxSpillBytes:  1 << 20,
+	}, func(_ []string, row hatSql.SQLRow) error {
+		result = append(result, hatSql.Row(row))
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("ExecuteSQLQueryRows() error = %v", err)
+	}
+	if len(result) != rowCount {
+		t.Fatalf("result rows = %d, want %d", len(result), rowCount)
+	}
+	outputIndex := 0
+	for id := int64(0); id < 4; id++ {
+		for sourceIndex := int(id); sourceIndex < rowCount; sourceIndex += 4 {
+			row := result[outputIndex]
+			if row["id"] != id || row["seq"] != int64(sourceIndex) {
+				t.Fatalf("result[%d] = %#v, want id=%d seq=%d", outputIndex, row, id, sourceIndex)
+			}
+			outputIndex++
+		}
+	}
+	entries, err := os.ReadDir(spillDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("spill directory entries after stable merge = %d, want cleanup", len(entries))
+	}
+}
+
 func TestCHU02ExternalOrderByCleansSpillAfterQuotaFailure(t *testing.T) {
 	rows := make([]hatSql.Row, 128)
 	for index := range rows {
