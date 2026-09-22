@@ -36899,3 +36899,34 @@ Direct arithmetic: 0.5252 0.5063 0.5175 0.4955 0.5263; 0; 0
 Observe target:    64.19 57.30 58.78 60.00 56.72; 0; 0
 Snapshot target:  177.2 187.1 186.6 177.3 186.0; 80; 1
 ```
+
+<a id="t206-deterministic-replica-bootstrap-and-join"></a>
+## T206 Deterministic Replica Bootstrap and Join
+
+Commands: `make benchmark-t206-baseline` and `make benchmark-t206`. Five
+samples were collected on Linux/amd64 with an AMD Ryzen 9 5950X. The first two
+rows are existing lower-bound controls. T206 measures a complete bounded
+prepare/abort join admission and a detached snapshot of 128 active members.
+
+| Workload | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Existing raw sequence admission control | 1.826 | 0 | 0 | 1.00x |
+| Existing bootstrap `AdvanceWAL` | 26.27 | 0 | 0 | 14.39x raw control |
+| T206 `Prepare` + `Abort` | 959.7 | 680 | 5 | 525.58x raw control / 36.53x bootstrap |
+| T206 snapshot of 128 members | 15,108 | 13,185 | 2 | 8,273.82x raw control / 575.10x bootstrap |
+
+The additional cost is isolated to join admission and monitoring snapshots:
+identity normalization, duplicate maps, deterministic candidate selection, and
+detached member export. No normal write, WAL-apply, HTTP, or gRPC path is
+changed unless a caller explicitly wires the registry into its control plane.
+Full lifecycle and safety rules are in
+[T206_REPLICA_BOOTSTRAP_JOIN.md](T206_REPLICA_BOOTSTRAP_JOIN.md).
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+Raw sequence:     1.900 1.870 1.826 1.820 1.807; 0; 0
+Bootstrap advance:26.27 26.28 26.25 26.22 27.00; 0; 0
+Prepare + abort:  936.2 918.2 989.5 959.7 996.5; 680; 5
+Snapshot 128:   14517 15154 15050 15394 15108; 13185; 2
+```

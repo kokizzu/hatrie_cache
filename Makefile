@@ -23246,6 +23246,39 @@ audit-hatrie-tmp:
 inspect-hatrie-tmp-recursive:
 	bash scripts/inspect-hatrie-tmp-recursive.sh
 
+test-t206:
+	bash scripts/test-t206.sh
+
+benchmark-t206-baseline:
+	bash scripts/benchmark-t206-baseline.sh
+
+benchmark-t206:
+	bash scripts/benchmark-t206.sh
+
+format-t206:
+	bash scripts/format-t206.sh
+
+race-t206:
+	bash scripts/race-t206.sh
+
+vet-t206:
+	bash scripts/vet-t206.sh
+
+test-t206-package:
+	bash scripts/test-t206-package.sh
+
+verify-docs-t206:
+	bash scripts/verify-docs-t206.sh
+
+stage-t206:
+	bash scripts/stage-t206.sh
+
+commit-t206:
+	bash scripts/commit-t206.sh
+
+push-t206:
+	bash scripts/push-t206.sh
+
 format-m223-materialized-hydration:
 	bash scripts/format-m223-materialized-hydration.sh
 
