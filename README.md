@@ -94,6 +94,7 @@ security guidance before exposing it on a network.
 - Flat native `[]int64` and `[]string` array columns for lower retained storage: [NATIVE_ARRAY_COLUMNS.md](NATIVE_ARRAY_COLUMNS.md)
 - ClickHouse/Materialize/Tarantool adoption and deferral matrix: [ADOPTED_QUERY_ENGINE_IDEAS.md](ADOPTED_QUERY_ENGINE_IDEAS.md)
 - Opt-in per-operator SQL update, batch, and frontier metrics: [M242_OPERATOR_METRICS.md](M242_OPERATOR_METRICS.md)
+- Typed-table arrangement memory metrics split by key, value, and trace state: [M243_ARRANGEMENT_MEMORY_METRICS.md](M243_ARRANGEMENT_MEMORY_METRICS.md)
 - ClickHouse-style typed-table decompressed column-block cache: [TYPED_TABLE_DECOMPRESSED_BLOCK_CACHE.md](TYPED_TABLE_DECOMPRESSED_BLOCK_CACHE.md)
 - 50-item adoption backlog for each inspiration source: [INSPIRATION_BACKLOG.md](INSPIRATION_BACKLOG.md)
 - Opt-in cross-source snapshot cutover coordination: [MZ010_SNAPSHOT_CUTOVER.md](MZ010_SNAPSHOT_CUTOVER.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-010-cross-source-snapshot-cutover)

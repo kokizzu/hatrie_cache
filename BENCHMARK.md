@@ -28,6 +28,28 @@ current metrics JSON:    1501  1409  1699  1603  1549 ns/op; 625 B/op; 2 allocs/
 The sidecar preserves the default allocation profile and costs about 82 B/op
 and one allocation only when enabled. See [M242_OPERATOR_METRICS.md](M242_OPERATOR_METRICS.md).
 
+## M243 Arrangement Memory Metrics
+
+Five `-benchmem` samples were collected for `TypedTableAggregateArrangement.Stats()`
+on Linux amd64, AMD Ryzen 9 5950X. The fixture contains 256 rows, 32 groups,
+and `SUM`/`MIN`/`MAX`/`DISTINCT` state.
+
+| Version | Median ns/op | B/op | Allocs/op |
+| --- | ---: | ---: | ---: |
+| Before M243 | 1,218 | 0 | 0 |
+| After M243 | 1,200 | 0 | 0 |
+
+Raw samples:
+
+```text
+before: 1279 1232 1183 1203 1218 ns/op; 0 B/op; 0 allocs/op
+after:  1191 1341 1139 1207 1200 ns/op; 0 B/op; 0 allocs/op
+```
+
+The median difference is within benchmark noise; the split has no measured
+CPU, allocation, or retained-memory regression. It adds three fields to the
+structured monitoring payload. See [M243_ARRANGEMENT_MEMORY_METRICS.md](M243_ARRANGEMENT_MEMORY_METRICS.md).
+
 ## MZ-026 Adaptive Dictionary Arrangements
 
 Five samples per case on Linux amd64, AMD Ryzen 9 5950X, building a 4,096-row

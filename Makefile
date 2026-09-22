@@ -26629,3 +26629,43 @@ commit-m242:
 push-m242:
 
 	bash scripts/push-m242.sh
+.PHONY: test-m243
+test-m243:
+
+	bash scripts/test-m243.sh
+.PHONY: benchmark-m243
+benchmark-m243:
+
+	bash scripts/benchmark-m243.sh
+.PHONY: format-m243
+format-m243:
+
+	bash scripts/format-m243.sh
+.PHONY: test-m243-package
+test-m243-package:
+
+	bash scripts/test-m243-package.sh
+.PHONY: race-m243
+race-m243:
+
+	bash scripts/race-m243.sh
+.PHONY: vet-m243
+vet-m243:
+
+	bash scripts/vet-m243.sh
+.PHONY: verify-docs-m243
+verify-docs-m243:
+
+	bash scripts/verify-docs-m243.sh
+.PHONY: stage-m243
+stage-m243:
+
+	bash scripts/stage-m243.sh
+.PHONY: commit-m243
+commit-m243:
+
+	bash scripts/commit-m243.sh
+.PHONY: push-m243
+push-m243:
+
+	bash scripts/push-m243.sh
