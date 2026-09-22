@@ -35922,3 +35922,32 @@ separate from the existing queue, so applications that do not need
 client-supplied deduplication pay no cost. See
 [T247_DEDUPLICATING_QUEUE.md](T247_DEDUPLICATING_QUEUE.md) for API and restore
 semantics.
+
+## T248: Retry Counters And Dead-Letter Routing
+
+Command: `make benchmark-t248-retrying-queue` (five samples, `-benchmem`,
+Linux/amd64, AMD Ryzen 9 5950X). The normal retry cycle performs enqueue,
+lease, nack, lease, and ack. The terminal cycle performs enqueue, lease, nack
+to dead letter, and pop, so it is not a same-operation comparison.
+
+```text
+Base retry cycle:       426.1 480.5 452.7 474.7 461.7 ns/op, 0 B/op, 0 allocs/op
+Retrying retry cycle:   535.8 553.0 568.9 536.2 617.5 ns/op, 0 B/op, 0 allocs/op
+Dead-letter cycle:      320.9 320.0 295.5 310.0 315.1 ns/op, 0 B/op, 0 allocs/op
+Base active-256 cycle:  344.0 322.4 339.3 302.7 297.9 ns/op, 0 B/op, 0 allocs/op
+Retry active-256 cycle: 364.0 354.0 373.2 390.2 349.5 ns/op, 0 B/op, 0 allocs/op
+```
+
+| Workload | Base median | Retrying median | Relative result | Memory |
+| --- | ---: | ---: | --- | --- |
+| Retry cycle | 461.7 ns/op | 553.0 ns/op | 1.20x CPU | 0 B/op, 0 allocs/op |
+| 256 active leases | 322.4 ns/op | 364.0 ns/op | 1.13x CPU | 0 B/op, 0 allocs/op |
+| 10,000 active leases | 4.735 MB | 6.188 MB | 1.31x retained heap | 473.5 vs 618.8 B/item |
+| Terminal route + pop | not directly comparable | 315.1 ns/op | 0 B/op, 0 allocs/op | small dead-letter buffer reused |
+
+The pre-implementation base samples were `431.1, 438.5, 445.7, 461.1,
+466.6 ns/op`, also with zero bytes and allocations. The final base path remains
+allocation-neutral and the controlled resident benchmark does not show an
+O(n) lease regression. The retry/dead-letter wrapper is opt-in; see
+[T248_RETRY_DEAD_LETTER.md](T248_RETRY_DEAD_LETTER.md) for limits, persistence,
+and restart fencing.

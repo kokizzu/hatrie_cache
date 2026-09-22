@@ -25112,3 +25112,31 @@ commit-t247-deduplicating-queue:
 
 push-t247-deduplicating-queue:
 	bash scripts/push-t247-deduplicating-queue.sh
+test-t248-retrying-queue:
+	bash scripts/test-t248-retrying-queue.sh
+
+benchmark-t248-retrying-queue-baseline:
+	bash scripts/benchmark-t248-retrying-queue-baseline.sh
+benchmark-t248-retrying-queue:
+	bash scripts/benchmark-t248-retrying-queue.sh
+memory-t248-retrying-queue:
+	bash scripts/memory-t248-retrying-queue.sh
+format-t248-retrying-queue:
+	bash scripts/format-t248-retrying-queue.sh
+
+test-t248-retrying-queue-package:
+	bash scripts/test-t248-retrying-queue-package.sh
+
+race-t248-retrying-queue:
+	bash scripts/race-t248-retrying-queue.sh
+
+vet-t248-retrying-queue:
+	bash scripts/vet-t248-retrying-queue.sh
+stage-t248-retrying-queue:
+	bash scripts/stage-t248-retrying-queue.sh
+
+commit-t248-retrying-queue:
+	bash scripts/commit-t248-retrying-queue.sh
+
+push-t248-retrying-queue:
+	bash scripts/push-t248-retrying-queue.sh

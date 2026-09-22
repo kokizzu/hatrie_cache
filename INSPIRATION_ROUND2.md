@@ -187,7 +187,7 @@ operator control remain the preferred deployment model.
 - [ ] T245 Queue visibility timeouts for worker crash recovery.
 - [x] T246 Priority queues with starvation bounds. Opt-in `PriorityVisibilityQueueOptions.StarvationAfter` guarantees a ready item is not bypassed more than the configured number of leases; the default remains strict priority. See [T246_PRIORITY_QUEUE_STARVATION.md](T246_PRIORITY_QUEUE_STARVATION.md) and [BENCHMARK.md](BENCHMARK.md#t246-priority-queue-starvation-bounds).
 - [x] T247 Queue task deduplication by client-supplied identity. `DeduplicatingPriorityVisibilityQueue[T]` rejects duplicate pending/leased keys, preserves identity through retry, expiry, snapshots, and atomic file checkpoints, and keeps the base queue unchanged; see [T247_DEDUPLICATING_QUEUE.md](T247_DEDUPLICATING_QUEUE.md) and [BENCHMARK.md](BENCHMARK.md#t247-deduplicating-priority-visibility-queue).
-- [ ] T248 Retry counters and dead-letter routing for failed tasks.
+- [x] T248 Retry counters and dead-letter routing for failed tasks. `RetryingDeduplicatingPriorityVisibilityQueue[T]` applies max-attempt policy to explicit and expired leases, preserves FIFO dead letters through CRC-protected atomic snapshots, and keeps the base queue unchanged; see [T248_RETRY_DEAD_LETTER.md](T248_RETRY_DEAD_LETTER.md) and [BENCHMARK.md](BENCHMARK.md#t248-retry-counters-and-dead-letter-routing).
 - [ ] T249 Queue capacity, age, retry, and consumer-lag metrics.
 - [ ] T250 Gap-safe sequence allocation with durable current value.
 ## C204 Status
