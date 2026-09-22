@@ -36212,3 +36212,19 @@ This is an opt-in availability tradeoff: each worker maintains an independent
 view and index, while the default single-registry path is unchanged. Raw
 samples and fencing/recovery semantics are recorded in
 [M222_REPLICATED_COMPUTE_WORKERS.md](M222_REPLICATED_COMPUTE_WORKERS.md).
+
+## M223: Materialized view hydration lifecycle
+
+The workload registers and hydrates one 256-row maintained projection. The
+control uses the existing synchronous `Create`; the feature path uses
+`CreateCold` followed by `Hydrate`. Five samples were run with
+`-benchtime=100ms -benchmem` on Linux amd64, AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Feature/control |
+| --- | ---: | ---: | ---: | ---: |
+| Existing synchronous `Create` | 260,847 | 270,956 | 1,567 | 1.00x |
+| `CreateCold` + `Hydrate` | 250,793 | 270,972 | 1,568 | 0.96x CPU, 1.0001x bytes, 1.0006x allocs |
+
+The lifecycle is opt-in; existing `Create` does not enter the cold/hydrating
+states. Raw samples and state/failure semantics are in
+[M223_MATERIALIZED_VIEW_HYDRATION.md](M223_MATERIALIZED_VIEW_HYDRATION.md).

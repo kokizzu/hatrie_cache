@@ -23243,6 +23243,37 @@ push-tu33-function-grants:
 audit-hatrie-tmp:
 	bash scripts/audit-hatrie-tmp.sh
 
+format-m223-materialized-hydration:
+	bash scripts/format-m223-materialized-hydration.sh
+
+test-m223-materialized-hydration:
+	bash scripts/test-m223-materialized-hydration.sh
+
+benchmark-m223-materialized-hydration:
+	bash scripts/benchmark-m223-materialized-hydration.sh
+
+race-m223-materialized-hydration:
+	bash scripts/race-m223-materialized-hydration.sh
+
+vet-m223-materialized-hydration:
+	bash scripts/vet-m223-materialized-hydration.sh
+
+test-m223-related-materialized:
+	bash scripts/test-m223-related-materialized.sh
+
+stage-m223-materialized-hydration:
+	bash scripts/stage-m223-materialized-hydration.sh
+
+commit-m223-materialized-hydration:
+	bash scripts/commit-m223-materialized-hydration.sh
+
+push-m223-materialized-hydration:
+	bash scripts/push-m223-materialized-hydration.sh
+
+status-m223-materialized-hydration:
+	bash scripts/status-m223-materialized-hydration.sh
+
+
 .PHONY: stage-t042-rejection
 
 stage-t042-rejection:

@@ -1176,3 +1176,14 @@ replicas serve point lookups, and failed workers can be fenced and recovered
 without taking the set offline. The default single-registry path is unchanged.
 See [M222_REPLICATED_COMPUTE_WORKERS.md](M222_REPLICATED_COMPUTE_WORKERS.md)
 for correctness rules and the measured 1.97x two-replica refresh cost.
+
+## M223: Materialized View Hydration State Machine
+
+M223 adds opt-in `CreateCold`, `Hydrate`, and
+`MarkMaterializedViewCold` lifecycle operations. Maintained views now expose
+`cold`, `hydrating`, and `ready` in `MaterializedViewStatus`; reads and
+incremental refreshes are fenced until the first snapshot and its point
+indexes publish atomically. Existing synchronous `Create` callers remain on
+the ready path. See
+[M223_MATERIALIZED_VIEW_HYDRATION.md](M223_MATERIALIZED_VIEW_HYDRATION.md) for
+failure transitions, generation fencing, and measured cost.

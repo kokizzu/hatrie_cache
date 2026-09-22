@@ -29,7 +29,8 @@ type MaterializedViewStatus struct {
 	Dependencies    []string
 	Revision        uint64
 	RefreshedAt     time.Time
-	IdempotencyKeys []string `json:"idempotency_keys,omitempty"`
+	HydrationState  MaterializedViewHydrationState `json:"hydration_state,omitempty"`
+	IdempotencyKeys []string                       `json:"idempotency_keys,omitempty"`
 }
 
 // MaterializedViewRefreshMetadata carries optional source-write metadata to
@@ -174,10 +175,11 @@ func (views *MaterializedViews) Create(ctx context.Context, definition Materiali
 		return MaterializedViewStatus{}, err
 	}
 	status := MaterializedViewStatus{
-		Name:         definition.Name,
-		Dependencies: append([]string(nil), definition.Dependencies...),
-		Revision:     1,
-		RefreshedAt:  time.Now().UTC(),
+		Name:           definition.Name,
+		Dependencies:   append([]string(nil), definition.Dependencies...),
+		Revision:       1,
+		RefreshedAt:    time.Now().UTC(),
+		HydrationState: MaterializedViewHydrationStateReady,
 	}
 	views.nextGeneration++
 	views.views[definition.Name] = materializedView{
@@ -312,6 +314,11 @@ func (views *MaterializedViews) RefreshChangedWithMetadata(ctx context.Context, 
 	if len(candidates) == 0 {
 		return nil, nil
 	}
+	for _, candidate := range candidates {
+		if !materializedViewIsReady(candidate) {
+			return nil, fmt.Errorf("%w: %q", ErrMaterializedViewHydrationNotReady, candidate.definition.Name)
+		}
+	}
 
 	results := make(map[string]QueryResult, len(candidates))
 	versions := make(map[string]map[string]string, len(candidates))
@@ -335,7 +342,7 @@ func (views *MaterializedViews) RefreshChangedWithMetadata(ctx context.Context, 
 	nextRows, nextBytes := views.rows, views.bytes
 	for _, candidate := range candidates {
 		current, exists := views.views[candidate.definition.Name]
-		if !exists || !sameMaterializedViewDefinition(current.definition, candidate.definition) {
+		if !exists || current.generation != candidate.generation || !materializedViewIsReady(current) || !sameMaterializedViewDefinition(current.definition, candidate.definition) {
 			continue
 		}
 		nextRows += resultRows[candidate.definition.Name] - current.storedRows
@@ -347,7 +354,7 @@ func (views *MaterializedViews) RefreshChangedWithMetadata(ctx context.Context, 
 	lookupUpdates := make(map[string]materializedViewPointLookup)
 	for _, candidate := range candidates {
 		current, exists := views.views[candidate.definition.Name]
-		if !exists || !sameMaterializedViewDefinition(current.definition, candidate.definition) {
+		if !exists || current.generation != candidate.generation || !materializedViewIsReady(current) || !sameMaterializedViewDefinition(current.definition, candidate.definition) {
 			continue
 		}
 		for indexName, index := range views.pointLookups {
@@ -363,7 +370,7 @@ func (views *MaterializedViews) RefreshChangedWithMetadata(ctx context.Context, 
 	}
 	for _, candidate := range candidates {
 		current, exists := views.views[candidate.definition.Name]
-		if !exists || !sameMaterializedViewDefinition(current.definition, candidate.definition) {
+		if !exists || current.generation != candidate.generation || !materializedViewIsReady(current) || !sameMaterializedViewDefinition(current.definition, candidate.definition) {
 			continue
 		}
 		current.snapshot.Result = results[candidate.definition.Name]
@@ -371,6 +378,7 @@ func (views *MaterializedViews) RefreshChangedWithMetadata(ctx context.Context, 
 		current.collation = normalizedMaterializedViewCollation(options.Collation)
 		current.snapshot.Status.Revision++
 		current.snapshot.Status.RefreshedAt = refreshedAt
+		current.snapshot.Status.HydrationState = MaterializedViewHydrationStateReady
 		current.snapshot.Status.IdempotencyKeys = append([]string(nil), metadataKeys...)
 		current.storedRows = resultRows[candidate.definition.Name]
 		current.storedBytes = resultBytes[candidate.definition.Name]
@@ -448,7 +456,7 @@ func (views *MaterializedViews) lookupExact(query string, resolver SourceResolve
 	views.mu.RLock()
 	names := make([]string, 0, len(views.views))
 	for name, view := range views.views {
-		if view.definition.Query == query && view.collation == requestedCollation && len(view.sourceVersions) == len(view.definition.Dependencies) {
+		if materializedViewIsReady(view) && view.definition.Query == query && view.collation == requestedCollation && len(view.sourceVersions) == len(view.definition.Dependencies) {
 			names = append(names, name)
 		}
 	}

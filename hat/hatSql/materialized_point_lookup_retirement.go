@@ -145,6 +145,15 @@ func (views *MaterializedViews) AcquirePointLookupReader(indexName string) (*Mat
 		views.mu.Unlock()
 		return nil, fmt.Errorf("%w: %q", ErrMaterializedViewPointLookupIndexMissing, indexName)
 	}
+	view, exists := views.views[index.definition.ViewName]
+	if !exists {
+		views.mu.Unlock()
+		return nil, fmt.Errorf("%w: %q", ErrMaterializedViewPointLookupViewMissing, index.definition.ViewName)
+	}
+	if !materializedViewIsReady(view) {
+		views.mu.Unlock()
+		return nil, fmt.Errorf("%w: %q", ErrMaterializedViewHydrationNotReady, index.definition.ViewName)
+	}
 	if views.pointLookupReaders == nil {
 		views.pointLookupReaders = make(map[string]*materializedViewPointLookupReaderState)
 	}

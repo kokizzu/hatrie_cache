@@ -105,6 +105,15 @@ func (views *MaterializedViews) LookupPoint(indexName, key string) (QueryResult,
 		views.mu.RUnlock()
 		return QueryResult{}, false, fmt.Errorf("%w: %q", ErrMaterializedViewPointLookupIndexMissing, indexName)
 	}
+	view, exists := views.views[index.definition.ViewName]
+	if !exists {
+		views.mu.RUnlock()
+		return QueryResult{}, false, fmt.Errorf("%w: %q", ErrMaterializedViewPointLookupViewMissing, index.definition.ViewName)
+	}
+	if !materializedViewIsReady(view) {
+		views.mu.RUnlock()
+		return QueryResult{}, false, fmt.Errorf("%w: %q", ErrMaterializedViewHydrationNotReady, index.definition.ViewName)
+	}
 	rows, found := index.rows[key]
 	result := QueryResult{Columns: append([]string(nil), index.columns...)}
 	if found {

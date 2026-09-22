@@ -171,6 +171,11 @@ func (views *MaterializedViews) StartPointLookupIndexBuild(ctx context.Context, 
 		cancel()
 		return nil, fmt.Errorf("%w: %q", ErrMaterializedViewPointLookupViewMissing, definition.ViewName)
 	}
+	if !materializedViewIsReady(view) {
+		views.mu.Unlock()
+		cancel()
+		return nil, fmt.Errorf("%w: %q", ErrMaterializedViewHydrationNotReady, definition.ViewName)
+	}
 	if views.pointLookupBuilds == nil {
 		views.pointLookupBuilds = make(map[string]*MaterializedViewPointLookupBuild)
 	}
