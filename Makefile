@@ -8834,6 +8834,50 @@ commit-t212:
 push-t212:
 	bash ./scripts/push-t212.sh
 
+.PHONY: test-t213
+test-t213:
+	bash ./scripts/test-t213.sh
+
+.PHONY: benchmark-t213-baseline
+benchmark-t213-baseline:
+	bash ./scripts/benchmark-t213-baseline.sh
+
+.PHONY: benchmark-t213
+benchmark-t213:
+	bash ./scripts/benchmark-t213.sh
+
+.PHONY: format-t213
+format-t213:
+	bash ./scripts/format-t213.sh
+
+.PHONY: test-t213-package
+test-t213-package:
+	bash ./scripts/test-t213-package.sh
+
+.PHONY: race-t213
+race-t213:
+	bash ./scripts/race-t213.sh
+
+.PHONY: vet-t213
+vet-t213:
+	bash ./scripts/vet-t213.sh
+
+.PHONY: verify-docs-t213
+verify-docs-t213:
+	bash ./scripts/verify-docs-t213.sh
+
+.PHONY: stage-t213
+stage-t213:
+	bash ./scripts/stage-t213.sh
+
+.PHONY: commit-t213
+commit-t213:
+	bash ./scripts/commit-t213.sh
+
+.PHONY: push-t213
+push-t213:
+	bash ./scripts/push-t213.sh
+
 .PHONY: cleanup-hatrie-audit-plan cleanup-hatrie-audit-apply
 cleanup-hatrie-audit-plan: audit-hatrie-tmp
 	bash ./scripts/cleanup-hatrie-tmp-audit.sh plan

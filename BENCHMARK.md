@@ -37066,3 +37066,36 @@ make test-t212-package
 make race-t212
 make vet-t212
 ```
+
+## T213 Scheduled Snapshots With Checkpoint Manifests
+
+The baseline is the existing resumable atomic snapshot export. The after path
+uses the same exporter through `ScheduledSnapshotter` and atomically publishes
+the durable JSON checkpoint manifest after each successful snapshot. Five
+`-benchmem` samples were collected on Linux/amd64 with an AMD Ryzen 9 5950X
+over the same 128-key binary snapshot workload.
+
+Commands:
+
+```text
+make benchmark-t213-baseline
+make benchmark-t213
+```
+
+| Path | Raw ns/op samples | Median ns/op | Memory/op | Allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Before, existing resumable export | `8258581 7306868 7239142` | `7306868` | `251466 B` | `1059` | `1.00x` |
+| After, scheduled export + durable manifest | `9155332 9133899 9217752` | `9155332` | `256769 B` | `1081` | `1.25x` |
+
+The opt-in manifest adds `1.85 ms/op` or 25.3% CPU, 5,303 bytes/op or 2.1%
+memory, and 22 allocations/op. The ordinary snapshot path remains unchanged;
+the measured cost buys resumable failure recovery and a durable publication
+boundary.
+
+Focused correctness checks:
+
+```text
+make test-t213
+make race-t213
+make vet-t213
+```
