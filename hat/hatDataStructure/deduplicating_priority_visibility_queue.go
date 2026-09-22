@@ -79,6 +79,7 @@ type DeduplicatingPriorityVisibilityQueueSnapshot[T any] struct {
 	NextID            uint64
 	NextSequence      uint64
 	StarvationAfter   uint32
+	EnableMetrics     bool
 	Pending           []DeduplicatingPriorityVisibilityQueueSnapshotItem[T]
 	Leases            []DeduplicatingPriorityVisibilityQueueLeaseSnapshot[T]
 }
@@ -140,6 +141,15 @@ func (queue *DeduplicatingPriorityVisibilityQueue[T]) LeaseLen() int {
 		return 0
 	}
 	return queue.queue.LeaseLen()
+}
+
+// Metrics returns the underlying priority queue metrics. Client-key
+// deduplication does not change capacity, age, or consumer-lag semantics.
+func (queue *DeduplicatingPriorityVisibilityQueue[T]) Metrics(now time.Time) PriorityVisibilityQueueMetrics {
+	if queue == nil {
+		return PriorityVisibilityQueueMetrics{}
+	}
+	return queue.queue.Metrics(now)
 }
 
 // Enqueue adds a ready item. It returns false for an invalid or already
@@ -285,6 +295,7 @@ func (queue *DeduplicatingPriorityVisibilityQueue[T]) Snapshot() DeduplicatingPr
 		NextID:            inner.NextID,
 		NextSequence:      inner.NextSequence,
 		StarvationAfter:   inner.StarvationAfter,
+		EnableMetrics:     inner.EnableMetrics,
 		Pending:           make([]DeduplicatingPriorityVisibilityQueueSnapshotItem[T], 0, len(inner.Pending)),
 		Leases:            make([]DeduplicatingPriorityVisibilityQueueLeaseSnapshot[T], 0, len(inner.Leases)),
 	}
@@ -325,6 +336,7 @@ func RestoreDeduplicatingPriorityVisibilityQueue[T any](snapshot DeduplicatingPr
 		NextID:            snapshot.NextID,
 		NextSequence:      snapshot.NextSequence,
 		StarvationAfter:   snapshot.StarvationAfter,
+		EnableMetrics:     snapshot.EnableMetrics,
 		Pending:           make([]PriorityVisibilityQueueSnapshotItem[deduplicatingPriorityVisibilityQueueValue[T]], 0, len(snapshot.Pending)),
 		Leases:            make([]PriorityVisibilityQueueLeaseSnapshot[deduplicatingPriorityVisibilityQueueValue[T]], 0, len(snapshot.Leases)),
 	}

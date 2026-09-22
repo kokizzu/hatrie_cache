@@ -50,6 +50,30 @@ type PriorityVisibilityQueueOptions struct {
 	VisibilityTimeout time.Duration
 	Epoch             uint64
 	StarvationAfter   uint32
+	EnableMetrics     bool
+}
+
+// PriorityVisibilityQueueMetrics is a point-in-time view of queue pressure
+// and consumer progress. Age fields are populated only when EnableMetrics was
+// set; structural counts remain available for every queue.
+//
+// Available is -1 for an unbounded queue. ConsumerLag is the age of the
+// oldest ready item waiting to be leased. TotalLeases and TotalRetries are
+// process-local counters and reset when a queue is restored.
+type PriorityVisibilityQueueMetrics struct {
+	Enabled        bool
+	Capacity       int
+	Used           int
+	Available      int
+	Pending        int
+	Ready          int
+	Delayed        int
+	Leased         int
+	OldestReadyAge time.Duration
+	OldestLeaseAge time.Duration
+	ConsumerLag    time.Duration
+	TotalLeases    uint64
+	TotalRetries   uint64
 }
 
 // PriorityVisibilityQueueLeaseToken identifies a lease across a process or
@@ -135,8 +159,20 @@ type PriorityVisibilityQueueSnapshot[T any] struct {
 	NextID            uint64
 	NextSequence      uint64
 	StarvationAfter   uint32
+	EnableMetrics     bool
 	Pending           []PriorityVisibilityQueueSnapshotItem[T]
 	Leases            []PriorityVisibilityQueueLeaseSnapshot[T]
+}
+
+type priorityVisibilityQueueMetricEntry struct {
+	readyAt  int64
+	leasedAt int64
+}
+
+type priorityVisibilityQueueMetricState struct {
+	entries      map[uint64]priorityVisibilityQueueMetricEntry
+	totalLeases  uint64
+	totalRetries uint64
 }
 
 // PriorityVisibilityQueue is a non-thread-safe priority queue with delayed
@@ -157,6 +193,7 @@ type PriorityVisibilityQueue[T any] struct {
 	visibilityTimeout time.Duration
 	epoch             uint64
 	starvationAfter   uint32
+	metrics           *priorityVisibilityQueueMetricState
 }
 
 // NewPriorityVisibilityQueue creates a priority visibility queue. A
@@ -198,7 +235,7 @@ func NewPriorityVisibilityQueueWithOptions[T any](options PriorityVisibilityQueu
 	if epoch == 0 {
 		epoch = DefaultVisibilityQueueEpoch
 	}
-	return &PriorityVisibilityQueue[T]{
+	queue := &PriorityVisibilityQueue[T]{
 		delayed:           NewDelayQueue[priorityVisibilityQueueEntry[T]](capacity),
 		leases:            make(map[uint64]priorityVisibilityQueueLease[T]),
 		capacity:          capacity,
@@ -206,6 +243,10 @@ func NewPriorityVisibilityQueueWithOptions[T any](options PriorityVisibilityQueu
 		epoch:             epoch,
 		starvationAfter:   options.StarvationAfter,
 	}
+	if options.EnableMetrics {
+		queue.enableMetrics()
+	}
+	return queue
 }
 
 func (queue *PriorityVisibilityQueue[T]) delayedQueue() *DelayQueue[priorityVisibilityQueueEntry[T]] {
@@ -277,6 +318,155 @@ func (queue *PriorityVisibilityQueue[T]) LeaseLen() int {
 	return len(queue.leases)
 }
 
+// Metrics returns queue pressure and consumer-progress metrics at now. A
+// zero now uses the wall clock. Enabling metrics adds timestamp state only to
+// this queue; the default queue path keeps no per-item metric metadata.
+func (queue *PriorityVisibilityQueue[T]) Metrics(now time.Time) PriorityVisibilityQueueMetrics {
+	var metrics PriorityVisibilityQueueMetrics
+	if queue == nil {
+		return metrics
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	nowNanos := now.UnixNano()
+	metrics.Enabled = queue.metrics != nil
+	metrics.Capacity = queue.capacity
+	metrics.Pending = queue.PendingLen()
+	metrics.Leased = queue.LeaseLen()
+	metrics.Used = metrics.Pending + metrics.Leased
+	if queue.capacity <= 0 {
+		metrics.Available = -1
+	} else {
+		metrics.Available = queue.capacity - metrics.Used
+		if metrics.Available < 0 {
+			metrics.Available = 0
+		}
+	}
+	if queue.metrics == nil {
+		metrics.Ready = queue.ReadyLen()
+		metrics.Delayed = metrics.Pending - metrics.Ready
+		return metrics
+	}
+	metrics.TotalLeases = queue.metrics.totalLeases
+	metrics.TotalRetries = queue.metrics.totalRetries
+	for _, entry := range queue.ready {
+		queue.observeMetricPending(&metrics, entry.id, true, time.Time{}, nowNanos)
+	}
+	if queue.delayed != nil {
+		for _, item := range queue.delayed.items {
+			ready := !item.ReadyAt.After(now)
+			queue.observeMetricPending(&metrics, item.Value.id, ready, item.ReadyAt, nowNanos)
+		}
+	}
+	for id := range queue.leases {
+		metadata, ok := queue.metrics.entries[id]
+		if !ok {
+			continue
+		}
+		age := metricAgeNanos(nowNanos, metadata.leasedAt)
+		if age > metrics.OldestLeaseAge {
+			metrics.OldestLeaseAge = age
+		}
+	}
+	metrics.Delayed = metrics.Pending - metrics.Ready
+	if metrics.Delayed < 0 {
+		metrics.Delayed = 0
+	}
+	metrics.ConsumerLag = metrics.OldestReadyAge
+	return metrics
+}
+
+func (queue *PriorityVisibilityQueue[T]) observeMetricPending(metrics *PriorityVisibilityQueueMetrics, id uint64, ready bool, fallbackReadyAt time.Time, nowNanos int64) {
+	if !ready {
+		return
+	}
+	metrics.Ready++
+	var readyAt int64
+	if !fallbackReadyAt.IsZero() {
+		readyAt = fallbackReadyAt.UnixNano()
+	}
+	if metadata, ok := queue.metrics.entries[id]; ok {
+		readyAt = metadata.readyAt
+	}
+	age := metricAgeNanos(nowNanos, readyAt)
+	if age > metrics.OldestReadyAge {
+		metrics.OldestReadyAge = age
+	}
+}
+
+func metricAgeNanos(now, since int64) time.Duration {
+	if since == 0 || now <= since {
+		return 0
+	}
+	return time.Duration(now - since)
+}
+
+func (queue *PriorityVisibilityQueue[T]) enableMetrics() {
+	if queue.metrics == nil {
+		queue.metrics = &priorityVisibilityQueueMetricState{}
+	}
+	if queue.metrics.entries == nil {
+		queue.metrics.entries = make(map[uint64]priorityVisibilityQueueMetricEntry)
+	}
+}
+
+func (queue *PriorityVisibilityQueue[T]) metricsRecordPending(id uint64, readyAt time.Time) {
+	if id == 0 {
+		return
+	}
+	queue.enableMetrics()
+	readyAtNanos := readyAt.UnixNano()
+	if readyAt.IsZero() {
+		readyAtNanos = time.Now().UnixNano()
+	}
+	queue.metrics.entries[id] = priorityVisibilityQueueMetricEntry{readyAt: readyAtNanos}
+}
+
+func (queue *PriorityVisibilityQueue[T]) metricsRecordLease(id uint64, now time.Time, attempts uint32) {
+	if id == 0 {
+		return
+	}
+	queue.enableMetrics()
+	metadata := queue.metrics.entries[id]
+	nowNanos := now.UnixNano()
+	if metadata.readyAt == 0 {
+		metadata.readyAt = nowNanos
+	}
+	metadata.leasedAt = nowNanos
+	queue.metrics.entries[id] = metadata
+	queue.metrics.totalLeases++
+	if attempts > 1 {
+		queue.metrics.totalRetries++
+	}
+}
+
+func (queue *PriorityVisibilityQueue[T]) metricsRemove(id uint64) {
+	delete(queue.metrics.entries, id)
+}
+
+func (queue *PriorityVisibilityQueue[T]) restoreMetricState(snapshot PriorityVisibilityQueueSnapshot[T]) {
+	if queue.metrics == nil {
+		return
+	}
+	queue.enableMetrics()
+	restoredAt := time.Now().UnixNano()
+	for _, item := range snapshot.Pending {
+		readyAt := item.ReadyAt.UnixNano()
+		if item.ReadyAt.IsZero() {
+			readyAt = restoredAt
+		}
+		queue.metrics.entries[item.ID] = priorityVisibilityQueueMetricEntry{readyAt: readyAt}
+	}
+	for _, item := range snapshot.Leases {
+		leasedAt := item.LeaseUntil.Add(-queue.timeout()).UnixNano()
+		queue.metrics.entries[item.ID] = priorityVisibilityQueueMetricEntry{
+			readyAt:  leasedAt,
+			leasedAt: leasedAt,
+		}
+	}
+}
+
 // Enqueue adds an immediately ready item.
 func (queue *PriorityVisibilityQueue[T]) Enqueue(priority int64, value T) bool {
 	return queue.EnqueueAt(priority, time.Time{}, value)
@@ -309,6 +499,9 @@ func (queue *PriorityVisibilityQueue[T]) EnqueueAt(priority int64, readyAt time.
 		queue.readyPush(entry)
 	} else {
 		queue.delayedQueue().Push(readyAt, entry)
+	}
+	if queue.metrics != nil {
+		queue.metricsRecordPending(id, readyAt)
 	}
 	return true
 }
@@ -386,6 +579,9 @@ func (queue *PriorityVisibilityQueue[T]) LeaseFor(now time.Time, timeout time.Du
 	}
 	queue.leaseMap()[entry.id] = lease
 	queue.expiryPush(priorityVisibilityQueueExpiry{id: entry.id, until: until})
+	if queue.metrics != nil {
+		queue.metricsRecordLease(entry.id, now, entry.attempts)
+	}
 	return PriorityVisibilityQueueItem[T]{
 		ID:         entry.id,
 		Priority:   entry.priority,
@@ -406,6 +602,9 @@ func (queue *PriorityVisibilityQueue[T]) Ack(id uint64) bool {
 	}
 	queue.expiryRemove(lease.expiryIndex)
 	delete(queue.leases, id)
+	if queue.metrics != nil {
+		queue.metricsRemove(id)
+	}
 	return true
 }
 
@@ -430,6 +629,9 @@ func (queue *PriorityVisibilityQueue[T]) Nack(id uint64, readyAt time.Time) bool
 	queue.expiryRemove(lease.expiryIndex)
 	delete(queue.leases, id)
 	queue.requeueEntry(readyAt, lease.entry)
+	if queue.metrics != nil {
+		queue.metricsRecordPending(id, readyAt)
+	}
 	return true
 }
 
@@ -460,6 +662,9 @@ func (queue *PriorityVisibilityQueue[T]) RequeueExpired(now time.Time) int {
 		}
 		delete(queue.leases, expiry.id)
 		queue.readyPush(lease.entry)
+		if queue.metrics != nil {
+			queue.metricsRecordPending(expiry.id, now)
+		}
 		recovered++
 	}
 	return recovered
@@ -500,6 +705,9 @@ func (queue *PriorityVisibilityQueue[T]) Clear() {
 	queue.ready = queue.ready[:0]
 	queue.expirations.items = nil
 	queue.leases = nil
+	if queue.metrics != nil {
+		queue.metrics.entries = nil
+	}
 }
 
 func (queue *PriorityVisibilityQueue[T]) readyPush(entry priorityVisibilityQueueEntry[T]) {
@@ -727,6 +935,7 @@ func (queue *PriorityVisibilityQueue[T]) Snapshot() PriorityVisibilityQueueSnaps
 		NextID:            queue.nextID,
 		NextSequence:      queue.nextSequence,
 		StarvationAfter:   queue.starvationAfter,
+		EnableMetrics:     queue.metrics != nil,
 		Pending:           make([]PriorityVisibilityQueueSnapshotItem[T], 0, queue.PendingLen()),
 		Leases:            make([]PriorityVisibilityQueueLeaseSnapshot[T], 0, len(queue.leases)),
 	}
@@ -853,6 +1062,7 @@ func RestorePriorityVisibilityQueue[T any](snapshot PriorityVisibilityQueueSnaps
 		VisibilityTimeout: snapshot.VisibilityTimeout,
 		Epoch:             epoch,
 		StarvationAfter:   snapshot.StarvationAfter,
+		EnableMetrics:     snapshot.EnableMetrics,
 	})
 	queue.nextID = snapshot.NextID
 	queue.nextSequence = snapshot.NextSequence
@@ -897,6 +1107,7 @@ func RestorePriorityVisibilityQueue[T any](snapshot PriorityVisibilityQueueSnaps
 		}
 		queue.expiryPush(priorityVisibilityQueueExpiry{id: item.ID, until: item.LeaseUntil})
 	}
+	queue.restoreMetricState(snapshot)
 	return queue, nil
 }
 
@@ -928,6 +1139,9 @@ func (queue *PriorityVisibilityQueue[T]) MarshalSnapshot(codec PriorityVisibilit
 	binary.LittleEndian.PutUint32(header[44:48], uint32(len(snapshot.Pending)))
 	binary.LittleEndian.PutUint32(header[48:52], uint32(len(snapshot.Leases)))
 	binary.LittleEndian.PutUint32(header[52:56], snapshot.StarvationAfter)
+	if snapshot.EnableMetrics {
+		header[56] = 1
+	}
 	encoded = append(encoded, header...)
 	for _, item := range snapshot.Pending {
 		value, err := codec.Encode(item.Value)
@@ -1015,18 +1229,20 @@ func unmarshalPriorityVisibilityQueueSnapshot[T any](data []byte, codec Priority
 	headerSize := priorityVisibilityQueueLegacyHeaderSize
 	recordHeaderSize := priorityVisibilityQueueLegacyRecordHeaderSize
 	var starvationAfter uint32
+	var enableMetrics bool
 	switch version {
 	case priorityVisibilityQueueLegacyFormatVersion:
 	case priorityVisibilityQueueFormatVersion:
 		if len(payload) < priorityVisibilityQueueHeaderSize {
 			return PriorityVisibilityQueueSnapshot[T]{}, errPriorityVisibilityQueueInvalidFormat
 		}
-		if payload[56] != 0 || payload[57] != 0 || payload[58] != 0 || payload[59] != 0 {
+		if payload[56] > 1 || payload[57] != 0 || payload[58] != 0 || payload[59] != 0 {
 			return PriorityVisibilityQueueSnapshot[T]{}, errPriorityVisibilityQueueInvalidFormat
 		}
 		headerSize = priorityVisibilityQueueHeaderSize
 		recordHeaderSize = priorityVisibilityQueueRecordHeaderSize
 		starvationAfter = binary.LittleEndian.Uint32(payload[52:56])
+		enableMetrics = payload[56] != 0
 	default:
 		return PriorityVisibilityQueueSnapshot[T]{}, errPriorityVisibilityQueueInvalidFormat
 	}
@@ -1050,6 +1266,7 @@ func unmarshalPriorityVisibilityQueueSnapshot[T any](data []byte, codec Priority
 		NextID:            binary.LittleEndian.Uint64(payload[28:36]),
 		NextSequence:      binary.LittleEndian.Uint64(payload[36:44]),
 		StarvationAfter:   starvationAfter,
+		EnableMetrics:     enableMetrics,
 		Pending:           make([]PriorityVisibilityQueueSnapshotItem[T], 0, pendingCount),
 		Leases:            make([]PriorityVisibilityQueueLeaseSnapshot[T], 0, leaseCount),
 	}

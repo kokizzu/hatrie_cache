@@ -25140,3 +25140,42 @@ commit-t248-retrying-queue:
 
 push-t248-retrying-queue:
 	bash scripts/push-t248-retrying-queue.sh
+.PHONY: test-t249-queue-metrics
+test-t249-queue-metrics:
+	bash scripts/test-t249-queue-metrics.sh
+
+.PHONY: format-t249-queue-metrics
+format-t249-queue-metrics:
+	bash scripts/format-t249-queue-metrics.sh
+
+.PHONY: benchmark-t249-queue-metrics
+benchmark-t249-queue-metrics:
+	bash scripts/benchmark-t249-queue-metrics.sh
+
+.PHONY: test-t249-queue-metrics-package
+test-t249-queue-metrics-package:
+	bash scripts/test-t249-queue-metrics-package.sh
+
+.PHONY: race-t249-queue-metrics
+race-t249-queue-metrics:
+	bash scripts/race-t249-queue-metrics.sh
+
+.PHONY: vet-t249-queue-metrics
+vet-t249-queue-metrics:
+	bash scripts/vet-t249-queue-metrics.sh
+
+.PHONY: memory-t249-queue-metrics
+memory-t249-queue-metrics:
+	bash scripts/memory-t249-queue-metrics.sh
+
+.PHONY: stage-t249-queue-metrics
+stage-t249-queue-metrics:
+	bash scripts/stage-t249-queue-metrics.sh
+
+.PHONY: commit-t249-queue-metrics
+commit-t249-queue-metrics:
+	bash scripts/commit-t249-queue-metrics.sh
+
+.PHONY: push-t249-queue-metrics
+push-t249-queue-metrics:
+	bash scripts/push-t249-queue-metrics.sh

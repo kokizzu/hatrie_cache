@@ -35951,3 +35951,19 @@ allocation-neutral and the controlled resident benchmark does not show an
 O(n) lease regression. The retry/dead-letter wrapper is opt-in; see
 [T248_RETRY_DEAD_LETTER.md](T248_RETRY_DEAD_LETTER.md) for limits, persistence,
 and restart fencing.
+## T249 Queue Capacity, Age, Retry, And Consumer-Lag Metrics
+
+Linux/amd64, AMD Ryzen 9 5950X, five samples per benchmark case:
+
+| Benchmark | Raw samples (ns/op) | Median | B/op | Allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Default lease/ack | 176.8, 174.2, 182.1, 174.9, 170.9 | 174.9 | 0 | 0 |
+| Metrics-enabled lease/ack | 268.5, 271.2, 273.6, 282.8, 274.2 | 273.6 | 0 | 0 |
+| Metrics read, 256 active items | 4070, 4090, 4052, 4151, 4144 | 4090 | 0 | 0 |
+
+The opt-in lease/ack path is `1.56x` the default path. A three-run retained
+heap measurement with 10,000 active leases was `3,070,784` bytes disabled
+versus `3,517,992` enabled, or `1.15x` (`307.1` versus `351.8` bytes/item).
+Packed Unix-nanosecond timestamps improved the metrics read from the initial
+`6,705 ns/op` to `4,090 ns/op` and reduced the initial `1.34x` retained-heap
+ratio to `1.15x`.

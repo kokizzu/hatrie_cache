@@ -72,6 +72,14 @@ type RetryingDeduplicatingPriorityVisibilityQueueDeadLetter[T any] struct {
 	Reason   RetryDeadLetterReason
 }
 
+// RetryingDeduplicatingPriorityVisibilityQueueMetrics combines queue pressure
+// and consumer progress with the current dead-letter count and retry policy.
+type RetryingDeduplicatingPriorityVisibilityQueueMetrics struct {
+	PriorityVisibilityQueueMetrics
+	DeadLetters int
+	MaxAttempts uint32
+}
+
 // RetryingDeduplicatingPriorityVisibilityQueueSnapshot is a checkpoint of
 // active work, retry policy, and dead-letter records.
 type RetryingDeduplicatingPriorityVisibilityQueueSnapshot[T any] struct {
@@ -146,6 +154,19 @@ func (queue *RetryingDeduplicatingPriorityVisibilityQueue[T]) DeadLetterLen() in
 		return 0
 	}
 	return len(queue.deadLetters) - queue.deadLetterAt
+}
+
+// Metrics returns the underlying queue metrics plus retry/dead-letter policy
+// state. Age fields are available when EnableMetrics was set in the options.
+func (queue *RetryingDeduplicatingPriorityVisibilityQueue[T]) Metrics(now time.Time) RetryingDeduplicatingPriorityVisibilityQueueMetrics {
+	if queue == nil {
+		return RetryingDeduplicatingPriorityVisibilityQueueMetrics{}
+	}
+	return RetryingDeduplicatingPriorityVisibilityQueueMetrics{
+		PriorityVisibilityQueueMetrics: queue.queue.Metrics(now),
+		DeadLetters:                    queue.DeadLetterLen(),
+		MaxAttempts:                    queue.maxAttempts,
+	}
 }
 
 // Enqueue adds ready work identified by key.
