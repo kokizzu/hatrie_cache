@@ -26880,6 +26880,36 @@ commit-m250:
 .PHONY: push-m250
 push-m250:
 	bash scripts/push-m250.sh
+.PHONY: test-t201
+test-t201:
+	bash scripts/test-t201.sh
+.PHONY: benchmark-t201
+benchmark-t201:
+	bash scripts/benchmark-t201.sh
+.PHONY: format-t201
+format-t201:
+	bash scripts/format-t201.sh
+.PHONY: race-t201
+race-t201:
+	bash scripts/race-t201.sh
+.PHONY: vet-t201
+vet-t201:
+	bash scripts/vet-t201.sh
+.PHONY: test-t201-package
+test-t201-package:
+	bash scripts/test-t201-package.sh
+.PHONY: verify-docs-t201
+verify-docs-t201:
+	bash scripts/verify-docs-t201.sh
+.PHONY: stage-t201
+stage-t201:
+	bash scripts/stage-t201.sh
+.PHONY: commit-t201
+commit-t201:
+	bash scripts/commit-t201.sh
+.PHONY: push-t201
+push-t201:
+	bash scripts/push-t201.sh
 .PHONY: verify-docs-m248
 verify-docs-m248:
 	bash scripts/verify-docs-m248.sh

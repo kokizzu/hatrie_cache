@@ -36704,6 +36704,38 @@ adds seven allocations and 565 B/op in this fixture. See
 [M241_OPTIMIZER_TRACE.md](M241_OPTIMIZER_TRACE.md) and rerun with
 `make benchmark-m241`.
 
+<a id="t201-per-space-synchronous-replication-quorum"></a>
+## T201 Per-Space Synchronous Replication Quorum
+
+Command: `make benchmark-t201`. Five `GOMAXPROCS=1` benchmark samples were
+collected on Linux/amd64 with an AMD Ryzen 9 5950X. The direct path is the existing
+proposal-bound `JournalWriteQuorum`; the per-space path adds one immutable
+space-policy lookup and routes the same three-voter quorum. The unconfigured
+path measures an ordinary asynchronous-space lookup with no acknowledgement
+callback.
+
+| Workload | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Existing direct journal quorum | 1,049 | 755 | 10 | 1.00x |
+| Configured per-space quorum | 1,109 | 787 | 11 | 1.06x cost |
+| Unconfigured space routing | 21.33 | 0 | 0 | routing-only |
+
+The configured policy costs about 5.7% CPU, 32 additional bytes, and one
+allocation per critical write in this microbenchmark. That is an opt-in cost
+for selecting critical spaces and retaining the existing proposal/fence safety
+checks; ordinary spaces pay only a zero-allocation map lookup and continue
+asynchronously. The feature was kept because it adds the requested durability
+boundary without changing the default path or requiring all spaces to join a
+quorum.
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+Existing direct journal quorum: 1049 1089 1082 1030 1022; 755; 10
+Configured per-space quorum:    1113 1081 1096 1118 1109; 787; 11
+Unconfigured space routing:     20.74 20.89 21.64 21.33 21.80; 0; 0
+```
+
 <a id="m250-temporal-join-frontier-alignment"></a>
 ## M250 Temporal Join Frontier Alignment
 
