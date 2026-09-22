@@ -36180,3 +36180,20 @@ timed retirement loop.
 M220 is a safety/lifecycle feature, not a query-throughput optimization. See
 [M220_POINT_LOOKUP_RETIREMENT.md](M220_POINT_LOOKUP_RETIREMENT.md) for raw
 samples and reader-drain semantics.
+
+## M221: Isolated compute cluster resource budgets
+
+M221 is an audit of the existing opt-in `SQLClusterAdmission` path. The
+workload is the same tiny direct-callback versus `Execute` admission control
+comparison used by M-U23: Linux amd64, AMD Ryzen 9 5950X, five samples.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Direct callback control | 1.597 | 0 | 0 | baseline |
+| `SQLClusterAdmission.Execute` | 194.3 | 96 | 1 | 121.6x CPU overhead for opt-in isolation |
+
+This is a control-plane cost, not a query-throughput improvement. The benefit
+is independent per-cluster and serving/maintenance budgets with bounded
+queueing. Existing SQL callers remain on the zero-cost default-off path. Raw
+samples and the named-cluster regression test are recorded in
+[M221_CLUSTER_COMPUTE_ISOLATION_AUDIT.md](M221_CLUSTER_COMPUTE_ISOLATION_AUDIT.md).

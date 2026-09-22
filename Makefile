@@ -25824,3 +25824,16 @@ push-m220-point-lookup-retirement:
 
 status-m220-point-lookup-retirement:
 	bash scripts/status-m220-point-lookup-retirement.sh
+format-m221-cluster-isolation:
+	bash scripts/format-m221-cluster-isolation.sh
+stage-m221-cluster-isolation:
+	bash scripts/stage-m221-cluster-isolation.sh
+
+commit-m221-cluster-isolation:
+	bash scripts/commit-m221-cluster-isolation.sh
+
+push-m221-cluster-isolation:
+	bash scripts/push-m221-cluster-isolation.sh
+
+status-m221-cluster-isolation:
+	bash scripts/status-m221-cluster-isolation.sh

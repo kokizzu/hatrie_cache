@@ -1157,3 +1157,13 @@ releasing the index. `DropPointLookupIndex` uses the same drain protocol while
 remaining synchronous. See
 [M220_POINT_LOOKUP_RETIREMENT.md](M220_POINT_LOOKUP_RETIREMENT.md) for
 correctness and measured lifecycle cost.
+
+## M221: Isolated Compute Cluster Resource Budgets
+
+M221 is already covered by the opt-in `SQLClusterAdmission` controller and
+its SQL execution integration. Named clusters have independent serving and
+maintenance CPU, memory, running, and queue budgets; the default SQL path is
+unchanged. The added regression test verifies that a saturated `analytics`
+cluster does not block `dashboard`. See
+[M221_CLUSTER_COMPUTE_ISOLATION_AUDIT.md](M221_CLUSTER_COMPUTE_ISOLATION_AUDIT.md)
+for the measured admission cost and existing implementation boundary.
