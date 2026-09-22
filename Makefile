@@ -27794,3 +27794,35 @@ commit-t235:
 .PHONY: push-t235
 push-t235:
 	bash scripts/push-t235.sh
+
+.PHONY: benchmark-t236
+benchmark-t236:
+	bash scripts/benchmark-t236.sh
+
+.PHONY: test-t236-rejected
+test-t236-rejected:
+	bash scripts/test-t236-rejected.sh
+
+.PHONY: verify-t236-rejection
+verify-t236-rejection:
+	bash scripts/verify-t236-rejection.sh
+
+.PHONY: format-t236-rejection
+format-t236-rejection:
+	bash scripts/format-t236-rejection.sh
+
+.PHONY: status-t236
+status-t236:
+	bash scripts/status-t236.sh
+
+.PHONY: stage-t236
+stage-t236:
+	bash scripts/stage-t236.sh
+
+.PHONY: commit-t236
+commit-t236:
+	bash scripts/commit-t236.sh
+
+.PHONY: push-t236
+push-t236:
+	bash scripts/push-t236.sh

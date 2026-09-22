@@ -37327,3 +37327,25 @@ worker path therefore used about 55.5x less measured CPU time and avoided the
 control's per-run heap allocation. This confirms the existing opt-in TU30
 implementation; no duplicate worker runtime was added for this backlog item.
 See [TU30_COOPERATIVE_FIBER_SCHEDULER.md](TU30_COOPERATIVE_FIBER_SCHEDULER.md).
+
+## T236: Low-Overhead Mailbox Channels (Rejected)
+
+A bounded multi-producer/single-consumer ring candidate was tested with four
+producers, one consumer, and a capacity of 256. The candidate passed its
+functional checks and a 100-run MPSC stress test, but it was rolled back after
+the performance comparison showed no win over the existing channel wrapper.
+The five-sample raw results from the candidate run were:
+
+| Path | Raw `ns/op` samples | Median `ns/op` | `B/op` | `allocs/op` |
+| --- | --- | ---: | ---: | ---: |
+| Native Go channel | 68.14, 66.63, 66.71, 66.85, 66.27 | 66.71 | 0 | 0 |
+| Existing `hatPipeline.Channel` | 223.0, 223.4, 216.0, 216.2, 219.9 | 219.9 | 0 | 0 |
+| Candidate mailbox, blocking | 220.3, 225.5, 227.1, 228.5, 231.1 | 227.1 | 0 | 0 |
+| Candidate mailbox, try loop | 220.8, 228.6, 221.8, 227.6, 225.4 | 225.4 | 0 | 0 |
+
+The candidate try path was about 1.025x slower than the existing wrapper and
+3.38x slower than the native channel. Its fixed ring and notification state
+also added memory and lifecycle complexity without improving the measured hot
+path, so no mailbox API was retained. `make benchmark-t236` reruns the two
+surviving controls; the rejected candidate's raw measurements are preserved
+above for comparison.
