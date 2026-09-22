@@ -27778,3 +27778,19 @@ commit-t234:
 .PHONY: push-t234
 push-t234:
 	bash scripts/push-t234.sh
+
+.PHONY: verify-t235-docs
+verify-t235-docs:
+	bash scripts/verify-t235-docs.sh
+
+.PHONY: stage-t235
+stage-t235:
+	bash scripts/stage-t235.sh
+
+.PHONY: commit-t235
+commit-t235:
+	bash scripts/commit-t235.sh
+
+.PHONY: push-t235
+push-t235:
+	bash scripts/push-t235.sh

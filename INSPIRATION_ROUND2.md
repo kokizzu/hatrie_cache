@@ -174,7 +174,7 @@ operator control remain the preferred deployment model.
 - [x] T232 Atomic transaction scopes with nested rollback boundaries. `hatCache.SQLTransaction.Scope` and `BeginScope` provide nested rollback boundaries, preserve handled outer work, and clean up callback panics. See [TT032_ATOMIC_TRANSACTION_SCOPES.md](TT032_ATOMIC_TRANSACTION_SCOPES.md).
 - [x] T233 MVCC transactions that permit cooperative yields. `hatCache.SQLTransaction.Yield(ctx)` releases the transaction mutex across a scheduler handoff, checks cancellation and timeout state, and leaves cancellation policy to the caller. See [TT033_MVCC_COOPERATIVE_YIELD.md](TT033_MVCC_COOPERATIVE_YIELD.md).
 - [x] T234 Early conflict detection for competing transactional writes. `hatCache.SQLTransactionOptions.EarlyConflictDetection` aborts stale staged writes before private work continues; the default remains commit-time-only detection. See [TT034_EARLY_TRANSACTION_CONFLICTS.md](TT034_EARLY_TRANSACTION_CONFLICTS.md).
-- [ ] T235 Cooperative fiber workers for nonblocking application tasks.
+- [x] T235 Cooperative fiber workers for nonblocking application tasks. The existing opt-in `hatFiber.Scheduler` runs stackless `StepYield` tasks with bounded worker capacity, cancellation, generation-safe reaping, and typed synchronization/local storage. See [TU30_COOPERATIVE_FIBER_SCHEDULER.md](TU30_COOPERATIVE_FIBER_SCHEDULER.md) and the fresh measurement in [BENCHMARK.md](BENCHMARK.md#t235-cooperative-fiber-workers).
 - [ ] T236 Low-overhead mailbox channels between independent workers.
 - [ ] T237 Connection pools with health checks and reconnect backoff.
 - [ ] T238 Batched binary protocol requests with ordered responses.

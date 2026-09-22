@@ -37316,3 +37316,14 @@ created a snapshot and staged one valid `INSERT` measured a default median of
 so this is a no-conflict overhead measurement. The difference is within normal
 run-to-run noise and is not treated as a speedup; the opt-in checks added no
 measured allocation cost. See [TT034_EARLY_TRANSACTION_CONFLICTS.md](TT034_EARLY_TRANSACTION_CONFLICTS.md).
+## T235: Cooperative Fiber Workers
+
+A fresh `make benchmark-tu30` run on an AMD Ryzen 9 5950X compared 256
+stackless fibers, each yielding eight times, with a goroutine control using the
+same logical workload. The `hatFiber` scheduler measured a median
+`25,575 ns/op`, `0 B/op`, and `0 allocs/op`; the goroutine control measured
+`1,420,090 ns/op`, `7,190 B/op`, and `266 allocs/op`. The bounded cooperative
+worker path therefore used about 55.5x less measured CPU time and avoided the
+control's per-run heap allocation. This confirms the existing opt-in TU30
+implementation; no duplicate worker runtime was added for this backlog item.
+See [TU30_COOPERATIVE_FIBER_SCHEDULER.md](TU30_COOPERATIVE_FIBER_SCHEDULER.md).
