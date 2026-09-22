@@ -25,17 +25,18 @@ func (fn QueryObserverFunc) ObserveSQLQuery(event QueryEvent) {
 // QueryEvent is an execution summary suitable for a structured log or metric.
 // It deliberately excludes SQL text, cache keys, predicates, and row values.
 type QueryEvent struct {
-	QueryID            string          `json:"query_id"`
-	ElapsedNanos       int64           `json:"elapsed_ns"`
-	OutputRows         int             `json:"output_rows"`
-	OutputColumns      int             `json:"output_columns"`
-	ResultBytes        int             `json:"result_bytes"`
-	OK                 bool            `json:"ok"`
-	Slow               bool            `json:"slow"`
-	Canceled           bool            `json:"canceled,omitempty"`
-	CancellationReason string          `json:"cancellation_reason,omitempty"`
-	Error              string          `json:"error,omitempty"`
-	Operators          []QueryOperator `json:"operators,omitempty"`
+	QueryID            string                 `json:"query_id"`
+	ElapsedNanos       int64                  `json:"elapsed_ns"`
+	OutputRows         int                    `json:"output_rows"`
+	OutputColumns      int                    `json:"output_columns"`
+	ResultBytes        int                    `json:"result_bytes"`
+	OK                 bool                   `json:"ok"`
+	Slow               bool                   `json:"slow"`
+	Canceled           bool                   `json:"canceled,omitempty"`
+	CancellationReason string                 `json:"cancellation_reason,omitempty"`
+	Error              string                 `json:"error,omitempty"`
+	Operators          []QueryOperator        `json:"operators,omitempty"`
+	OperatorMetrics    []QueryOperatorMetrics `json:"operator_metrics,omitempty"`
 }
 
 // QueryOperator is a privacy-safe execution counter.
@@ -48,6 +49,16 @@ type QueryOperator struct {
 	ElapsedNanos         int64    `json:"elapsed_ns"`
 	EstimatedRows        *int     `json:"estimated_rows,omitempty"`
 	EstimateErrorPercent *float64 `json:"estimate_error_percent,omitempty"`
+}
+
+// QueryOperatorMetrics is an opt-in sidecar for one recorded operator. It is
+// separate from QueryOperator so default observer events keep their existing
+// allocation shape.
+type QueryOperatorMetrics struct {
+	Node        string  `json:"node"`
+	UpdateCount uint64  `json:"update_count,omitempty"`
+	BatchCount  uint64  `json:"batch_count,omitempty"`
+	Frontier    *uint64 `json:"frontier,omitempty"`
 }
 
 // SourceResolver supplies relational source rows. Nil rows are an empty source.

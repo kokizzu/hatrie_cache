@@ -123,6 +123,7 @@ type SQLQueryObserver = QueryObserver
 type SQLQueryObserverFunc = QueryObserverFunc
 type SQLQueryEvent = QueryEvent
 type SQLQueryOperator = QueryOperator
+type SQLQueryOperatorMetrics = QueryOperatorMetrics
 type SQLQueryRequest = QueryRequest
 type SQLRow = Row
 type SQLQueryResult = QueryResult
@@ -368,6 +369,10 @@ type SQLQueryOptions struct {
 	QueryID            string
 	SlowQueryThreshold time.Duration
 	Observer           SQLQueryObserver
+	// OperatorMetrics adds per-operator update, batch, and selected-frontier
+	// counters to observer events. It is disabled by default to preserve the
+	// existing observer payload and execution cost.
+	OperatorMetrics bool
 	// IndexAdvisor records candidate index fields only for observed slow scans.
 	// Nil preserves the existing privacy-safe telemetry-only behavior.
 	IndexAdvisor *SQLIndexAdvisor
@@ -715,6 +720,8 @@ type sqlQueryObservation struct {
 	planSnapshotEnabled    bool
 	requiredSourceFrontier *uint64
 	asOfFrontier           *uint64
+	operatorMetrics        bool
+	operatorFrontier       *uint64
 }
 
 func newSQLQueryObservation(options SQLQueryOptions) sqlQueryObservation {
@@ -729,6 +736,10 @@ func newSQLQueryObservation(options SQLQueryOptions) sqlQueryObservation {
 		started:             time.Now(),
 		threshold:           options.SlowQueryThreshold,
 		planSnapshotEnabled: options.PlanSnapshot != nil,
+	}
+	observation.operatorMetrics = options.OperatorMetrics
+	if options.OperatorMetrics && options.AsOfFrontier != nil {
+		observation.operatorFrontier = cloneSQLPlanSnapshotFrontier(options.AsOfFrontier)
 	}
 	if observation.planSnapshotEnabled {
 		if options.RequireSourceFrontier {
@@ -788,6 +799,9 @@ func (observation sqlQueryObservation) finishSummary(outputRows, outputColumns, 
 		}
 	}
 	event.Operators = sqlQueryOperators(steps)
+	if observation.operatorMetrics {
+		event.OperatorMetrics = sqlQueryOperatorMetrics(steps, observation.operatorFrontier)
+	}
 	if observation.observer != nil {
 		observation.observer.ObserveSQLQuery(event)
 	}
@@ -825,6 +839,28 @@ func sqlQueryOperators(steps []SQLExplainStep) []SQLQueryOperator {
 		operators = append(operators, operator)
 	}
 	return operators
+}
+
+func sqlQueryOperatorMetrics(steps []SQLExplainStep, frontier *uint64) []SQLQueryOperatorMetrics {
+	metrics := make([]SQLQueryOperatorMetrics, 0, len(steps))
+	for _, step := range steps {
+		if step.ActualInputRows == nil || step.ActualOutputRows == nil || step.ElapsedNanos == nil {
+			continue
+		}
+		metric := SQLQueryOperatorMetrics{
+			Node:       step.Node,
+			BatchCount: 1,
+		}
+		if *step.ActualOutputRows > 0 {
+			metric.UpdateCount = uint64(*step.ActualOutputRows)
+		}
+		if frontier != nil {
+			frontierValue := *frontier
+			metric.Frontier = &frontierValue
+		}
+		metrics = append(metrics, metric)
+	}
+	return metrics
 }
 
 // ExecuteSQLQueryParameters executes source with positional $1, $2, ...

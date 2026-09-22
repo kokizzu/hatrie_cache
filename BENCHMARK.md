@@ -1,5 +1,33 @@
 # Benchmark
 
+## M242 Per-Operator Update, Batch, And Frontier Metrics
+
+Five `-benchmem` samples were collected per path with 1-second samples on
+Linux amd64, AMD Ryzen 9 5950X. The baseline is the pre-M242 parent commit
+(`ffeadde6`), and the baseline-compatible observer benchmark was copied into
+that temporary worktree. CPU is noisy for this short workload; the relevant
+guard is that default observer allocations remain unchanged. The initial
+inline-field design was rejected after adding about 50 B/op to default
+observer events.
+
+| Workload | Pre-M242 median ns/op | Current median ns/op | Current B/op | Current allocs/op | Wire bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Observer, metrics off | 12,407 | 16,853 | 8,657 | 101 | n/a |
+| Observer, metrics on | n/a | 14,403 | 8,739 | 102 | n/a |
+| JSON sidecar marshal | n/a | 1,549 | 625 | 2 | 477-478 |
+
+Raw samples:
+
+```text
+pre-M242 observer:       14368 11837 12376 13479 12407 ns/op; 8649-8657 B/op; 101 allocs/op
+current observer off:   14729 17309 16853 17587 16367 ns/op; 8650-8657 B/op; 101 allocs/op
+current metrics on:     17746 14403 13874 13499 14991 ns/op; 8737-8739 B/op; 102 allocs/op
+current metrics JSON:    1501  1409  1699  1603  1549 ns/op; 625 B/op; 2 allocs/op; 477-478 wire bytes
+```
+
+The sidecar preserves the default allocation profile and costs about 82 B/op
+and one allocation only when enabled. See [M242_OPERATOR_METRICS.md](M242_OPERATOR_METRICS.md).
+
 ## MZ-026 Adaptive Dictionary Arrangements
 
 Five samples per case on Linux amd64, AMD Ryzen 9 5950X, building a 4,096-row

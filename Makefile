@@ -26587,3 +26587,45 @@ prune-empty-hatrie-tmp-plans:
 
 inspect-hatrie-tmp-plan:
 	bash scripts/inventory-hatrie-tmp.sh inspect-plan
+.PHONY: test-m242
+test-m242:
+
+	bash scripts/test-m242.sh
+.PHONY: format-m242
+format-m242:
+
+	bash scripts/format-m242.sh
+.PHONY: benchmark-m242
+benchmark-m242:
+
+	bash scripts/benchmark-m242.sh
+.PHONY: verify-docs-m242
+verify-docs-m242:
+
+	bash scripts/verify-docs-m242.sh
+.PHONY: test-m242-package
+test-m242-package:
+
+	bash scripts/test-m242-package.sh
+
+.PHONY: race-m242
+race-m242:
+
+	bash scripts/race-m242.sh
+
+.PHONY: vet-m242
+vet-m242:
+
+	bash scripts/vet-m242.sh
+.PHONY: stage-m242
+stage-m242:
+
+	bash scripts/stage-m242.sh
+.PHONY: commit-m242
+commit-m242:
+
+	bash scripts/commit-m242.sh
+.PHONY: push-m242
+push-m242:
+
+	bash scripts/push-m242.sh

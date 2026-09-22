@@ -13,17 +13,18 @@ import (
 // and bound parameter values. StatementFingerprint lets operators correlate a
 // repeated query shape without retaining its input.
 type SQLSlowQuerySample struct {
-	QueryID              string             `json:"query_id"`
-	StatementFingerprint string             `json:"statement_fingerprint"`
-	Parameters           []string           `json:"parameters,omitempty"`
-	ElapsedNanos         int64              `json:"elapsed_ns"`
-	OutputRows           int                `json:"output_rows"`
-	OutputColumns        int                `json:"output_columns"`
-	ResultBytes          int                `json:"result_bytes"`
-	OK                   bool               `json:"ok"`
-	Slow                 bool               `json:"slow"`
-	Canceled             bool               `json:"canceled,omitempty"`
-	Plan                 []SQLQueryOperator `json:"plan,omitempty"`
+	QueryID              string                    `json:"query_id"`
+	StatementFingerprint string                    `json:"statement_fingerprint"`
+	Parameters           []string                  `json:"parameters,omitempty"`
+	ElapsedNanos         int64                     `json:"elapsed_ns"`
+	OutputRows           int                       `json:"output_rows"`
+	OutputColumns        int                       `json:"output_columns"`
+	ResultBytes          int                       `json:"result_bytes"`
+	OK                   bool                      `json:"ok"`
+	Slow                 bool                      `json:"slow"`
+	Canceled             bool                      `json:"canceled,omitempty"`
+	Plan                 []SQLQueryOperator        `json:"plan,omitempty"`
+	OperatorMetrics      []SQLQueryOperatorMetrics `json:"operator_metrics,omitempty"`
 }
 
 // SlowQuerySample is the package-native name for SQLSlowQuerySample.
@@ -89,6 +90,7 @@ func (recorder *SQLSlowQueryRecorder) record(event SQLQueryEvent, source string,
 		Slow:                 event.Slow,
 		Canceled:             event.Canceled,
 		Plan:                 cloneSQLQueryOperators(event.Operators),
+		OperatorMetrics:      cloneSQLQueryOperatorMetrics(event.OperatorMetrics),
 	}
 	recorder.mu.Lock()
 	defer recorder.mu.Unlock()
@@ -123,6 +125,7 @@ func redactedSQLParameters(parameters []interface{}) []string {
 func cloneSQLSlowQuerySample(sample SQLSlowQuerySample) SQLSlowQuerySample {
 	sample.Parameters = append([]string(nil), sample.Parameters...)
 	sample.Plan = cloneSQLQueryOperators(sample.Plan)
+	sample.OperatorMetrics = cloneSQLQueryOperatorMetrics(sample.OperatorMetrics)
 	return sample
 }
 
@@ -148,6 +151,21 @@ func cloneSQLQueryOperators(operators []SQLQueryOperator) []SQLQueryOperator {
 		if operator.EstimateErrorPercent != nil {
 			value := *operator.EstimateErrorPercent
 			cloned[index].EstimateErrorPercent = &value
+		}
+	}
+	return cloned
+}
+
+func cloneSQLQueryOperatorMetrics(metrics []SQLQueryOperatorMetrics) []SQLQueryOperatorMetrics {
+	if len(metrics) == 0 {
+		return nil
+	}
+	cloned := make([]SQLQueryOperatorMetrics, len(metrics))
+	for index, metric := range metrics {
+		cloned[index] = metric
+		if metric.Frontier != nil {
+			value := *metric.Frontier
+			cloned[index].Frontier = &value
 		}
 	}
 	return cloned
