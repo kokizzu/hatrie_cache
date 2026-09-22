@@ -26784,3 +26784,39 @@ commit-m246:
 .PHONY: push-m246
 push-m246:
 	bash scripts/push-m246.sh
+.PHONY: test-m247
+test-m247:
+	bash scripts/test-m247.sh
+.PHONY: format-m247
+format-m247:
+	bash scripts/format-m247.sh
+.PHONY: benchmark-m247
+benchmark-m247:
+	bash scripts/benchmark-m247.sh
+.PHONY: race-m247
+race-m247:
+	bash scripts/race-m247.sh
+
+.PHONY: vet-m247
+vet-m247:
+	bash scripts/vet-m247.sh
+
+.PHONY: test-m247-package
+test-m247-package:
+	bash scripts/test-m247-package.sh
+
+.PHONY: verify-docs-m247
+verify-docs-m247:
+	bash scripts/verify-docs-m247.sh
+
+.PHONY: stage-m247
+stage-m247:
+	bash scripts/stage-m247.sh
+
+.PHONY: commit-m247
+commit-m247:
+	bash scripts/commit-m247.sh
+
+.PHONY: push-m247
+push-m247:
+	bash scripts/push-m247.sh

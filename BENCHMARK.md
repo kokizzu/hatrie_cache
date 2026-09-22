@@ -129,6 +129,34 @@ state is lazy and bounded by `MaxPolicies`; only explicitly configured objects
 pay for the policy map and sidecar reads. See
 [M246_FRONTIER_RETENTION_POLICY.md](M246_FRONTIER_RETENTION_POLICY.md).
 
+## M247 Frontier Expiry Errors
+
+Five `-benchmem` samples were collected on Linux amd64, AMD Ryzen 9 5950X.
+The parent is M246 (`96e746f3`); the current revision is M247. The parent
+fixture returns the old sentinel, while the current fixture returns the typed
+diagnostic error.
+
+| Path | Parent median ns/op | Current median ns/op | Current B/op | Current allocs/op | Relative time | Result |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Valid frontier check | 34.35 | 32.93 | 0 | 0 | 0.96x | no success-path regression |
+| Expired acquire, error not formatted | 37.84 | 67.48 | 48 | 1 | 1.78x | exceptional diagnostic allocation |
+| Expired acquire plus `Error()` | 39.45 | 369.1 | 192 | 3 | 9.35x | logging/formatting cost is exceptional-only |
+
+Raw samples, in the order emitted by `make benchmark-m247`:
+
+```text
+parent AcquireExpired: 38.73 38.79 37.41 37.63 37.84 ns/op; 0 B/op; 0 allocs/op
+current AcquireExpired: 66.97 67.48 66.40 69.24 67.52 ns/op; 48 B/op; 1 allocs/op
+parent AcquireExpiredMessage: 39.76 39.45 38.70 40.95 38.68 ns/op; 0 B/op; 0 allocs/op
+current AcquireExpiredMessage: 375.9 376.3 355.3 369.1 364.6 ns/op; 192 B/op; 3 allocs/op
+parent CheckTimestampValid: 34.35 36.05 33.73 33.51 34.46 ns/op; 0 B/op; 0 allocs/op
+current CheckTimestampValid: 33.80 32.93 32.68 33.93 32.80 ns/op; 0 B/op; 0 allocs/op
+```
+
+Typed details are worth the measured cost only on a rejected resume request;
+the valid check is unchanged. See
+[M247_FRONTIER_EXPIRY_ERRORS.md](M247_FRONTIER_EXPIRY_ERRORS.md).
+
 ## MZ-026 Adaptive Dictionary Arrangements
 
 Five samples per case on Linux amd64, AMD Ryzen 9 5950X, building a 4,096-row

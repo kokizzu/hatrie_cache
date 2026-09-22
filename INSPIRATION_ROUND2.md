@@ -133,7 +133,7 @@ operator control remain the preferred deployment model.
 - [x] M244 Compaction debt metrics measured against the current logical frontier. `TypedTableAggregateArrangementStats.CompactionDebt` reports `max(0, SourceSequence-CompactedThrough)` without changing compaction behavior. See [M244_COMPACTION_DEBT.md](M244_COMPACTION_DEBT.md).
 - [x] M245 Timestamp throughput and input-to-output latency metrics. `SQLTelemetry.ObserveSQLTimestamp` exports update/batch throughput counters, monotone logical timestamp gauges, and guarded input-to-output freshness latency. See [M245_TIMESTAMP_TELEMETRY.md](M245_TIMESTAMP_TELEMETRY.md).
 - [x] M246 Per-object history-retention policies with bounded storage accounting. `FrontierRetentionRegistry` provides bounded per-frontier policies and caller-reported usage through an opt-in sidecar; see [M246_FRONTIER_RETENTION_POLICY.md](M246_FRONTIER_RETENTION_POLICY.md).
-- [ ] M247 Resume errors that identify when a requested frontier has expired.
+- [x] M247 Resume errors that identify when a requested frontier has expired. `FrontierRetentionExpiredError` preserves the old sentinel while exposing the frontier ID, requested as-of, and observed bounds; see [M247_FRONTIER_EXPIRY_ERRORS.md](M247_FRONTIER_EXPIRY_ERRORS.md).
 - [ ] M248 Reusable maintained-result cache for identical read expressions.
 - [x] M249 Consistency fencing between a point read and a subsequent subscription; see [M249_READ_FENCE.md](M249_READ_FENCE.md).
 - [ ] M250 Temporal join alignment that waits for both input frontiers.

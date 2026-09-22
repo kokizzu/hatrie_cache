@@ -450,7 +450,12 @@ func (registry *FrontierRetentionRegistry) checkTimestamp(frontierID string, asO
 		return err
 	}
 	if asOf < snapshot.Lower {
-		return ErrFrontierRetentionExpired
+		return &FrontierRetentionExpiredError{
+			FrontierID:    frontierID,
+			RequestedAsOf: asOf,
+			CurrentLower:  snapshot.Lower,
+			CurrentUpper:  snapshot.Upper,
+		}
 	}
 	if asOf > snapshot.Upper {
 		return ErrFrontierRetentionAhead
