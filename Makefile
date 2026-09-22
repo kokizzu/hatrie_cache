@@ -23295,6 +23295,16 @@ commit-t246-priority-queue:
 push-t246-priority-queue:
 	bash scripts/push-t246-priority-queue.sh
 
+.PHONY: inspect-t247-context
+
+.PHONY: test-t247-deduplicating-queue
+test-t247-deduplicating-queue:
+	bash scripts/test-t247-deduplicating-queue.sh
+
+.PHONY: benchmark-t247-deduplicating-queue-baseline
+benchmark-t247-deduplicating-queue-baseline:
+	bash scripts/benchmark-t247-deduplicating-queue-baseline.sh
+
 .PHONY: format-t246-priority-queue
 format-t246-priority-queue:
 	bash scripts/format-t246-priority-queue.sh
@@ -25079,3 +25089,26 @@ commit-t238-batch-protocol:
 .PHONY: push-t238-batch-protocol
 push-t238-batch-protocol:
 	bash scripts/push-t238-batch-protocol.sh
+format-t247-deduplicating-queue:
+	bash scripts/format-t247-deduplicating-queue.sh
+benchmark-t247-deduplicating-queue:
+	bash scripts/benchmark-t247-deduplicating-queue.sh
+memory-t247-deduplicating-queue:
+	bash scripts/memory-t247-deduplicating-queue.sh
+
+test-t247-deduplicating-queue-package:
+	bash scripts/test-t247-deduplicating-queue-package.sh
+
+race-t247-deduplicating-queue:
+	bash scripts/race-t247-deduplicating-queue.sh
+
+vet-t247-deduplicating-queue:
+	bash scripts/vet-t247-deduplicating-queue.sh
+stage-t247-deduplicating-queue:
+	bash scripts/stage-t247-deduplicating-queue.sh
+
+commit-t247-deduplicating-queue:
+	bash scripts/commit-t247-deduplicating-queue.sh
+
+push-t247-deduplicating-queue:
+	bash scripts/push-t247-deduplicating-queue.sh

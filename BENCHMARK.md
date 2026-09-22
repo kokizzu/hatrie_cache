@@ -35895,3 +35895,30 @@ default strict path effectively allocation-neutral and within run-to-run CPU
 noise. The enabled fairness scan is intentionally slower for a 256-item
 resident queue, but it provides a hard starvation bound and remains opt-in.
 See [T246_PRIORITY_QUEUE_STARVATION.md](T246_PRIORITY_QUEUE_STARVATION.md).
+
+## T247: Deduplicating Priority Visibility Queue
+
+Command: `make benchmark-t247-deduplicating-queue` (five samples,
+`-benchmem`, Linux/amd64, AMD Ryzen 9 5950X). The base path is the existing
+priority visibility queue with the same enqueue/lease/ack workload. The
+deduplicating path adds a client-key index and a reverse lease index.
+
+```text
+Base empty:        134.8 136.8 132.9 135.3 128.7 ns/op, 0 B/op, 0 allocs/op
+Dedup empty:       241.8 243.7 248.3 224.8 251.7 ns/op, 0 B/op, 0 allocs/op
+Base resident256:  220.3 213.7 210.3 222.3 212.9 ns/op, 0 B/op, 0 allocs/op
+Dedup resident256: 373.5 374.5 338.4 351.1 375.0 ns/op, 0 B/op, 0 allocs/op
+```
+
+| Workload | Base median | Dedup median | Dedup / base | Memory result |
+| --- | ---: | ---: | ---: | --- |
+| Empty enqueue/lease/ack | 134.8 ns/op | 243.7 ns/op | 1.81x CPU | 0 B/op, 0 allocs/op on both |
+| 256 resident items | 213.7 ns/op | 373.5 ns/op | 1.75x CPU | 0 B/op, 0 allocs/op on both |
+| 10,000 pending items | 1.165-1.170 MB | 2.024 MB | 1.73x retained heap | about 117 vs 202 B/item |
+
+The retained-heap row comes from `make memory-t247-deduplicating-queue` and
+three independent runs. The CPU cost is intentional and the feature is
+separate from the existing queue, so applications that do not need
+client-supplied deduplication pay no cost. See
+[T247_DEDUPLICATING_QUEUE.md](T247_DEDUPLICATING_QUEUE.md) for API and restore
+semantics.
