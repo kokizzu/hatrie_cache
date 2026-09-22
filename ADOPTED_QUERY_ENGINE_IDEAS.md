@@ -1245,3 +1245,13 @@ must make the data write and metadata write atomic, or make the destination
 operation idempotent; this package alone cannot guarantee arbitrary external
 side effects. See
 [M228_EXACTLY_ONCE_SOURCE_RESTART.md](M228_EXACTLY_ONCE_SOURCE_RESTART.md).
+
+## M230 Source Backpressure From the Downstream Frontier
+
+The Materialize-style frontier flow-control pattern is adopted as an opt-in
+`SpaceChangefeedBackpressureOptions` contract. A source rejects the next
+publish with `ErrSpaceChangefeedBackpressure` when the slowest active
+subscriber exceeds `MaxLag`; it never blocks a goroutine and the default is
+unchanged. The minimum frontier is cached and exposed through
+`SpaceChangefeedStats`. See
+[M230_SOURCE_BACKPRESSURE.md](M230_SOURCE_BACKPRESSURE.md).

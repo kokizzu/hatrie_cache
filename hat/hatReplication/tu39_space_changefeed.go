@@ -68,6 +68,7 @@ type SpaceChangefeedOptions struct {
 	Space          string
 	SchemaVersion  string
 	Schema         *ChangefeedSchema
+	Backpressure   SpaceChangefeedBackpressureOptions
 	MaxEvents      int
 	MaxSubscribers int
 	MaxBytes       int64
@@ -95,6 +96,10 @@ type SpaceChangefeedStats struct {
 	RetainedBytes         int64
 	Subscribers           int
 	OverflowedSubscribers uint64
+	BackpressureEnabled   bool
+	MaxDownstreamLag      uint64
+	BackpressuredPublishes uint64
+	DownstreamFrontier    uint64
 }
 
 type spaceChangefeedSubscription struct {
@@ -128,6 +133,9 @@ type SpaceChangefeed struct {
 	nextSequence   uint64
 	published      uint64
 	overflowed     uint64
+	backpressure   SpaceChangefeedBackpressureOptions
+	backpressured  uint64
+	downstreamFrontier uint64
 	subscribers    map[*spaceChangefeedSubscription]struct{}
 	closed         bool
 }
@@ -172,7 +180,7 @@ func NewSpaceChangefeed(options SpaceChangefeedOptions) (*SpaceChangefeed, error
 	if maxEventBytes == 0 {
 		maxEventBytes = DefaultSpaceChangefeedMaxEventBytes
 	}
-	if maxEvents < 1 || maxEvents > MaxSpaceChangefeedMaxEvents || maxSubscribers < 1 || maxSubscribers > MaxSpaceChangefeedMaxSubscribers || maxBytes < 1 || maxBytes > MaxSpaceChangefeedMaxBytes || maxEventBytes < 1 || maxEventBytes > MaxSpaceChangefeedMaxEventBytes || int64(maxEventBytes) > maxBytes {
+	if maxEvents < 1 || maxEvents > MaxSpaceChangefeedMaxEvents || maxSubscribers < 1 || maxSubscribers > MaxSpaceChangefeedMaxSubscribers || maxBytes < 1 || maxBytes > MaxSpaceChangefeedMaxBytes || maxEventBytes < 1 || maxEventBytes > MaxSpaceChangefeedMaxEventBytes || int64(maxEventBytes) > maxBytes || options.Backpressure.MaxLag > MaxSpaceChangefeedMaxLag {
 		return nil, ErrSpaceChangefeedOptionsInvalid
 	}
 	return &SpaceChangefeed{
@@ -183,6 +191,7 @@ func NewSpaceChangefeed(options SpaceChangefeedOptions) (*SpaceChangefeed, error
 		maxBytes:       maxBytes,
 		maxEventBytes:  maxEventBytes,
 		schema:         schema,
+		backpressure:   options.Backpressure,
 		subscribers:    make(map[*spaceChangefeedSubscription]struct{}),
 	}, nil
 }
@@ -262,6 +271,10 @@ func (feed *SpaceChangefeed) Publish(event SpaceChangefeedEvent) (uint64, error)
 	}
 	if feed.nextSequence == ^uint64(0) {
 		return 0, fmt.Errorf("%w: sequence exhausted", ErrSpaceChangefeedEventInvalid)
+	}
+	if feed.backpressure.Enabled && !feed.allowsNextSequenceLocked(feed.nextSequence+1) {
+		feed.backpressured++
+		return 0, ErrSpaceChangefeedBackpressure
 	}
 	normalized.Sequence = feed.nextSequence + 1
 	feed.nextSequence = normalized.Sequence
@@ -370,6 +383,9 @@ func (feed *SpaceChangefeed) Subscribe(ctx context.Context, options SpaceChangef
 		}
 	}
 	feed.subscribers[subscription] = struct{}{}
+	if len(feed.subscribers) == 1 || subscription.checkpoint < feed.downstreamFrontier {
+		feed.downstreamFrontier = subscription.checkpoint
+	}
 	if done := ctx.Done(); done != nil {
 		go feed.watchSpaceChangefeedContext(ctx, subscription)
 	}
@@ -392,7 +408,52 @@ func (feed *SpaceChangefeed) Stats() SpaceChangefeedStats {
 		RetainedBytes:         feed.retainedBytes,
 		Subscribers:           len(feed.subscribers),
 		OverflowedSubscribers: feed.overflowed,
+		BackpressureEnabled:   feed.backpressure.Enabled,
+		MaxDownstreamLag:      feed.maxDownstreamLagLocked(),
+		BackpressuredPublishes: feed.backpressured,
+		DownstreamFrontier:    feed.downstreamFrontierLocked(),
 	}
+}
+
+func (feed *SpaceChangefeed) allowsNextSequenceLocked(sequence uint64) bool {
+	if len(feed.subscribers) == 0 || sequence <= feed.downstreamFrontier {
+		return true
+	}
+	return sequence-feed.downstreamFrontier <= feed.backpressure.MaxLag
+}
+
+func (feed *SpaceChangefeed) downstreamFrontierLocked() uint64 {
+	if len(feed.subscribers) == 0 {
+		return 0
+	}
+	return feed.downstreamFrontier
+}
+
+func (feed *SpaceChangefeed) maxDownstreamLagLocked() uint64 {
+	frontier := feed.downstreamFrontierLocked()
+	if feed.nextSequence <= frontier {
+		return 0
+	}
+	return feed.nextSequence - frontier
+}
+
+func (feed *SpaceChangefeed) recomputeDownstreamFrontierLocked() {
+	first := true
+	var frontier uint64
+	for subscription := range feed.subscribers {
+		if subscription.closed {
+			continue
+		}
+		if first || subscription.checkpoint < frontier {
+			frontier = subscription.checkpoint
+			first = false
+		}
+	}
+	if first {
+		feed.downstreamFrontier = 0
+		return
+	}
+	feed.downstreamFrontier = frontier
 }
 
 // Close terminates the feed and all active subscriptions.
@@ -498,9 +559,13 @@ func (feed *SpaceChangefeed) closeSubscriptionLocked(subscription *spaceChangefe
 	if subscription.closed {
 		return
 	}
+	wasFrontier := len(feed.subscribers) > 0 && subscription.checkpoint == feed.downstreamFrontier
 	subscription.closed = true
 	subscription.err = err
 	delete(feed.subscribers, subscription)
+	if wasFrontier {
+		feed.recomputeDownstreamFrontierLocked()
+	}
 	close(subscription.events)
 	close(subscription.done)
 }
@@ -611,7 +676,11 @@ func (subscription *SpaceChangefeedSubscription) Advance(sequence uint64) (Chang
 	if err != nil {
 		return ChangefeedCheckpoint{}, err
 	}
+	previous := state.checkpoint
 	state.checkpoint = checkpoint.Sequence
+	if previous == feed.downstreamFrontier && checkpoint.Sequence > previous {
+		feed.recomputeDownstreamFrontierLocked()
+	}
 	return checkpoint, nil
 }
 

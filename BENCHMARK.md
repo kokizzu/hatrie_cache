@@ -36327,3 +36327,21 @@ machine also measured commit plus restart-offset lookup at 145.3 ns/op with
 64 B/op and 2 allocs/op. Raw samples, transaction requirements, and recovery
 semantics are in
 [M228_EXACTLY_ONCE_SOURCE_RESTART.md](M228_EXACTLY_ONCE_SOURCE_RESTART.md).
+
+## M230 Source Backpressure From the Downstream Frontier
+
+Five samples were run per operation on Linux amd64, AMD Ryzen 9 5950X. The
+first pair is the scan-based implementation; the second pair is the final
+cached-frontier implementation.
+
+| Workload | Scan baseline median | Cached-frontier median | Cached result | Allocation result |
+| --- | ---: | ---: | ---: | ---: |
+| Legacy publish with acknowledged subscriber | 228.6 ns/op | 289.5 ns/op | separate-run baseline variance | 16 B/op, 2 allocs/op |
+| Enabled publish with acknowledged subscriber | 289.9 ns/op | 293.5 ns/op | 1.014x cached/legacy in the later run | 16 B/op, 2 allocs/op |
+| Rejected publish | 117.6 ns/op | 80.87 ns/op | 1.45x faster in the later run | 8 B/op, 1 alloc/op |
+
+The first implementation added about 27% to the enabled publish workload because
+it scanned subscribers for every event. Caching the minimum frontier removed
+that cost to roughly measurement noise without increasing allocations. Raw
+samples and the nonblocking retry semantics are in
+[M230_SOURCE_BACKPRESSURE.md](M230_SOURCE_BACKPRESSURE.md).
