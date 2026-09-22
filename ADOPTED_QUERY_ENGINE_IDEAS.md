@@ -1224,3 +1224,15 @@ The source-bootstrap boundary pattern from Materialize is adopted as an opt-in
 and first live frontier together, rejects partial or regressed recovery, and
 persists the coupled boundary in compact CBS1 form. See
 [M227_ATOMIC_SNAPSHOT_FRONTIER.md](M227_ATOMIC_SNAPSHOT_FRONTIER.md).
+
+## M228 Exactly-Once Source Restart
+
+The committed-offset restart pattern from Materialize source progress and
+Tarantool durable consumer state is adopted as an opt-in
+`hatReplication.ChangefeedExactlyOnceConsumer`. It persists one pending batch,
+returns `Apply`, `Resume`, or `Skip`, rejects gaps and overlaps, and commits the
+source offset and frontier together in compact COX1 form. The embedding service
+must make the data write and metadata write atomic, or make the destination
+operation idempotent; this package alone cannot guarantee arbitrary external
+side effects. See
+[M228_EXACTLY_ONCE_SOURCE_RESTART.md](M228_EXACTLY_ONCE_SOURCE_RESTART.md).

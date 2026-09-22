@@ -26079,3 +26079,62 @@ commit-m227-snapshot-boundary:
 .PHONY: push-m227-snapshot-boundary
 push-m227-snapshot-boundary:
 	bash scripts/push-m227-snapshot-boundary.sh
+.PHONY: format-m228-exactly-once-restart
+format-m228-exactly-once-restart:
+	bash scripts/m228-exactly-once-restart.sh format
+
+.PHONY: test-m228-exactly-once-restart
+test-m228-exactly-once-restart:
+	bash scripts/m228-exactly-once-restart.sh test
+
+.PHONY: benchmark-m228-exactly-once-restart
+benchmark-m228-exactly-once-restart:
+	bash scripts/m228-exactly-once-restart.sh benchmark
+
+.PHONY: size-m228-exactly-once-restart
+size-m228-exactly-once-restart:
+	bash scripts/m228-exactly-once-restart.sh size
+
+.PHONY: race-m228-exactly-once-restart
+race-m228-exactly-once-restart:
+	bash scripts/m228-exactly-once-restart.sh race
+
+.PHONY: vet-m228-exactly-once-restart
+vet-m228-exactly-once-restart:
+	bash scripts/m228-exactly-once-restart.sh vet
+
+.PHONY: test-m228-package
+test-m228-package:
+	bash scripts/m228-exactly-once-restart.sh package
+
+.PHONY: docs-m228-exactly-once-restart
+docs-m228-exactly-once-restart:
+	bash scripts/m228-exactly-once-restart.sh docs
+
+.PHONY: status-m228-exactly-once-restart
+status-m228-exactly-once-restart:
+	bash scripts/status-m228-exactly-once-restart.sh
+
+.PHONY: stage-m228-exactly-once-restart
+stage-m228-exactly-once-restart:
+	bash scripts/stage-m228-exactly-once-restart.sh
+
+.PHONY: commit-m228-exactly-once-restart
+commit-m228-exactly-once-restart:
+	bash scripts/commit-m228-exactly-once-restart.sh
+
+.PHONY: push-m228-exactly-once-restart
+push-m228-exactly-once-restart:
+	bash scripts/push-m228-exactly-once-restart.sh
+
+.PHONY: cleanup-hatrie-plan-preview
+cleanup-hatrie-plan-preview:
+	bash scripts/cleanup-hatrie-plan.sh preview
+
+.PHONY: show-hatrie-plan
+show-hatrie-plan:
+	bash scripts/cleanup-hatrie-plan.sh show
+
+.PHONY: cleanup-hatrie-plan
+cleanup-hatrie-plan:
+	bash scripts/cleanup-hatrie-plan.sh apply

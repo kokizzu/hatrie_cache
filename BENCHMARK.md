@@ -36293,3 +36293,20 @@ is a control using the same snapshot struct.
 CBS1 was 38 bytes versus JSON at 104 bytes, or 2.74x smaller. Raw samples and
 the recovery semantics are in
 [M227_ATOMIC_SNAPSHOT_FRONTIER.md](M227_ATOMIC_SNAPSHOT_FRONTIER.md).
+
+## M228 Exactly-Once Source Restart
+
+The workload persisted one committed batch plus one pending batch. Five samples
+were run per operation. COX1 is the feature path; JSON is a control using the
+same snapshot struct.
+
+| Operation | COX1 ns/op | JSON ns/op | COX1 B/op | JSON B/op | COX1 allocs/op | JSON allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Marshal | 192.4 | 653.0 | 112 | 320 | 1 | 2 | 3.39x CPU, 2.86x lower B/op, 2x fewer allocs |
+| Unmarshal | 191.8 | 2,808 | 96 | 424 | 4 | 11 | 14.64x CPU, 4.42x lower B/op, 2.75x fewer allocs |
+
+COX1 was 97 bytes versus JSON at 254 bytes, or 2.62x smaller. The state
+machine also measured commit plus restart-offset lookup at 145.3 ns/op with
+64 B/op and 2 allocs/op. Raw samples, transaction requirements, and recovery
+semantics are in
+[M228_EXACTLY_ONCE_SOURCE_RESTART.md](M228_EXACTLY_ONCE_SOURCE_RESTART.md).
