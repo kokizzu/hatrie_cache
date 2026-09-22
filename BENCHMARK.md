@@ -36478,3 +36478,34 @@ explicit topology. The JSON payload grows from 561 to 722 bytes because it
 now carries the stage and worker boundary. Existing plans without stage
 changes keep their previous memory and allocation profile. Raw samples and
 commands are in [M240_EXPLAIN_DATAFLOW.md](M240_EXPLAIN_DATAFLOW.md).
+
+## M241 Optimizer Rule Trace
+
+Five `-benchmem` samples were collected per path with 1-second samples on
+Linux amd64, AMD Ryzen 9 5950X. The parent is `d4d07b29`; the current tree
+adds M241. The baseline benchmark file uses only the pre-M241 optimizer API,
+so the default and trace-off rows are directly comparable. CPU is noisy for
+this short workload; no speedup is claimed.
+
+| Workload | Parent median ns/op | M241 median ns/op | M241 B/op | M241 allocs/op | Wire bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Default `EXPLAIN` | 8,317 | 9,980 | 9,280 | 35 | n/a |
+| Optimizer, trace off | 11,628 | 12,351 | 11,856 | 44 | n/a |
+| Optimizer, trace on | n/a | 13,808 | 12,421 | 51 | n/a |
+| Trace JSON serialization | n/a | 3,935 | 1,090 | 14 | 570 |
+
+Raw samples:
+
+```text
+parent default: 7938 8321 8048 8317 7795 ns/op; 9280 B/op; 35 allocs/op
+M241 default:    8334 8499 10110 9980 10445 ns/op; 9280 B/op; 35 allocs/op
+parent no-trace: 10264 10563 13002 11628 13151 ns/op; 11856 B/op; 44 allocs/op
+M241 no-trace:    12351 12331 11951 12723 13012 ns/op; 11856 B/op; 44 allocs/op
+M241 trace:       14888 14299 13808 12932 12267 ns/op; 12421 B/op; 51 allocs/op
+M241 trace JSON:   3747 3935 3826 4128 4170 ns/op; 1090 B/op; 14 allocs/op; 570 wire bytes
+```
+
+The default and trace-off allocation profiles are unchanged. Opt-in tracing
+adds seven allocations and 565 B/op in this fixture. See
+[M241_OPTIMIZER_TRACE.md](M241_OPTIMIZER_TRACE.md) and rerun with
+`make benchmark-m241`.

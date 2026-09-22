@@ -20,14 +20,15 @@ type Row map[string]interface{}
 
 // QueryResult is a materialized SQL response. Streaming clients use QueryRows.
 type QueryResult struct {
-	QueryID      string           `json:"query_id,omitempty"`
-	Columns      []string         `json:"columns"`
-	Rows         []Row            `json:"rows"`
-	Plan         []ExplainStep    `json:"plan,omitempty"`
-	PlanSnapshot *SQLPlanSnapshot `json:"plan_snapshot,omitempty"`
-	Stats        *QueryStats      `json:"stats,omitempty"`
-	HasMore      bool             `json:"has_more,omitempty"`
-	NextCursor   string           `json:"next_cursor,omitempty"`
+	QueryID        string                  `json:"query_id,omitempty"`
+	Columns        []string                `json:"columns"`
+	Rows           []Row                   `json:"rows"`
+	Plan           []ExplainStep           `json:"plan,omitempty"`
+	OptimizerTrace *SQLQueryOptimizerTrace `json:"optimizer_trace,omitempty"`
+	PlanSnapshot   *SQLPlanSnapshot        `json:"plan_snapshot,omitempty"`
+	Stats          *QueryStats             `json:"stats,omitempty"`
+	HasMore        bool                    `json:"has_more,omitempty"`
+	NextCursor     string                  `json:"next_cursor,omitempty"`
 }
 
 // ExplainStep is one stable operation in an EXPLAIN plan.
@@ -76,6 +77,32 @@ type ExplainAlternative struct {
 	EstimatedCost  int    `json:"estimated_cost"`
 	Selected       bool   `json:"selected"`
 	RejectedReason string `json:"rejected_reason,omitempty"`
+}
+
+// SQLQueryOptimizerTraceFormat identifies the stable optimizer-trace wire
+// shape returned when SQLQueryOptions.OptimizerTrace is enabled.
+const SQLQueryOptimizerTraceFormat = "hatrie-cache-sql-optimizer-trace/v1"
+
+// SQLQueryOptimizerTrace records ordered optimizer rule activity for one
+// query. It is opt-in because trace events are diagnostic output, not part of
+// the normal execution contract.
+type SQLQueryOptimizerTrace struct {
+	Format string                        `json:"format"`
+	Events []SQLQueryOptimizerTraceEvent `json:"events"`
+
+	rule    int
+	pending []SQLQueryOptimizerTraceEvent
+}
+
+// SQLQueryOptimizerTraceEvent is one applied rule or rejected alternative.
+// Rule is one-based and follows the order supplied to NewSQLQueryOptimizer.
+type SQLQueryOptimizerTraceEvent struct {
+	Rule       int    `json:"rule"`
+	Kind       string `json:"kind"`
+	Action     string `json:"action"`
+	Expression string `json:"expression,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+	Changed    bool   `json:"changed,omitempty"`
 }
 
 // ExplainNotice is a stable, machine-readable optimizer diagnostic attached

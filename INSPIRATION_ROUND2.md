@@ -127,7 +127,7 @@ operator control remain the preferred deployment model.
 - [x] M238 Explain output for filter pushdown and arrangement reuse. `EXPLAIN` now emits a `FILTER_PUSHDOWN` notice, while `Arrangements[].Reused` exposes arrangement reuse. See [M238_EXPLAIN_PUSHDOWN.md](M238_EXPLAIN_PUSHDOWN.md).
 - [x] M239 Explain output for logical timestamp and frontier requirements. `EXPLAIN` now emits `LOGICAL_TIMESTAMP` and `FRONTIER_REQUIREMENT` notices for opt-in temporal contracts. See [M239_EXPLAIN_FRONTIER.md](M239_EXPLAIN_FRONTIER.md).
 - [x] M240 Raw dataflow explain output for operator and exchange topology. `ExplainDataflowGraph.Exchanges` now exposes stage-boundary worker transport while preserving pipeline and subplan edges. See [M240_EXPLAIN_DATAFLOW.md](M240_EXPLAIN_DATAFLOW.md).
-- [ ] M241 Optimizer trace showing rule applications and rejected alternatives.
+- [x] M241 Optimizer trace showing rule applications and rejected alternatives. `SQLQueryOptions.OptimizerTrace` is default-off, and optimizer rules can emit structured rejected alternatives through `RejectAlternative`. See [M241_OPTIMIZER_TRACE.md](M241_OPTIMIZER_TRACE.md).
 - [ ] M242 Per-operator update, batch, and frontier metrics.
 - [ ] M243 Arrangement memory metrics split by key, value, and trace history.
 - [ ] M244 Compaction debt metrics measured against the current logical frontier.

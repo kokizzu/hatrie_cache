@@ -23870,6 +23870,40 @@ commit-cleanup-go-build-tmp:
 push-cleanup-go-build-tmp:
 	bash scripts/push-cleanup-go-build-tmp.sh
 
+.PHONY: test-m241 test-m241-package race-m241 vet-m241 format-m241 verify-docs-m241
+
+test-m241:
+	bash scripts/test-m241.sh test
+
+test-m241-package:
+	bash scripts/test-m241.sh package
+
+race-m241:
+	bash scripts/test-m241.sh race
+
+vet-m241:
+	bash scripts/test-m241.sh vet
+
+format-m241:
+	bash scripts/test-m241.sh format
+
+verify-docs-m241:
+	bash scripts/test-m241.sh docs
+
+benchmark-m241:
+	bash scripts/benchmark-m241.sh
+
+.PHONY: stage-m241 commit-m241 push-m241
+
+stage-m241:
+	bash scripts/stage-m241.sh
+
+commit-m241:
+	bash scripts/commit-m241.sh
+
+push-m241:
+	bash scripts/push-m241.sh
+
 .PHONY: stage-m240-dataflow commit-m240-dataflow push-m240-dataflow
 
 stage-m240-dataflow:

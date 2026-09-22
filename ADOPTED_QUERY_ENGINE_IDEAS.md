@@ -1337,3 +1337,16 @@ final separate list leaves legacy memory and allocations unchanged. The
 stage-aware fixture adds 96 B/op and one allocation, and JSON adds 161 wire
 bytes for the explicit exchange metadata. See
 [M240_EXPLAIN_DATAFLOW.md](M240_EXPLAIN_DATAFLOW.md).
+
+## M241 Optimizer Rule Trace
+
+The ClickHouse/Materialize-style explainability pattern is adopted for the
+existing ordered SQL optimizer rules. `SQLQueryOptions.OptimizerTrace` is
+default-off and records one applied event per rule; rule authors can add
+machine-readable rejected alternatives with
+`SQLQueryOptimizationContext.RejectAlternative`. The trace is attached to
+materialized query results, has stable format
+`hatrie-cache-sql-optimizer-trace/v1`, and does not change the default or
+optimizer-without-trace allocation profile. The opt-in fixture measured
+`12,421 B/op`, `51 allocs/op`, and a `570`-byte JSON payload for one rule and
+one rejected alternative. See [M241_OPTIMIZER_TRACE.md](M241_OPTIMIZER_TRACE.md).

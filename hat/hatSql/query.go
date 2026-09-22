@@ -389,6 +389,11 @@ type SQLQueryOptions struct {
 	// planner controls after parsing. Nil preserves the default path and keeps
 	// SQLQueryOptions comparable for callers that use it as a value.
 	Optimizer *SQLQueryOptimizer
+	// OptimizerTrace includes ordered rule and rejected-alternative events in
+	// the returned result. It is disabled by default and has no trace storage
+	// cost when false.
+	OptimizerTrace bool
+	optimizerTrace *SQLQueryOptimizerTrace
 	// SlowQueryRecorder retains privacy-safe samples only for queries that
 	// meet SlowQueryThreshold. Nil disables sample retention.
 	SlowQueryRecorder *SQLSlowQueryRecorder
@@ -843,6 +848,9 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		}
 		err = sqlClassifyError(sqlRuntimeDiagnostic(err))
 		observation.attachPlanSnapshot(&result, operatorSteps)
+		if options.optimizerTrace != nil {
+			result.OptimizerTrace = options.optimizerTrace
+		}
 		observation.finish(result, err, operatorSteps, source, parameters)
 	}()
 	var snapshotResolver SQLSourceResolver
@@ -897,7 +905,7 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		applySQLQueryCollation(query, options.Collation)
 	}
 	if options.IndexHint.Mode != "" || options.Optimizer != nil {
-		options.IndexHint, err = applySQLQueryOptimizerRules(source, query, options)
+		options.IndexHint, options.optimizerTrace, err = applySQLQueryOptimizerRules(source, query, options)
 		if err != nil {
 			return result, err
 		}
