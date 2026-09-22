@@ -102,6 +102,7 @@ security guidance before exposing it on a network.
 - Opt-in maintained result caching coalesces concurrent identical reads with bounded in-flight state: [M248_MAINTAINED_RESULT_CACHE.md](M248_MAINTAINED_RESULT_CACHE.md)
 - Opt-in temporal join frontier alignment waits for both inputs before a shared timestamp is used: [M250_TEMPORAL_JOIN_FRONTIER_ALIGNMENT.md](M250_TEMPORAL_JOIN_FRONTIER_ALIGNMENT.md)
 - Opt-in per-space synchronous replication quorum for critical writes: [T201_PER_SPACE_SYNC_QUORUM.md](T201_PER_SPACE_SYNC_QUORUM.md)
+- Opt-in replica-set leader election with heartbeat expiry, quorum selection, and generation-fenced commit: [T202_REPLICA_SET_LEADER_ELECTION.md](T202_REPLICA_SET_LEADER_ELECTION.md), with control-plane measurements in [BENCHMARK.md](BENCHMARK.md#t202-replica-set-leader-election)
 - ClickHouse-style typed-table decompressed column-block cache: [TYPED_TABLE_DECOMPRESSED_BLOCK_CACHE.md](TYPED_TABLE_DECOMPRESSED_BLOCK_CACHE.md)
 - 50-item adoption backlog for each inspiration source: [INSPIRATION_BACKLOG.md](INSPIRATION_BACKLOG.md)
 - Opt-in cross-source snapshot cutover coordination: [MZ010_SNAPSHOT_CUTOVER.md](MZ010_SNAPSHOT_CUTOVER.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-010-cross-source-snapshot-cutover)

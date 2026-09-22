@@ -26910,6 +26910,36 @@ commit-t201:
 .PHONY: push-t201
 push-t201:
 	bash scripts/push-t201.sh
+.PHONY: test-t202
+test-t202:
+	bash scripts/test-t202.sh
+.PHONY: benchmark-t202
+benchmark-t202:
+	bash scripts/benchmark-t202.sh
 .PHONY: verify-docs-m248
 verify-docs-m248:
 	bash scripts/verify-docs-m248.sh
+.PHONY: format-t202 race-t202 vet-t202 test-t202-package verify-docs-t202 stage-t202 commit-t202 push-t202
+format-t202:
+	bash scripts/format-t202.sh
+
+race-t202:
+	bash scripts/race-t202.sh
+
+vet-t202:
+	bash scripts/vet-t202.sh
+
+test-t202-package:
+	bash scripts/test-t202-package.sh
+
+verify-docs-t202:
+	bash scripts/verify-docs-t202.sh
+
+stage-t202:
+	bash scripts/stage-t202.sh
+
+commit-t202:
+	bash scripts/commit-t202.sh
+
+push-t202:
+	bash scripts/push-t202.sh

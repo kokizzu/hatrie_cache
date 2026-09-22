@@ -36765,3 +36765,40 @@ Raw samples (`ns/op`, `B/op`, `allocs/op`):
 Sequential left/right waits: 6.266 6.568 6.367 6.697 6.645; 0; 0
 Aligned temporal-join wait:  5.302 5.282 4.955 4.899 5.753; 0; 0
 ```
+
+<a id="t202-replica-set-leader-election"></a>
+## T202 Replica-Set Leader Election
+
+Command: `make benchmark-t202`. Five `GOMAXPROCS=1` benchmark samples were
+collected on Linux/amd64 with an AMD Ryzen 9 5950X. The existing evaluator is
+the control: it validates one already-normalized health observation and picks
+a candidate. T202 additionally tracks fixed voters, heartbeat freshness,
+quorum, term/generation fencing, and the explicit cancellation/commit
+lifecycle. The heartbeat row measures the steady-state observation path
+separately.
+
+| Workload | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Existing automatic-failover evaluation control | 106.1 | 0 | 0 | 1.00x |
+| T202 election decision plus cancellation | 171.9 | 64 | 1 | 1.62x control cost |
+| T202 heartbeat observation | 48.77 | 0 | 0 | 0.46x control, different operation |
+
+The 65.8 ns/op and one-allocation difference for a complete election cycle is
+the bounded cost of maintaining the election state and returning a fenced
+proposal; it is paid only during failover control work. Heartbeat ingestion is
+zero-allocation in the measured steady state. There is no default data-path
+CPU, heap, wire, or background-goroutine cost because the feature is disabled
+unless explicitly enabled and transport remains caller-owned.
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+Existing evaluator: 106.9 99.40 105.3 107.4 106.1; 0; 0
+Election + cancel:  170.0 184.6 177.4 171.9 171.1; 64; 1
+Heartbeat observe:   48.77 48.66 49.50 50.68 47.79; 0; 0
+```
+
+The feature is kept because it adds quorum-gated, deterministic leader
+selection and stale-proposal fencing, not because the election path is faster
+than the smaller existing evaluator. Full API boundaries and default-off
+behavior are in [T202_REPLICA_SET_LEADER_ELECTION.md](T202_REPLICA_SET_LEADER_ELECTION.md).
