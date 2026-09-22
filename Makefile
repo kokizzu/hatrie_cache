@@ -25442,3 +25442,38 @@ commit-c239-merge-metrics:
 
 push-c239-merge-metrics:
 	bash scripts/push-c239-merge-metrics.sh
+.PHONY: test-c240
+test-c240:
+	bash scripts/test-c240-read-only-backup.sh
+
+.PHONY: benchmark-c240
+benchmark-c240:
+	bash scripts/benchmark-c240-read-only-backup.sh
+
+.PHONY: format-c240
+format-c240:
+	bash scripts/format-c240.sh
+
+.PHONY: race-c240
+race-c240:
+	bash scripts/race-c240-read-only-backup.sh
+
+.PHONY: vet-c240
+vet-c240:
+	bash scripts/vet-c240-read-only-backup.sh
+
+.PHONY: test-c240-package
+test-c240-package:
+	bash scripts/test-c240-package.sh
+
+.PHONY: stage-c240
+stage-c240:
+	bash scripts/stage-c240-read-only-backup.sh
+
+.PHONY: commit-c240
+commit-c240:
+	bash scripts/commit-c240-read-only-backup.sh
+
+.PHONY: push-c240
+push-c240:
+	bash scripts/push-c240-read-only-backup.sh

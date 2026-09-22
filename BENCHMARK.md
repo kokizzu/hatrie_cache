@@ -36087,3 +36087,37 @@ accounting by cloning storage events; C239 reads direct table counters.
 
 This measures status collection only. Merge scheduling and compaction behavior
 are unchanged.
+
+## C240 Read-Only Backup Attachment
+
+Measured with `make benchmark-c240` on Linux/amd64, AMD Ryzen 9 5950X, with
+five benchmark samples per case. The fixture is a small snapshot archive with
+129 string keys. The attachment path verifies/extracts the archive, loads the
+immutable view, performs one lookup, and closes it. The baseline restores the
+same archive into a new data directory, loads the snapshot, performs the same
+lookup, and removes the directory.
+
+| Path | Raw samples (ns/op) | Median | Memory | Relative result |
+| --- | --- | ---: | ---: | --- |
+| Existing restore + load + lookup | 4,314,004; 4,357,317; 4,359,116; 4,478,377; 4,447,941 | 4,359,116 | 488,296 B/op, 1,864 allocs/op | baseline |
+| C240 read-only attach + lookup | 593,720; 799,519; 911,837; 928,098; 935,732 | 911,837 | 244,552 B/op, 767 allocs/op | 4.78x faster; 49.9% fewer bytes; 2.43x fewer allocations |
+
+The attachment avoids restore publication and the baseline's second snapshot
+load/verification path, but it still loads the complete backup into memory.
+This is an operational recovery/query improvement, not a claim of lazy
+on-disk querying. Archive/repository staging remains a temporary-disk cost.
+
+### Raw C240 output
+
+```text
+BenchmarkReadOnlyBackupAttachment-32             593720 ns/op  244507 B/op  769 allocs/op
+BenchmarkReadOnlyBackupAttachment-32             799519 ns/op  244614 B/op  769 allocs/op
+BenchmarkReadOnlyBackupAttachment-32             911837 ns/op  244625 B/op  769 allocs/op
+BenchmarkReadOnlyBackupAttachment-32             928098 ns/op  244467 B/op  767 allocs/op
+BenchmarkReadOnlyBackupAttachment-32             935732 ns/op  244552 B/op  767 allocs/op
+BenchmarkReadOnlyBackupRestoreAndLoad-32       4,314,004 ns/op  488379 B/op  1864 allocs/op
+BenchmarkReadOnlyBackupRestoreAndLoad-32       4,357,317 ns/op  488363 B/op  1864 allocs/op
+BenchmarkReadOnlyBackupRestoreAndLoad-32       4,359,116 ns/op  487955 B/op  1863 allocs/op
+BenchmarkReadOnlyBackupRestoreAndLoad-32       4,478,377 ns/op  488296 B/op  1864 allocs/op
+BenchmarkReadOnlyBackupRestoreAndLoad-32       4,447,941 ns/op  487672 B/op  1863 allocs/op
+```

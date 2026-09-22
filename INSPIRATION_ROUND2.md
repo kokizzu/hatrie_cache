@@ -73,7 +73,7 @@ operator control remain the preferred deployment model.
 - [x] C237 Explain output for projection selection and estimated I/O cost; EXPLAIN now reports selected columnar fields, predicate/output field roles, and bounded selected-batch read estimates. See [C237_EXPLAIN_PROJECTION.md](C237_EXPLAIN_PROJECTION.md) and `make test-c237-projection`.
 - [x] C238 Mutation queue progress with ready/pending/blocked/running/completed/failed/remaining counts and queue-lifetime elapsed/estimated-remaining nanoseconds. See [C238_MUTATION_QUEUE_PROGRESS.md](C238_MUTATION_QUEUE_PROGRESS.md) and `make test-c238-progress`.
 - [x] C239 Part-merge backlog, amplification, and age metrics via `TypedTable.PartMergeMetrics()`. See [C239_PART_MERGE_METRICS.md](C239_PART_MERGE_METRICS.md) and `make test-c239-merge-metrics`.
-- [ ] C240 Read-only backup database attachment for querying backup parts in place.
+- [x] C240 Read-only backup database attachment for querying snapshot/checkpoint/repository parts without publishing a writable restore. See [C240_READ_ONLY_BACKUP_ATTACHMENT.md](C240_READ_ONLY_BACKUP_ATTACHMENT.md) and [BENCHMARK.md](BENCHMARK.md#c240-read-only-backup-attachment).
 - [ ] C241 Incremental backup chunk deduplication across snapshots.
 - [x] C242 Parallel restore of independent parts with bounded concurrency. See [C242_PARALLEL_RESTORE.md](C242_PARALLEL_RESTORE.md) and [BENCHMARK.md](BENCHMARK.md#c242-bounded-parallel-restore).
 - [x] C243 Remote-part read-through caching with immutable checksum keys is implemented by `hatStorage.RemotePartCache`. See [C243_REMOTE_PART_CACHE.md](C243_REMOTE_PART_CACHE.md), [REMOTE_PART_CACHE.md](REMOTE_PART_CACHE.md), and [BENCHMARK.md](BENCHMARK.md#c243-remote-part-read-through-cache).
