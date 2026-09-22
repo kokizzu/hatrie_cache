@@ -8785,6 +8785,18 @@ commit-t210:
 push-t210:
 	bash ./scripts/push-t210.sh
 
+.PHONY: stage-t211
+stage-t211:
+	bash ./scripts/stage-t211.sh
+
+.PHONY: commit-t211
+commit-t211:
+	bash ./scripts/commit-t211.sh
+
+.PHONY: push-t211
+push-t211:
+	bash ./scripts/push-t211.sh
+
 .PHONY: test-m052c-native-dataflow
 test-m052c-native-dataflow:
 	bash ./scripts/test-m052c-native-dataflow.sh
