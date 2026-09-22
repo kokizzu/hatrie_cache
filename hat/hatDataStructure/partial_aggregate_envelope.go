@@ -27,6 +27,10 @@ const (
 	AggregateStateKindTopK = "top_k"
 	// AggregateStateKindTDigest identifies an approximate quantile payload.
 	AggregateStateKindTDigest = "tdigest"
+	// AggregateStateKindArgMaxInt64 identifies a mergeable int64 arg-max state.
+	AggregateStateKindArgMaxInt64 = "argmax_int64"
+	// AggregateStateKindArgMinInt64 identifies a mergeable int64 arg-min state.
+	AggregateStateKindArgMinInt64 = "argmin_int64"
 )
 
 var (

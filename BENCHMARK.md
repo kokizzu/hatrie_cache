@@ -35707,3 +35707,40 @@ The typed path is limited to the existing equality-hash-join branch. Other
 join algorithms and unsupported key values retain their prior behavior. Full
 correctness and race/vet commands are recorded in
 [C213_TYPED_HASH_JOIN.md](C213_TYPED_HASH_JOIN.md).
+
+## C224: Importable ArgMax/ArgMin Aggregate State
+
+Command: `make benchmark-c224-arg-state` (five samples, `-benchmem`,
+Linux/amd64, AMD Ryzen 9 5950X). The JSON baseline was measured before the
+implementation with the same logical fields; HAG1 is the fixed-width,
+checksummed state after implementation.
+
+```text
+JSON marshal:   190.4 188.4 177.5 184.6 187.9 ns/op
+                88 88 88 88 88 B/op
+                2 2 2 2 2 allocs/op
+JSON unmarshal: 904.1 895.5 876.9 903.7 879.5 ns/op
+                240 240 240 240 240 B/op
+                5 5 5 5 5 allocs/op
+HAG1 marshal:   82.97 76.64 79.28 75.95 77.70 ns/op
+                48 48 48 48 48 B/op
+                1 1 1 1 1 allocs/op
+HAG1 unmarshal: 104.0 105.8 111.8 111.9 109.3 ns/op
+                40 40 40 40 40 B/op
+                2 2 2 2 2 allocs/op
+HAG1 merge:     111.4 112.8 111.3 110.5 111.5 ns/op
+                40 40 40 40 40 B/op
+                2 2 2 2 2 allocs/op
+```
+
+| Operation | JSON median | HAG1 median | Relative result | Wire bytes |
+| --- | ---: | ---: | ---: | ---: |
+| Marshal | 187.9 ns/op, 88 B/op, 2 allocs | 77.70 ns/op, 48 B/op, 1 alloc | 2.42x faster, 45.5% fewer bytes | 51 -> 48 |
+| Unmarshal | 895.5 ns/op, 240 B/op, 5 allocs | 109.3 ns/op, 40 B/op, 2 allocs | 8.19x faster, 83.3% fewer bytes, 60.0% fewer allocs | 51 -> 48 |
+| Decode and merge | 895.5 ns/op unmarshal reference | 111.4 ns/op, 40 B/op, 2 allocs | 8.04x vs JSON unmarshal reference | 51 -> 48 |
+
+The result improves CPU and temporary memory substantially while reducing the
+sample wire value only modestly. The typed state is intentionally limited to
+signed `int64` ordering and argument values; the existing SQL scalar-flexible
+arg-extreme state remains unchanged. Full API scope and validation rules are
+recorded in [C224_ARGMAX_ARGMIN_STATE.md](C224_ARGMAX_ARGMIN_STATE.md).

@@ -24845,6 +24845,33 @@ push-m064-recursive-dataflow:
 report-open-inspiration:
 	bash scripts/report-open-inspiration.sh
 
+test-c224-arg-state:
+	bash scripts/test-c224-arg-state.sh
+
+benchmark-c224-arg-state:
+	bash scripts/benchmark-c224-arg-state.sh
+
+format-c224-arg-state:
+	bash scripts/format-c224-arg-state.sh
+
+verify-c224-arg-state:
+	bash scripts/verify-c224-arg-state.sh
+
+race-c224-arg-state:
+	bash scripts/race-c224-arg-state.sh
+
+vet-c224-arg-state:
+	bash scripts/vet-c224-arg-state.sh
+
+stage-c224-arg-state:
+	bash scripts/stage-c224-arg-state.sh
+
+commit-c224-arg-state:
+	bash scripts/commit-c224-arg-state.sh
+
+push-c224-arg-state:
+	bash scripts/push-c224-arg-state.sh
+
 .PHONY: test-c213-typed-hash-join
 test-c213-typed-hash-join:
 	bash scripts/test-c213-typed-hash-join.sh

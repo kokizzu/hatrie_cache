@@ -57,7 +57,7 @@ operator control remain the preferred deployment model.
 - [x] C223b Compact mergeable TDigest aggregate state; fixed-width centroid payloads use HAG1 framing, validate compression/count/order/finite values, and support atomic merge-from-wire without changing existing defaults. An existing large-input centroid-bound mismatch remains a separate compaction task.
 - [x] C223b Mergeable Count-Min Sketch partial state; exported `CountMinSketch` snapshots merge same-shape counter matrices with saturating addition, and `HatTrie.MergeCountMinSketch` imports an owned state without changing existing command defaults. SQL `State`/`Merge` syntax remains open under C223.
 - [x] C223c Versioned partial aggregate envelopes; importable HLL and Count-Min state APIs now use bounded, checksummed HAG1 frames with compact raw-register/counter payloads, explicit kind/version metadata, and strict decoder validation. SQL `State`/`Merge` integration remains open under C223.
-- [ ] C224 `argMax` and `argMin` aggregate states with deterministic tie handling.
+- [x] C224 `argMax` and `argMin` aggregate states with deterministic tie handling; see [C224_ARGMAX_ARGMIN_STATE.md](C224_ARGMAX_ARGMIN_STATE.md).
 - [ ] C225 Incremental window-frame state for repeated ordered windows.
 - [ ] C226 Grace-hash join spilling with bounded disk runs.
 - [x] C227 External aggregation spilling with merge-time memory limits; `SQLQueryOptions.MaxGroupMergeBytes` bounds the decoded spill-reader frontier, stays off by default, and cleans temporary files on rejection. See [C227_GROUP_MERGE_BUDGET.md](C227_GROUP_MERGE_BUDGET.md) and [BENCHMARK.md#c227-external-group-merge-memory-budget](BENCHMARK.md#c227-external-group-merge-memory-budget).
