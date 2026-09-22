@@ -36373,3 +36373,20 @@ uses one coupled envelope containing 32 upsert records; JSON is a control.
 
 Raw samples and the no-progress-only-message invariant are in
 [M232_SINK_PROGRESS_ENVELOPES.md](M232_SINK_PROGRESS_ENVELOPES.md).
+
+## M233 Sink Retry Outbox
+
+Five samples were run per operation on Linux amd64, AMD Ryzen 9 5950X. The
+codec rows use the same 128-record snapshot; SRT1 is the feature path and JSON
+is a compatibility control.
+
+| Operation | SRT1 / queue median | JSON median | Improvement | SRT1 B/op | JSON B/op | SRT1 allocs/op | JSON allocs/op |
+| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| Enqueue + claim + ack | 396.1 ns/op | n/a | bounded queue path | 238 | n/a | 6 | n/a |
+| Claim + retry + reclaim + ack | 692.8 ns/op | n/a | bounded retry path | 288 | n/a | 9 | n/a |
+| Snapshot marshal | 21,030 ns/op | 46,385 ns/op | 2.21x CPU, 28.3% lower bytes, 2x more allocs | 14,760 | 20,590 | 4 | 2 |
+| Snapshot unmarshal | 27,086 ns/op | 293,168 ns/op | 10.82x CPU, 35.1% lower bytes, 3.3% fewer allocs | 23,664 | 36,464 | 389 | 402 |
+
+The binary format trades two extra marshal allocations for lower CPU and
+storage/wire size. Raw semantics, limits, and the exact benchmark command are
+in [M233_SINK_RETRY_OUTBOX.md](M233_SINK_RETRY_OUTBOX.md).

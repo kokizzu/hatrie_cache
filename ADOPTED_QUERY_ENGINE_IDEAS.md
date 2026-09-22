@@ -1272,3 +1272,14 @@ dataflow output is adopted as `SinkProgressEnvelope` and
 `SinkProgressEmitter`. They reject progress-only messages, preserve monotone
 frontiers, and encode output plus progress together in compact SPG1. See
 [M232_SINK_PROGRESS_ENVELOPES.md](M232_SINK_PROGRESS_ENVELOPES.md).
+
+## M233 Sink Retry Outbox
+
+Tarantool-style task identity and retry metadata are adopted as the opt-in
+`hatReplication.SinkRetryQueue`. It bounds pending disconnected output by
+record count and bytes, deduplicates identical output identities, replaces
+superseded pending upserts, protects in-flight records from unsafe replacement,
+and schedules retries with deterministic capped exponential backoff. Its
+compact SRT1 snapshot makes in-flight work immediately claimable after restart.
+It does not perform network I/O or provide external durability on its own. See
+[M233_SINK_RETRY_OUTBOX.md](M233_SINK_RETRY_OUTBOX.md).

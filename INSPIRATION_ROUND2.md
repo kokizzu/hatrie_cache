@@ -119,7 +119,7 @@ operator control remain the preferred deployment model.
 - [x] M230 Source backpressure based on downstream frontier lag. See [M230_SOURCE_BACKPRESSURE.md](M230_SOURCE_BACKPRESSURE.md).
 - [x] M231 Exactly-once upsert sinks with durable output identities. See [M231_EXACTLY_ONCE_UPSERT_SINK.md](M231_EXACTLY_ONCE_UPSERT_SINK.md).
 - [x] M232 Sink progress checkpoints coupled to emitted frontier messages. See [M232_SINK_PROGRESS_ENVELOPES.md](M232_SINK_PROGRESS_ENVELOPES.md).
-- [ ] M233 Sink retry and deduplication for disconnected output connections.
+- [x] M233 Sink retry and deduplication for disconnected output connections. See [M233_SINK_RETRY_OUTBOX.md](M233_SINK_RETRY_OUTBOX.md).
 - [ ] M234 Sink backpressure and bounded pending-output memory.
 - [ ] M235 Dependency graph invalidation for affected indexes and views only.
 - [ ] M236 On-demand refresh of only invalidated maintained objects.

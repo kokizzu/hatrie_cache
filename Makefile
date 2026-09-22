@@ -26260,6 +26260,42 @@ commit-m232-sink-progress:
 push-m232-sink-progress:
 	bash scripts/push-m232-sink-progress.sh
 
+inspect-m233-sink-retry:
+	bash scripts/m233-sink-retry.sh inspect
+
+test-m233-sink-retry-package:
+	bash scripts/verify-m233-sink-retry.sh package
+
+race-m233-sink-retry:
+	bash scripts/verify-m233-sink-retry.sh race
+
+vet-m233-sink-retry:
+	bash scripts/verify-m233-sink-retry.sh vet
+
+benchmark-m233-sink-retry:
+	bash scripts/verify-m233-sink-retry.sh benchmark
+
+verify-docs-m233-sink-retry:
+	bash scripts/verify-m233-sink-retry.sh docs
+
+review-staged-m233-sink-retry:
+	bash scripts/verify-m233-sink-retry.sh staged
+
+stage-m233-sink-retry:
+	bash scripts/stage-m233-sink-retry.sh
+
+commit-m233-sink-retry:
+	bash scripts/commit-m233-sink-retry.sh
+
+push-m233-sink-retry:
+	bash scripts/push-m233-sink-retry.sh
+
+format-m233-sink-retry:
+	bash scripts/m233-sink-retry.sh format
+
+test-m233-sink-retry:
+	bash scripts/m233-sink-retry.sh test
+
 .PHONY: inspect-m229-source-schema
 inspect-m229-source-schema:
 	bash scripts/m229-source-schema.sh inspect
@@ -26311,3 +26347,24 @@ push-m229-source-schema:
 .PHONY: cleanup-hatrie-plan
 cleanup-hatrie-plan:
 	bash scripts/cleanup-hatrie-plan.sh apply
+.PHONY: inventory-hatrie-tmp preview-inventory-hatrie-tmp clean-inventory-hatrie-tmp
+inventory-hatrie-tmp:
+	bash scripts/inventory-hatrie-tmp.sh inventory
+
+inventory-hatrie-tmp-recent:
+	HATRIE_TMP_MIN_AGE_MINUTES=0 bash scripts/inventory-hatrie-tmp.sh inventory
+
+inventory-named-hatrie-tmp:
+	bash scripts/inventory-hatrie-tmp.sh inventory-named
+
+preview-inventory-hatrie-tmp:
+	bash scripts/inventory-hatrie-tmp.sh preview
+
+clean-inventory-hatrie-tmp:
+	bash scripts/inventory-hatrie-tmp.sh clean
+
+prune-empty-hatrie-tmp-plans:
+	bash scripts/inventory-hatrie-tmp.sh prune-empty-plans
+
+inspect-hatrie-tmp-plan:
+	bash scripts/inventory-hatrie-tmp.sh inspect-plan
