@@ -25518,6 +25518,10 @@ push-c241:
 test-t201:
 	bash scripts/test-t201-per-space-write-quorum.sh
 
+.PHONY: test-t202
+test-t202:
+	bash scripts/test-t202-automatic-leader-election.sh
+
 .PHONY: format-t201
 format-t201:
 	bash scripts/format-t201.sh
@@ -25549,3 +25553,34 @@ commit-t201:
 .PHONY: push-t201
 push-t201:
 	bash scripts/push-t201.sh
+.PHONY: format-t202
+format-t202:
+	bash scripts/format-t202.sh
+
+.PHONY: test-t202-package
+test-t202-package:
+	bash scripts/test-t202-package.sh
+
+.PHONY: benchmark-t202
+benchmark-t202:
+	bash scripts/benchmark-t202.sh
+
+.PHONY: race-t202
+race-t202:
+	bash scripts/race-t202.sh
+
+.PHONY: vet-t202
+vet-t202:
+	bash scripts/vet-t202.sh
+
+.PHONY: stage-t202
+stage-t202:
+	bash scripts/stage-t202.sh
+
+.PHONY: commit-t202
+commit-t202:
+	bash scripts/commit-t202.sh
+
+.PHONY: push-t202
+push-t202:
+	bash scripts/push-t202.sh

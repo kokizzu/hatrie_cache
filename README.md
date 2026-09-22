@@ -4937,3 +4937,10 @@ and emits deterministic copy, replace, or quarantine actions without performing
 network or destructive storage operations. Use
 [CH019_REPLICA_PART_CHECKS.md](CH019_REPLICA_PART_CHECKS.md) for the API,
 safety bounds, and measured comparison in [BENCHMARK.md](BENCHMARK.md#ch-019-replica-part-consistency-planning).
+### Automatic Replica Leader Election
+
+Replica liveness can be refreshed with `ElectionStore.Run`; set
+`ElectionOptions.RequireHeartbeat: true` to require a heartbeat before a node
+is eligible. The default remains `false` for compatibility. See
+[`T202_AUTOMATIC_LEADER_ELECTION.md`](T202_AUTOMATIC_LEADER_ELECTION.md) for
+the lifecycle example and safety boundary.

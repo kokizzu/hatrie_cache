@@ -1,6 +1,7 @@
 package hatCache
 
 import (
+	"context"
 	"time"
 
 	"hatrie_cache/hat/hatTopology"
@@ -9,6 +10,7 @@ import (
 // Election types remain available from the root package for compatibility.
 // New integrations can depend on hatTopology directly.
 const DefaultElectionTimeout = hatTopology.DefaultElectionTimeout
+const DefaultElectionHeartbeatInterval = hatTopology.DefaultElectionHeartbeatInterval
 
 type ElectionOptions = hatTopology.ElectionOptions
 type ElectionStatus = hatTopology.ElectionStatus
@@ -41,6 +43,15 @@ func (store *ElectionStore) Heartbeat(nodeID string) error {
 		return hatTopology.NewElectionStore(nil, ElectionOptions{}).Heartbeat(nodeID)
 	}
 	return store.core.Heartbeat(nodeID)
+}
+
+// Run records an immediate heartbeat for nodeID and keeps it alive until ctx
+// is canceled. The caller owns the goroutine.
+func (store *ElectionStore) Run(ctx context.Context, nodeID string, interval time.Duration) error {
+	if store == nil || store.core == nil {
+		return hatTopology.NewElectionStore(nil, ElectionOptions{}).Run(ctx, nodeID, interval)
+	}
+	return store.core.Run(ctx, nodeID, interval)
 }
 
 func (store *ElectionStore) MarkOffline(nodeID string) error {

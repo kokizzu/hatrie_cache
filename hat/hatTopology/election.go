@@ -1,6 +1,7 @@
 package hatTopology
 
 import (
+	"context"
 	"errors"
 	"sort"
 	"strings"
@@ -12,6 +13,10 @@ import (
 // considered unavailable.
 const DefaultElectionTimeout = 15 * time.Second
 
+// DefaultElectionHeartbeatInterval is the interval used by Run when the
+// caller does not provide one.
+const DefaultElectionHeartbeatInterval = DefaultElectionTimeout / 3
+
 // TopologySnapshotProvider returns an immutable, normalized topology snapshot.
 // Implementations may update their current topology between calls.
 type TopologySnapshotProvider interface {
@@ -20,18 +25,20 @@ type TopologySnapshotProvider interface {
 
 // ElectionOptions configures leader selection.
 type ElectionOptions struct {
-	Timeout time.Duration
-	Now     func() time.Time
+	Timeout          time.Duration
+	Now              func() time.Time
+	RequireHeartbeat bool
 }
 
 // ElectionStore tracks node liveness and elects the first available owner of
 // each topology shard. The shard primary is always preferred.
 type ElectionStore struct {
-	mu       sync.RWMutex
-	topology TopologySnapshotProvider
-	timeout  time.Duration
-	now      func() time.Time
-	nodes    map[string]electionNodeRecord
+	mu               sync.RWMutex
+	topology         TopologySnapshotProvider
+	timeout          time.Duration
+	now              func() time.Time
+	requireHeartbeat bool
+	nodes            map[string]electionNodeRecord
 }
 
 type electionNodeRecord struct {
@@ -78,7 +85,48 @@ func NewElectionStore(topology TopologySnapshotProvider, options ElectionOptions
 	if now == nil {
 		now = time.Now
 	}
-	return &ElectionStore{topology: topology, timeout: timeout, now: now, nodes: map[string]electionNodeRecord{}}
+	return &ElectionStore{
+		topology:         topology,
+		timeout:          timeout,
+		now:              now,
+		requireHeartbeat: options.RequireHeartbeat,
+		nodes:            map[string]electionNodeRecord{},
+	}
+}
+
+// Run records an immediate heartbeat for nodeID and keeps it alive until ctx
+// is canceled. The caller owns the goroutine, allowing startup and shutdown
+// to remain explicit. A heartbeat error stops the loop and is returned.
+func (store *ElectionStore) Run(ctx context.Context, nodeID string, interval time.Duration) error {
+	if store == nil {
+		return errors.New("hatriecache: election store is nil")
+	}
+	if ctx == nil {
+		return errors.New("hatriecache: election context is nil")
+	}
+	select {
+	case <-ctx.Done():
+		return nil
+	default:
+	}
+	if err := store.Heartbeat(nodeID); err != nil {
+		return err
+	}
+	if interval <= 0 {
+		interval = DefaultElectionHeartbeatInterval
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			if err := store.Heartbeat(nodeID); err != nil {
+				return err
+			}
+		}
+	}
 }
 
 func (store *ElectionStore) Heartbeat(nodeID string) error {
@@ -285,7 +333,10 @@ func (store *ElectionStore) nodeActiveLocked(nodes []TopologyNode, nodeID string
 		return false
 	}
 	record, tracked := store.nodes[nodeID]
-	return !tracked || (!record.offline && (store.timeout <= 0 || record.lastSeen.IsZero() || now.Sub(record.lastSeen) <= store.timeout))
+	if !tracked {
+		return !store.requireHeartbeat
+	}
+	return !record.offline && (store.timeout <= 0 || record.lastSeen.IsZero() || now.Sub(record.lastSeen) <= store.timeout)
 }
 
 func (store *ElectionStore) nodeStatusLocked(node TopologyNode, now time.Time) ElectionNodeStatus {

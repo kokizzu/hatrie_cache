@@ -36195,3 +36195,38 @@ Chunked1MiB:       200328, 100164, 467432, 267104, 100164 new_object_B/op
 WholeFileControl:  24.051669, 23.078073, 24.093990, 23.411704, 23.438107 ms/op
 WholeFileControl:  1402296, 1101804, 534208, 1135192, 734536 new_object_B/op
 ```
+## T202: Automatic Leader Election
+
+Command:
+
+```text
+make benchmark-t202
+```
+
+The benchmark measures `LeaderForKey` with the legacy assumed-online default
+against opt-in `RequireHeartbeat: true` mode. Five runs were executed on
+`linux/amd64` with an AMD Ryzen 9 5950X.
+
+| Mode | Median | Memory | Allocations |
+| --- | ---: | ---: | ---: |
+| Legacy assumed-online | 419.1 ns/op | 172 B/op | 7 allocs/op |
+| Heartbeat required | 431.4 ns/op | 172 B/op | 7 allocs/op |
+
+Relative to the default, heartbeat-required selection was `1.029x` the lookup
+time (`+2.9%`), with no memory or allocation increase.
+
+Raw output:
+
+```text
+BenchmarkT202LeaderForKey/LegacyAssumedOnline-32          2739786  431.4 ns/op  172 B/op  7 allocs/op
+BenchmarkT202LeaderForKey/LegacyAssumedOnline-32          2982465  419.1 ns/op  172 B/op  7 allocs/op
+BenchmarkT202LeaderForKey/LegacyAssumedOnline-32          2863148  397.0 ns/op  172 B/op  7 allocs/op
+BenchmarkT202LeaderForKey/LegacyAssumedOnline-32          3028732  415.3 ns/op  172 B/op  7 allocs/op
+BenchmarkT202LeaderForKey/LegacyAssumedOnline-32          2930848  438.5 ns/op  172 B/op  7 allocs/op
+BenchmarkT202LeaderForKey/HeartbeatRequired-32            2666548  431.4 ns/op  172 B/op  7 allocs/op
+BenchmarkT202LeaderForKey/HeartbeatRequired-32            2826090  415.5 ns/op  172 B/op  7 allocs/op
+BenchmarkT202LeaderForKey/HeartbeatRequired-32            2591793  433.7 ns/op  172 B/op  7 allocs/op
+BenchmarkT202LeaderForKey/HeartbeatRequired-32            2804860  411.7 ns/op  172 B/op  7 allocs/op
+BenchmarkT202LeaderForKey/HeartbeatRequired-32            2927066  441.1 ns/op  172 B/op  7 allocs/op
+PASS
+```
