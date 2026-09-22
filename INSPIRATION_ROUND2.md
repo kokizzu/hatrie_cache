@@ -59,7 +59,7 @@ operator control remain the preferred deployment model.
 - [x] C223c Versioned partial aggregate envelopes; importable HLL and Count-Min state APIs now use bounded, checksummed HAG1 frames with compact raw-register/counter payloads, explicit kind/version metadata, and strict decoder validation. SQL `State`/`Merge` integration remains open under C223.
 - [x] C224 `argMax` and `argMin` aggregate states with deterministic tie handling; see [C224_ARGMAX_ARGMIN_STATE.md](C224_ARGMAX_ARGMIN_STATE.md).
 - [x] C225 Incremental window-frame state for repeated ordered windows; see [INCREMENTAL_FRAME_WINDOW.md](INCREMENTAL_FRAME_WINDOW.md) and `make test-m065d-incremental-frame-window`.
-- [ ] C226 Grace-hash join spilling with bounded disk runs.
+- [x] C226 Grace-hash join spilling with bounded disk runs; the opt-in partitioned path is covered by [C229_JOIN_OVERFLOW_POLICY.md](C229_JOIN_OVERFLOW_POLICY.md), [CHU25_QUERY_SPILL_QUOTA.md](CHU25_QUERY_SPILL_QUOTA.md), and `make test-chu08-join-overflow`.
 - [x] C227 External aggregation spilling with merge-time memory limits; `SQLQueryOptions.MaxGroupMergeBytes` bounds the decoded spill-reader frontier, stays off by default, and cleans temporary files on rejection. See [C227_GROUP_MERGE_BUDGET.md](C227_GROUP_MERGE_BUDGET.md) and [BENCHMARK.md#c227-external-group-merge-memory-budget](BENCHMARK.md#c227-external-group-merge-memory-budget).
 - [ ] C228 External sort spilling with stable run ordering.
 - [x] C229 Explicit join overflow policy for auto, reject, and bounded spill; truncation remains intentionally unsupported to preserve SQL correctness. See [C229_JOIN_OVERFLOW_POLICY.md](C229_JOIN_OVERFLOW_POLICY.md) and [BENCHMARK.md#c229-join-overflow-policy](BENCHMARK.md#c229-join-overflow-policy).
