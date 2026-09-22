@@ -30791,6 +30791,20 @@ heap are unchanged by the feature; the measured costs are paid only when
 reconciliation is explicitly requested. The row-callback comparison is not
 strictly apples-to-apples because its control is materialized.
 
+### CH-004 schema-bound FINAL metadata
+
+The new registry was compared with an explicit resolver on the same 32-row
+replacing workload, using five samples and `-benchmem`:
+
+| Resolver | Median ns/op | B/op | Allocs/op | Registry overhead |
+| --- | ---: | ---: | ---: | ---: |
+| Explicit callback | 26,675 | 25,984 | 138 | 1.00x |
+| Schema registry | 26,962 | 25,984 | 138 | 1.011x |
+
+The opt-in schema lookup adds 287 ns/op (1.1%) and no allocations. Queries
+without `FINAL`, and `FINAL` queries using the existing explicit resolver, keep
+their existing behavior.
+
 <a id="ch-005-delete-bitmap-state-snapshots"></a>
 ## CH-005 Delete Bitmap State Snapshots
 

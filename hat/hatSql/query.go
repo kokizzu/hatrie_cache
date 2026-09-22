@@ -387,6 +387,9 @@ type SQLQueryOptions struct {
 	// reconciliation for sources marked FINAL in the query. Nil preserves the
 	// existing unreconciled source path and is the default.
 	FinalSourceOptions *SQLFinalSourceOptionsResolver
+	// FinalSchema resolves FINAL contracts from opt-in schema-bound metadata
+	// when FinalSourceOptions is nil. Explicit per-query options take precedence.
+	FinalSchema *SQLFinalSchemaRegistry
 	// SnapshotToken optionally authenticates and selects an immutable frontier
 	// for related queries. Empty preserves the existing query path.
 	SnapshotToken      string

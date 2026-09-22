@@ -599,8 +599,9 @@ fails closed when a marked source has no configuration. Existing query paths
 remain unchanged without `FINAL`; marked queries bypass shortcuts that could
 return unreconciled rows and reconcile before downstream operators consume the
 source. See [CH004_FINAL_READ.md](CH004_FINAL_READ.md) and
-[BENCHMARK.md](BENCHMARK.md#ch-004-final-read-semantics). Persistent
-schema-bound metadata and background merge integration remain open.
+[BENCHMARK.md](BENCHMARK.md#ch-004-final-read-semantics). Opt-in exact
+schema-bound metadata is now available through `SQLFinalSchemaRegistry`;
+persistent registry storage and background merge integration remain open.
 
 ## CH-005: Delete Bitmap State Snapshots
 

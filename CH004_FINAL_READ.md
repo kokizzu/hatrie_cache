@@ -80,9 +80,32 @@ incomplete cancellation explicit instead of silently dropping data.
 - Callbacks must be deterministic, read-only, and safe for the source rows.
   They are application code and should validate row types instead of using
   unchecked assertions when input is not trusted.
-- Persistent schema-bound FINAL metadata, automatic key/version discovery, and
-  background merge integration remain future work. The current API requires an
-  explicit caller contract for every marked source.
++ Schema-bound FINAL metadata is available through the opt-in
+  `SQLFinalSchemaRegistry`. Persistent registry storage, automatic key/version
+  discovery, and background merge integration remain caller-owned.
+
+### Schema-bound metadata
+
+Register the immutable reconciliation contract once and reuse it for marked
+sources:
+
+```go
+schema := hatSql.NewSQLFinalSchemaRegistry()
+_ = schema.Register("CACHE", "events", hatSql.SQLFinalOptions{
+    Mode: hatSql.SQLFinalReplacing,
+    Key: func(row hatSql.SQLRow) string { return row["id"].(string) },
+    Version: func(row hatSql.SQLRow) (uint64, error) {
+        return row["version"].(uint64), nil
+    },
+})
+
+result, err := hatSql.ExecuteSQLQueryContext(ctx, query, resolver,
+    hatSql.SQLQueryOptions{FinalSchema: schema})
+```
+
+The registry is exact by source key, validates contracts at registration,
+supports concurrent resolution, and remains disabled unless `FinalSchema` is
+provided. An explicit `FinalSourceOptions` resolver takes precedence.
 
 ## Measurement
 
@@ -100,6 +123,16 @@ Ryzen 9 5950X Linux/amd64 host. The legacy path is the same query without
 The row-callback row is not a strict apples-to-apples comparison because the
 legacy control is materialized. It shows the cost of reconciling before
 emission, not a claim that callbacks are slower than materialization.
+
+The schema registry adds no allocations to the same 32-row replacing workload:
+
+| Resolver | Median ns/op | B/op | Allocs/op | Registry overhead |
+| --- | ---: | ---: | ---: | ---: |
+| Explicit callback | 26,675 | 25,984 | 138 | 1.00x |
+| Schema registry | 26,962 | 25,984 | 138 | 1.011x |
+
+The measured registry lookup cost is 287 ns/op (1.1%) for this opt-in query;
+the ordinary non-`FINAL` path is unchanged.
 
 Raw commands:
 

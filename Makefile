@@ -24691,3 +24691,46 @@ push-ch046-compression:
 	bash scripts/push-ch046-compression.sh
 benchmark-mz026-adaptive:
 	bash scripts/benchmark-mz026-after.sh
+.PHONY: test-ch004-schema
+test-ch004-schema:
+	bash scripts/test-ch004-schema.sh
+.PHONY: benchmark-ch004-schema-before
+benchmark-ch004-schema-before:
+	bash scripts/benchmark-ch004-schema-before.sh
+.PHONY: format-ch004-schema
+format-ch004-schema:
+	bash scripts/format-ch004-schema.sh
+
+.PHONY: test-ch004-full
+test-ch004-full:
+	bash scripts/test-ch004-full.sh
+
+.PHONY: race-ch004-schema
+race-ch004-schema:
+	bash scripts/race-ch004-schema.sh
+
+.PHONY: vet-ch004-schema
+vet-ch004-schema:
+	bash scripts/vet-ch004-schema.sh
+
+.PHONY: benchmark-ch004-schema
+benchmark-ch004-schema:
+	bash scripts/benchmark-ch004-schema.sh
+.PHONY: benchmark-ch004-schema-compare
+benchmark-ch004-schema-compare:
+	bash scripts/benchmark-ch004-schema-compare.sh
+.PHONY: status-ch004-schema
+status-ch004-schema:
+	bash scripts/status-ch004-schema.sh
+.PHONY: prepare-ch004-schema-branch
+prepare-ch004-schema-branch:
+	bash scripts/prepare-ch004-schema-branch.sh
+.PHONY: stage-ch004-schema
+stage-ch004-schema:
+	bash scripts/stage-ch004-schema.sh
+.PHONY: commit-ch004-schema
+commit-ch004-schema:
+	bash scripts/commit-ch004-schema.sh
+.PHONY: push-ch004-schema
+push-ch004-schema:
+	bash scripts/push-ch004-schema.sh

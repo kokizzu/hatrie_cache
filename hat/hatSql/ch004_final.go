@@ -66,10 +66,25 @@ func finalizeSQLSourceRows(source sqlSource, control *sqlExecutionControl, rows 
 	if !source.final {
 		return rows, nil
 	}
-	if control == nil || control.options.FinalSourceOptions == nil || control.options.FinalSourceOptions.Resolve == nil {
+	if control == nil {
 		return nil, ErrSQLFinalOptionsRequired
 	}
-	options, configured, err := control.options.FinalSourceOptions.Resolve(source.kind, source.key)
+	var (
+		options    SQLFinalOptions
+		configured bool
+		err        error
+	)
+	switch {
+	case control.options.FinalSourceOptions != nil:
+		if control.options.FinalSourceOptions.Resolve == nil {
+			return nil, ErrSQLFinalOptionsRequired
+		}
+		options, configured, err = control.options.FinalSourceOptions.Resolve(source.kind, source.key)
+	case control.options.FinalSchema != nil:
+		options, configured, err = control.options.FinalSchema.Resolve(source.kind, source.key)
+	default:
+		return nil, ErrSQLFinalOptionsRequired
+	}
 	if err != nil {
 		return nil, err
 	}
