@@ -38495,3 +38495,31 @@ Raw command:
 ```text
 make m233-mz-g38-benchmark
 ```
+## CH050 Plan Reproducibility Hash
+
+This ClickHouse-inspired diagnostic hashes a normalized SQL shape, required
+schema/settings fingerprints, and structural `ExplainStep` data. Runtime-only
+worker assignment, pruning observations, actual row/byte counts, estimate
+errors, and elapsed time are excluded. It is opt-in and does not affect normal
+query execution.
+
+Command:
+
+```text
+make m235-ch-g50-benchmark
+```
+
+Five runs on the repository's AMD Ryzen 9 5950X host produced these medians:
+
+| Operation | Median ns/op | Median B/op | Median allocs/op | Relative CPU | Relative bytes | Relative allocations |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Existing `SQLQueryFingerprint` baseline | 11,520 | 8,448 | 41 | 1.00x | 1.00x | 1.00x |
+| `SQLPlanReproducibilityHash` | 15,912 | 10,342 | 58 | 1.38x | 1.22x | 1.41x |
+
+The additional cost is the deterministic plan clone and encoding. Because the
+feature is an explicit diagnostic API rather than a default query-execution
+step, ordinary query latency and allocations are unchanged.
+
+See [CH050_PLAN_REPRODUCIBILITY_HASH.md](CH050_PLAN_REPRODUCIBILITY_HASH.md).
+
+## MZ038 Source Lag Alerts

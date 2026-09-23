@@ -67,7 +67,7 @@ the memory/operational cost is disproportionate to the gain.
 | CH-G47 | Kafka-style transactional source offset plus data checkpoint | Fault-injected restart must not duplicate committed data |
 | CH-G48 | Live result view refresh notifications with dependency frontier | Verify no stale notification after invalidation |
 | CH-G49 | Asynchronous read-ahead budget shared across columns and parts | Compare tail latency and cache pollution |
-| CH-G50 | Query plan reproducibility hash with settings and schema fingerprint | Stable hash across process restart and equivalent formatting |
+| CH-G50 | Query plan reproducibility hash with settings and schema fingerprint | Implemented and measured in `CH050_PLAN_REPRODUCIBILITY_HASH.md` and `BENCHMARK.md`: bounded structural SHA-256 hash with runtime-field exclusion |
 
 ## Materialize: 50 Candidate Gaps
 

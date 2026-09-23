@@ -27649,3 +27649,42 @@ m233-commit:
 .PHONY: m233-push
 m233-push:
 	bash scripts/m233-push.sh
+.PHONY: m235-ch-g50-test
+m235-ch-g50-test:
+	bash scripts/m235-ch-g50-test.sh
+
+.PHONY: m235-ch-g50-format
+m235-ch-g50-format:
+	bash scripts/m235-ch-g50-format.sh
+
+.PHONY: m235-ch-g50-benchmark
+m235-ch-g50-benchmark:
+	bash scripts/m235-ch-g50-benchmark.sh
+
+.PHONY: m235-ch-g50-race
+m235-ch-g50-race:
+	bash scripts/m235-ch-g50-race.sh
+
+.PHONY: m235-ch-g50-vet
+m235-ch-g50-vet:
+	bash scripts/m235-ch-g50-vet.sh
+
+.PHONY: m235-ch-g50-package-test
+m235-ch-g50-package-test:
+	bash scripts/m235-ch-g50-package-test.sh
+
+.PHONY: m235-ch-g50-docs
+m235-ch-g50-docs:
+	bash scripts/m235-ch-g50-docs.sh
+
+.PHONY: m235-stage
+m235-stage:
+	bash scripts/m235-stage.sh
+
+.PHONY: m235-commit
+m235-commit:
+	bash scripts/m235-commit.sh
+
+.PHONY: m235-push
+m235-push:
+	bash scripts/m235-push.sh
