@@ -27562,3 +27562,50 @@ m229-commit:
 .PHONY: m229-push
 m229-push:
 	bash scripts/m229-push.sh
+.PHONY: m230-inspect-catalog
+m230-inspect-catalog:
+	bash scripts/m230-inspect-catalog.sh
+
+.PHONY: m231-tt-g11-test
+m231-tt-g11-test:
+	bash scripts/m231-tt-g11-test.sh
+
+.PHONY: m231-tt-g11-benchmark
+m231-tt-g11-benchmark:
+	bash scripts/m231-tt-g11-benchmark.sh
+
+.PHONY: m231-tt-g11-zstd-test
+m231-tt-g11-zstd-test:
+	bash scripts/m231-tt-g11-zstd-test.sh
+
+.PHONY: m231-tt-g11-format
+m231-tt-g11-format:
+	bash scripts/m231-tt-g11-format.sh
+
+.PHONY: m231-tt-g11-race
+m231-tt-g11-race:
+	bash scripts/m231-tt-g11-race.sh
+
+.PHONY: m231-tt-g11-vet
+m231-tt-g11-vet:
+	bash scripts/m231-tt-g11-vet.sh
+
+.PHONY: m231-tt-g11-package-test
+m231-tt-g11-package-test:
+	bash scripts/m231-tt-g11-package-test.sh
+
+.PHONY: m231-tt-g11-docs
+m231-tt-g11-docs:
+	bash scripts/m231-tt-g11-docs.sh
+
+.PHONY: m231-stage
+m231-stage:
+	bash scripts/m231-stage.sh
+
+.PHONY: m231-commit
+m231-commit:
+	bash scripts/m231-commit.sh
+
+.PHONY: m231-push
+m231-push:
+	bash scripts/m231-push.sh

@@ -38431,3 +38431,41 @@ near-head replay cannot skip much work. The format, checksums, encryption, and
 command results are unchanged. The focused correctness test also verifies
 that a corrupted segment outside the requested range is not opened by the
 ranged scanner.
+## TT-G11 WAL Segment Compression
+
+This pass completes the Tarantool-inspired independent WAL segment compression
+gap. The repository already had a CRC-protected Zstandard frame and a compatible
+reader, so the change made the archived-segment default `zstd`, kept the active
+journal uncompressed, retained explicit `none` fallback, and limited the
+encoder to one worker to reduce transient memory and allocations.
+
+Workload: 282,624 highly repetitive journal bytes; Linux `amd64`; AMD Ryzen 9
+5950X; five samples per sub-benchmark. The raw-copy row is a CPU control, not an
+end-to-end filesystem comparison.
+
+| Path | Raw samples (ns/op) | Median ns/op | Median B/op | Median allocs/op | Compressed bytes | Ratio |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Raw copy control | 47.77, 47.30, 47.17, 49.81, 47.37 | 47.37 | 48 | 1 | 282,624 | 1.00x |
+| Existing Zstandard settings | 2,847,729; 3,473,639; 2,908,295; 3,138,121; 2,774,193 | 2,908,295 | 19,133,259 | 71 | 120 | 0.0004246x |
+| Default single-worker Zstandard | 1,897,940; 2,245,179; 2,090,730; 2,220,986; 2,469,638 | 2,220,986 | 18,562,891 | 48 | 120 | 0.0004246x |
+
+Within the controlled pre-change run, the selected encoder was `1.31x` faster
+than the previous Zstandard settings, used `1.03x` less heap, and used `1.48x`
+fewer allocations. The compressed frame was `2,355x` smaller than the raw
+fixture. The absolute wall time varied between benchmark runs, so the within-run
+comparison is the relevant encoder result. Rotation still pays compression CPU;
+callers that prefer lower rotation latency can set
+`SegmentCompression: CommandJournalSegmentCompressionNone`.
+
+Raw commands:
+
+```text
+make m231-tt-g11-benchmark
+```
+
+Correctness covered default compressed rotation, explicit uncompressed fallback,
+replay, inspection, and CRC corruption rejection:
+
+```text
+make m231-tt-g11-zstd-test
+```

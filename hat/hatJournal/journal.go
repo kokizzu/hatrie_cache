@@ -47,7 +47,10 @@ const (
 	SegmentCompressionZstd SegmentCompression = "zstd"
 )
 
-const DefaultSegmentCompression = SegmentCompressionNone
+// DefaultSegmentCompression keeps immutable WAL segments compact while the
+// active journal remains uncompressed. Callers can select None explicitly
+// when rotation CPU is more important than retained storage.
+const DefaultSegmentCompression = SegmentCompressionZstd
 
 // ParseSegmentCompression returns the canonical archived-segment compression.
 // Empty input and "none" preserve the uncompressed segment format.

@@ -138,7 +138,7 @@ the memory/operational cost is disproportionate to the gain.
 | TT-G08 | Bounded key-affine parallel WAL decode and apply | Initial shared-trie implementation rejected: 2.58x slower and 6.26x higher measured bytes; revisit only with shard-local state and a merge design |
 | TT-G09 | WAL group-commit policy with latency/throughput controls | Measure fsync count, latency, and loss window |
 | TT-G10 | WAL segment index for bounded recovery seek | Implemented and measured in `TTG10_WAL_SEGMENT_SEEK.md` and `BENCHMARK.md`: 10.18x faster near-tail replay, 10.74x lower heap, and 10.45x fewer allocations |
-| TT-G11 | Independent WAL segment compression with checksummed frames | Corruption is detected before apply |
+| TT-G11 | Independent WAL segment compression with checksummed frames | Implemented and measured in `TTG11_WAL_SEGMENT_COMPRESSION.md` and `BENCHMARK.md`: CRC-protected Zstandard is the segmented-journal default, with explicit `none` fallback |
 | TT-G12 | Parallel snapshot serialization by space or shard | Snapshot digest matches serial output |
 | TT-G13 | Incremental snapshot manifests with changed-space tracking | Restore from base plus delta equals full snapshot |
 | TT-G14 | Per-space snapshot checksums and verified restore report | All supported types round-trip correctly |

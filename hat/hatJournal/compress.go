@@ -7,6 +7,10 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
+func newSegmentEncoder(destination io.Writer) (*zstd.Encoder, error) {
+	return zstd.NewWriter(destination, zstd.WithEncoderCRC(true), zstd.WithEncoderConcurrency(1))
+}
+
 // CompressFile writes a CRC-protected zstd frame from sourcePath to
 // destinationPath. Callers can publish the destination atomically after this
 // function returns successfully.
@@ -21,7 +25,7 @@ func CompressFile(sourcePath string, destinationPath string) error {
 	if err != nil {
 		return err
 	}
-	encoder, err := zstd.NewWriter(destination, zstd.WithEncoderCRC(true))
+	encoder, err := newSegmentEncoder(destination)
 	if err != nil {
 		_ = destination.Close()
 		return err

@@ -53,4 +53,24 @@ func BenchmarkCommandJournalSegmentCompression(b *testing.B) {
 			}
 		}
 	})
+	b.Run("zstd-concurrency-1", func(b *testing.B) {
+		b.ReportAllocs()
+		b.SetBytes(int64(len(raw)))
+		b.ReportMetric(float64(len(raw)), "raw_bytes")
+		b.ReportMetric(float64(compressed.Len()), "compressed_bytes")
+		b.ReportMetric(float64(compressed.Len())/float64(len(raw)), "compression_ratio")
+		for range b.N {
+			var output bytes.Buffer
+			encoder, err := zstd.NewWriter(&output, zstd.WithEncoderCRC(true), zstd.WithEncoderConcurrency(1))
+			if err != nil {
+				b.Fatal(err)
+			}
+			if _, err := encoder.Write(raw); err != nil {
+				b.Fatal(err)
+			}
+			if err := encoder.Close(); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }
