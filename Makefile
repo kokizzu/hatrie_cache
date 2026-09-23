@@ -24691,3 +24691,27 @@ push-ch046-compression:
 	bash scripts/push-ch046-compression.sh
 benchmark-mz026-adaptive:
 	bash scripts/benchmark-mz026-after.sh
+.PHONY: test-chg34-mutation-control
+test-chg34-mutation-control:
+	bash scripts/test-chg34-mutation-control.sh
+.PHONY: format-chg34-mutation-control test-chg34-mutation-control-package race-chg34-mutation-control vet-chg34-mutation-control bench-chg34-mutation-control
+format-chg34-mutation-control:
+	bash scripts/format-chg34-mutation-control.sh
+
+test-chg34-mutation-control-package:
+	bash scripts/test-chg34-mutation-control-package.sh
+
+race-chg34-mutation-control:
+	bash scripts/race-chg34-mutation-control.sh
+
+vet-chg34-mutation-control:
+	bash scripts/vet-chg34-mutation-control.sh
+
+bench-chg34-mutation-control:
+	bash scripts/bench-chg34-mutation-control.sh
+.PHONY: commit-chg34-mutation-control push-chg34-mutation-control
+commit-chg34-mutation-control:
+	bash scripts/commit-chg34-mutation-control.sh
+
+push-chg34-mutation-control:
+	bash scripts/push-chg34-mutation-control.sh
