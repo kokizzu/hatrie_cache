@@ -235,6 +235,7 @@ security guidance before exposing it on a network.
 - Tarantool-style tuple format version negotiation: [TUPLE_FORMAT_NEGOTIATION.md](TUPLE_FORMAT_NEGOTIATION.md)
 - Compatible tuple-format readers for additive schema versions: [T228_TUPLE_FORMAT_COMPATIBILITY.md](T228_TUPLE_FORMAT_COMPATIBILITY.md)
 - Opt-in before-replace validation and conflict hooks: [T229_BEFORE_REPLACE.md](T229_BEFORE_REPLACE.md)
+- Opt-in on-replace changefeed hooks with old/new images: [T230_ON_REPLACE_CHANGEFEED.md](T230_ON_REPLACE_CHANGEFEED.md)
 - Tarantool-inspired adaptive per-tuple compression: [TT045_TUPLE_COMPRESSION.md](TT045_TUPLE_COMPRESSION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#tt-045-tuple-level-compression)
 - Snapshot-consistent ordered index cursors: [ORDERED_SNAPSHOT_CURSOR.md](ORDERED_SNAPSHOT_CURSOR.md)
 - Opt-in per-space memory quotas: [SPACE_MEMORY_QUOTA.md](SPACE_MEMORY_QUOTA.md)
@@ -4329,6 +4330,16 @@ so it can enforce conflict policy without exposing storage memory. It is
 disabled by default, and ordinary input/capacity validation runs first. See
 [T229_BEFORE_REPLACE.md](T229_BEFORE_REPLACE.md) and the measurements in
 [BENCHMARK.md](BENCHMARK.md#t229-before-replace-triggers).
+
+## On-Replace Changefeed Hooks
+
+`SpaceOptions.OnReplace` emits copied old/new images after successful
+insert, update, and delete operations. It is disabled by default and can be
+connected directly to the bounded `hatReplication.SpaceChangefeed` publisher.
+The callback is serialized with mutations so event order follows storage order;
+use `BeforeReplace` when a callback must reject a write. See
+[T230_ON_REPLACE_CHANGEFEED.md](T230_ON_REPLACE_CHANGEFEED.md) and the raw
+measurements in [BENCHMARK.md](BENCHMARK.md#t230-on-replace-changefeed-hooks).
 
 ## SQL Logical Predicate Short-Circuiting
 

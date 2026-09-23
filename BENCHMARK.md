@@ -37353,6 +37353,50 @@ enabled callback costs about 2.0x against the same-invocation disabled control
 and adds 16 B/op plus two allocations for copied event images. Invalid writes
 are rejected before the callback and rejected conflicts do not mutate state.
 
+<a id="t230-on-replace-changefeed-hooks"></a>
+## T230 On-Replace Changefeed Hooks
+
+This benchmark compares the existing memtx replacement path before T230, the
+same path after T230 with `OnReplace` disabled, and a no-op `OnReplace` hook.
+The enabled row includes the intentional copied old/new image cost.
+
+Command: `make benchmark-t230` (`-benchmem -count=5 -cpu=1`)
+Platform: Linux/amd64, AMD Ryzen 9 5950X
+Samples: five runs; table values are medians.
+
+| Workload | Median CPU | Memory | Relative CPU |
+| --- | ---: | ---: | ---: |
+| Existing path before T230 | 48.40 ns/op | 8 B/op, 1 alloc/op | 1.00x |
+| Hook disabled after T230 | 50.38 ns/op | 8 B/op, 1 alloc/op | 1.04x |
+| Hook enabled, no-op callback | 96.66 ns/op | 24 B/op, 3 allocs/op | 1.92x |
+
+The default path remains allocation-equivalent and within benchmark noise of
+the pre-change control. The opt-in hook adds 46.28 ns/op, 16 B/op, and two
+allocations for the copied event images and serialized callback.
+
+### Raw T230 Output
+
+```text
+Before, make benchmark-t230-before:
+BenchmarkT230SpacePutBaseline  26372954  48.80 ns/op  8 B/op  1 allocs/op
+BenchmarkT230SpacePutBaseline  23672271  51.33 ns/op  8 B/op  1 allocs/op
+BenchmarkT230SpacePutBaseline  21333800  47.03 ns/op  8 B/op  1 allocs/op
+BenchmarkT230SpacePutBaseline  26293842  48.33 ns/op  8 B/op  1 allocs/op
+BenchmarkT230SpacePutBaseline  25470004  48.40 ns/op  8 B/op  1 allocs/op
+
+After, make benchmark-t230:
+BenchmarkT230SpacePutBaseline  25564536  51.29 ns/op  8 B/op  1 allocs/op
+BenchmarkT230SpacePutBaseline  23372583  48.97 ns/op  8 B/op  1 allocs/op
+BenchmarkT230SpacePutBaseline  24717015  48.84 ns/op  8 B/op  1 allocs/op
+BenchmarkT230SpacePutBaseline  25417533  51.03 ns/op  8 B/op  1 allocs/op
+BenchmarkT230SpacePutBaseline  22234324  50.38 ns/op  8 B/op  1 allocs/op
+BenchmarkT230SpaceOnReplace    12503095  98.16 ns/op 24 B/op  3 allocs/op
+BenchmarkT230SpaceOnReplace    12741025  98.85 ns/op 24 B/op  3 allocs/op
+BenchmarkT230SpaceOnReplace    11715085  96.66 ns/op 24 B/op  3 allocs/op
+BenchmarkT230SpaceOnReplace    12630963  94.18 ns/op 24 B/op  3 allocs/op
+BenchmarkT230SpaceOnReplace    12671566  96.19 ns/op 24 B/op  3 allocs/op
+```
+
 ### Raw T229 Output
 
 ```text
