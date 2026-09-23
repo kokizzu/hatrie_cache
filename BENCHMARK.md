@@ -38523,3 +38523,30 @@ step, ordinary query latency and allocations are unchanged.
 See [CH050_PLAN_REPRODUCIBILITY_HASH.md](CH050_PLAN_REPRODUCIBILITY_HASH.md).
 
 ## MZ038 Source Lag Alerts
+## TT-G42 Per-Peer Adaptive Flow Control
+
+This Tarantool-inspired controller applies lag hysteresis independently to each
+replication peer. It is disabled by default, retains at most the configured
+number of peer states, and never owns or drops queue data.
+
+Command:
+
+```text
+make m237-tt-g42-benchmark
+```
+
+Five runs on the repository's AMD Ryzen 9 5950X host produced these medians;
+the registry case round-robins 16 registered peers:
+
+| Operation | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Existing single-relay admission | 6.905 | 0 | 0 | 1.00x |
+| Per-peer registry observation | 32.42 | 0 | 0 | 4.70x |
+
+The added map/lock lookup costs about 25.5 ns per observation but still uses
+zero heap bytes and zero allocations. Disabled mode does not retain peer state,
+and existing single-relay behavior is untouched.
+
+See [TTG42_PEER_FLOW_CONTROL.md](TTG42_PEER_FLOW_CONTROL.md).
+
+## CH050 Plan Reproducibility Hash

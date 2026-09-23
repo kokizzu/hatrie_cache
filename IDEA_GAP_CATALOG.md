@@ -169,7 +169,7 @@ the memory/operational cost is disproportionate to the gain.
 | TT-G39 | Prepared statement cache keyed by schema generation | Schema change cannot reuse an invalid plan |
 | TT-G40 | Multiplexed pipelined request frames with ordered responses | Wire order and cancellation are preserved |
 | TT-G41 | Negotiated network compression with per-frame limits | Decompression bombs and oversized frames are rejected |
-| TT-G42 | Replication lag adaptive flow control per peer | Slow peers cannot exhaust sender memory |
+| TT-G42 | Replication lag adaptive flow control per peer | Implemented and measured in `TTG42_PEER_FLOW_CONTROL.md` and `BENCHMARK.md`: bounded independent hysteresis with zero-observation allocations |
 | TT-G43 | Replica-read consistency token for minimum LSN reads | Stale replicas are rejected or retried |
 | TT-G44 | System catalog for spaces, indexes, WAL, and replica state | Stable bounded rows and redaction policy |
 | TT-G45 | Audit log for schema and data-operation metadata | Audit entries are durable and privacy-safe |

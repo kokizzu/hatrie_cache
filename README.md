@@ -5116,6 +5116,12 @@ lag and pause state. See
 [T209_RELAY_APPLIER_BACKPRESSURE.md](T209_RELAY_APPLIER_BACKPRESSURE.md) and
 [BENCHMARK.md](BENCHMARK.md#t209-relayapplier-backpressure).
 
+Tarantool-inspired per-peer adaptive relay flow control is available as an
+opt-in bounded controller through
+`hatReplication.NewPeerRelayBackpressure`; see
+[TTG42_PEER_FLOW_CONTROL.md](TTG42_PEER_FLOW_CONTROL.md) and
+[BENCHMARK.md](BENCHMARK.md#tt-g42-per-peer-adaptive-flow-control).
+
 ## Master-Master Conflict Hooks
 
 `hatReplication.ConflictPolicy` accepts an optional `ConflictHook` for

@@ -27649,6 +27649,46 @@ m233-commit:
 .PHONY: m233-push
 m233-push:
 	bash scripts/m233-push.sh
+.PHONY: m237-tt-g42-test
+m237-tt-g42-test:
+	bash scripts/m237-tt-g42-test.sh
+
+.PHONY: m237-tt-g42-format
+m237-tt-g42-format:
+	bash scripts/m237-tt-g42-format.sh
+
+.PHONY: m237-tt-g42-benchmark
+m237-tt-g42-benchmark:
+	bash scripts/m237-tt-g42-benchmark.sh
+
+.PHONY: m237-tt-g42-race
+m237-tt-g42-race:
+	bash scripts/m237-tt-g42-race.sh
+
+.PHONY: m237-tt-g42-vet
+m237-tt-g42-vet:
+	bash scripts/m237-tt-g42-vet.sh
+
+.PHONY: m237-tt-g42-package-test
+m237-tt-g42-package-test:
+	bash scripts/m237-tt-g42-package-test.sh
+
+.PHONY: m237-tt-g42-docs
+m237-tt-g42-docs:
+	bash scripts/m237-tt-g42-docs.sh
+
+.PHONY: m237-stage
+m237-stage:
+	bash scripts/m237-stage.sh
+
+.PHONY: m237-commit
+m237-commit:
+	bash scripts/m237-commit.sh
+
+.PHONY: m237-push
+m237-push:
+	bash scripts/m237-push.sh
+
 .PHONY: m235-ch-g50-test
 m235-ch-g50-test:
 	bash scripts/m235-ch-g50-test.sh
