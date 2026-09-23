@@ -142,6 +142,9 @@ type MonitoringOptions struct {
 	Replicator                      *HTTPReplicator
 	ReplicationSafety               *ReplicationSafetyStore
 	EnforceLeaderWrites             bool
+	// EnforceLeaderFencing requires public and internal writes to carry the
+	// current topology fencing generation. It is disabled by default.
+	EnforceLeaderFencing bool
 	// RequireHealthyReplicaReads rejects stale-sensitive reads when the local
 	// node is offline, timed out, in maintenance, or absent from topology.
 	// It is disabled by default for backward compatibility.
@@ -360,6 +363,7 @@ type commandExecutionOptions struct {
 	Replicator                          *HTTPReplicator
 	ReplicationSafety                   *ReplicationSafetyStore
 	EnforceLeaderWrites                 bool
+	EnforceLeaderFencing                bool
 	RequireHealthyReplicaReads          bool
 	WriteQuorum                         int
 	WriteQuorumPolicy                   *WriteQuorumPolicy
@@ -1967,6 +1971,7 @@ func (handler *MonitoringHandler) handleCommands(w http.ResponseWriter, r *http.
 		Replicator:                     handler.options.Replicator,
 		ReplicationSafety:              handler.options.ReplicationSafety,
 		EnforceLeaderWrites:            handler.options.EnforceLeaderWrites,
+		EnforceLeaderFencing:           handler.options.EnforceLeaderFencing,
 		RequireHealthyReplicaReads:     handler.options.RequireHealthyReplicaReads,
 		WriteQuorum:                    handler.options.WriteQuorum,
 		WriteQuorumPolicy:              handler.options.WriteQuorumPolicy,
@@ -2103,6 +2108,9 @@ func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheComman
 	if trie == nil {
 		return commandError("trie is not configured"), false
 	}
+	if response, rejected := rejectStrictReplicationFencing(request, options); rejected {
+		return response, true
+	}
 	switch normalizedCommand(request.Command) {
 	case replicationDigestCommand:
 		return executeInternalReplicationDigest(ctx, trie, request, options)
@@ -2140,7 +2148,7 @@ func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheComman
 	if handled {
 		return response, rejected
 	}
-	if response, rejected := rejectNonLeaderWrite(request, options.NodeName, options.Election, options.EnforceLeaderWrites); rejected {
+	if response, rejected := rejectNonLeaderWrite(request, options.NodeName, options.Topology, options.Election, options.EnforceLeaderWrites, options.EnforceLeaderFencing); rejected {
 		return response, true
 	}
 	requiredWriteQuorum, err := commandWriteQuorumForRequest(request, options)
@@ -2157,7 +2165,7 @@ func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheComman
 		effects.batch = false
 		options.Journal.mu.Lock()
 		response, stopped := effects.execute(ctx, trie, request, false, func() CacheCommandResponse {
-			return trie.ExecuteCommand(request)
+			return trie.ExecuteCommand(stripLeaderFencingToken(request))
 		})
 		if err := effects.commitLocked(trie); err != nil {
 			response = commandError(err.Error())
@@ -2170,6 +2178,7 @@ func executeCacheCommand(ctx context.Context, trie *HatTrie, request CacheComman
 		effects.publish(ctx)
 		return response, stopped
 	}
+	request = stripLeaderFencingToken(request)
 	if options.Journal != nil {
 		response = options.Journal.ExecuteCommand(trie, request)
 	} else {
@@ -2455,8 +2464,10 @@ type publicCommandBatchEffects struct {
 	dirtyTracker       *LevelDBDirtyTracker
 	replicator         *HTTPReplicator
 	nodeName           string
+	topology           *TopologyStore
 	election           *ElectionStore
 	enforceLeader      bool
+	enforceFencing     bool
 	appendStarted      bool
 	appended           bool
 	initialAppend      commandJournalAppendState
@@ -2476,13 +2487,15 @@ type publicCommandBatchEffects struct {
 
 func newPublicCommandBatchEffects(options commandExecutionOptions) *publicCommandBatchEffects {
 	effects := &publicCommandBatchEffects{
-		journal:       options.Journal,
-		dirtyTracker:  options.DirtyTracker,
-		replicator:    options.Replicator,
-		nodeName:      options.NodeName,
-		election:      options.Election,
-		enforceLeader: options.EnforceLeaderWrites,
-		batch:         true,
+		journal:        options.Journal,
+		dirtyTracker:   options.DirtyTracker,
+		replicator:     options.Replicator,
+		nodeName:       options.NodeName,
+		topology:       options.Topology,
+		election:       options.Election,
+		enforceLeader:  options.EnforceLeaderWrites,
+		enforceFencing: options.EnforceLeaderFencing,
+		batch:          true,
 	}
 	effects.deferJournal = effects.replicator.usesJournalOutbox(effects.journal)
 	return effects
@@ -2492,9 +2505,10 @@ func (effects *publicCommandBatchEffects) execute(ctx context.Context, trie *Hat
 	if err := ctx.Err(); err != nil {
 		return commandError(err.Error()), true
 	}
-	if response, rejected := rejectNonLeaderWrite(request, effects.nodeName, effects.election, effects.enforceLeader); rejected {
+	if response, rejected := rejectNonLeaderWrite(request, effects.nodeName, effects.topology, effects.election, effects.enforceLeader, effects.enforceFencing); rejected {
 		return response, false
 	}
+	request = stripLeaderFencingToken(request)
 
 	journaled := effects.journal != nil && commandShouldJournal(request)
 	deferredJournal := journaled && effects.deferJournal
@@ -3005,8 +3019,8 @@ func checkReplicationSafetyWithMetadata(
 	return token, CacheCommandResponse{}, false, false
 }
 
-func rejectNonLeaderWrite(request CacheCommandRequest, nodeName string, election *ElectionStore, enforce bool) (CacheCommandResponse, bool) {
-	if !enforce || !commandRequiresLeader(request) {
+func rejectNonLeaderWrite(request CacheCommandRequest, nodeName string, topology *TopologyStore, election *ElectionStore, enforceLeader, enforceFencing bool) (CacheCommandResponse, bool) {
+	if (!enforceLeader && !enforceFencing) || !commandRequiresLeader(request) {
 		return CacheCommandResponse{}, false
 	}
 	if election == nil {
@@ -3021,6 +3035,26 @@ func rejectNonLeaderWrite(request CacheCommandRequest, nodeName string, election
 	}
 	if route.Leader.Leader != strings.TrimSpace(nodeName) {
 		return commandError("local node is not elected leader for key; leader is " + route.Leader.Leader), true
+	}
+	if !enforceFencing {
+		return CacheCommandResponse{}, false
+	}
+	if topology == nil {
+		return commandError("leader fencing requires a topology store"), true
+	}
+	ownership, ok := topology.OwnershipForKey(strings.TrimSpace(request.Key))
+	if !ok {
+		return commandError("topology cannot determine fencing generation"), true
+	}
+	fencingToken, present, err := replicationFencingToken(request)
+	if err != nil {
+		return commandError("invalid leader fencing token"), true
+	}
+	if !present {
+		return commandError("leader fencing token is required"), true
+	}
+	if fencingToken != ownership.FencingToken {
+		return commandError("leader fencing token mismatch"), true
 	}
 	return CacheCommandResponse{}, false
 }

@@ -25584,3 +25584,38 @@ commit-t202:
 .PHONY: push-t202
 push-t202:
 	bash scripts/push-t202.sh
+.PHONY: test-t203
+test-t203:
+	bash scripts/test-t203-leader-fencing.sh
+
+.PHONY: format-t203
+format-t203:
+	bash scripts/format-t203.sh
+
+.PHONY: benchmark-t203
+benchmark-t203:
+	bash scripts/benchmark-t203.sh
+
+.PHONY: test-t203-package
+test-t203-package:
+	bash scripts/test-t203-package.sh
+
+.PHONY: race-t203
+race-t203:
+	bash scripts/race-t203.sh
+
+.PHONY: vet-t203
+vet-t203:
+	bash scripts/vet-t203.sh
+
+.PHONY: stage-t203
+stage-t203:
+	bash scripts/stage-t203.sh
+
+.PHONY: commit-t203
+commit-t203:
+	bash scripts/commit-t203.sh
+
+.PHONY: push-t203
+push-t203:
+	bash scripts/push-t203.sh

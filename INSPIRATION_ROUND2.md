@@ -144,7 +144,7 @@ operator control remain the preferred deployment model.
 - [x] T202 Automatic leader election for a replica set. Implemented in
   [`T202_AUTOMATIC_LEADER_ELECTION.md`](T202_AUTOMATIC_LEADER_ELECTION.md),
   with an opt-in heartbeat requirement and caller-owned refresh loop.
-- [ ] T203 Strict leader fencing against stale writers after failover.
+- [x] T203 Strict leader fencing against stale writers after failover; see [T203_LEADER_FENCING.md](T203_LEADER_FENCING.md) and [BENCHMARK.md](BENCHMARK.md#t203-strict-leader-fencing).
 - [ ] T204 Supervised failover with explicit operator override and recovery state.
 - [ ] T205 LSN-based replication lag and apply-throughput metrics.
 - [ ] T206 Deterministic replica bootstrap and join workflow.

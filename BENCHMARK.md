@@ -19654,6 +19654,44 @@ BenchmarkGroupAverageInt64DifferentialRows/after_average-32 622 356199 ns/op 780
 PASS
 ```
 
+## T203: Strict Leader Fencing
+
+Command:
+
+```text
+make benchmark-t203
+```
+
+Linux/amd64, AMD Ryzen 9 5950X, five samples per case. This isolates the
+leader-write admission check. The legacy path checks the elected leader only;
+the strict path additionally parses and compares the current fencing token.
+
+| Path | Median | Memory | Allocations | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Legacy leader check | 592.7 ns/op | 344 B/op | 5 allocs/op | baseline |
+| Strict current-token check | 744.0 ns/op | 360 B/op | 6 allocs/op | 1.255x time; +16 B; +1 alloc |
+
+Strict fencing is a correctness and failover-safety feature, not a speed
+optimization. It adds about 25.5% to this isolated admission check and is
+therefore disabled by default. The benchmark does not include network,
+journaling, or trie mutation time.
+
+Raw output:
+
+```text
+BenchmarkT203LeaderWriteFencing/LegacyLeaderCheck-32  2099971  582.1 ns/op  344 B/op  5 allocs/op
+BenchmarkT203LeaderWriteFencing/LegacyLeaderCheck-32  2128917  592.3 ns/op  344 B/op  5 allocs/op
+BenchmarkT203LeaderWriteFencing/LegacyLeaderCheck-32  2050030  592.7 ns/op  344 B/op  5 allocs/op
+BenchmarkT203LeaderWriteFencing/LegacyLeaderCheck-32  1999748  618.2 ns/op  344 B/op  5 allocs/op
+BenchmarkT203LeaderWriteFencing/LegacyLeaderCheck-32  1932793  611.8 ns/op  344 B/op  5 allocs/op
+BenchmarkT203LeaderWriteFencing/StrictLeaderCheck-32  1482032  743.0 ns/op  360 B/op  6 allocs/op
+BenchmarkT203LeaderWriteFencing/StrictLeaderCheck-32  1591327  744.0 ns/op  360 B/op  6 allocs/op
+BenchmarkT203LeaderWriteFencing/StrictLeaderCheck-32  1511143  777.1 ns/op  360 B/op  6 allocs/op
+BenchmarkT203LeaderWriteFencing/StrictLeaderCheck-32  1627564  752.9 ns/op  360 B/op  6 allocs/op
+BenchmarkT203LeaderWriteFencing/StrictLeaderCheck-32  1587135  743.9 ns/op  360 B/op  6 allocs/op
+PASS
+```
+
 ## Rejected Generic Keyed Differential Reduction
 
 Workload: 256 weighted rows across 16 groups, comparing an arbitrary

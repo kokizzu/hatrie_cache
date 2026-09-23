@@ -88,6 +88,7 @@ func (server *CacheGRPCServer) scalarBatchRequiresCompatibilityPath() bool {
 		server.options.DirtyTracker != nil ||
 		server.options.Replicator != nil ||
 		server.options.EnforceLeaderWrites ||
+		server.options.EnforceLeaderFencing ||
 		server.options.RequireHealthyReplicaReads
 }
 
@@ -516,6 +517,7 @@ func (server *CacheGRPCServer) executeScalarBatchCompatibility(ctx context.Conte
 		Replicator:                 server.options.Replicator,
 		ReplicationSafety:          server.options.ReplicationSafety,
 		EnforceLeaderWrites:        server.options.EnforceLeaderWrites,
+		EnforceLeaderFencing:       server.options.EnforceLeaderFencing,
 		RequireHealthyReplicaReads: server.options.RequireHealthyReplicaReads,
 	})
 	return scalarBatchResponseFromCommand(request, result)

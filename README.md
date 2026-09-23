@@ -4944,3 +4944,12 @@ Replica liveness can be refreshed with `ElectionStore.Run`; set
 is eligible. The default remains `false` for compatibility. See
 [`T202_AUTOMATIC_LEADER_ELECTION.md`](T202_AUTOMATIC_LEADER_ELECTION.md) for
 the lifecycle example and safety boundary.
+
+## Strict Leader Fencing
+
+`EnforceLeaderFencing` is an opt-in stale-writer guard for failover. It
+requires public and internal writes to carry the current topology generation
+in `hatCache.LeaderFencingTokenPair`; missing or stale generations are
+rejected before mutation. The default is `false`. See
+[T203_LEADER_FENCING.md](T203_LEADER_FENCING.md) for configuration, client
+requests, batch limitations, safety boundaries, and measurements.

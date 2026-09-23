@@ -327,6 +327,7 @@ func (server *CacheGRPCServer) executeStructuredBatchCompatibilityPrepared(ctx c
 		Replicator:                 server.options.Replicator,
 		ReplicationSafety:          server.options.ReplicationSafety,
 		EnforceLeaderWrites:        server.options.EnforceLeaderWrites,
+		EnforceLeaderFencing:       server.options.EnforceLeaderFencing,
 		RequireHealthyReplicaReads: server.options.RequireHealthyReplicaReads,
 	})
 	return structuredBatchResponseFromCommand(request, result)

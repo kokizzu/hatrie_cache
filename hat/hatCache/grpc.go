@@ -48,12 +48,15 @@ type CacheGRPCOptions struct {
 	DirtyTracker        *LevelDBDirtyTracker
 	// ReplicationApplyThrottle optionally gates each ordered replication batch
 	// before it mutates the local trie. Nil preserves the legacy path.
-	ReplicationApplyThrottle   ReplicationApplyThrottle
-	Topology                   *TopologyStore
-	Election                   *ElectionStore
-	Replicator                 *HTTPReplicator
-	ReplicationSafety          *ReplicationSafetyStore
-	EnforceLeaderWrites        bool
+	ReplicationApplyThrottle ReplicationApplyThrottle
+	Topology                 *TopologyStore
+	Election                 *ElectionStore
+	Replicator               *HTTPReplicator
+	ReplicationSafety        *ReplicationSafetyStore
+	EnforceLeaderWrites      bool
+	// EnforceLeaderFencing requires public and internal writes to carry the
+	// current topology fencing generation. It is disabled by default.
+	EnforceLeaderFencing       bool
 	RequireHealthyReplicaReads bool
 	// ReplicationSchema identifies the schema expected on internal replication.
 	ReplicationSchema ReplicationSchemaContract
@@ -438,6 +441,7 @@ func (server *CacheGRPCServer) executeGRPCCommand(ctx context.Context, request *
 		Replicator:                     server.options.Replicator,
 		ReplicationSafety:              server.options.ReplicationSafety,
 		EnforceLeaderWrites:            server.options.EnforceLeaderWrites,
+		EnforceLeaderFencing:           server.options.EnforceLeaderFencing,
 		RequireHealthyReplicaReads:     server.options.RequireHealthyReplicaReads,
 		WriteQuorum:                    server.options.WriteQuorum,
 		WriteQuorumPolicy:              server.options.WriteQuorumPolicy,
