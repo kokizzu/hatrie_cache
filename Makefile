@@ -23273,6 +23273,21 @@ t242-commit:
 t242-push:
 	bash scripts/push-t242.sh
 
+t244-245-test:
+	bash scripts/t244-245-test.sh
+
+t244-245-benchmark:
+	bash scripts/t244-245-benchmark.sh
+
+t244-245-stage:
+	bash scripts/stage-t244-245.sh
+
+t244-245-commit:
+	bash scripts/commit-t244-245.sh
+
+t244-245-push:
+	bash scripts/push-t244-245.sh
+
 .PHONY: audit-hatrie-tmp-inventory
 audit-hatrie-tmp-inventory:
 	bash scripts/audit-hatrie-tmp-inventory.sh
