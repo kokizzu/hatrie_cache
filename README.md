@@ -4302,6 +4302,14 @@ opt-in and remains off the ordinary query hot path. See
 [T226_INDEX_HINTS.md](T226_INDEX_HINTS.md) and
 [TU26_INDEX_STRATEGY_INSPECTION.md](TU26_INDEX_STRATEGY_INSPECTION.md).
 
+## SQL Schema Field Validation
+
+`hatSchema.ValidateRows` validates declared field types, nullability, and enum
+values before applying row constraints. Call `hatSchema.ValidateFieldValue`
+when a producer needs to reject one field before building a candidate row. See
+[T227_FIELD_VALIDATION.md](T227_FIELD_VALIDATION.md) and
+[SCHEMA_CONSTRAINTS.md](SCHEMA_CONSTRAINTS.md).
+
 ## SQL Logical Predicate Short-Circuiting
 
 Columnar batch evaluation short-circuits deterministic, total right-hand

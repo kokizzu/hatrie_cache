@@ -26446,3 +26446,27 @@ commit-t226:
 	bash scripts/commit-t226.sh
 push-t226:
 	bash scripts/push-t226.sh
+.PHONY: test-t227
+test-t227:
+	bash scripts/test-t227.sh
+.PHONY: benchmark-t227
+benchmark-t227:
+	bash scripts/benchmark-t227.sh
+.PHONY: format-t227 race-t227 vet-t227 verify-t227
+format-t227:
+	bash scripts/format-t227.sh
+race-t227:
+	bash scripts/race-t227.sh
+vet-t227:
+	bash scripts/vet-t227.sh
+verify-t227:
+	bash scripts/verify-t227.sh
+.PHONY: review-t227 stage-t227 commit-t227 push-t227
+review-t227:
+	bash scripts/review-t227.sh
+stage-t227:
+	bash scripts/stage-t227.sh
+commit-t227:
+	bash scripts/commit-t227.sh
+push-t227:
+	bash scripts/push-t227.sh

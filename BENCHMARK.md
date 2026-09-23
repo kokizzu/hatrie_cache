@@ -37285,3 +37285,23 @@ Samples: five `-benchmem` runs; table values are medians.
 The inspection call is bounded by the supplied candidate slice and is not
 invoked by ordinary query execution. The measurable cost is therefore paid
 only by callers that explicitly request planner diagnostics.
+<a id="t227-per-field-schema-validation"></a>
+## T227 Per-Field Schema Validation
+
+`hatSchema.ValidateRows` now checks each declared field's nullability and Go
+value shape before evaluating table constraints. This benchmark measures the
+same valid three-field row before and after the validation path; it is a
+correctness-boundary cost measurement, not a query acceleration claim.
+
+Command: `make benchmark-t227`
+Platform: Linux/amd64, AMD Ryzen 9 5950X
+Samples: five `-benchmem` runs; table values are medians.
+
+| Workload | Median CPU | Memory | Relative CPU |
+| --- | ---: | ---: | ---: |
+| Before field validation | 194.1 ns/op | 0 B/op, 0 allocs/op | 1.00x |
+| After field validation | 214.2 ns/op | 0 B/op, 0 allocs/op | 1.10x |
+
+The new checks add 20.1 ns/op, about 10.4% CPU, and no allocations. The
+validation is explicit and read-only; callers pay it to prevent malformed
+typed or nullable values from reaching later constraint evaluation.

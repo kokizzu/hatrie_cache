@@ -42,6 +42,12 @@ Schema and constraint names are normalized and included in the schema
 fingerprint, so incompatible definitions remain distinguishable during
 migrations and replication checks.
 
+Before those row constraints run, `ValidateRows` validates every declared
+field with `ValidateFieldValue`. Nullable fields accept `nil`; `NotNull`
+fields reject it. Scalar Go types, enum membership, binary values, and JSON
+values are checked against the declared column type, so a malformed row is
+rejected before it can reach a CHECK, UNIQUE, or foreign-key comparison.
+
 ## Verification
 
 The schema package tests cover valid and invalid foreign-key datasets,

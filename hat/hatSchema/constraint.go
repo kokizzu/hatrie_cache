@@ -113,8 +113,8 @@ func ValidateRows(schema Schema, sourceName string, rows []Row, resolver SourceR
 func validateRows(source Source, rows []Row, resolve SourceRowsResolver) error {
 	for rowIndex, row := range rows {
 		for _, column := range source.Columns {
-			if column.NotNull && row[column.Name] == nil {
-				return constraintViolation(source, "column "+column.Name+" NOT NULL", rowIndex)
+			if err := ValidateFieldValue(column, row[column.Name]); err != nil {
+				return fmt.Errorf("hatSchema: source %q row %d: %w", source.Name, rowIndex+1, err)
 			}
 		}
 		for _, constraint := range source.Constraints {
