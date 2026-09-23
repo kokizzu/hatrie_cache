@@ -5219,3 +5219,13 @@ the shared `TypedTableJoinArrangement` lease exposes the same methods. Existing
 `ApplyLeft`, `ApplyRight`, and `Rows` behavior remains unchanged. See
 [M215_DELTA_JOIN_MAINTENANCE.md](M215_DELTA_JOIN_MAINTENANCE.md) and
 [BENCHMARK.md](BENCHMARK.md#m215-delta-join-maintenance).
+
+## Incremental Top-K
+
+Use the opt-in `hatSql.IncrementalTopK` maintainer for exact weighted Top-K
+updates. It maintains SQL order under signed inserts and retractions, returns
+only selected changes, and can report rank-only movement with
+`ApplyWithRankChanges`. The selected result is bounded by `K`, but exact
+replacement after arbitrary deletes retains all active candidates. See
+[M216_INCREMENTAL_TOP_K.md](M216_INCREMENTAL_TOP_K.md) and
+[BENCHMARK.md](BENCHMARK.md#m216-incremental-top-k).

@@ -38024,3 +38024,31 @@ intentionally costs more than state-only `ApplyLeft`, because it produces 512
 independent signed pair snapshots. See
 [M215_DELTA_JOIN_MAINTENANCE.md](M215_DELTA_JOIN_MAINTENANCE.md) for API
 semantics and raw samples.
+
+## M216: Incremental Top-K
+
+The requested incremental Top-K capability was already present as the C213
+`IncrementalTopK` maintainer. This verification compares its ordered signed
+updates with rebuilding and sorting the full 10,000-row relation for every
+update. Both paths use `K=20` and the same deterministic update sequence.
+
+Workload: five `-benchmem` samples on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative CPU | Relative bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Full rebuild and sort | 85,996 | 1,089 | 7 | 1.00x | 1.00x |
+| Incremental Top-K | 3,158 | 1,213 | 7 | 0.0367x (`27.2x` faster) | 1.114x (`11.4%` higher) |
+
+Raw samples:
+
+```text
+BenchmarkMZ037TopKRebuildBaseline: 85996 1089 7; 84782 1089 7; 88429 1089 7; 86790 1090 7; 85688 1090 7
+BenchmarkMZ037TopKIncremental:     3065  1213 7; 3293  1212 7; 3298  1213 7; 3158  1212 7; 2770  1212 7
+```
+
+This is a CPU improvement, not a retained-memory improvement. `B/op` measures
+transient allocation and is slightly higher for the incremental path; both
+paths report seven allocations per update. Exact deletes and replacement
+promotion require retaining every active candidate, so only the selected
+output is bounded by `K`. See [M216_INCREMENTAL_TOP_K.md](M216_INCREMENTAL_TOP_K.md)
+for API semantics and the state-size limitation.
