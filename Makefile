@@ -26795,3 +26795,43 @@ commit-t234:
 .PHONY: push-t234
 push-t234:
 	bash scripts/push-t234.sh
+
+.PHONY: benchmark-t235-before
+benchmark-t235-before:
+	bash scripts/benchmark-t235-before.sh
+
+.PHONY: test-t235
+test-t235:
+	bash scripts/test-t235.sh
+benchmark-t235:
+	bash scripts/benchmark-t235.sh
+
+benchmark-t235-one:
+	BENCHMARK_COUNT=1 bash scripts/benchmark-t235.sh
+
+benchmark-t235-before-one:
+	bash scripts/benchmark-t235-before-one.sh
+
+
+format-t235:
+	bash scripts/format-t235.sh
+
+race-t235:
+	bash scripts/race-t235.sh
+
+vet-t235:
+	bash scripts/vet-t235.sh
+
+test-t235-package:
+	bash scripts/test-t235-package.sh
+
+verify-t235: format-t235 test-t235 race-t235 vet-t235 test-t235-package benchmark-t235
+
+stage-t235:
+	bash scripts/stage-t235.sh
+
+commit-t235:
+	bash scripts/commit-t235.sh
+
+push-t235:
+	bash scripts/push-t235.sh

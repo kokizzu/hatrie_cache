@@ -5147,3 +5147,11 @@ The receiver stages and validates the complete stream before cutover, and the
 existing file-based snapshot APIs remain unchanged. See
 [T214_SNAPSHOT_STREAMING.md](T214_SNAPSHOT_STREAMING.md) and the measurements
 in [BENCHMARK.md](BENCHMARK.md#t214-streaming-snapshots).
+## Cooperative Fiber Worker Pool
+
+For concurrent submission of bounded, nonblocking continuation tasks, use the
+opt-in `hat/hatFiber.NewWorkerPool` API. It keeps one stackless scheduler per
+worker and returns `Future` values for completion. Existing direct scheduler
+users are unchanged and remain the lowest-overhead path. See
+[T235_COOPERATIVE_WORKER_POOL.md](T235_COOPERATIVE_WORKER_POOL.md) for API
+semantics, defaults, limits, and benchmark tradeoffs.

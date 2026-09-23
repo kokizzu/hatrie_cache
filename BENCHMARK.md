@@ -37633,3 +37633,31 @@ Rejected atomic-gate trial, default Vinyl Put:
 BenchmarkT234DirectVinylPutDefault-32 20167036 59.36 ns/op 8 B/op 1 allocs/op
 BenchmarkT234DirectVinylPutDefault-32 20986054 65.04 ns/op 8 B/op 1 allocs/op
 ```
+# T235: Cooperative Fiber Worker Pool
+
+Workload: 128 tasks, eight cooperative steps each. The goroutine baseline used
+128 goroutines and `runtime.Gosched`; `WorkerPool` used four workers, 32 fiber
+slots per worker, queue capacity 128 per worker, and eight scheduler steps per
+turn. Results are medians from five clean one-sample invocations on AMD Ryzen
+9 5950X.
+
+| Workload | Median ns/op | Median B/op | Allocs/op | Relative time |
+| --- | ---: | ---: | ---: | ---: |
+| Goroutine baseline | 490,578 | 3,353 | 130 | 1.00x |
+| `WorkerPool` | 132,279 | 29,698 | 640 | 3.71x faster |
+| Existing single-owner scheduler | 11,824 | 0 | 0 | 41.49x faster than `WorkerPool` |
+
+Raw samples:
+
+```text
+Goroutine ns/op: 481024 531097 538017 446619 490578
+Goroutine B/op:  3275   3301   3373   3369   3353
+WorkerPool ns/op: 136622 132279 136207 131023 131882
+WorkerPool B/op:  29698  29699  29698  29699  29699
+```
+
+The pool is an opt-in concurrency path, not a replacement for the existing
+single-owner scheduler: it is about 3.71x faster than the goroutine baseline
+for this workload, while using about 8.9x more bytes/op and 4.9x more
+allocations/op than that baseline. The direct scheduler remains the best path
+when one goroutine can own the event loop.
