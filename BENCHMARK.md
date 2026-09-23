@@ -38302,3 +38302,44 @@ explicit persistence. The correctness gain is duplicate-owner prevention and
 stale-owner fencing, not raw SQL throughput. See
 [M225_PERSISTED_SHARD_LEASES.md](M225_PERSISTED_SHARD_LEASES.md) for the
 durability workflow and security boundary.
+
+<a id="m226-durable-consensus-metadata"></a>
+## M226: Durable Consensus Metadata
+
+M226 binds the M225 owner/token to a monotone frontier and exposes a
+generation-based compare-and-swap checkpoint interface. The frontier-only
+benchmark is the existing `SQLSourceFrontierTracker` control; it does not
+provide owner fencing, term/revision metadata, or durable CAS publication.
+
+Raw results from `make m226-benchmark` on the AMD Ryzen 9 5950X host, five
+runs per benchmark:
+
+```text
+BenchmarkM226DisabledControl ns/op: 0.2773, 0.2530, 0.2518, 0.2707, 0.2479
+BenchmarkM226FrontierOnlyBaseline ns/op: 42.16, 40.76, 44.63, 40.19, 41.13
+BenchmarkM226AdvanceFrontier ns/op: 51.65, 49.03, 52.60, 52.34, 50.56
+BenchmarkM226ClaimTakeover ns/op: 53.45, 51.81, 52.90, 51.09, 50.99
+BenchmarkM226Get ns/op: 22.94, 23.50, 23.29, 22.84, 22.37
+BenchmarkM226MarshalBinary ns/op: 30592, 30167, 32294, 30272, 30468
+BenchmarkM226UnmarshalBinary ns/op: 13331, 13393, 13758, 13650, 13157
+BenchmarkM226MarshalBinary B/op: 21912 on every sample; allocs/op: 5 on every sample
+BenchmarkM226UnmarshalBinary B/op: 13952 on every sample; allocs/op: 257 on every sample
+All other paths B/op: 0; allocs/op: 0 on every sample
+```
+
+| Path | Median ns/op | B/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Empty disabled control | 0.2530 | 0 | 0 | 1.00x control |
+| Existing frontier-only update | 41.13 | 0 | 0 | 1.00x feature baseline |
+| Fenced frontier update | 51.65 | 0 | 0 | 1.26x slower; owner/term/revision checks |
+| Ownership takeover claim | 51.81 | 0 | 0 | 1.26x frontier baseline; new term/generation |
+| Metadata lookup | 22.94 | 0 | 0 | 0.56x frontier baseline; direct map read |
+| Marshal 128 metadata records | 30,468 | 21,912 | 5 | 171 B/record; persistence cost |
+| Unmarshal 128 metadata records | 13,393 | 13,952 | 257 | detached restore cost |
+
+The 1.26x update cost is the accepted control-plane tradeoff for fencing and
+durable generation metadata. It remains zero-allocation, while existing SQL and
+frontier callers pay nothing until they opt in. The checkpoint path is bounded
+and explicit; the feature does not claim raw frontier throughput improvement.
+See [M226_DURABLE_CONSENSUS_METADATA.md](M226_DURABLE_CONSENSUS_METADATA.md)
+for CAS conflict handling and the security boundary.

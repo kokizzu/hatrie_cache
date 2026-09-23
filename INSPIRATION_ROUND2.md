@@ -112,7 +112,7 @@ operator control remain the preferred deployment model.
 - [x] M223 Hydration state machines distinguish cold, hydrating, and ready materialized-view point indexes. See [M223_MATERIALIZED_VIEW_HYDRATION.md](M223_MATERIALIZED_VIEW_HYDRATION.md) and [BENCHMARK.md](BENCHMARK.md#m223-materialized-view-hydration-states).
 - [x] M224 Hydration progress and estimated remaining work metrics. See [M224_HYDRATION_PROGRESS.md](M224_HYDRATION_PROGRESS.md) and [BENCHMARK.md](BENCHMARK.md#m224-hydration-progress).
 - [x] M225 Persisted shard leases prevent duplicate state ownership through the opt-in `SQLShardLeaseRegistry`, monotonic fencing tokens, and CRC-checked binary checkpoints. See [M225_PERSISTED_SHARD_LEASES.md](M225_PERSISTED_SHARD_LEASES.md) and [BENCHMARK.md](BENCHMARK.md#m225-persisted-shard-leases).
-- [ ] M226 Durable consensus metadata for state shard and frontier ownership.
+- [x] M226 Durable consensus metadata binds state-shard ownership to monotone frontiers through per-shard terms/revisions, generation CAS checkpoints, and CRC-checked binary snapshots. It deliberately leaves network consensus and quorum transport caller-owned. See [M226_DURABLE_CONSENSUS_METADATA.md](M226_DURABLE_CONSENSUS_METADATA.md) and [BENCHMARK.md](BENCHMARK.md#m226-durable-consensus-metadata).
 - [ ] M227 Source snapshot offsets coupled atomically to the first live frontier.
 - [ ] M228 Exactly-once source restart from a committed source offset.
 - [ ] M229 Source schema evolution with additive field compatibility checks.

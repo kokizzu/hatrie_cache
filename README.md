@@ -5301,3 +5301,10 @@ tokens, and supports bounded CRC-checked binary checkpoints; callers own the
 durable commit, restore-before-startup, renewal, and downstream fencing checks.
 See [M225_PERSISTED_SHARD_LEASES.md](M225_PERSISTED_SHARD_LEASES.md) and
 [BENCHMARK.md](BENCHMARK.md#m225-persisted-shard-leases).
+
+`SQLShardConsensusMetadataRegistry` binds an M225 fencing token to a monotone
+state frontier with per-shard terms/revisions and generation-based durable
+compare-and-swap checkpoints. It is opt-in metadata, not a network consensus
+implementation; callers provide the durable store and quorum transport. See
+[M226_DURABLE_CONSENSUS_METADATA.md](M226_DURABLE_CONSENSUS_METADATA.md) and
+[BENCHMARK.md](BENCHMARK.md#m226-durable-consensus-metadata).

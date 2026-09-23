@@ -27416,3 +27416,35 @@ m225-commit:
 .PHONY: m225-push
 m225-push:
 	bash scripts/m225-push.sh
+
+.PHONY: m226-test
+m226-test:
+	bash scripts/m226-test.sh
+
+.PHONY: m226-format
+m226-format:
+	bash scripts/m226-format.sh
+
+.PHONY: m226-benchmark
+m226-benchmark:
+	bash scripts/m226-benchmark.sh
+
+.PHONY: m226-race
+m226-race:
+	bash scripts/m226-race.sh
+
+.PHONY: m226-vet
+m226-vet:
+	bash scripts/m226-vet.sh
+
+.PHONY: m226-stage
+m226-stage:
+	bash scripts/m226-stage.sh
+
+.PHONY: m226-commit
+m226-commit:
+	bash scripts/m226-commit.sh
+
+.PHONY: m226-push
+m226-push:
+	bash scripts/m226-push.sh
