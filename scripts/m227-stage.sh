@@ -8,6 +8,7 @@ git add -- \
   Makefile \
   scripts/m227-commit.sh \
   scripts/m227-landscape.sh \
+  scripts/m227-push.sh \
   scripts/m227-replay-context.sh \
   scripts/m227-stage.sh \
   scripts/m227-verify-catalog.sh \
