@@ -36368,3 +36368,39 @@ BenchmarkT205MetricsSnapshotApply-32  4169046  281.2 ns/op  624 B/op  2 allocs/o
 The apply snapshot allocation is bounded by the number of observed targets and
 occurs when monitoring copies the snapshot. The command and acknowledgement
 observation paths remain zero-allocation in the benchmark.
+
+## T206: Deterministic Replica Bootstrap
+
+T206 adds deterministic source admission for snapshot-plus-WAL replica joins.
+It ranks preferred locality and freshness, rejects duplicate source identity,
+and binds the selected source to the existing fenced bootstrap coordinator.
+The planner is used during join admission, not on a per-command replication or
+query path.
+
+### Summary
+
+| Benchmark | Median | Memory | Improvement / tradeoff |
+| --- | ---: | ---: | --- |
+| Existing first-eligible scan | 5.98 ns/op | 0 B/op; 0 allocs/op | Lower bound only; not deterministic and no duplicate rejection |
+| Deterministic map prototype | 5.30 us/op | 3,496 B/op; 3 allocs/op | Rejected due to unnecessary heap cost |
+| Final bounded stack hash table | 2.73 us/op | 0 B/op; 0 allocs/op | 1.94x faster than map prototype; 3,496 B/op and 3 allocs/op removed |
+
+The five final planner samples were 2.586, 2.668, 2.733, 2.835, and 2.846
+us/op. The five existing first-match samples were 5.858, 5.914, 6.008,
+6.067, and 6.361 ns/op. The first-match path is not a semantic equivalent;
+it is included only to show the cost of stronger deterministic admission.
+
+### Raw T206 Output
+
+```text
+BenchmarkTU206BaselineFirstEligibleSource-32  5.858 ns/op  0 B/op  0 allocs/op
+BenchmarkTU206BaselineFirstEligibleSource-32  5.914 ns/op  0 B/op  0 allocs/op
+BenchmarkTU206BaselineFirstEligibleSource-32  6.008 ns/op  0 B/op  0 allocs/op
+BenchmarkTU206BaselineFirstEligibleSource-32  6.067 ns/op  0 B/op  0 allocs/op
+BenchmarkTU206BaselineFirstEligibleSource-32  6.361 ns/op  0 B/op  0 allocs/op
+BenchmarkTU206PlanReplicaBootstrap-32  2668 ns/op  0 B/op  0 allocs/op
+BenchmarkTU206PlanReplicaBootstrap-32  2733 ns/op  0 B/op  0 allocs/op
+BenchmarkTU206PlanReplicaBootstrap-32  2835 ns/op  0 B/op  0 allocs/op
+BenchmarkTU206PlanReplicaBootstrap-32  2586 ns/op  0 B/op  0 allocs/op
+BenchmarkTU206PlanReplicaBootstrap-32  2846 ns/op  0 B/op  0 allocs/op
+```

@@ -4963,3 +4963,12 @@ verified, and `CompleteRecovery` explicitly returns the shard to automatic
 election. The default election path is unchanged. See
 [T204_SUPERVISED_FAILOVER.md](T204_SUPERVISED_FAILOVER.md) for the lifecycle,
 status fields, safety boundary, and measurements.
+
+## Deterministic Replica Bootstrap
+
+`hatReplication.NewReplicaBootstrapWorkflowFromSources` deterministically
+selects a safe snapshot source, binds the exact WAL boundary to the fenced
+bootstrap lifecycle, and rejects duplicate or stale source metadata. Snapshot
+transfer, replay, and topology publication remain caller-owned. See
+[T206_DETERMINISTIC_REPLICA_BOOTSTRAP.md](T206_DETERMINISTIC_REPLICA_BOOTSTRAP.md)
+and its measurements in [BENCHMARK.md](BENCHMARK.md#t206-deterministic-replica-bootstrap).
