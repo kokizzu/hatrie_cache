@@ -398,6 +398,9 @@ type SQLQueryOptions struct {
 	// frontier. Nil preserves the live/default execution path; a non-nil
 	// pointer also permits an explicit frontier of zero.
 	AsOfFrontier *uint64
+	// LogicalFrontier optionally rejects reads whose AsOfFrontier moves
+	// backwards. Nil preserves the existing stateless read behavior.
+	LogicalFrontier *SQLLogicalFrontier
 	// FinalSourceOptions enables explicit ClickHouse-style FINAL
 	// reconciliation for sources marked FINAL in the query. Nil preserves the
 	// existing unreconciled source path and is the default.
@@ -859,6 +862,12 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 				err = quotaErr
 			}
 		}
+		if err == nil {
+			if frontierErr := commitSQLLogicalFrontier(options); frontierErr != nil {
+				result = SQLQueryResult{QueryID: observation.id}
+				err = frontierErr
+			}
+		}
 		err = sqlClassifyError(sqlRuntimeDiagnostic(err))
 		observation.attachPlanSnapshot(&result, operatorSteps)
 		observation.finish(result, err, operatorSteps, source, parameters)
@@ -1077,6 +1086,11 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 		if quotaActive {
 			if quotaErr := quotaReservation.finish(quotaBytes, time.Since(observation.started)); err == nil && quotaErr != nil {
 				err = quotaErr
+			}
+		}
+		if err == nil {
+			if frontierErr := commitSQLLogicalFrontier(options); frontierErr != nil {
+				err = frontierErr
 			}
 		}
 		err = sqlClassifyError(sqlRuntimeDiagnostic(err))
@@ -5415,6 +5429,12 @@ func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceR
 	var operatorSteps []SQLExplainStep
 	result.QueryID = observation.id
 	defer func() {
+		if err == nil {
+			if frontierErr := commitSQLLogicalFrontier(options); frontierErr != nil {
+				result = SQLQueryResult{QueryID: observation.id}
+				err = frontierErr
+			}
+		}
 		observation.attachPlanSnapshot(&result, operatorSteps)
 		observation.finish(result, err, operatorSteps, source, parameters)
 	}()

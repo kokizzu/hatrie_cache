@@ -18,6 +18,10 @@ type QuerySubscriptionDefinition struct {
 	AsOf         uint64
 	UpTo         uint64
 	EmitProgress bool
+	// LogicalFrontier optionally rejects out-of-order NotifyChangedAt and
+	// Heartbeat calls shared by this subscription's read/stream lifecycle.
+	// Nil preserves the existing per-subscription monotone behavior.
+	LogicalFrontier *SQLLogicalFrontier
 	// StartLive validates the query at registration but suppresses its initial
 	// result. The first relevant refresh publishes revision one.
 	StartLive bool
@@ -122,6 +126,11 @@ func (registry *QuerySubscriptions) subscribe(ctx context.Context, definition Qu
 	if err != nil {
 		return nil, err
 	}
+	if definition.LogicalFrontier != nil && definition.AsOf > 0 {
+		if _, err := definition.LogicalFrontier.Advance(definition.AsOf); err != nil {
+			return nil, fmt.Errorf("query subscription AS OF frontier %d: %w", definition.AsOf, err)
+		}
+	}
 	initialRevision := uint64(1)
 	if definition.StartLive {
 		initialRevision = 0
@@ -196,6 +205,12 @@ func (registry *QuerySubscriptions) Heartbeat(frontier uint64) error {
 		subscriptions = append(subscriptions, subscription)
 	}
 	registry.mu.RUnlock()
+	if err := validateQuerySubscriptionFrontiers(subscriptions, frontier); err != nil {
+		return err
+	}
+	if err := advanceQuerySubscriptionFrontiers(subscriptions, frontier); err != nil {
+		return err
+	}
 	for _, subscription := range subscriptions {
 		if subscription == nil || !subscription.definition.EmitProgress {
 			continue
@@ -234,6 +249,11 @@ func (registry *QuerySubscriptions) notifyChangedAt(ctx context.Context, frontie
 		subscriptions = append(subscriptions, subscription)
 	}
 	registry.mu.RUnlock()
+	if frontier > 0 {
+		if err := validateQuerySubscriptionFrontiers(subscriptions, frontier); err != nil {
+			return err
+		}
+	}
 	type pendingSubscriptionUpdate struct {
 		subscription *QuerySubscription
 		result       QueryResult
@@ -281,6 +301,11 @@ func (registry *QuerySubscriptions) notifyChangedAt(ctx context.Context, frontie
 		}
 		updates = append(updates, pendingSubscriptionUpdate{subscription: subscription, result: cloneQueryResult(result), hasResult: true, frontier: effectiveFrontier, complete: complete})
 	}
+	if frontier > 0 {
+		if err := advanceQuerySubscriptionFrontiers(subscriptions, frontier); err != nil {
+			return err
+		}
+	}
 	for _, update := range updates {
 		if update.hasResult {
 			update.subscription.publishAt(update.result, update.frontier, update.complete)
@@ -292,6 +317,42 @@ func (registry *QuerySubscriptions) notifyChangedAt(ctx context.Context, frontie
 		}
 		if update.complete {
 			update.subscription.complete()
+		}
+	}
+	return nil
+}
+
+func validateQuerySubscriptionFrontiers(subscriptions []*QuerySubscription, frontier uint64) error {
+	seen := make(map[*SQLLogicalFrontier]struct{}, len(subscriptions))
+	for _, subscription := range subscriptions {
+		if subscription == nil || subscription.definition.LogicalFrontier == nil {
+			continue
+		}
+		logicalFrontier := subscription.definition.LogicalFrontier
+		if _, exists := seen[logicalFrontier]; exists {
+			continue
+		}
+		seen[logicalFrontier] = struct{}{}
+		if err := logicalFrontier.Validate(frontier); err != nil {
+			return fmt.Errorf("query subscription frontier %d: %w", frontier, err)
+		}
+	}
+	return nil
+}
+
+func advanceQuerySubscriptionFrontiers(subscriptions []*QuerySubscription, frontier uint64) error {
+	seen := make(map[*SQLLogicalFrontier]struct{}, len(subscriptions))
+	for _, subscription := range subscriptions {
+		if subscription == nil || subscription.definition.LogicalFrontier == nil {
+			continue
+		}
+		logicalFrontier := subscription.definition.LogicalFrontier
+		if _, exists := seen[logicalFrontier]; exists {
+			continue
+		}
+		seen[logicalFrontier] = struct{}{}
+		if _, err := logicalFrontier.Advance(frontier); err != nil {
+			return fmt.Errorf("query subscription frontier %d: %w", frontier, err)
 		}
 	}
 	return nil

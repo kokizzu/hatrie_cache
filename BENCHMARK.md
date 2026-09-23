@@ -37786,6 +37786,34 @@ also verify that denied requests do not invoke the handler, space boundaries are
 enforced, cancellation propagates, and authorization internals are normalized
 to the stable denial error.
 
+## M209: Monotone Logical Frontiers
+
+Workload: repeated `normalizeSQLSnapshotToken` calls and equal frontier
+advances, measured with `go test -bench '^BenchmarkM209' -benchmem -count=5`
+on Linux/amd64 with an AMD Ryzen 9 5950X. These isolate the guard overhead;
+they are not end-to-end SQL query timings.
+
+| Path | Median ns/op | B/op | allocs/op | Relative CPU vs default |
+| --- | ---: | ---: | ---: | ---: |
+| Default read normalization | 2.29 | 0 | 0 | 1.00x |
+| Guarded read validation | 4.31 | 0 | 0 | 1.88x |
+| Equal frontier advance | 8.38 | 0 | 0 | 3.66x |
+
+Raw samples, in ns/op:
+
+```text
+BenchmarkM209ReadFrontierDefaultPath: 2.329, 2.268, 2.283, 2.282, 2.316
+BenchmarkM209ReadFrontierGuardedPath: 4.307, 4.296, 4.356, 4.419, 4.167
+BenchmarkM209LogicalFrontierAdvance: 8.378, 8.291, 8.429, 8.299, 8.439
+```
+
+The default path is unchanged when `LogicalFrontier` is nil. The opt-in guard
+stores one `uint64` and a mutex, adds no per-row storage, and measured zero
+allocations. Reads validate before invoking a resolver and advance only after a
+successful materialized, streamed, or paged read; the focused tests also cover
+failed reads, initial subscription frontiers, change notifications, and
+heartbeats.
+
 # M208: Differential Multiplicity Folding
 
 Workload: 512 distinct query-subscription rows, each repeated as four signed

@@ -174,11 +174,19 @@ func (codec *SQLSnapshotTokenCodec) Apply(token string, options *SQLQueryOptions
 }
 
 func (options *SQLQueryOptions) normalizeSQLSnapshotToken() error {
-	if options == nil || options.SnapshotToken == "" {
+	if options == nil {
 		return nil
 	}
-	if options.SnapshotTokenCodec == nil {
-		return ErrSQLSnapshotTokenCodecNil
+	if options.SnapshotToken != "" {
+		if options.SnapshotTokenCodec == nil {
+			return ErrSQLSnapshotTokenCodecNil
+		}
+		if err := options.SnapshotTokenCodec.Apply(options.SnapshotToken, options); err != nil {
+			return err
+		}
 	}
-	return options.SnapshotTokenCodec.Apply(options.SnapshotToken, options)
+	if options.LogicalFrontier == nil || options.AsOfFrontier == nil {
+		return nil
+	}
+	return options.LogicalFrontier.Validate(*options.AsOfFrontier)
 }
