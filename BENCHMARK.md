@@ -35629,3 +35629,20 @@ Command: `make benchmark-c239`; five benchmark samples per row; median on AMD Ry
 | Compaction scheduler stats read | 7.651 ns/op | 8.190 ns/op | 1.070x (+7.0%) | 0 B/op, 0 allocs/op |
 
 The initial map-scan implementation was measured at about 58 ns/op for the stats read and was discarded. The final version keeps counters updated on queue transitions, avoiding a per-read scan.
+## C240 read-only backup attachment
+
+Environment: Linux amd64, AMD Ryzen 9 5950X, 64 KiB payload, in-memory object
+store, five samples per benchmark. Full restore writes to disk; attachment
+reads and verifies the object without restoring it.
+
+| Operation | Median ns/op | B/op | allocs/op | x faster than restore | x lower B/op |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Full restore to disk | 1,937,206 | 42,072 | 112 | 1.00x | 1.00x |
+| Attach + `ReadFile` | 70,532 | 141,168 | 49 | 27.47x | 0.30x |
+| Reused attach + `ReadFile` | 66,427 | 138,640 | 26 | 29.16x | 0.30x |
+| Attach + streaming `Open` | 39,559 | 3,064 | 33 | 48.97x | 13.73x |
+| Reused attach + streaming `Open` | 33,474 | 529 | 10 | 57.87x | 79.53x |
+
+Raw samples are in `C240_READ_ONLY_BACKUP_ATTACHMENT.md`. The benchmark is
+local and excludes network latency; `ReadFile` intentionally buffers the
+payload, while streaming `Open` is the low-memory production path.

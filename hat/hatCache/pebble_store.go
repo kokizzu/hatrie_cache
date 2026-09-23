@@ -92,6 +92,25 @@ func OpenPebbleStoreWithFormatAndCipher(path string, format StorageFormat, ciphe
 	}, nil
 }
 
+// OpenPebbleStoreReadOnly opens an existing Pebble store without enabling
+// writes, checkpoint adoption, generation cleanup, or directory creation.
+func OpenPebbleStoreReadOnly(path string) (*PebbleStore, error) {
+	return OpenPebbleStoreReadOnlyWithFormat(path, DefaultStorageFormat)
+}
+
+// OpenPebbleStoreReadOnlyWithFormat opens an existing Pebble store without
+// enabling writes, using the selected record codec.
+func OpenPebbleStoreReadOnlyWithFormat(path string, format StorageFormat) (*PebbleStore, error) {
+	return OpenPebbleStoreReadOnlyWithFormatAndCipher(path, format, nil)
+}
+
+// OpenPebbleStoreReadOnlyWithFormatAndCipher opens an existing Pebble store
+// without enabling writes. The cipher is used only to decode authenticated
+// encrypted record values.
+func OpenPebbleStoreReadOnlyWithFormatAndCipher(path string, format StorageFormat, cipher *hatCodec.StreamCipher) (*PebbleStore, error) {
+	return openPebbleStoreReadOnlyWithFormatAndCipher(path, format, cipher)
+}
+
 // AdoptCheckpoint replaces the open database with a verified native Pebble
 // checkpoint while preserving this store handle and its configured path.
 func (store *PebbleStore) AdoptCheckpoint(checkpointPath string) error {
@@ -251,6 +270,10 @@ func cleanupAdoptedPebbleCheckpoint(path string) error {
 }
 
 func openPebbleStoreReadOnlyWithFormat(path string, format StorageFormat) (*PebbleStore, error) {
+	return openPebbleStoreReadOnlyWithFormatAndCipher(path, format, nil)
+}
+
+func openPebbleStoreReadOnlyWithFormatAndCipher(path string, format StorageFormat, cipher *hatCodec.StreamCipher) (*PebbleStore, error) {
 	if path == "" {
 		return nil, errors.New("hatriecache: pebble path is required")
 	}
@@ -271,6 +294,7 @@ func openPebbleStoreReadOnlyWithFormat(path string, format StorageFormat) (*Pebb
 		path:             path,
 		db:               db,
 		format:           format,
+		recordCipher:     cipher,
 		activeGeneration: activeGeneration,
 		nextGeneration:   nextGeneration,
 	}, nil

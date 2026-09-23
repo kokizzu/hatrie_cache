@@ -24869,3 +24869,42 @@ test-c239:
 
 format-c239:
 	@bash scripts/format-c239.sh
+.PHONY: show-c240-context
+
+show-c240-context:
+	@bash scripts/show-c240-context.sh
+
+.PHONY: show-c240-focus
+
+show-c240-focus:
+	@bash scripts/show-c240-focus.sh
+.PHONY: test-c240
+test-c240:
+	@bash scripts/test-c240.sh
+.PHONY: format-c240
+format-c240:
+	@bash scripts/format-c240.sh
+.PHONY: benchmark-c240
+benchmark-c240:
+	@bash scripts/benchmark-c240.sh
+.PHONY: verify-c240-docs
+verify-c240-docs:
+	@bash scripts/verify-c240-docs.sh
+.PHONY: test-c240-package
+test-c240-package:
+	@bash scripts/test-c240-package.sh
+
+.PHONY: race-c240
+race-c240:
+	@bash scripts/race-c240.sh
+
+.PHONY: vet-c240
+vet-c240:
+	@bash scripts/vet-c240.sh
+
+.PHONY: status-c240
+status-c240:
+	@bash scripts/status-c240.sh
+.PHONY: commit-c240
+commit-c240:
+	@bash scripts/commit-c240.sh

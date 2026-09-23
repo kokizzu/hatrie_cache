@@ -1025,3 +1025,16 @@ deferred. See [TT021_PACKED_RTREE.md](TT021_PACKED_RTREE.md) and
 ## C239: Part-Merge Backlog And Amplification Metrics
 
 The compaction scheduler now exposes pending and running estimated bytes in `CompactionSchedulerStats`, including priority-queue tasks. `CompactionArrangementDiagnostics` records successful input/output byte totals and computes write amplification from successful work only. Estimates are caller supplied, counters saturate on overflow, and maintenance remains caller-driven with no background worker.
+### C240: read-only backup attachment
+
+Implemented a manifest-pinned, checksum-verifying object-store attachment with
+streaming `Open`, buffered `ReadFile`, and full `Verify` operations. The API
+never creates a restore directory or writes to the object store. Also exposed
+the existing Pebble read-only opener with default, format, and cipher-aware
+constructors for local checkpoint inspection.
+
+The streaming benchmark is the recommended path: median 39.559 us and 3,064
+B/op for a fresh attach, versus 1.937 ms and 42,072 B/op for full restore of
+the same 64 KiB payload. Reusing the attachment measured 33.474 us and 529
+B/op. `ReadFile` is intentionally more memory hungry because it buffers the
+result.

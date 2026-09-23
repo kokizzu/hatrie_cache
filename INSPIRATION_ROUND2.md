@@ -73,7 +73,7 @@ operator control remain the preferred deployment model.
 - [ ] C237 Explain output for projection selection and estimated I/O cost.
 - [x] C238 Mutation queue progress with rows remaining and elapsed estimates is implemented as derived, read-time fields on `hatSql.MutationSnapshot`; the opt-in controller hot path and defaults remain unchanged. See [C238_MUTATION_PROGRESS.md](C238_MUTATION_PROGRESS.md).
 - [x] C239 Part-merge backlog, amplification, and age metrics. See [C239_COMPACTION_METRICS.md](C239_COMPACTION_METRICS.md).
-- [ ] C240 Read-only backup database attachment for querying backup parts in place.
+- [x] C240 Read-only backup database attachment for querying backup parts in place. See [C240_READ_ONLY_BACKUP_ATTACHMENT.md](C240_READ_ONLY_BACKUP_ATTACHMENT.md).
 - [ ] C241 Incremental backup chunk deduplication across snapshots.
 - [x] C242 Parallel restore of independent parts with bounded concurrency. See [C242_PARALLEL_RESTORE.md](C242_PARALLEL_RESTORE.md) and [BENCHMARK.md](BENCHMARK.md#c242-bounded-parallel-restore).
 - [x] C243 Remote-part read-through caching with immutable checksum keys is implemented by `hatStorage.RemotePartCache`. See [C243_REMOTE_PART_CACHE.md](C243_REMOTE_PART_CACHE.md), [REMOTE_PART_CACHE.md](REMOTE_PART_CACHE.md), and [BENCHMARK.md](BENCHMARK.md#c243-remote-part-read-through-cache).
