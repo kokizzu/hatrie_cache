@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -85,7 +86,11 @@ type MonitoringOptions struct {
 	ReplicationAuthPreviousToken     string
 	ReplicationAuthPreviousExpiresAt time.Time
 	AuditLog                         *AuditLogger
-	WriteProtected                   bool
+	// AuditAllOperations emits one generic event for every monitoring HTTP
+	// request that does not already emit a detailed audit event. It is disabled
+	// by default to preserve the existing request cost and log volume.
+	AuditAllOperations bool
+	WriteProtected     bool
 	// MaintenanceReadOnly rejects public cache writes while preserving reads,
 	// snapshots, and backup operations. It is disabled by default.
 	MaintenanceReadOnly bool
@@ -706,20 +711,26 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 		out = monitoringAuthHandler(handler.identityProvider, handler.authTokens, handler.replicationAuthTokens, out)
 	}
 	out = hatHttp.GzipHandler(out)
+	var traced http.Handler
 	if handler.profileCapture == nil {
-		return hatTrace.HTTPMiddleware(out)
-	}
-	var profileHandler http.Handler = http.HandlerFunc(handler.handleProfile)
-	if handler.identityProvider != nil || handler.authTokens.Configured() || handler.replicationAuthTokens.Configured() {
-		profileHandler = monitoringAuthHandler(handler.identityProvider, handler.authTokens, handler.replicationAuthTokens, profileHandler)
-	}
-	return hatTrace.HTTPMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/profile" {
-			profileHandler.ServeHTTP(w, r)
-			return
+		traced = hatTrace.HTTPMiddleware(out)
+	} else {
+		var profileHandler http.Handler = http.HandlerFunc(handler.handleProfile)
+		if handler.identityProvider != nil || handler.authTokens.Configured() || handler.replicationAuthTokens.Configured() {
+			profileHandler = monitoringAuthHandler(handler.identityProvider, handler.authTokens, handler.replicationAuthTokens, profileHandler)
 		}
-		out.ServeHTTP(w, r)
-	}))
+		traced = hatTrace.HTTPMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/profile" {
+				profileHandler.ServeHTTP(w, r)
+				return
+			}
+			out.ServeHTTP(w, r)
+		}))
+	}
+	if handler.options.AuditAllOperations {
+		return handler.auditAllOperations(traced)
+	}
+	return traced
 }
 
 type monitoringIdentityContextKey struct{}
@@ -818,6 +829,11 @@ func monitoringReplicationRequestAuthorized(r *http.Request, tokens hatAuth.Toke
 }
 
 func (handler *MonitoringHandler) auditHTTP(r *http.Request, event AuditEvent) {
+	if r != nil {
+		if state, ok := r.Context().Value(monitoringAuditRequestStateKey{}).(*monitoringAuditRequestState); ok {
+			state.recorded.Store(true)
+		}
+	}
 	if handler.options.AuditLog == nil {
 		return
 	}
@@ -829,6 +845,83 @@ func (handler *MonitoringHandler) auditHTTP(r *http.Request, event AuditEvent) {
 		event.Path = r.URL.Path
 	}
 	handler.options.Metrics.RecordAuditResult(handler.options.AuditLog.Log(event))
+}
+
+type monitoringAuditRequestStateKey struct{}
+
+type monitoringAuditRequestState struct {
+	recorded atomic.Bool
+}
+
+// auditAllOperations adds a bounded generic event for requests that do not
+// already emit a more specific audit event from a handler.
+func (handler *MonitoringHandler) auditAllOperations(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		state := &monitoringAuditRequestState{}
+		request := r.WithContext(context.WithValue(r.Context(), monitoringAuditRequestStateKey{}, state))
+		recorder := &monitoringAuditResponseWriter{ResponseWriter: w}
+		defer func() {
+			if state.recorded.Load() {
+				return
+			}
+			status := recorder.status
+			if status == 0 {
+				status = http.StatusOK
+			}
+			handler.auditHTTP(request, AuditEvent{
+				Action:  "http.request",
+				OK:      status < http.StatusBadRequest,
+				Status:  status,
+				Message: http.StatusText(status),
+			})
+		}()
+		next.ServeHTTP(recorder, request)
+	})
+}
+
+type monitoringAuditResponseWriter struct {
+	http.ResponseWriter
+	status      int
+	wroteHeader bool
+}
+
+func (writer *monitoringAuditResponseWriter) WriteHeader(status int) {
+	if writer.wroteHeader {
+		return
+	}
+	writer.status = status
+	writer.wroteHeader = true
+	writer.ResponseWriter.WriteHeader(status)
+}
+
+func (writer *monitoringAuditResponseWriter) Write(data []byte) (int, error) {
+	if !writer.wroteHeader {
+		writer.WriteHeader(http.StatusOK)
+	}
+	return writer.ResponseWriter.Write(data)
+}
+
+func (writer *monitoringAuditResponseWriter) Flush() {
+	if !writer.wroteHeader {
+		writer.WriteHeader(http.StatusOK)
+	}
+	if flusher, ok := writer.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (writer *monitoringAuditResponseWriter) ReadFrom(source io.Reader) (int64, error) {
+	if !writer.wroteHeader {
+		writer.WriteHeader(http.StatusOK)
+	}
+	if readerFrom, ok := writer.ResponseWriter.(io.ReaderFrom); ok {
+		return readerFrom.ReadFrom(source)
+	}
+	return io.Copy(writer.ResponseWriter, source)
+}
+
+func (writer *monitoringAuditResponseWriter) Unwrap() http.ResponseWriter {
+	return writer.ResponseWriter
 }
 
 func (handler *MonitoringHandler) rejectDangerousHTTP(w http.ResponseWriter, r *http.Request, action string, details map[string]interface{}) bool {

@@ -23243,6 +23243,36 @@ push-tu33-function-grants:
 audit-hatrie-tmp:
 	bash scripts/audit-hatrie-tmp.sh
 
+t242-benchmark-baseline:
+	bash scripts/t242-benchmark-baseline.sh
+
+t242-format:
+	bash scripts/t242-format.sh
+
+t242-test:
+	bash scripts/t242-test.sh
+
+t242-test-package:
+	bash scripts/t242-test-package.sh
+
+t242-benchmark:
+	bash scripts/t242-benchmark.sh
+
+t242-race:
+	bash scripts/t242-race.sh
+
+t242-vet:
+	bash scripts/t242-vet.sh
+
+t242-stage:
+	bash scripts/stage-t242.sh
+
+t242-commit:
+	bash scripts/commit-t242.sh
+
+t242-push:
+	bash scripts/push-t242.sh
+
 .PHONY: audit-hatrie-tmp-inventory
 audit-hatrie-tmp-inventory:
 	bash scripts/audit-hatrie-tmp-inventory.sh

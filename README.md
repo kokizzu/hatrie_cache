@@ -1999,6 +1999,14 @@ and denied events are always retained. Go embedders can add structured
 [TR048_AUDIT_SAMPLING.md](TR048_AUDIT_SAMPLING.md) for the CLI/API contract,
 security behavior, and measurements.
 
+For complete monitoring HTTP request coverage, configure `AuditLog` together
+with `MonitoringOptions.AuditAllOperations: true`. The opt-in mode emits one
+generic `http.request` event for requests without an existing detailed command,
+SQL, backup, storage, replication, journal, or profile event; it excludes query
+strings, headers, and bodies. See [T242_APPEND_ONLY_AUDIT.md](T242_APPEND_ONLY_AUDIT.md)
+and [BENCHMARK.md](BENCHMARK.md#t242-append-only-audit-coverage) for the
+configuration and measured overhead.
+
 Set `WRITE_PROTECTION=true` to reject dangerous write/admin actions while still
 allowing read-only health, stats, entry listing, metrics, and status endpoints.
 Set `RATE_LIMIT=N` to token-bucket limit dangerous HTTP/gRPC API actions to

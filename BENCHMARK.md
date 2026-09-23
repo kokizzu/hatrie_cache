@@ -37740,3 +37740,24 @@ The opt-in policy is allocation-free but adds CPU for matching. Focused tests
 also verify that denied requests do not invoke the handler, space boundaries are
 enforced, cancellation propagates, and authorization internals are normalized
 to the stable denial error.
+## T242 Append-Only Audit Coverage
+
+The benchmark compares the existing monitoring request path with the opt-in
+`MonitoringOptions.AuditAllOperations` wrapper using `io.Discard` as the JSONL
+sink. The default path remains unaudited and unchanged.
+
+| Path | ns/op | B/op | allocs/op | Relative |
+| --- | ---: | ---: | ---: | --- |
+| Audit disabled | 2,778 | 1,412 | 16 | 1.00x |
+| AuditAllOperations enabled | 5,324 | 2,712 | 24 | 1.92x slower |
+
+Raw result:
+
+```text
+BenchmarkT242AuditAllOperationsBaseline-32    382678  2778 ns/op  1412 B/op  16 allocs/op
+BenchmarkT242AuditAllOperationsEnabled-32     241102  5324 ns/op  2712 B/op  24 allocs/op
+```
+
+The enabled mode adds about `2,546 ns/op`, `1,300 B/op`, and 8 allocations for
+this request shape. See [T242_APPEND_ONLY_AUDIT.md](T242_APPEND_ONLY_AUDIT.md)
+for semantics, configuration, and verification details.
