@@ -26687,6 +26687,55 @@ Bitmap Visit:  12537, 12150, 11869, 11879, 11983 ns/op; 0 B/op; 0 allocs/op
 Bitmap build: 5474809, 5477014, 5434687, 5741687, 5978742 ns/op; 672300 B/op; 440 allocs/op
 ```
 
+<a id="t222-multikey-array-indexes"></a>
+## T222: Multikey Array Indexes
+
+This round-2 item was already implemented by the SQL JSON multikey index and
+typed tuple multikey index. The fresh runs below verify the existing behavior;
+they do not introduce a second implementation. The benchmark commands use
+`-benchmem -count=5` on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+### SQL JSON array membership
+
+Median of five runs:
+
+| Workload | ns/op | bytes/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Full scan | 17,581,711 | 8,315,049 | 170,239 | 1.00x |
+| Warm multikey index | 118,780 | 105,408 | 525 | 148.0x faster; 78.8x fewer bytes; 324.3x fewer allocations |
+
+Raw output:
+
+```text
+BenchmarkSQLJSONMultikeyScanQuery-32       70  16984508 ns/op  8315128 B/op 170239 allocs/op
+BenchmarkSQLJSONMultikeyScanQuery-32       73  16128848 ns/op  8315119 B/op 170239 allocs/op
+BenchmarkSQLJSONMultikeyScanQuery-32       66  17581711 ns/op  8315046 B/op 170239 allocs/op
+BenchmarkSQLJSONMultikeyScanQuery-32       68  18468466 ns/op  8315044 B/op 170239 allocs/op
+BenchmarkSQLJSONMultikeyScanQuery-32       63  17599294 ns/op  8315049 B/op 170239 allocs/op
+BenchmarkSQLJSONMultikeyIndexQuery-32  11114    101138 ns/op   105409 B/op    525 allocs/op
+BenchmarkSQLJSONMultikeyIndexQuery-32  11388    118780 ns/op   105408 B/op    525 allocs/op
+BenchmarkSQLJSONMultikeyIndexQuery-32  11409    113890 ns/op   105408 B/op    525 allocs/op
+BenchmarkSQLJSONMultikeyIndexQuery-32   9506    119839 ns/op   105408 B/op    525 allocs/op
+BenchmarkSQLJSONMultikeyIndexQuery-32   8652    120936 ns/op   105408 B/op    525 allocs/op
+```
+
+### Typed multikey lookup and build
+
+Median of five runs:
+
+| Workload | ns/op | bytes/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| String index lookup | 97.83 | 0 | 0 | 97.0x faster than map-of-sets; 2,077x faster than scan |
+| Map-of-sets lookup | 9,495 | 0 | 0 | Baseline |
+| Linear scan | 203,288 | 1 | 0 | Baseline for scan |
+| Sorted string-index build | 3,469,377 | 2,197,396 | 21,347 | 1.69x slower and 2.03x more bytes than map-of-sets build |
+| Map-of-sets build | 2,047,967 | 1,080,927 | 1,583 | Lower build cost baseline |
+
+The lookup win is large, but sorted postings cost more to build than a map of
+sets. The index is therefore most useful when repeated reads amortize build and
+update work. See [T222_MULTIKEY_INDEX.md](T222_MULTIKEY_INDEX.md) for limits and
+reproduction commands.
+
 <a id="tr-026-typed-bitmap-index"></a>
 ## TR-026 Typed Bitmap Index
 

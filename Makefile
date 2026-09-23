@@ -26316,3 +26316,29 @@ commit-t221:
 .PHONY: push-t221
 push-t221:
 	bash scripts/push-t221.sh
+format-t222:
+	bash ./scripts/format-t222.sh
+
+test-t222:
+	bash ./scripts/test-t222.sh
+
+benchmark-t222:
+	bash ./scripts/benchmark-t222.sh
+
+race-t222:
+	bash ./scripts/race-t222.sh
+
+vet-t222:
+	bash ./scripts/vet-t222.sh
+
+verify-t222-scope:
+	bash ./scripts/verify-t222-scope.sh
+
+stage-t222:
+	bash ./scripts/stage-t222.sh
+
+commit-t222:
+	bash ./scripts/commit-t222.sh
+
+push-t222:
+	bash ./scripts/push-t222.sh

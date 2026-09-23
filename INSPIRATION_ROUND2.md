@@ -163,7 +163,7 @@ operator control remain the preferred deployment model.
 - [x] T219 HASH indexes for constant-time exact lookups; see [T219_HASH_INDEX.md](T219_HASH_INDEX.md) and [BENCHMARK.md](BENCHMARK.md#t219-typed-hash-index).
 - [x] T220 RTREE indexes for spatial bounding-box searches; see [T220_RTREE_INDEX.md](T220_RTREE_INDEX.md), [TR027_RTREE_SPATIAL_INDEX.md](TR027_RTREE_SPATIAL_INDEX.md), and [BENCHMARK.md](BENCHMARK.md#t220-r-tree-spatial-index).
 - [x] T221 BITSET indexes for low-cardinality membership predicates; see [T221_BITMAP_INDEX.md](T221_BITMAP_INDEX.md) and [BENCHMARK.md](BENCHMARK.md#t221-typed-bitsetbitmap-index).
-- [ ] T222 Multikey indexes over array-valued fields.
+- [x] T222 Multikey indexes over array-valued fields; existing SQL JSON and typed tuple implementations were reverified with focused tests, race/vet checks, and fresh lookup/build benchmarks. See [T222_MULTIKEY_INDEX.md](T222_MULTIKEY_INDEX.md) and [BENCHMARK.md](BENCHMARK.md#t222-multikey-array-indexes).
 - [ ] T223 Functional indexes over derived field expressions.
 - [ ] T224 Partial indexes restricted by a validated predicate.
 - [ ] T225 Covering indexes that return projected fields without row fetches.
