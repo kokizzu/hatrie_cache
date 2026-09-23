@@ -37785,6 +37785,36 @@ The opt-in policy is allocation-free but adds CPU for matching. Focused tests
 also verify that denied requests do not invoke the handler, space boundaries are
 enforced, cancellation propagates, and authorization internals are normalized
 to the stable denial error.
+
+# M208: Differential Multiplicity Folding
+
+Workload: 512 distinct query-subscription rows, each repeated as four signed
+deltas (`+1`, `+1`, `-1`, `-1`). The baseline is the previous manual
+map-and-filter implementation; the M208 path uses
+`hatSql.ConsolidateQuerySubscriptionDeltas`. Results are medians from five
+samples on AMD Ryzen 9 5950X with `-benchmem`.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative |
+| --- | ---: | ---: | ---: | ---: |
+| Manual consolidation baseline | 1,247,712 | 257,250 | 10,249 | 1.00x |
+| M208 consolidator | 1,238,949 | 290,082 | 10,250 | 0.993x, within noise |
+
+Raw samples:
+
+```text
+Manual ns/op:       1274742 1257862 1247712 1216819 1225745
+Manual B/op:        257254  257247  257250  257243  257259
+Manual allocs/op:   10249   10249   10249   10249   10249
+M208 ns/op:         1179055 1238949 1207564 1295063 1301916
+M208 B/op:          290076  290082  290082  290085  290082
+M208 allocs/op:     10250   10250   10250   10250   10250
+```
+
+On this run, the reusable public API's CPU median is 0.7% lower, which is
+within noise; it costs about 12.8% bytes and one allocation. It is only used as
+a fallback after the Debezium fast path rejects duplicate keys or unsupported
+multiplicity; normal unique `+1`/`-1` batches keep the existing path. See
+[M208_DIFFERENTIAL_MULTIPLICITY.md](M208_DIFFERENTIAL_MULTIPLICITY.md).
 ## T242 Append-Only Audit Coverage
 
 The benchmark compares the existing monitoring request path with the opt-in

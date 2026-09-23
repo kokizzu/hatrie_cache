@@ -23318,6 +23318,30 @@ m206-commit:
 m206-push:
 	bash scripts/m206-push.sh
 
+m208-format:
+	bash scripts/m208-format.sh
+
+m208-test:
+	bash scripts/m208-test.sh
+
+m208-benchmark:
+	bash scripts/m208-benchmark.sh
+
+m208-race:
+	bash scripts/m208-race.sh
+
+m208-vet:
+	bash scripts/m208-vet.sh
+
+m208-stage:
+	bash scripts/m208-stage.sh
+
+m208-commit:
+	bash scripts/m208-commit.sh
+
+m208-push:
+	bash scripts/m208-push.sh
+
 .PHONY: audit-hatrie-tmp-inventory
 audit-hatrie-tmp-inventory:
 	bash scripts/audit-hatrie-tmp-inventory.sh

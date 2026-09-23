@@ -126,6 +126,15 @@ func (feed *DebeziumChangefeed) Apply(batch QuerySubscriptionDeltaBatch) ([]Debe
 	}
 	if !feed.initialized {
 		rows, order, err := feed.initialRows(batch.Deltas)
+		if err != nil && (errors.Is(err, ErrDebeziumDuplicateKey) || errors.Is(err, ErrDebeziumUnsupportedMultiplicity)) {
+			consolidated, consolidateErr := consolidateQuerySubscriptionDeltas(batch.Deltas, false)
+			if consolidateErr != nil {
+				return nil, consolidateErr
+			}
+			if querySubscriptionDeltasChanged(batch.Deltas, consolidated) {
+				rows, order, err = feed.initialRows(consolidated)
+			}
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -175,6 +184,25 @@ func (feed *DebeziumChangefeed) initialRows(deltas []QuerySubscriptionDelta) (ma
 }
 
 func (feed *DebeziumChangefeed) applyDeltaBatch(batch QuerySubscriptionDeltaBatch) ([]DebeziumChange, error) {
+	changes, err := feed.applyDeltaBatchFast(batch)
+	if err == nil {
+		return changes, nil
+	}
+	if !errors.Is(err, ErrDebeziumDuplicateKey) && !errors.Is(err, ErrDebeziumUnsupportedMultiplicity) {
+		return nil, err
+	}
+	consolidated, consolidateErr := consolidateQuerySubscriptionDeltas(batch.Deltas, false)
+	if consolidateErr != nil {
+		return nil, consolidateErr
+	}
+	if !querySubscriptionDeltasChanged(batch.Deltas, consolidated) {
+		return nil, err
+	}
+	batch.Deltas = consolidated
+	return feed.applyDeltaBatchFast(batch)
+}
+
+func (feed *DebeziumChangefeed) applyDeltaBatchFast(batch QuerySubscriptionDeltaBatch) ([]DebeziumChange, error) {
 	deltas := make(map[string]*debeziumDeltaState, len(batch.Deltas))
 	order := make([]string, 0, len(batch.Deltas))
 	for _, delta := range batch.Deltas {
