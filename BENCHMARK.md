@@ -38005,3 +38005,22 @@ Registry reuse allocs:              6      6      6      6      6
 
 See [M214_SORTED_ARRANGEMENT_REUSE.md](M214_SORTED_ARRANGEMENT_REUSE.md) for
 compatibility rules and the tie-order refinement caveat.
+
+## M215: Delta-Join Maintenance
+
+Workload: five `-benchmem` samples on Linux/amd64 with an AMD Ryzen 9 5950X.
+The fixture has 256 left and 256 right rows sharing one hot join key. Each
+update changes one left row and therefore touches 256 maintained result pairs.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Existing `ApplyLeft` only | 22,832 | 288 | 3 | 1.00x |
+| Existing `ApplyLeft` plus full `Rows()` | 30,991,494 | 17,826,412 | 131,085 | 1,357x |
+| `ApplyLeftDeltas` | 382,784 | 408,506 | 1,061 | 16.8x vs apply-only |
+
+The delta path is about `81x` faster, `44x` lower in allocated bytes, and
+`124x` lower in allocations than repeatedly materializing the full join. It
+intentionally costs more than state-only `ApplyLeft`, because it produces 512
+independent signed pair snapshots. See
+[M215_DELTA_JOIN_MAINTENANCE.md](M215_DELTA_JOIN_MAINTENANCE.md) for API
+semantics and raw samples.

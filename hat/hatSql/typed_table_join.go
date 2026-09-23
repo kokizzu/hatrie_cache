@@ -119,6 +119,10 @@ func (join *TypedTableJoin) ApplyLeft(changes []TypedTableChange) error {
 	}
 	join.mu.Lock()
 	defer join.mu.Unlock()
+	return join.applyLeftChangesLocked(changes)
+}
+
+func (join *TypedTableJoin) applyLeftChangesLocked(changes []TypedTableChange) error {
 	join.recordLeftDataMovement(changes)
 	if len(changes) == 1 {
 		return join.applyLeftOneLocked(changes[0])
@@ -191,6 +195,10 @@ func (join *TypedTableJoin) ApplyRight(changes []TypedTableChange) error {
 	}
 	join.mu.Lock()
 	defer join.mu.Unlock()
+	return join.applyRightChangesLocked(changes)
+}
+
+func (join *TypedTableJoin) applyRightChangesLocked(changes []TypedTableChange) error {
 	join.recordRightDataMovement(changes)
 	if len(changes) == 1 {
 		return join.applyRightOneLocked(changes[0])

@@ -101,7 +101,7 @@ operator control remain the preferred deployment model.
 - [x] M212 Logical compaction that advances retained history without rewriting live state; see [M212_LOGICAL_COMPACTION.md](M212_LOGICAL_COMPACTION.md) and [BENCHMARK.md#m212-logical-compaction](BENCHMARK.md#m212-logical-compaction).
 - [x] M213 Consolidation of equal updates before forwarding to downstream consumers. `QuerySubscriptionDeltaBatch.Consolidate` normalizes unmarked batches, generated subscription batches skip duplicate work with an internal marker, and `DebeziumChangefeed.Apply` enforces the boundary; see [M213_DIFFERENTIAL_CONSOLIDATION.md](M213_DIFFERENTIAL_CONSOLIDATION.md) and [BENCHMARK.md#m213-differential-batch-consolidation](BENCHMARK.md#m213-differential-batch-consolidation).
 - [x] M214 Arrangement reuse across indexes and compatible query plans; the opt-in `TypedTableSortedArrangements` registry shares exact or longer-prefix sorted state with reference-counted leases. See [M214_SORTED_ARRANGEMENT_REUSE.md](M214_SORTED_ARRANGEMENT_REUSE.md) and [BENCHMARK.md](BENCHMARK.md#m214-sorted-arrangement-reuse).
-- [ ] M215 Delta-join maintenance for high-churn join inputs.
+- [x] M215 Delta-join maintenance for high-churn join inputs; opt-in `ApplyLeftDeltas`/`ApplyRightDeltas` emits only affected signed pair changes while preserving the existing full-state APIs. See [M215_DELTA_JOIN_MAINTENANCE.md](M215_DELTA_JOIN_MAINTENANCE.md) and [BENCHMARK.md](BENCHMARK.md#m215-delta-join-maintenance).
 - [ ] M216 Incremental top-K arrangements with bounded replacement state.
 - [ ] M217 Indexes that store complete maintained view results for point lookups.
 - [ ] M218 Planner selection of point lookup versus arrangement scan.

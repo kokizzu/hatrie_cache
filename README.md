@@ -5209,3 +5209,13 @@ hints. Apply source changes once to the shared lease and call `Release` when a
 plan is done. The default direct constructor is unchanged. See
 [M214_SORTED_ARRANGEMENT_REUSE.md](M214_SORTED_ARRANGEMENT_REUSE.md) and
 [BENCHMARK.md](BENCHMARK.md#m214-sorted-arrangement-reuse).
+
+## Differential Join Output
+
+For high-churn typed joins whose consumers maintain their own keyed state, use
+the opt-in `TypedTableJoin.ApplyLeftDeltas` or `ApplyRightDeltas` APIs. They
+return signed pair insertions/retractions for only affected source keys, and
+the shared `TypedTableJoinArrangement` lease exposes the same methods. Existing
+`ApplyLeft`, `ApplyRight`, and `Rows` behavior remains unchanged. See
+[M215_DELTA_JOIN_MAINTENANCE.md](M215_DELTA_JOIN_MAINTENANCE.md) and
+[BENCHMARK.md](BENCHMARK.md#m215-delta-join-maintenance).

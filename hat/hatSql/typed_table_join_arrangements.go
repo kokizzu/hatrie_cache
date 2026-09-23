@@ -104,6 +104,17 @@ func (arrangement *TypedTableJoinArrangement) ApplyLeft(changes []TypedTableChan
 	defer entry.mu.Unlock()
 	return entry.join.ApplyLeft(changes)
 }
+
+// ApplyLeftDeltas applies left changes and returns only affected join rows.
+func (arrangement *TypedTableJoinArrangement) ApplyLeftDeltas(changes []TypedTableChange) ([]TypedTableJoinDelta, error) {
+	entry, err := arrangement.activeEntry()
+	if err != nil {
+		return nil, err
+	}
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	return entry.join.ApplyLeftDeltas(changes)
+}
 func (arrangement *TypedTableJoinArrangement) ApplyRight(changes []TypedTableChange) error {
 	entry, err := arrangement.activeEntry()
 	if err != nil {
@@ -112,6 +123,17 @@ func (arrangement *TypedTableJoinArrangement) ApplyRight(changes []TypedTableCha
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
 	return entry.join.ApplyRight(changes)
+}
+
+// ApplyRightDeltas applies right changes and returns only affected join rows.
+func (arrangement *TypedTableJoinArrangement) ApplyRightDeltas(changes []TypedTableChange) ([]TypedTableJoinDelta, error) {
+	entry, err := arrangement.activeEntry()
+	if err != nil {
+		return nil, err
+	}
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	return entry.join.ApplyRightDeltas(changes)
 }
 func (arrangement *TypedTableJoinArrangement) Freshness() (TypedTableJoinArrangementFreshness, error) {
 	entry, err := arrangement.activeEntry()
