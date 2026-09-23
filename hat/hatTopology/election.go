@@ -39,6 +39,7 @@ type ElectionStore struct {
 	now              func() time.Time
 	requireHeartbeat bool
 	nodes            map[string]electionNodeRecord
+	controls         map[uint32]electionControl
 }
 
 type electionNodeRecord struct {
@@ -52,6 +53,7 @@ type ElectionStatus struct {
 	Nodes         []ElectionNodeStatus `json:"nodes"`
 	Leaders       []ElectionLeader     `json:"leaders"`
 	OrphanNodes   []string             `json:"orphan_nodes,omitempty"`
+	Controls      []ElectionControl    `json:"controls,omitempty"`
 }
 
 type ElectionNodeStatus struct {
@@ -220,6 +222,7 @@ func (store *ElectionStore) Status() ElectionStatus {
 		Nodes:         nodes,
 		Leaders:       leaders,
 		OrphanNodes:   store.orphanNodeIDsLocked(topology),
+		Controls:      store.controlsSnapshotLocked(),
 	}
 }
 
@@ -317,6 +320,9 @@ func (store *ElectionStore) activeNodesLocked(topology ClusterTopology, now time
 }
 
 func (store *ElectionStore) electShardLeaderLocked(shard TopologyShard, nodes []TopologyNode, now time.Time) ElectionLeader {
+	if leader, controlled := store.controlledLeaderLocked(shard, nodes, now); controlled {
+		return leader
+	}
 	leader := ElectionLeader{Shard: shard.ID, Primary: shard.Primary, Candidates: Owners(shard)}
 	for _, nodeID := range leader.Candidates {
 		if store.nodeActiveLocked(nodes, nodeID, now) {

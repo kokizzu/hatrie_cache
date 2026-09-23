@@ -4953,3 +4953,12 @@ in `hatCache.LeaderFencingTokenPair`; missing or stale generations are
 rejected before mutation. The default is `false`. See
 [T203_LEADER_FENCING.md](T203_LEADER_FENCING.md) for configuration, client
 requests, batch limitations, safety boundaries, and measurements.
+
+## Supervised Failover
+
+`ElectionStore.SetLeaderOverride` provides an opt-in operator-selected leader
+for a healthy shard owner. `BeginRecovery` pins that choice while recovery is
+verified, and `CompleteRecovery` explicitly returns the shard to automatic
+election. The default election path is unchanged. See
+[T204_SUPERVISED_FAILOVER.md](T204_SUPERVISED_FAILOVER.md) for the lifecycle,
+status fields, safety boundary, and measurements.

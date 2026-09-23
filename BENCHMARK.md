@@ -19692,6 +19692,52 @@ BenchmarkT203LeaderWriteFencing/StrictLeaderCheck-32  1587135  743.9 ns/op  360 
 PASS
 ```
 
+## T204: Supervised Failover
+
+Commands:
+
+```text
+make benchmark-t202
+make benchmark-t204
+```
+
+Linux/amd64, AMD Ryzen 9 5950X, five samples per case. The pre-change row is
+the T202 legacy election benchmark captured before T204. The T204 rows use the
+same leader lookup with a nil control map, an operator override, and an active
+recovery control.
+
+| Path | Median | Memory | Allocations | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Pre-T204 automatic election | 409.0 ns/op | 172 B/op | 7 allocs/op | baseline |
+| T204 automatic election | 405.1 ns/op | 172 B/op | 7 allocs/op | 0.991x time; no allocation change |
+| T204 operator override | 410.7 ns/op | 172 B/op | 7 allocs/op | +1.4% versus T204 automatic |
+| T204 recovery state | 430.6 ns/op | 172 B/op | 7 allocs/op | +6.3% versus T204 automatic |
+
+The nil-control default path shows no measurable regression in memory or
+allocations. The small timing differences are within normal benchmark noise;
+the controlled paths add no allocation cost.
+
+Raw T204 output:
+
+```text
+BenchmarkT204LeaderForKey/AutomaticDefault-32  2970336  417.3 ns/op  172 B/op  7 allocs/op
+BenchmarkT204LeaderForKey/AutomaticDefault-32  2703242  401.9 ns/op  172 B/op  7 allocs/op
+BenchmarkT204LeaderForKey/AutomaticDefault-32  2992294  405.1 ns/op  172 B/op  7 allocs/op
+BenchmarkT204LeaderForKey/AutomaticDefault-32  2844448  402.4 ns/op  172 B/op  7 allocs/op
+BenchmarkT204LeaderForKey/AutomaticDefault-32  3045544  409.2 ns/op  172 B/op  7 allocs/op
+BenchmarkT204LeaderForKey/OperatorOverride-32  2922086  410.6 ns/op  172 B/op  7 allocs/op
+BenchmarkT204LeaderForKey/OperatorOverride-32  2881491  414.3 ns/op  172 B/op  7 allocs/op
+BenchmarkT204LeaderForKey/OperatorOverride-32  2953993  407.8 ns/op  172 B/op  7 allocs/op
+BenchmarkT204LeaderForKey/OperatorOverride-32  2914192  415.3 ns/op  172 B/op  7 allocs/op
+BenchmarkT204LeaderForKey/OperatorOverride-32  2566972  410.7 ns/op  172 B/op  7 allocs/op
+BenchmarkT204LeaderForKey/RecoveryState-32  2942323  418.2 ns/op  172 B/op  7 allocs/op
+BenchmarkT204LeaderForKey/RecoveryState-32  2808267  435.2 ns/op  172 B/op  7 allocs/op
+BenchmarkT204LeaderForKey/RecoveryState-32  2541919  454.2 ns/op  172 B/op  7 allocs/op
+BenchmarkT204LeaderForKey/RecoveryState-32  2640783  426.6 ns/op  172 B/op  7 allocs/op
+BenchmarkT204LeaderForKey/RecoveryState-32  2671660  430.6 ns/op  172 B/op  7 allocs/op
+PASS
+```
+
 ## Rejected Generic Keyed Differential Reduction
 
 Workload: 256 weighted rows across 16 groups, comparing an arbitrary

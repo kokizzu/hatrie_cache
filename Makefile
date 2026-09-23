@@ -25588,6 +25588,46 @@ push-t202:
 test-t203:
 	bash scripts/test-t203-leader-fencing.sh
 
+.PHONY: test-t204
+test-t204:
+	bash scripts/test-t204-supervised-failover.sh
+
+.PHONY: format-t204
+format-t204:
+	bash scripts/format-t204.sh
+
+.PHONY: benchmark-t204
+benchmark-t204:
+	bash scripts/benchmark-t204.sh
+
+.PHONY: test-t204-package
+test-t204-package:
+	bash scripts/test-t204-package.sh
+
+.PHONY: race-t204
+race-t204:
+	bash scripts/race-t204.sh
+
+.PHONY: vet-t204
+vet-t204:
+	bash scripts/vet-t204.sh
+
+.PHONY: compile-t204-root
+compile-t204-root:
+	bash scripts/compile-t204-root.sh
+
+.PHONY: stage-t204
+stage-t204:
+	bash scripts/stage-t204.sh
+
+.PHONY: commit-t204
+commit-t204:
+	bash scripts/commit-t204.sh
+
+.PHONY: push-t204
+push-t204:
+	bash scripts/push-t204.sh
+
 .PHONY: format-t203
 format-t203:
 	bash scripts/format-t203.sh

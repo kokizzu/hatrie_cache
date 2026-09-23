@@ -17,6 +17,14 @@ type ElectionStatus = hatTopology.ElectionStatus
 type ElectionNodeStatus = hatTopology.ElectionNodeStatus
 type ElectionLeader = hatTopology.ElectionLeader
 type ElectionKeyRoute = hatTopology.ElectionKeyRoute
+type ElectionRecoveryState = hatTopology.ElectionRecoveryState
+type ElectionControl = hatTopology.ElectionControl
+
+const (
+	ElectionRecoveryAutomatic        = hatTopology.ElectionRecoveryAutomatic
+	ElectionRecoveryOperatorOverride = hatTopology.ElectionRecoveryOperatorOverride
+	ElectionRecoveryInProgress       = hatTopology.ElectionRecoveryInProgress
+)
 
 // ElectionStore adapts the legacy root topology store to hatTopology's public
 // election implementation.
@@ -59,6 +67,38 @@ func (store *ElectionStore) MarkOffline(nodeID string) error {
 		return hatTopology.NewElectionStore(nil, ElectionOptions{}).MarkOffline(nodeID)
 	}
 	return store.core.MarkOffline(nodeID)
+}
+
+// SetLeaderOverride pins a healthy shard owner as the supervised leader.
+func (store *ElectionStore) SetLeaderOverride(shardID uint32, nodeID, reason string) error {
+	if store == nil || store.core == nil {
+		return hatTopology.NewElectionStore(nil, ElectionOptions{}).SetLeaderOverride(shardID, nodeID, reason)
+	}
+	return store.core.SetLeaderOverride(shardID, nodeID, reason)
+}
+
+// BeginRecovery starts the explicit recovery phase for a supervised shard.
+func (store *ElectionStore) BeginRecovery(shardID uint32, reason string) error {
+	if store == nil || store.core == nil {
+		return hatTopology.NewElectionStore(nil, ElectionOptions{}).BeginRecovery(shardID, reason)
+	}
+	return store.core.BeginRecovery(shardID, reason)
+}
+
+// CompleteRecovery releases a supervised shard back to automatic election.
+func (store *ElectionStore) CompleteRecovery(shardID uint32) error {
+	if store == nil || store.core == nil {
+		return hatTopology.NewElectionStore(nil, ElectionOptions{}).CompleteRecovery(shardID)
+	}
+	return store.core.CompleteRecovery(shardID)
+}
+
+// Controls returns the current supervised failover decisions.
+func (store *ElectionStore) Controls() []ElectionControl {
+	if store == nil || store.core == nil {
+		return nil
+	}
+	return store.core.Controls()
 }
 
 // IsHealthy reports whether nodeID is eligible to serve stale-sensitive reads.
