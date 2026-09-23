@@ -749,6 +749,16 @@ existing mutation and backup defaults remain unchanged. See
 [TU36_SNAPSHOT_ROTATION.md](TU36_SNAPSHOT_ROTATION.md) and
 [BENCHMARK.md](BENCHMARK.md#tu36-snapshot-rotation-policy).
 
+## ClickHouse C238: Mutation Queue Progress
+
+Adopted as an additive diagnostic extension of the opt-in
+`hatSql.MutationController`. `MutationSnapshot` now derives remaining work,
+elapsed duration, and a best-effort remaining-time estimate at read time. The
+progress callback and mutation execution path gain no timer, goroutine, or
+allocation; terminal and unknown-total snapshots fail closed to zero future
+work. See [C238_MUTATION_PROGRESS.md](C238_MUTATION_PROGRESS.md) and
+[BENCHMARK.md#c238-mutation-queue-progress](BENCHMARK.md#c238-mutation-queue-progress).
+
 ## T-U37: Replica Applier Throttling
 
 Added an opt-in bounded `hatReplication.ApplierThrottle` and wired it to

@@ -35599,3 +35599,23 @@ Linux/amd64 (AMD Ryzen 9 5950X), with `-benchtime=100ms -count=5`:
 The syntax addition is read-only and has no ordinary-query-path cost. See
 [CH045_EXPLAIN_ESTIMATE.md](CH045_EXPLAIN_ESTIMATE.md) for API semantics and
 verification commands.
+
+<a id="c238-mutation-progress"></a>
+## C238 Mutation Queue Progress
+
+The paired `BenchmarkC238MutationSnapshot` fixture measures one active
+mutation snapshot before and after adding derived remaining-work and timing
+fields. Five samples ran with `make benchmark-c238` on
+Linux/amd64, AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | B/op | allocs/op | Relative time |
+| --- | ---: | ---: | ---: | ---: |
+| Before derived fields | 47.70 | 0 | 0 | 1.00x |
+| With derived fields | 102.8 | 0 | 0 | 2.15x |
+
+The added cost is confined to `Snapshot` reads: the controller's progress
+callback does not gain bookkeeping, timers, goroutines, or allocations.
+Submit/wait retained 446 B/op and 7 allocs/op. The absolute snapshot cost is
+about 103 ns in this fixture; callers that poll status should account for the
+expected clock and estimate calculation cost. See
+[C238_MUTATION_PROGRESS.md](C238_MUTATION_PROGRESS.md).

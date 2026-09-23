@@ -71,7 +71,7 @@ operator control remain the preferred deployment model.
 - [ ] C235 Read/write task profiler aggregation by table part and column.
 - [ ] C236 Explain output for data-skipping-index decisions and rejected marks.
 - [ ] C237 Explain output for projection selection and estimated I/O cost.
-- [ ] C238 Mutation queue progress with rows remaining and elapsed estimates.
+- [x] C238 Mutation queue progress with rows remaining and elapsed estimates is implemented as derived, read-time fields on `hatSql.MutationSnapshot`; the opt-in controller hot path and defaults remain unchanged. See [C238_MUTATION_PROGRESS.md](C238_MUTATION_PROGRESS.md).
 - [ ] C239 Part-merge backlog, amplification, and age metrics.
 - [ ] C240 Read-only backup database attachment for querying backup parts in place.
 - [ ] C241 Incremental backup chunk deduplication across snapshots.

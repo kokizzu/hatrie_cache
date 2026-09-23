@@ -24794,3 +24794,36 @@ commit-chg45:
 
 push-chg45:
 	bash ./scripts/push-chg45.sh
+.PHONY: test-c238
+
+test-c238:
+	@bash scripts/test-c238.sh
+.PHONY: format-c238
+
+format-c238:
+	@bash scripts/format-c238.sh
+.PHONY: test-c238-related test-c238-package race-c238 vet-c238 verify-c238-docs benchmark-c238 commit-c238 push-c238
+
+test-c238-related:
+	@bash scripts/test-c238-related.sh
+
+test-c238-package:
+	@bash scripts/test-c238-package.sh
+
+race-c238:
+	@bash scripts/race-c238.sh
+
+vet-c238:
+	@bash scripts/vet-c238.sh
+
+verify-c238-docs:
+	@bash scripts/verify-c238-docs.sh
+
+benchmark-c238:
+	@bash scripts/benchmark-c238.sh
+
+commit-c238:
+	@bash scripts/commit-c238.sh
+
+push-c238:
+	@bash scripts/push-c238.sh

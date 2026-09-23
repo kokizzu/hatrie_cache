@@ -75,14 +75,17 @@ type MutationControllerOptions struct {
 
 // MutationSnapshot is a point-in-time, copy-safe mutation status record.
 type MutationSnapshot struct {
-	ID         string
-	Priority   int
-	State      MutationState
-	Completed  uint64
-	Total      uint64
-	Error      string
-	StartedAt  time.Time
-	FinishedAt time.Time
+	ID                 string
+	Priority           int
+	State              MutationState
+	Completed          uint64
+	Total              uint64
+	Remaining          uint64
+	Elapsed            time.Duration
+	EstimatedRemaining time.Duration
+	Error              string
+	StartedAt          time.Time
+	FinishedAt         time.Time
 }
 
 // MutationControllerStats contains bounded-controller counters and gauges.
@@ -558,16 +561,57 @@ func (c *MutationController) finishLocked(job *mutationJob, state MutationState,
 }
 
 func (c *MutationController) snapshotLocked(job *mutationJob) MutationSnapshot {
-	return MutationSnapshot{
-		ID:         job.spec.ID,
-		Priority:   job.spec.Priority,
-		State:      job.state,
-		Completed:  job.progress.Completed,
-		Total:      job.progress.Total,
-		Error:      boundedMutationError(job.err),
-		StartedAt:  job.startedAt,
-		FinishedAt: job.finishedAt,
+	now := time.Now().UTC()
+	elapsed := mutationElapsed(job, now)
+	remaining := uint64(0)
+	estimatedRemaining := time.Duration(0)
+	if job.state == MutationRunning && job.totalKnown && job.progress.Total > job.progress.Completed {
+		remaining = job.progress.Total - job.progress.Completed
+		estimatedRemaining = estimateMutationRemaining(elapsed, job.progress.Completed, job.progress.Total)
 	}
+	return MutationSnapshot{
+		ID:                 job.spec.ID,
+		Priority:           job.spec.Priority,
+		State:              job.state,
+		Completed:          job.progress.Completed,
+		Total:              job.progress.Total,
+		Remaining:          remaining,
+		Elapsed:            elapsed,
+		EstimatedRemaining: estimatedRemaining,
+		Error:              boundedMutationError(job.err),
+		StartedAt:          job.startedAt,
+		FinishedAt:         job.finishedAt,
+	}
+}
+
+func mutationElapsed(job *mutationJob, now time.Time) time.Duration {
+	if job == nil || job.startedAt.IsZero() {
+		return 0
+	}
+	end := job.finishedAt
+	if end.IsZero() {
+		end = now
+	}
+	if end.Before(job.startedAt) {
+		return 0
+	}
+	return end.Sub(job.startedAt)
+}
+
+func estimateMutationRemaining(elapsed time.Duration, completed, total uint64) time.Duration {
+	if elapsed <= 0 || completed == 0 || total <= completed {
+		return 0
+	}
+	remaining := total - completed
+	estimate := float64(elapsed) * float64(remaining) / float64(completed)
+	maxDuration := float64(time.Duration(1<<63 - 1))
+	if estimate >= maxDuration {
+		return time.Duration(1<<63 - 1)
+	}
+	if estimate <= 0 {
+		return 0
+	}
+	return time.Duration(estimate)
 }
 
 func (c *MutationController) historyContainsLocked(id string) bool {
