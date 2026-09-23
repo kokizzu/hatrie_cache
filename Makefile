@@ -26490,6 +26490,54 @@ format-t228:
 benchmark-t228:
 	bash scripts/benchmark-t228.sh
 
+.PHONY: format-t229
+format-t229:
+	bash scripts/format-t229.sh
+
+.PHONY: test-t229
+test-t229:
+	bash scripts/test-t229.sh
+
+.PHONY: benchmark-t229-before
+benchmark-t229-before:
+	bash scripts/benchmark-t229-before.sh
+
+.PHONY: benchmark-t229
+benchmark-t229:
+	bash scripts/benchmark-t229.sh
+
+.PHONY: race-t229
+race-t229:
+	bash scripts/race-t229.sh
+
+.PHONY: vet-t229
+vet-t229:
+	bash scripts/vet-t229.sh
+
+.PHONY: test-t229-package
+test-t229-package:
+	bash scripts/test-t229-package.sh
+
+.PHONY: verify-t229
+verify-t229:
+	bash scripts/verify-t229.sh
+
+.PHONY: review-t229
+review-t229:
+	bash scripts/review-t229.sh
+
+.PHONY: stage-t229
+stage-t229:
+	bash scripts/stage-t229.sh
+
+.PHONY: commit-t229
+commit-t229:
+	bash scripts/commit-t229.sh
+
+.PHONY: push-t229
+push-t229:
+	bash scripts/push-t229.sh
+
 .PHONY: race-t228
 race-t228:
 	bash scripts/race-t228.sh

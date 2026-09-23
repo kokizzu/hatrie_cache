@@ -234,6 +234,7 @@ security guidance before exposing it on a network.
 - Bounded as-of retention leases for safe compaction: [FRONTIER_RETENTION.md](FRONTIER_RETENTION.md)
 - Tarantool-style tuple format version negotiation: [TUPLE_FORMAT_NEGOTIATION.md](TUPLE_FORMAT_NEGOTIATION.md)
 - Compatible tuple-format readers for additive schema versions: [T228_TUPLE_FORMAT_COMPATIBILITY.md](T228_TUPLE_FORMAT_COMPATIBILITY.md)
+- Opt-in before-replace validation and conflict hooks: [T229_BEFORE_REPLACE.md](T229_BEFORE_REPLACE.md)
 - Tarantool-inspired adaptive per-tuple compression: [TT045_TUPLE_COMPRESSION.md](TT045_TUPLE_COMPRESSION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#tt-045-tuple-level-compression)
 - Snapshot-consistent ordered index cursors: [ORDERED_SNAPSHOT_CURSOR.md](ORDERED_SNAPSHOT_CURSOR.md)
 - Opt-in per-space memory quotas: [SPACE_MEMORY_QUOTA.md](SPACE_MEMORY_QUOTA.md)
@@ -4318,6 +4319,16 @@ without weakening strict tuple validation. It fills missing trailing fields
 from defaults, generators, or nullable rules, and rejects unsafe positional
 changes. See [T228_TUPLE_FORMAT_COMPATIBILITY.md](T228_TUPLE_FORMAT_COMPATIBILITY.md)
 and [TUPLE_FORMAT_NEGOTIATION.md](TUPLE_FORMAT_NEGOTIATION.md).
+
+## Before-Replace Validation Hooks
+
+`SpaceOptions.BeforeReplace` adds an opt-in callback for validating inserts,
+replacements, and deletes before they mutate a memtx or Vinyl space. The
+callback receives copied old and new values plus `Exists` and `Delete` flags,
+so it can enforce conflict policy without exposing storage memory. It is
+disabled by default, and ordinary input/capacity validation runs first. See
+[T229_BEFORE_REPLACE.md](T229_BEFORE_REPLACE.md) and the measurements in
+[BENCHMARK.md](BENCHMARK.md#t229-before-replace-triggers).
 
 ## SQL Logical Predicate Short-Circuiting
 

@@ -55,15 +55,32 @@ type MemtxSpaceOptions struct {
 // SpaceOptions configures one immutable-at-creation storage policy.
 // Engine == "" selects SpaceEngineMemtx.
 type SpaceOptions struct {
-	Engine SpaceEngine
-	Memtx  MemtxSpaceOptions
-	Vinyl  LSMTableOptions
+	Engine        SpaceEngine
+	Memtx         MemtxSpaceOptions
+	Vinyl         LSMTableOptions
+	BeforeReplace SpaceBeforeReplace
 }
 
+// SpaceReplace describes one accepted-key replacement attempt. OldValue and
+// NewValue are independent copies owned by the callback invocation.
+type SpaceReplace struct {
+	Key      string
+	OldValue []byte
+	NewValue []byte
+	Exists   bool
+	Delete   bool
+}
+
+// SpaceBeforeReplace validates or rejects a replacement before it mutates the
+// space. The callback runs while the space mutation is serialized and must not
+// call back into the same Space.
+type SpaceBeforeReplace func(SpaceReplace) error
+
 type normalizedSpaceOptions struct {
-	engine SpaceEngine
-	memtx  MemtxSpaceOptions
-	vinyl  LSMTableOptions
+	engine        SpaceEngine
+	memtx         MemtxSpaceOptions
+	vinyl         LSMTableOptions
+	beforeReplace SpaceBeforeReplace
 }
 
 // SpaceStats reports engine-specific structural counters without materializing
@@ -79,11 +96,12 @@ type SpaceStats struct {
 // engine. The selected engine does not change at runtime; create another
 // space and migrate through snapshots when an engine change is required.
 type Space struct {
-	mu           sync.RWMutex
-	engine       SpaceEngine
-	memtxOptions MemtxSpaceOptions
-	memtx        map[string][]byte
-	vinyl        *LSMTable
+	mu            sync.RWMutex
+	engine        SpaceEngine
+	memtxOptions  MemtxSpaceOptions
+	memtx         map[string][]byte
+	vinyl         *LSMTable
+	beforeReplace SpaceBeforeReplace
 }
 
 // NewSpace creates one independently configured storage space.
@@ -93,8 +111,9 @@ func NewSpace(options SpaceOptions) (*Space, error) {
 		return nil, err
 	}
 	space := &Space{
-		engine:       normalized.engine,
-		memtxOptions: normalized.memtx,
+		engine:        normalized.engine,
+		memtxOptions:  normalized.memtx,
+		beforeReplace: normalized.beforeReplace,
 	}
 	if normalized.engine == SpaceEngineMemtx {
 		space.memtx = make(map[string][]byte)
@@ -123,16 +142,34 @@ func (space *Space) Put(key string, value []byte) error {
 	if key == "" {
 		return ErrSpaceKeyRequired
 	}
-	if space.engine == SpaceEngineVinyl {
+	if space.engine == SpaceEngineVinyl && space.beforeReplace == nil {
 		return space.vinyl.Put(key, value)
 	}
 	space.mu.Lock()
 	defer space.mu.Unlock()
+	if space.engine == SpaceEngineVinyl {
+		if len(value) > space.vinyl.config.runConfig.maxValueBytes {
+			return ErrLSMTableValueTooLarge
+		}
+		oldValue, exists := space.vinyl.Get(key)
+		if err := space.runBeforeReplaceLocked(key, oldValue, value, exists, false); err != nil {
+			return err
+		}
+		return space.vinyl.Put(key, value)
+	}
 	if len(value) > space.memtxOptions.MaxValueBytes {
 		return ErrSpaceValueTooLarge
 	}
 	if _, exists := space.memtx[key]; !exists && len(space.memtx) >= space.memtxOptions.MaxRecords {
 		return ErrSpaceFull
+	}
+	if space.beforeReplace == nil {
+		space.memtx[key] = append([]byte(nil), value...)
+		return nil
+	}
+	oldValue, exists := space.memtx[key]
+	if err := space.runBeforeReplaceLocked(key, oldValue, value, exists, false); err != nil {
+		return err
 	}
 	space.memtx[key] = append([]byte(nil), value...)
 	return nil
@@ -143,11 +180,14 @@ func (space *Space) Get(key string) ([]byte, bool) {
 	if space == nil || key == "" {
 		return nil, false
 	}
-	if space.engine == SpaceEngineVinyl {
+	if space.engine == SpaceEngineVinyl && space.beforeReplace == nil {
 		return space.vinyl.Get(key)
 	}
 	space.mu.RLock()
 	defer space.mu.RUnlock()
+	if space.engine == SpaceEngineVinyl {
+		return space.vinyl.Get(key)
+	}
 	value, ok := space.memtx[key]
 	if !ok {
 		return nil, false
@@ -163,7 +203,7 @@ func (space *Space) Delete(key string) error {
 	if key == "" {
 		return ErrSpaceKeyRequired
 	}
-	if space.engine == SpaceEngineVinyl {
+	if space.engine == SpaceEngineVinyl && space.beforeReplace == nil {
 		if _, exists := space.vinyl.Get(key); !exists {
 			return nil
 		}
@@ -171,8 +211,43 @@ func (space *Space) Delete(key string) error {
 	}
 	space.mu.Lock()
 	defer space.mu.Unlock()
+	if space.engine == SpaceEngineVinyl {
+		oldValue, exists := space.vinyl.Get(key)
+		if !exists {
+			return nil
+		}
+		if err := space.runBeforeReplaceLocked(key, oldValue, nil, true, true); err != nil {
+			return err
+		}
+		return space.vinyl.Delete(key)
+	}
+	if space.beforeReplace == nil {
+		delete(space.memtx, key)
+		return nil
+	}
+	oldValue, exists := space.memtx[key]
+	if !exists {
+		return nil
+	}
+	if err := space.runBeforeReplaceLocked(key, oldValue, nil, true, true); err != nil {
+		return err
+	}
 	delete(space.memtx, key)
 	return nil
+}
+
+func (space *Space) runBeforeReplaceLocked(key string, oldValue, newValue []byte, exists, deleting bool) error {
+	if space.beforeReplace == nil {
+		return nil
+	}
+	event := SpaceReplace{
+		Key:      key,
+		OldValue: append([]byte(nil), oldValue...),
+		NewValue: append([]byte(nil), newValue...),
+		Exists:   exists,
+		Delete:   deleting,
+	}
+	return space.beforeReplace(event)
 }
 
 // Flush seals pending Vinyl writes. It is a no-op for memtx spaces.
@@ -359,7 +434,12 @@ func normalizeSpaceOptions(options SpaceOptions) (normalizedSpaceOptions, error)
 	if memtx.MaxRecords < 1 || memtx.MaxValueBytes < 1 {
 		return normalizedSpaceOptions{}, ErrSpaceOptionsInvalid
 	}
-	return normalizedSpaceOptions{engine: engine, memtx: memtx, vinyl: options.Vinyl}, nil
+	return normalizedSpaceOptions{
+		engine:        engine,
+		memtx:         memtx,
+		vinyl:         options.Vinyl,
+		beforeReplace: options.BeforeReplace,
+	}, nil
 }
 
 func spaceEngineCode(engine SpaceEngine) byte {

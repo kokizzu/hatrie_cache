@@ -37329,3 +37329,49 @@ Samples: five runs; table values are medians from the same invocation.
 The exact-shape reader adds about 1.4 ns/op, or 0.5% CPU, with no memory or
 allocation increase. The compatibility path validates all source fields,
 resolves target suffix fields in order, and rejects unsafe schema changes.
+
+<a id="t229-before-replace-triggers"></a>
+## T229 Before-Replace Triggers
+
+This benchmark measures the existing memtx replacement path before T229, the
+same path after T229 with the hook disabled, and the opt-in path with a
+no-op callback. The callback still receives copied old/new values, so the
+enabled row includes the feature's intentional copy cost.
+
+Command: `make benchmark-t229` (`-benchmem -count=5 -cpu=1`)
+Platform: Linux/amd64, AMD Ryzen 9 5950X
+Samples: five runs; table values are medians.
+
+| Workload | Median CPU | Memory | Relative CPU |
+| --- | ---: | ---: | ---: |
+| Existing path before T229 | 47.86 ns/op | 8 B/op, 1 alloc/op | 1.00x |
+| Hook disabled after T229 | 51.37 ns/op | 8 B/op, 1 alloc/op | 1.07x |
+| Hook enabled, no-op callback | 102.4 ns/op | 24 B/op, 3 allocs/op | 2.14x |
+
+The default remains disabled and retains the original allocation profile. The
+enabled callback costs about 2.0x against the same-invocation disabled control
+and adds 16 B/op plus two allocations for copied event images. Invalid writes
+are rejected before the callback and rejected conflicts do not mutate state.
+
+### Raw T229 Output
+
+```text
+Before, make benchmark-t229-before:
+BenchmarkT229SpacePutBaseline  25009249  52.69 ns/op  8 B/op  1 allocs/op
+BenchmarkT229SpacePutBaseline  26341557  47.86 ns/op  8 B/op  1 allocs/op
+BenchmarkT229SpacePutBaseline  26593970  48.76 ns/op  8 B/op  1 allocs/op
+BenchmarkT229SpacePutBaseline  26515309  46.82 ns/op  8 B/op  1 allocs/op
+BenchmarkT229SpacePutBaseline  27667789  47.73 ns/op  8 B/op  1 allocs/op
+
+After, make benchmark-t229:
+BenchmarkT229SpacePutBaseline    24440487  53.33 ns/op  8 B/op  1 allocs/op
+BenchmarkT229SpacePutBaseline    25210012  49.45 ns/op  8 B/op  1 allocs/op
+BenchmarkT229SpacePutBaseline    23797422  48.32 ns/op  8 B/op  1 allocs/op
+BenchmarkT229SpacePutBaseline    24884442  51.37 ns/op  8 B/op  1 allocs/op
+BenchmarkT229SpacePutBaseline    25390701  53.10 ns/op  8 B/op  1 allocs/op
+BenchmarkT229SpaceBeforeReplace  10992358 100.8 ns/op 24 B/op  3 allocs/op
+BenchmarkT229SpaceBeforeReplace  10768528 106.6 ns/op 24 B/op  3 allocs/op
+BenchmarkT229SpaceBeforeReplace  10647303  99.28 ns/op 24 B/op  3 allocs/op
+BenchmarkT229SpaceBeforeReplace  11661644 102.4 ns/op 24 B/op  3 allocs/op
+BenchmarkT229SpaceBeforeReplace  10524669 108.5 ns/op 24 B/op  3 allocs/op
+```
