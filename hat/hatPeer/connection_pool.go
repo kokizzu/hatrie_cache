@@ -56,6 +56,12 @@ type Connection interface {
 // shutdown and request cancellation can interrupt slow connection attempts.
 type DialFunc func(ctx context.Context) (Connection, error)
 
+// ConnectionHealthCheckFunc validates an idle connection before reuse. A
+// non-nil error discards the connection and lets the pool dial a replacement.
+// The check runs only when a connection is taken from the idle pool; newly
+// dialed connections are returned without a duplicate check.
+type ConnectionHealthCheckFunc func(ctx context.Context, connection Connection) error
+
 // ConnectionPoolCircuitBreakerOptions enables the optional peer circuit
 // breaker when assigned to ConnectionPoolOptions.Breaker.
 type ConnectionPoolCircuitBreakerOptions struct {
@@ -104,7 +110,10 @@ type ConnectionPoolOptions struct {
 	DialRetryDelay    time.Duration
 	DialRetryMaxDelay time.Duration
 	Dial              DialFunc
-	Breaker           *ConnectionPoolCircuitBreakerOptions
+	// HealthCheck is an opt-in liveness probe for connections taken from idle.
+	// A failed probe closes that connection and retries through Dial.
+	HealthCheck ConnectionHealthCheckFunc
+	Breaker     *ConnectionPoolCircuitBreakerOptions
 	// Lifecycle records opt-in connection and pool lifecycle events. A nil
 	// registry preserves the allocation-free legacy path.
 	Lifecycle *PeerLifecycleRegistry
@@ -114,12 +123,14 @@ type ConnectionPoolOptions struct {
 
 // ConnectionPoolStats is a point-in-time pool snapshot.
 type ConnectionPoolStats struct {
-	Active       int
-	Open         int
-	Idle         int
-	Acquires     uint64
-	DialAttempts uint64
-	DialFailures uint64
+	Active              int
+	Open                int
+	Idle                int
+	Acquires            uint64
+	DialAttempts        uint64
+	DialFailures        uint64
+	HealthChecks        uint64
+	HealthCheckFailures uint64
 }
 
 // ConnectionPool bounds peer connections and reuses successful connections.
@@ -132,6 +143,7 @@ type ConnectionPool struct {
 	maxDialAttempts   int
 	dialRetryDelay    time.Duration
 	dialRetryMaxDelay time.Duration
+	healthCheck       ConnectionHealthCheckFunc
 	breaker           *connectionPoolCircuitBreaker
 
 	slots     chan struct{}
@@ -143,14 +155,16 @@ type ConnectionPool struct {
 	lifecycle *PeerLifecycleRegistry
 	peerID    string
 
-	mu              sync.Mutex
-	closedState     bool
-	shutdownEmitted bool
-	active          int
-	open            int
-	acquires        uint64
-	dialAttempts    uint64
-	dialFailures    uint64
+	mu                  sync.Mutex
+	closedState         bool
+	shutdownEmitted     bool
+	active              int
+	open                int
+	acquires            uint64
+	dialAttempts        uint64
+	dialFailures        uint64
+	healthChecks        uint64
+	healthCheckFailures uint64
 }
 
 // NewConnectionPool creates a bounded reusable connection pool.
@@ -250,6 +264,7 @@ func NewConnectionPool(options ConnectionPoolOptions) (*ConnectionPool, error) {
 		maxDialAttempts:   options.MaxDialAttempts,
 		dialRetryDelay:    options.DialRetryDelay,
 		dialRetryMaxDelay: options.DialRetryMaxDelay,
+		healthCheck:       options.HealthCheck,
 		breaker:           breaker,
 		slots:             make(chan struct{}, options.MaxOpen),
 		idle:              make(chan Connection, options.MaxIdle),
@@ -340,12 +355,14 @@ func (pool *ConnectionPool) Stats() ConnectionPoolStats {
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 	return ConnectionPoolStats{
-		Active:       pool.active,
-		Open:         pool.open,
-		Idle:         len(pool.idle),
-		Acquires:     pool.acquires,
-		DialAttempts: pool.dialAttempts,
-		DialFailures: pool.dialFailures,
+		Active:              pool.active,
+		Open:                pool.open,
+		Idle:                len(pool.idle),
+		Acquires:            pool.acquires,
+		DialAttempts:        pool.dialAttempts,
+		DialFailures:        pool.dialFailures,
+		HealthChecks:        pool.healthChecks,
+		HealthCheckFailures: pool.healthCheckFailures,
 	}
 }
 
@@ -379,6 +396,13 @@ func (pool *ConnectionPool) end() {
 }
 
 func (pool *ConnectionPool) acquire(ctx context.Context) (Connection, error) {
+	if pool.healthCheck == nil {
+		return pool.acquireWithoutHealthCheck(ctx)
+	}
+	return pool.acquireWithHealthCheck(ctx)
+}
+
+func (pool *ConnectionPool) acquireWithoutHealthCheck(ctx context.Context) (Connection, error) {
 	if connection, ok := pool.tryIdle(); ok {
 		return pool.acceptIdle(connection)
 	}
@@ -413,6 +437,56 @@ func (pool *ConnectionPool) acquire(ctx context.Context) (Connection, error) {
 	}
 }
 
+func (pool *ConnectionPool) acquireWithHealthCheck(ctx context.Context) (Connection, error) {
+	for {
+		if connection, ok := pool.tryIdle(); ok {
+			accepted, retry, err := pool.acceptHealthyIdle(ctx, connection)
+			if err != nil {
+				return nil, err
+			}
+			if !retry {
+				return accepted, nil
+			}
+			continue
+		}
+
+		select {
+		case connection := <-pool.idle:
+			accepted, retry, err := pool.acceptHealthyIdle(ctx, connection)
+			if err != nil {
+				return nil, err
+			}
+			if !retry {
+				return accepted, nil
+			}
+		case pool.slots <- struct{}{}:
+			if pool.isClosed() {
+				pool.releaseSlot()
+				return nil, ErrConnectionPoolClosed
+			}
+			connection, err := pool.dialWithRetry(ctx)
+			if err != nil {
+				pool.releaseSlot()
+				return nil, err
+			}
+			pool.mu.Lock()
+			if pool.closedState {
+				pool.mu.Unlock()
+				_ = pool.closeConnection(connection)
+				pool.releaseSlot()
+				return nil, ErrConnectionPoolClosed
+			}
+			pool.open++
+			pool.mu.Unlock()
+			return connection, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-pool.closed:
+			return nil, ErrConnectionPoolClosed
+		}
+	}
+}
+
 func (pool *ConnectionPool) tryIdle() (Connection, bool) {
 	select {
 	case connection := <-pool.idle:
@@ -432,6 +506,35 @@ func (pool *ConnectionPool) acceptIdle(connection Connection) (Connection, error
 		return nil, ErrConnectionPoolClosed
 	}
 	return connection, nil
+}
+
+func (pool *ConnectionPool) acceptHealthyIdle(ctx context.Context, connection Connection) (Connection, bool, error) {
+	accepted, err := pool.acceptIdle(connection)
+	if err != nil {
+		return nil, false, err
+	}
+	pool.mu.Lock()
+	pool.healthChecks++
+	pool.mu.Unlock()
+	if err := pool.healthCheck(ctx, accepted); err != nil {
+		pool.mu.Lock()
+		pool.healthCheckFailures++
+		pool.mu.Unlock()
+		_ = pool.closeConnectionAndReleaseSlot(accepted)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, false, ctxErr
+		}
+		if pool.isClosed() {
+			return nil, false, ErrConnectionPoolClosed
+		}
+		return nil, true, nil
+	}
+	if pool.isClosed() {
+		_ = pool.closeConnection(accepted)
+		pool.releaseSlot()
+		return nil, false, ErrConnectionPoolClosed
+	}
+	return accepted, false, nil
 }
 
 func (pool *ConnectionPool) dialWithRetry(ctx context.Context) (Connection, error) {

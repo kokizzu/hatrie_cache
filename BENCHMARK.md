@@ -37685,3 +37685,32 @@ Mailbox B/op:   2759   2747   2737   2740   2767
 The mailbox is about 1.49x faster on this batched workload, at about 6.8% more
 bytes/op and three more allocations per benchmark iteration. It is opt-in;
 ordinary channels remain the better fit when batch draining is not useful.
+
+# T237: Connection Pool Health Checks
+
+Workload: one `hatPeer.ConnectionPool` with `MaxOpen=1` and `MaxIdle=1`,
+repeatedly acquiring and releasing one idle connection. Results are medians
+from five samples on AMD Ryzen 9 5950X with `-benchmem`.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative time |
+| --- | ---: | ---: | ---: | ---: |
+| Before implementation, health disabled | 54.62 | 0 | 0 | 1.00x |
+| After implementation, health disabled | 53.27 | 0 | 0 | 1.03x faster, within noise |
+| After implementation, health enabled | 58.92 | 0 | 0 | 1.11x the paired baseline |
+
+Raw samples:
+
+```text
+Before baseline ns/op: 56.56 56.12 52.40 54.62 49.21
+Before baseline B/op:  0     0     0     0     0
+After baseline ns/op:  52.51 53.85 53.48 53.27 52.55
+After baseline B/op:   0     0     0     0     0
+Health enabled ns/op:  60.01 57.17 58.92 57.35 59.99
+Health enabled B/op:   0     0     0     0     0
+```
+
+The enabled path adds about 11.8% CPU in this synthetic reuse loop, with no
+measured bytes/op or allocation increase. The disabled path retains the
+zero-allocation fast path. Stale-idle recovery and cancellation behavior are
+covered by focused tests; see
+[T237_CONNECTION_POOL_HEALTH.md](T237_CONNECTION_POOL_HEALTH.md).

@@ -5162,3 +5162,13 @@ between independent worker goroutines. It provides context-aware blocking,
 nonblocking operations, and batch draining without per-element allocation. See
 [T236_MAILBOX.md](T236_MAILBOX.md) for semantics, limits, and benchmark
 tradeoffs.
+
+## Connection Pool Health Checks
+
+Use `hatPeer.ConnectionPoolOptions.HealthCheck` to validate an idle peer
+connection before reuse. A failed check closes the stale connection and uses
+the existing dial retry/backoff policy to obtain a replacement. The option is
+disabled by default, does not start a background goroutine, and does not check
+newly dialed connections twice. See
+[T237_CONNECTION_POOL_HEALTH.md](T237_CONNECTION_POOL_HEALTH.md) for the API,
+operational guidance, counters, and measured overhead.

@@ -26876,3 +26876,36 @@ commit-t236:
 
 push-t236:
 	bash scripts/push-t236.sh
+
+benchmark-t237-before:
+	bash scripts/benchmark-t237-before.sh
+
+test-t237:
+	bash scripts/test-t237.sh
+
+format-t237:
+	bash scripts/format-t237.sh
+
+benchmark-t237:
+	bash scripts/benchmark-t237.sh
+
+race-t237:
+	bash scripts/race-t237.sh
+
+vet-t237:
+	bash scripts/vet-t237.sh
+
+test-t237-package:
+	bash scripts/test-t237-package.sh
+
+test-t237-package-verbose:
+	bash scripts/test-t237-package-verbose.sh
+
+stage-t237:
+	bash scripts/stage-t237.sh
+
+commit-t237:
+	bash scripts/commit-t237.sh
+
+push-t237:
+	bash scripts/push-t237.sh
