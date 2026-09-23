@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+test -f CH045_EXPLAIN_ESTIMATE.md
+rg -n 'EXPLAIN ESTIMATE|CH045_EXPLAIN_ESTIMATE|CH-G45' \
+  CH045_EXPLAIN_ESTIMATE.md README.md BENCHMARK.md

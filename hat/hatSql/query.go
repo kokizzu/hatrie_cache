@@ -5578,6 +5578,9 @@ func parseSQLQueryTemplate(source string) (*sqlQuery, error) {
 		if parser.keyword("COST") {
 			cost = true
 			parser.next()
+		} else if parser.keyword("ESTIMATE") {
+			cost = true
+			parser.next()
 		}
 		if parser.keyword("ANALYZE") {
 			analyze = true
@@ -8120,7 +8123,7 @@ func (p *sqlQueryParser) diagnostic(token sqlToken, message string) error {
 }
 func sqlClauseKeyword(value string) bool {
 	switch strings.ToUpper(value) {
-	case "EXPLAIN", "PIPELINE", "COST", "ANALYZE", "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "TABLESAMPLE", "ARRAY", "WHERE", "PREWHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "FETCH", "OFFSET", "SETTINGS", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL", "RECURSIVE", "EXTERNAL", "TABLE":
+	case "EXPLAIN", "PIPELINE", "COST", "ESTIMATE", "ANALYZE", "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "TABLESAMPLE", "ARRAY", "WHERE", "PREWHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "FETCH", "OFFSET", "SETTINGS", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL", "RECURSIVE", "EXTERNAL", "TABLE":
 		return true
 	}
 	return false

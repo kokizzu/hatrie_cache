@@ -4279,6 +4279,12 @@ candidate decisions omit both fields, so existing result columns and JSON
 shape remain unchanged. See [SQL_EXPLAIN_OPTIMIZER.md](SQL_EXPLAIN_OPTIMIZER.md)
 for the contract and example.
 
+`EXPLAIN ESTIMATE` is a ClickHouse-inspired alias for the read-only heuristic
+cost plan. It reports the same estimated rows, CPU cost, and memory columns as
+`EXPLAIN COST`, does not execute the query, and preserves `EXPLAIN COST` for
+backward compatibility. See [CH045_EXPLAIN_ESTIMATE.md](CH045_EXPLAIN_ESTIMATE.md)
+for the contract and measurements.
+
 ## SQL Logical Predicate Short-Circuiting
 
 Columnar batch evaluation short-circuits deterministic, total right-hand

@@ -24754,3 +24754,43 @@ commit-chg44:
 
 push-chg44:
 	bash ./scripts/push-chg44.sh
+.PHONY: test-chg45
+test-chg45:
+	bash ./scripts/test-chg45.sh
+
+.PHONY: benchmark-chg45-baseline
+benchmark-chg45-baseline:
+	bash ./scripts/benchmark-chg45-baseline.sh
+
+.PHONY: benchmark-chg45
+benchmark-chg45:
+	bash ./scripts/benchmark-chg45.sh
+
+.PHONY: format-chg45
+format-chg45:
+	bash ./scripts/format-chg45.sh
+
+.PHONY: test-chg45-related race-chg45 vet-chg45
+test-chg45-related:
+	bash ./scripts/test-chg45-related.sh
+
+race-chg45:
+	bash ./scripts/race-chg45.sh
+
+vet-chg45:
+	bash ./scripts/vet-chg45.sh
+
+.PHONY: verify-chg45-docs
+verify-chg45-docs:
+	bash ./scripts/verify-chg45-docs.sh
+
+.PHONY: test-chg45-package
+test-chg45-package:
+	bash ./scripts/test-chg45-package.sh
+
+.PHONY: commit-chg45 push-chg45
+commit-chg45:
+	bash ./scripts/commit-chg45.sh
+
+push-chg45:
+	bash ./scripts/push-chg45.sh

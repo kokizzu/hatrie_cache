@@ -35585,3 +35585,17 @@ limits, raw samples, and interpretation.
 | Current default raw v1 | 415,888 | 351,660 | 196 | 119,217 | 1.11x faster | 1.00x |
 | Explicit Auto / BestSpeed | 11,496,941 | 58,011,656 | 1,228 | 9,025 | 24.9x slower | 13.2x smaller |
 | Explicit Flate / HuffmanOnly | 7,688,601 | 35,688,752 | 1,133 | 46,225 | 16.7x slower | 2.58x smaller |
+## CH-G45 `EXPLAIN ESTIMATE`
+
+The parser alias is measured against the existing `EXPLAIN COST` path on
+Linux/amd64 (AMD Ryzen 9 5950X), with `-benchtime=100ms -count=5`:
+
+| Operation | CPU range | Heap | Allocs |
+| --- | ---: | ---: | ---: |
+| Existing `EXPLAIN COST` baseline | 10.174–10.918 us/op | 11,870 B/op | 66 |
+| `EXPLAIN ESTIMATE` | 10.445–11.379 us/op | 11,811–11,813 B/op | 64 |
+| Same-fixture `EXPLAIN COST` control | 10.296–11.143 us/op | 11,811–11,813 B/op | 64 |
+
+The syntax addition is read-only and has no ordinary-query-path cost. See
+[CH045_EXPLAIN_ESTIMATE.md](CH045_EXPLAIN_ESTIMATE.md) for API semantics and
+verification commands.
