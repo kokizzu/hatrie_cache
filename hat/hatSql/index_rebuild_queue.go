@@ -66,15 +66,18 @@ type SQLIndexRebuildRequest struct {
 }
 
 type SQLIndexRebuildStatus struct {
-	ID                    string
-	Name                  string
-	Priority              int
-	State                 SQLIndexRebuildState
-	SubmittedAt           time.Time
-	StartedAt             time.Time
-	FinishedAt            time.Time
-	Completed             int
-	Total                 int
+	ID          string
+	Name        string
+	Priority    int
+	State       SQLIndexRebuildState
+	SubmittedAt time.Time
+	StartedAt   time.Time
+	FinishedAt  time.Time
+	Completed   int
+	Total       int
+	// Frontier is the monotonic completed-work frontier. For row-oriented
+	// rebuilds it is the exclusive row ordinal already incorporated.
+	Frontier              uint64
 	CancelRequested       bool
 	VerificationRequested bool
 	Verified              bool
@@ -469,6 +472,9 @@ func (queue *SQLIndexRebuildQueue) updateProgress(task *sqlIndexRebuildTask, com
 	}
 	task.status.Total = total
 	task.status.Completed = completed
+	if completed >= 0 {
+		task.status.Frontier = uint64(completed)
+	}
 }
 
 func (queue *SQLIndexRebuildQueue) finishTask(task *sqlIndexRebuildTask, runErr error, verified bool) {

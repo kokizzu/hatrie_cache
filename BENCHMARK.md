@@ -38105,3 +38105,39 @@ alter ordinary queries. The arrangement scan is the safe default for dense
 postings, while point lookup pays only the selected-row clone cost. Stale
 source versions and unsupported query shapes are verified to fall back without
 serving an old snapshot. Reproduce with `make m218-benchmark`.
+
+<a id="m219-background-index-creation"></a>
+## M219: Background Index Creation
+
+This benchmark uses a 4,096-row already-published materialized snapshot and a
+single `region` point field. The synchronous rows include source resolution,
+snapshot construction, and publication. The background build starts from that
+published result, so it measures work moved out of the caller path rather than
+claiming an end-to-end reduction in total index work.
+
+| Path | ns/op | B/op | allocs/op | Relative CPU | Relative bytes | Meaning |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Create without point index | 6,386,904 | 5,959,650 | 57,022 | 1.00x | 1.00x | baseline snapshot creation |
+| Create with synchronous point index | 6,578,477 | 6,101,268 | 61,581 | 1.03x (`3.0%` higher) | 1.02x (`2.4%` higher) | legacy opt-in path |
+| Background enqueue only | 1,008 | 819 | 8 | n/a | n/a | caller submission/status cost |
+| Background build and flush | 408,266 | 142,902 | 4,572 | n/a | n/a | queued posting work on an existing snapshot |
+
+The synchronous index adds about 3.0% CPU, 2.4% transient bytes, and 8.0%
+allocations over the no-index `Create` baseline in this run. The background
+path does not make those postings free; it returns submission in about 1.0 us
+and performs the 4,096-row posting build behind the queue. Readers use the old
+snapshot until the complete map is published, and a stale revision fails
+without publication.
+
+Raw result from `make m219-benchmark`:
+
+```text
+BenchmarkM219MaterializedViewPointBuild/create_with_synchronous_index-32  177  6578477 ns/op  6101268 B/op  61581 allocs/op
+BenchmarkM219MaterializedViewPointBuild/create_without_index-32           200  6386904 ns/op  5959650 B/op  57022 allocs/op
+BenchmarkM219MaterializedViewPointBuild/background_enqueue_only-32   1115152     1008 ns/op      819 B/op      8 allocs/op
+BenchmarkM219MaterializedViewPointBuild/background_total_build-32        2451   408266 ns/op   142902 B/op   4572 allocs/op
+```
+
+The queue frontier and atomic stale-build behavior are verified by the focused
+tests. See [M219_BACKGROUND_INDEX_BUILD.md](M219_BACKGROUND_INDEX_BUILD.md) for
+the API, lifecycle, and operational tradeoffs.

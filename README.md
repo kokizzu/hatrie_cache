@@ -5250,3 +5250,15 @@ uses `MATERIALIZED POINT LOOKUP` for selective postings and
 query shapes and stale snapshots use the ordinary executor. See
 [M218_MATERIALIZED_POINT_PLANNER.md](M218_MATERIALIZED_POINT_PLANNER.md) and
 [BENCHMARK.md](BENCHMARK.md#m218-materialized-point-planner).
+
+## Background Materialized Index Builds
+
+Use `MaterializedViews.EnqueuePointLookupBuild` with the existing
+`SQLIndexRebuildQueue` to build point postings after a snapshot is published.
+The view stays readable throughout the build, `SQLIndexRebuildStatus.Frontier`
+reports the exclusive row ordinal incorporated so far, and publication swaps
+the complete posting map only after the captured snapshot revision and fields
+still match. Stale, canceled, or invalid builds do not publish partial state.
+The default synchronous `Create` and refresh paths are unchanged. See
+[M219_BACKGROUND_INDEX_BUILD.md](M219_BACKGROUND_INDEX_BUILD.md) and
+[BENCHMARK.md](BENCHMARK.md#m219-background-index-creation).

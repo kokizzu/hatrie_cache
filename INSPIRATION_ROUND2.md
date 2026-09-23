@@ -105,7 +105,7 @@ operator control remain the preferred deployment model.
 - [x] M216 Incremental Top-K maintenance is verified through the existing C213 `IncrementalTopK` maintainer. Selected output is bounded by `K`; exact replacement retains all active candidates. See [M216_INCREMENTAL_TOP_K.md](M216_INCREMENTAL_TOP_K.md) and [BENCHMARK.md](BENCHMARK.md#m216-incremental-top-k).
 - [x] M217 Opt-in maintained materialized-view point postings return complete rows for exact lookups, with atomic refresh replacement. See [M217_MATERIALIZED_POINT_LOOKUPS.md](M217_MATERIALIZED_POINT_LOOKUPS.md) and [BENCHMARK.md](BENCHMARK.md#m217-materialized-view-point-lookups).
 - [x] M218 Planner selection of point lookup versus arrangement scan; fresh compatible materialized snapshots choose selective postings, dense/unindexed predicates use a snapshot arrangement scan, and stale or unsupported shapes fall back to the ordinary executor. See [M218_MATERIALIZED_POINT_PLANNER.md](M218_MATERIALIZED_POINT_PLANNER.md) and [BENCHMARK.md](BENCHMARK.md#m218-materialized-point-planner).
-- [ ] M219 Background index creation with observable build frontier.
+- [x] M219 Background index creation with observable build frontier; point postings can be built through the existing bounded rebuild queue, with an exclusive row frontier and revision-fenced atomic publication. See [M219_BACKGROUND_INDEX_BUILD.md](M219_BACKGROUND_INDEX_BUILD.md) and [BENCHMARK.md](BENCHMARK.md#m219-background-index-creation).
 - [ ] M220 Safe index removal after dependent readers drain.
 - [ ] M221 Isolated compute clusters with independent resource budgets.
 - [ ] M222 Replicated compute workers for highly available maintained indexes.

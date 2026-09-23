@@ -47,6 +47,16 @@ type MaterializedViewsOptions struct {
 	MaxBytes int64
 }
 
+// MaterializedViewPointLookupBuildRequest describes an asynchronous point
+// posting build for one already-published snapshot. Fields may be omitted only
+// when the view already declares PointLookupFields.
+type MaterializedViewPointLookupBuildRequest struct {
+	ID       string
+	ViewName string
+	Priority int
+	Fields   []string
+}
+
 // MaterializedViewStorageUsage reports logical rows and encoded row bytes
 // retained by a registry. Bytes are accounted when MaxBytes is configured.
 type MaterializedViewStorageUsage struct {
@@ -201,6 +211,74 @@ func (views *MaterializedViews) Create(ctx context.Context, definition Materiali
 		views.dependents[dependency] = append(views.dependents[dependency], definition.Name)
 	}
 	return cloneMaterializedViewStatus(status), nil
+}
+
+// EnqueuePointLookupBuild schedules an asynchronous point-posting build for a
+// published snapshot. The snapshot remains readable while the task runs. The
+// index is installed only when the captured snapshot revision is still current;
+// callers observe row progress and the exclusive row frontier through the
+// returned SQLIndexRebuildStatus and SQLIndexRebuildQueue.Status.
+func (views *MaterializedViews) EnqueuePointLookupBuild(queue *SQLIndexRebuildQueue, request MaterializedViewPointLookupBuildRequest) (SQLIndexRebuildStatus, error) {
+	if views == nil {
+		return SQLIndexRebuildStatus{}, fmt.Errorf("materialized views are nil")
+	}
+	if queue == nil {
+		return SQLIndexRebuildStatus{}, ErrSQLIndexRebuildQueueNil
+	}
+	request.ID = strings.TrimSpace(request.ID)
+	request.ViewName = strings.TrimSpace(request.ViewName)
+	if request.ID == "" || request.ViewName == "" {
+		return SQLIndexRebuildStatus{}, ErrSQLIndexRebuildRequestInvalid
+	}
+
+	views.mu.RLock()
+	view, exists := views.views[request.ViewName]
+	if !exists {
+		views.mu.RUnlock()
+		return SQLIndexRebuildStatus{}, fmt.Errorf("materialized view %q does not exist", request.ViewName)
+	}
+	definition := view.definition
+	originalFields := append([]string(nil), definition.PointLookupFields...)
+	if len(request.Fields) > 0 {
+		definition.PointLookupFields = append([]string(nil), request.Fields...)
+	}
+	definition, err := normalizeMaterializedViewDefinition(definition)
+	if err != nil {
+		views.mu.RUnlock()
+		return SQLIndexRebuildStatus{}, err
+	}
+	if len(definition.PointLookupFields) == 0 {
+		views.mu.RUnlock()
+		return SQLIndexRebuildStatus{}, fmt.Errorf("materialized view %q point lookup fields are required", request.ViewName)
+	}
+	revision := view.snapshot.Status.Revision
+	result := view.snapshot.Result
+	views.mu.RUnlock()
+
+	return queue.Enqueue(SQLIndexRebuildRequest{
+		ID:       request.ID,
+		Name:     request.ViewName,
+		Priority: request.Priority,
+		Run: func(ctx context.Context, progress SQLIndexRebuildProgressFunc) error {
+			lookups, buildErr := buildMaterializedViewPointLookupsWithProgress(ctx, definition, result, progress)
+			if buildErr != nil {
+				return buildErr
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			views.mu.Lock()
+			defer views.mu.Unlock()
+			current, exists := views.views[request.ViewName]
+			if !exists || current.snapshot.Status.Revision != revision || !sameMaterializedViewPointLookupFields(current.definition.PointLookupFields, originalFields) {
+				return fmt.Errorf("materialized view %q changed during point lookup build", request.ViewName)
+			}
+			current.definition.PointLookupFields = append([]string(nil), definition.PointLookupFields...)
+			current.pointLookups = lookups
+			views.views[request.ViewName] = current
+			return nil
+		},
+	})
 }
 
 // Get returns an independent copy of the named materialized-view snapshot.
@@ -463,6 +541,57 @@ func buildMaterializedViewPointLookups(definition MaterializedViewDefinition, re
 			postings[key] = append(postings[key], rowIndex)
 		}
 		lookups[field] = postings
+	}
+	return lookups, nil
+}
+
+func buildMaterializedViewPointLookupsWithProgress(ctx context.Context, definition MaterializedViewDefinition, result QueryResult, progress SQLIndexRebuildProgressFunc) (map[string]map[string][]int, error) {
+	if len(definition.PointLookupFields) == 0 {
+		return nil, nil
+	}
+	columns := make(map[string]struct{}, len(result.Columns))
+	for _, column := range result.Columns {
+		columns[column] = struct{}{}
+	}
+	lookups := make(map[string]map[string][]int, len(definition.PointLookupFields))
+	for _, field := range definition.PointLookupFields {
+		if _, exists := columns[field]; !exists {
+			return nil, fmt.Errorf("point lookup field %q is not a materialized view output column", field)
+		}
+		lookups[field] = make(map[string][]int)
+	}
+	total := len(result.Rows)
+	if progress != nil {
+		progress(0, total)
+	}
+	const batchSize = 256
+	for start := 0; start < total; start += batchSize {
+		if ctx != nil {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
+		end := start + batchSize
+		if end > total {
+			end = total
+		}
+		for rowIndex := start; rowIndex < end; rowIndex++ {
+			row := result.Rows[rowIndex]
+			for _, field := range definition.PointLookupFields {
+				value, exists := row[field]
+				if !exists {
+					continue
+				}
+				key, supported := materializedViewPointLookupKey(value)
+				if !supported {
+					return nil, fmt.Errorf("point lookup field %q contains unsupported value type %T", field, value)
+				}
+				lookups[field][key] = append(lookups[field][key], rowIndex)
+			}
+		}
+		if progress != nil {
+			progress(end, total)
+		}
 	}
 	return lookups, nil
 }
