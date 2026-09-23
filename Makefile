@@ -27235,3 +27235,27 @@ m217-commit:
 
 m217-push:
 	bash scripts/m217-push.sh
+
+m218-test:
+	bash scripts/m218-test.sh
+
+m218-benchmark:
+	bash scripts/m218-benchmark.sh
+
+m218-format:
+	bash scripts/m218-format.sh
+
+m218-race:
+	bash scripts/m218-race.sh
+
+m218-vet:
+	bash scripts/m218-vet.sh
+
+m218-stage:
+	bash scripts/m218-stage.sh
+
+m218-commit:
+	bash scripts/m218-commit.sh
+
+m218-push:
+	bash scripts/m218-push.sh

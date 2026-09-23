@@ -5240,3 +5240,13 @@ the rows and postings atomically, and a failed refresh leaves both unchanged.
 See [M217_MATERIALIZED_POINT_LOOKUPS.md](M217_MATERIALIZED_POINT_LOOKUPS.md)
 and [BENCHMARK.md](BENCHMARK.md#m217-materialized-view-point-lookups) for
 the read win and refresh tradeoff.
+
+## Materialized Point Planner
+
+When `ProjectionCatalog` is configured, a filtered query with the same simple
+projection as a fresh materialized view can use its point postings. The planner
+uses `MATERIALIZED POINT LOOKUP` for selective postings and
+`MATERIALIZED ARRANGEMENT SCAN` for dense or unindexed predicates. Unsupported
+query shapes and stale snapshots use the ordinary executor. See
+[M218_MATERIALIZED_POINT_PLANNER.md](M218_MATERIALIZED_POINT_PLANNER.md) and
+[BENCHMARK.md](BENCHMARK.md#m218-materialized-point-planner).

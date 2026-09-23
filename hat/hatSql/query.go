@@ -998,6 +998,24 @@ func executeSQLQueryUncached(ctx context.Context, source string, query *sqlQuery
 		}
 		return projection, nil
 	}
+	if projection, ok, projectionErr := options.ProjectionCatalog.lookupPoint(query, resolver, options); projectionErr != nil {
+		return result, projectionErr
+	} else if ok {
+		if (control.options.MaxRows > 0 || control.options.MaxIntermediateRows > 0) && len(projection.Rows) > control.maxRows {
+			return result, fmt.Errorf("SQL result exceeds the %d row limit", control.maxRows)
+		}
+		if control.options.MaxResultBytes > 0 && sqlRowsBytes(projection.Rows) > control.options.MaxResultBytes {
+			return result, fmt.Errorf("SQL result exceeds the %d byte limit", control.options.MaxResultBytes)
+		}
+		if err := control.check(); err != nil {
+			return result, err
+		}
+		projection.QueryID = observation.id
+		if operatorSteps != nil {
+			*operatorSteps = projection.Plan
+		}
+		return projection, nil
+	}
 	if options.IndexHint.Mode == SQLIndexHintForbid && strings.TrimSpace(options.IndexHint.Kind) != "" {
 		return result, fmt.Errorf("%w: kind-specific FORBID requires ExplainSQLIndexStrategy", ErrSQLIndexStrategyHintUnsupported)
 	}

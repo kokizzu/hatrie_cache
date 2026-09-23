@@ -38079,3 +38079,29 @@ Workload: five `-benchmem` samples on Linux/amd64 with an AMD Ryzen 9 5950X.
 
 Raw samples and correctness semantics are in
 [M217_MATERIALIZED_POINT_LOOKUPS.md](M217_MATERIALIZED_POINT_LOOKUPS.md).
+
+<a id="m218-materialized-point-planner"></a>
+## M218: Materialized Point Planner
+
+This compares the pre-feature source-execution path with the M218 planner on a
+10,000-row materialized snapshot. The rare value matches 100 rows; the common
+value matches 9,900 rows. The point index is maintained only in the point-lookup
+case. The planner uses the point path only when candidates are at most half of
+the snapshot; dense matches use the arrangement scan. These are raw default
+`go test -benchmem` measurements from Linux/amd64 on an AMD Ryzen 9 5950X.
+
+| Workload | Before M218 ns/op | After M218 ns/op | Before B/op | After B/op | Before allocs/op | After allocs/op | Result |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Rare, source execution | 6,789,596 | 6,521,762 | 8,077,626 | 8,077,762 | 40,628 | 40,630 | ordinary path unchanged within run noise |
+| Rare, catalog without postings | 6,345,615 | 540,351 | 8,166,099 | 50,490 | 41,087 | 289 | 11.7x faster, 161.7x lower bytes, 142.2x fewer allocs |
+| Rare, catalog with postings | 5,958,149 | 29,386 | 8,164,189 | 40,938 | 41,109 | 220 | 202.8x faster, 199.4x lower bytes, 186.9x fewer allocs |
+| Dense, source execution | 9,239,008 | 9,719,426 | 12,018,670 | 12,018,924 | 60,368 | 60,373 | ordinary path unchanged within run noise |
+| Dense, catalog with postings | 9,383,364 | 3,447,136 | 12,144,707 | 3,703,154 | 61,090 | 20,316 | 2.72x faster, 3.28x lower bytes, 3.01x fewer allocs |
+
+The before values are the pre-implementation run recorded immediately before
+M218; after values are the corresponding post-implementation run. The source
+baseline is intentionally retained to show that enabling the catalog does not
+alter ordinary queries. The arrangement scan is the safe default for dense
+postings, while point lookup pays only the selected-row clone cost. Stale
+source versions and unsupported query shapes are verified to fall back without
+serving an old snapshot. Reproduce with `make m218-benchmark`.

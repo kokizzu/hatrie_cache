@@ -76,6 +76,7 @@ type MaterializedViews struct {
 
 type materializedView struct {
 	definition     MaterializedViewDefinition
+	parsedQuery    *sqlQuery
 	snapshot       MaterializedView
 	sourceVersions map[string]string
 	collation      SQLCollation
@@ -145,6 +146,11 @@ func (views *MaterializedViews) Create(ctx context.Context, definition Materiali
 	if views == nil {
 		return MaterializedViewStatus{}, fmt.Errorf("materialized views are nil")
 	}
+	parsedQuery, err := parseSQLQuery(definition.Query)
+	if err != nil {
+		return MaterializedViewStatus{}, err
+	}
+	applySQLQueryCollation(parsedQuery, options.Collation)
 	result, sourceVersions, err := executeMaterializedViewQuery(ctx, definition.Query, definition.Dependencies, resolver, options)
 	if err != nil {
 		return MaterializedViewStatus{}, err
@@ -178,6 +184,7 @@ func (views *MaterializedViews) Create(ctx context.Context, definition Materiali
 	}
 	views.views[definition.Name] = materializedView{
 		definition:     definition,
+		parsedQuery:    parsedQuery,
 		collation:      normalizedMaterializedViewCollation(options.Collation),
 		sourceVersions: sourceVersions,
 		snapshot: MaterializedView{
@@ -596,6 +603,169 @@ func (views *MaterializedViews) lookupExact(query string, resolver SourceResolve
 	}
 	views.mu.RUnlock()
 	return QueryResult{}, false
+}
+
+func (views *MaterializedViews) lookupPoint(query *sqlQuery, resolver SourceResolver, options QueryOptions) (QueryResult, bool, error) {
+	if views == nil || query == nil || resolver == nil || options.IndexHint.Mode != "" {
+		return QueryResult{}, false, nil
+	}
+	predicateField, predicateValue, ok := materializedPointLookupPredicate(query)
+	if !ok {
+		return QueryResult{}, false, nil
+	}
+	versions, versioned := resolver.(SourceVersionResolver)
+	if !versioned {
+		return QueryResult{}, false, nil
+	}
+
+	views.mu.RLock()
+	names := make([]string, 0, len(views.views))
+	for name := range views.views {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		view := views.views[name]
+		outputField, compatible := materializedPointLookupOutputField(view.parsedQuery, query, predicateField)
+		if !compatible || !materializedViewFresh(view, versions) {
+			continue
+		}
+
+		rows := view.snapshot.Result.Rows
+		pointIndexes, indexed := view.pointLookups[outputField]
+		usePoint := false
+		var selected []Row
+		if indexed && predicateValue != nil {
+			key, supported := materializedViewPointLookupKey(predicateValue)
+			if supported {
+				indexes := pointIndexes[key]
+				if materializedPointLookupPreferred(len(indexes), len(rows)) {
+					var err error
+					selected, err = materializedPointLookupRows(rows, indexes, name)
+					if err != nil {
+						views.mu.RUnlock()
+						return QueryResult{}, false, err
+					}
+					usePoint = true
+				}
+			}
+		}
+		node := "MATERIALIZED ARRANGEMENT SCAN"
+		if usePoint {
+			node = "MATERIALIZED POINT LOOKUP"
+		} else {
+			var err error
+			selected, err = materializedArrangementScanRows(rows, outputField, predicateValue, query.where.collation)
+			if err != nil {
+				views.mu.RUnlock()
+				return QueryResult{}, false, err
+			}
+		}
+		result := materializedLookupResult(view.snapshot.Result, selected, node, name+"."+outputField)
+		views.mu.RUnlock()
+		return result, true, nil
+	}
+	views.mu.RUnlock()
+	return QueryResult{}, false, nil
+}
+
+func materializedPointLookupPredicate(query *sqlQuery) (string, interface{}, bool) {
+	if query == nil || query.from == nil || query.where.kind != "binary" || query.where.op != "=" || query.where.left == nil || query.where.right == nil || query.where.collation.normalized() != SQLCollationBinary {
+		return "", nil, false
+	}
+	field, literal := query.where.left, query.where.right
+	if field.kind != "field" || literal.kind != "literal" {
+		field, literal = query.where.right, query.where.left
+	}
+	if field.kind != "field" || literal.kind != "literal" || field.qualifier != query.from.alias || field.name == "" {
+		return "", nil, false
+	}
+	return field.name, literal.value, true
+}
+
+func materializedPointLookupOutputField(base, candidate *sqlQuery, predicateField string) (string, bool) {
+	if base == nil || candidate == nil || base.from == nil || candidate.from == nil || base.where.kind != "" || !materializedPointLookupQueryShapeEqual(base, candidate) || !sameMaterializedPointLookupSource(base.from, candidate.from) {
+		return "", false
+	}
+	columns := sqlColumns(base.selects)
+	for index, item := range base.selects {
+		if item.expr.kind == "field" && item.expr.name == predicateField && item.expr.qualifier == base.from.alias {
+			return columns[index], true
+		}
+	}
+	return "", false
+}
+
+func materializedPointLookupQueryShapeEqual(base, candidate *sqlQuery) bool {
+	if base == nil || candidate == nil || base.from == nil || candidate.from == nil || base.from.kind != "CACHE" || candidate.from.kind != "CACHE" || len(base.ctes) != 0 || len(candidate.ctes) != 0 || len(base.joins) != 0 || len(candidate.joins) != 0 || len(base.groupBy) != 0 || len(candidate.groupBy) != 0 || len(base.groupingSets) != 0 || len(candidate.groupingSets) != 0 || len(base.groupingDimensions) != 0 || len(candidate.groupingDimensions) != 0 || base.having.kind != "" || candidate.having.kind != "" || base.qualify.kind != "" || candidate.qualify.kind != "" || len(base.orderBy) != 0 || len(candidate.orderBy) != 0 || base.sample != nil || candidate.sample != nil || base.limitBy != nil || candidate.limitBy != nil || len(base.unions) != 0 || len(candidate.unions) != 0 || base.distinct || candidate.distinct || base.offset != 0 || candidate.offset != 0 || base.limit >= 0 || candidate.limit >= 0 || base.explain || candidate.explain || base.pipeline || candidate.pipeline || base.analyze || candidate.analyze || base.prewhere.kind != "" || candidate.prewhere.kind != "" {
+		return false
+	}
+	if len(base.selects) != len(candidate.selects) {
+		return false
+	}
+	for index := range base.selects {
+		if base.selects[index].alias != candidate.selects[index].alias || !sqlExpressionsStructurallyEqual(base.selects[index].expr, candidate.selects[index].expr) {
+			return false
+		}
+	}
+	return true
+}
+
+func sameMaterializedPointLookupSource(left, right *sqlSource) bool {
+	if left == nil || right == nil || left.kind != right.kind || left.key != right.key || left.alias != right.alias || left.lateral != right.lateral || left.final != right.final || left.keyParameter != right.keyParameter || len(left.values) != 0 || len(right.values) != 0 || len(left.columns) != 0 || len(right.columns) != 0 || len(left.fieldTypes) != 0 || len(right.fieldTypes) != 0 || left.query != nil || right.query != nil {
+		return false
+	}
+	return true
+}
+
+func materializedViewFresh(view materializedView, versions SourceVersionResolver) bool {
+	if versions == nil || len(view.sourceVersions) != len(view.definition.Dependencies) {
+		return false
+	}
+	for _, dependency := range view.definition.Dependencies {
+		version, available, err := versions.SQLSourceVersion("CACHE", dependency)
+		if err != nil || !available || version == "" || version != view.sourceVersions[dependency] {
+			return false
+		}
+	}
+	return true
+}
+
+func materializedPointLookupPreferred(matches, total int) bool {
+	return total == 0 || matches <= total/2
+}
+
+func materializedPointLookupRows(rows []Row, indexes []int, name string) ([]Row, error) {
+	selected := make([]Row, 0, len(indexes))
+	for _, index := range indexes {
+		if index < 0 || index >= len(rows) {
+			return nil, fmt.Errorf("materialized view %q point lookup index is inconsistent", name)
+		}
+		selected = append(selected, cloneResultCacheRow(rows[index]))
+	}
+	return selected, nil
+}
+
+func materializedArrangementScanRows(rows []Row, field string, value interface{}, collation SQLCollation) ([]Row, error) {
+	selected := make([]Row, 0)
+	for _, row := range rows {
+		matched := sqlBinaryValueWithCollation("=", row[field], value, collation)
+		if err := sqlExpressionError(matched); err != nil {
+			return nil, err
+		}
+		if sqlTruthy(matched) {
+			selected = append(selected, cloneResultCacheRow(row))
+		}
+	}
+	return selected, nil
+}
+
+func materializedLookupResult(snapshot QueryResult, rows []Row, node, detail string) QueryResult {
+	return QueryResult{
+		Columns: append([]string(nil), snapshot.Columns...),
+		Rows:    rows,
+		Plan:    []ExplainStep{{Node: node, Detail: detail}},
+	}
 }
 
 func normalizeMaterializedViewDefinition(definition MaterializedViewDefinition) (MaterializedViewDefinition, error) {

@@ -104,7 +104,7 @@ operator control remain the preferred deployment model.
 - [x] M215 Delta-join maintenance for high-churn join inputs; opt-in `ApplyLeftDeltas`/`ApplyRightDeltas` emits only affected signed pair changes while preserving the existing full-state APIs. See [M215_DELTA_JOIN_MAINTENANCE.md](M215_DELTA_JOIN_MAINTENANCE.md) and [BENCHMARK.md](BENCHMARK.md#m215-delta-join-maintenance).
 - [x] M216 Incremental Top-K maintenance is verified through the existing C213 `IncrementalTopK` maintainer. Selected output is bounded by `K`; exact replacement retains all active candidates. See [M216_INCREMENTAL_TOP_K.md](M216_INCREMENTAL_TOP_K.md) and [BENCHMARK.md](BENCHMARK.md#m216-incremental-top-k).
 - [x] M217 Opt-in maintained materialized-view point postings return complete rows for exact lookups, with atomic refresh replacement. See [M217_MATERIALIZED_POINT_LOOKUPS.md](M217_MATERIALIZED_POINT_LOOKUPS.md) and [BENCHMARK.md](BENCHMARK.md#m217-materialized-view-point-lookups).
-- [ ] M218 Planner selection of point lookup versus arrangement scan.
+- [x] M218 Planner selection of point lookup versus arrangement scan; fresh compatible materialized snapshots choose selective postings, dense/unindexed predicates use a snapshot arrangement scan, and stale or unsupported shapes fall back to the ordinary executor. See [M218_MATERIALIZED_POINT_PLANNER.md](M218_MATERIALIZED_POINT_PLANNER.md) and [BENCHMARK.md](BENCHMARK.md#m218-materialized-point-planner).
 - [ ] M219 Background index creation with observable build frontier.
 - [ ] M220 Safe index removal after dependent readers drain.
 - [ ] M221 Isolated compute clusters with independent resource budgets.
