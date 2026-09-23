@@ -40,6 +40,7 @@ security guidance before exposing it on a network.
 - Typed tuple multikey indexes with compact sorted postings: [TU23_TYPED_MULTIKEY_INDEX.md](TU23_TYPED_MULTIKEY_INDEX.md)
 - Round-2 multikey index verification and tradeoffs: [T222_MULTIKEY_INDEX.md](T222_MULTIKEY_INDEX.md)
 - Opt-in conditional index catalog with planner metadata, generation invalidation, fenced rebuilds, and atomic replacement: [TU24_CONDITIONAL_INDEX_CATALOG.md](TU24_CONDITIONAL_INDEX_CATALOG.md), with measured direct-index tradeoffs in [BENCHMARK.md](BENCHMARK.md#t-u24-conditional-index-catalog)
+- Round-2 partial-index verification and predicate tradeoffs: [T224_PARTIAL_INDEX.md](T224_PARTIAL_INDEX.md)
 - Opt-in named R-tree space catalog with write-maintained membership, planner metadata, fenced rebuilds, and atomic replacement: [TU25_RTREE_SPACE_CATALOG.md](TU25_RTREE_SPACE_CATALOG.md), with steady-state and rebuild measurements in [BENCHMARK.md](BENCHMARK.md#t-u25-r-tree-space-catalog)
 - Opt-in per-query index strategy hints and deterministic candidate inspection: [TU26_INDEX_STRATEGY_INSPECTION.md](TU26_INDEX_STRATEGY_INSPECTION.md), with selection and allocation measurements in [BENCHMARK.md](BENCHMARK.md#t-u26-index-strategy-hints-and-inspection)
 - Opt-in SQL query cancellation and bounded operator history: [SQL_QUERY_MANAGER.md](SQL_QUERY_MANAGER.md)

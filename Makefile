@@ -26322,6 +26322,33 @@ format-t222:
 format-t223:
 	bash ./scripts/format-t223.sh
 
+format-t224:
+	bash ./scripts/format-t224.sh
+
+test-t224:
+	bash ./scripts/test-t224.sh
+
+benchmark-t224:
+	bash ./scripts/benchmark-t224.sh
+
+race-t224:
+	bash ./scripts/race-t224.sh
+
+vet-t224:
+	bash ./scripts/vet-t224.sh
+
+verify-t224-scope:
+	bash ./scripts/verify-t224-scope.sh
+
+stage-t224:
+	bash ./scripts/stage-t224.sh
+
+commit-t224:
+	bash ./scripts/commit-t224.sh
+
+push-t224:
+	bash ./scripts/push-t224.sh
+
 test-t223:
 	bash ./scripts/test-t223.sh
 

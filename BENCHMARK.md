@@ -26812,6 +26812,38 @@ The large read win is workload-dependent: derived-key evaluation and posting
 maintenance make index construction substantially more expensive, so ordinary
 scans remain the fallback and the functional path stays opt-in.
 
+<a id="t224-partial-indexes-with-validated-predicates"></a>
+## T224: Partial Indexes With Validated Predicates
+
+This round-2 item was already implemented by the conditional functional/index
+catalog and SQL JSON partial-index paths. The fresh run below compares a
+selective predicate refresh with rebuilding a composite index for every row.
+Runs used `-benchmem -count=5` on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Workload | ns/op | bytes/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Partial predicate refresh | 276,529 | 25,929 | 1,013 | 6.37x faster; 22.0x fewer bytes; 19.8x fewer allocations |
+| Composite all-row rebuild | 1,760,607 | 568,330 | 20,031 | Baseline |
+
+Raw output:
+
+```text
+BenchmarkSQLJSONPartialIndexRefresh/partial_active_true-32  276529 ns/op  25931 B/op  1013 allocs/op
+BenchmarkSQLJSONPartialIndexRefresh/partial_active_true-32  273715 ns/op  25932 B/op  1013 allocs/op
+BenchmarkSQLJSONPartialIndexRefresh/partial_active_true-32  287323 ns/op  25929 B/op  1013 allocs/op
+BenchmarkSQLJSONPartialIndexRefresh/partial_active_true-32  289784 ns/op  25929 B/op  1013 allocs/op
+BenchmarkSQLJSONPartialIndexRefresh/partial_active_true-32  255585 ns/op  25929 B/op  1013 allocs/op
+BenchmarkSQLJSONPartialIndexRefresh/composite_all_rows-32  1733275 ns/op 568330 B/op 20031 allocs/op
+BenchmarkSQLJSONPartialIndexRefresh/composite_all_rows-32  1646767 ns/op 568329 B/op 20031 allocs/op
+BenchmarkSQLJSONPartialIndexRefresh/composite_all_rows-32  1888768 ns/op 568332 B/op 20031 allocs/op
+BenchmarkSQLJSONPartialIndexRefresh/composite_all_rows-32  1866089 ns/op 568340 B/op 20031 allocs/op
+BenchmarkSQLJSONPartialIndexRefresh/composite_all_rows-32  1760607 ns/op 568330 B/op 20031 allocs/op
+```
+
+The gain depends on predicate selectivity. Predicate validation and maintenance
+remain part of the write/rebuild path, while failed or canceled rebuilds must
+not publish partial state.
+
 <a id="tr-026-typed-bitmap-index"></a>
 ## TR-026 Typed Bitmap Index
 
