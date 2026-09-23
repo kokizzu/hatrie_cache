@@ -10,6 +10,7 @@ git add -- \
   scripts/m227-landscape.sh \
   scripts/m227-replay-context.sh \
   scripts/m227-stage.sh \
-  scripts/m227-verify-catalog.sh
+  scripts/m227-verify-catalog.sh \
+  scripts/m227-verify-rollback.sh
 git diff --cached --check
 git diff --cached --stat

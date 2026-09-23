@@ -27471,3 +27471,7 @@ m227-commit:
 .PHONY: m227-push
 m227-push:
 	bash scripts/m227-push.sh
+
+.PHONY: m227-verify-rollback
+m227-verify-rollback:
+	bash scripts/m227-verify-rollback.sh
