@@ -12442,7 +12442,10 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 								return SQLQueryResult{}, pruneErr
 							}
 							if available {
-								right = flattenSQLSourcePartitions(partitions)
+								right, err = finishSQLSourceRows(join.source, control, flattenSQLSourcePartitions(partitions), true, nil)
+								if err != nil {
+									return SQLQueryResult{}, err
+								}
 								runtimePartitionPruned = true
 							}
 						}

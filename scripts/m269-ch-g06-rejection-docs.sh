@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+test -s CH006_RUNTIME_JOIN_PREFETCH.md
+rg -n 'CH-G06|rejected|1\.057x|CH006_RUNTIME_JOIN_PREFETCH.md' CH006_RUNTIME_JOIN_PREFETCH.md BENCHMARK.md IDEA_GAP_CATALOG.md

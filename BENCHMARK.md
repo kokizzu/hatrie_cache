@@ -38627,6 +38627,22 @@ It is therefore disabled by default. See
 [CH005_RUNTIME_JOIN_PARTITION_FILTER.md](CH005_RUNTIME_JOIN_PARTITION_FILTER.md)
 for the resolver contract and raw samples.
 
+## CH-G06: Rejected Mark-Selective Join Prefetch
+
+The attempted mark-selective prefetch hook was measured against an equivalent
+partition-backed resolver. It was rolled back because the current materialized
+partition API cannot overlap remote reads or reduce read amplification.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Existing partition resolution | 6,240,499 | 7,073,437 | 34,101 | Reference |
+| Mark-selective prefetch request | 6,594,036 | 7,086,594 | 34,234 | 1.057x slower; 0.19% more bytes; 0.39% more allocations |
+
+The request and option were removed. A future attempt needs an asynchronous
+per-partition fetch contract with direct read-amplification and tail-latency
+measurements. See [CH006_RUNTIME_JOIN_PREFETCH.md](CH006_RUNTIME_JOIN_PREFETCH.md)
+for raw samples and the rollback rationale.
+
 ## CH050 Plan Reproducibility Hash
 
 This ClickHouse-inspired diagnostic hashes a normalized SQL shape, required

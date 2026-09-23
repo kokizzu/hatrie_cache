@@ -27896,3 +27896,18 @@ commit-ch-g05:
 .PHONY: push-ch-g05
 push-ch-g05:
 	bash scripts/push-ch-g05.sh
+.PHONY: m269-ch-g06-rejection-docs
+m269-ch-g06-rejection-docs:
+	bash scripts/m269-ch-g06-rejection-docs.sh
+.PHONY: m225-diff
+m225-diff:
+	bash ./scripts/m225-diff.sh
+.PHONY: stage-ch-g06-rejection
+stage-ch-g06-rejection:
+	bash scripts/stage-ch-g06-rejection.sh
+.PHONY: commit-ch-g06-rejection
+commit-ch-g06-rejection:
+	bash scripts/commit-ch-g06-rejection.sh
+.PHONY: push-ch-g06-rejection
+push-ch-g06-rejection:
+	bash scripts/push-ch-g06-rejection.sh
