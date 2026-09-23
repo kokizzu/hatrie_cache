@@ -4243,6 +4243,12 @@ timings/row counts; it does not retain SQL text, predicates, parameters, or
 row values. A positive limit keeps the newest events, and a non-positive limit
 retains all events.
 
+For opt-in OTLP/HTTP JSON export, create a bounded `hatTrace.OTLPHTTPExporter`
+and pass it to `recorder.ExportOpenTelemetry(ctx, exporter)`. The default
+configuration performs no network export; endpoint validation, payload limits,
+security behavior, and measurements are documented in
+[CH044_EXPORTABLE_TRACE.md](CH044_EXPORTABLE_TRACE.md).
+
 ## SQL EXPLAIN PIPELINE
 
 Use `EXPLAIN PIPELINE` when operators need an explicit static stage and worker

@@ -1,10 +1,14 @@
 package hatSql
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"strconv"
 	"time"
+
+	"hatrie_cache/hat/hatTrace"
 )
 
 // QueryTraceSpan is an SDK-neutral OpenTelemetry span projection. TraceID and
@@ -75,6 +79,33 @@ func (recorder *QueryTraceRecorder) OpenTelemetrySpans() []QueryTraceSpan {
 		}
 	}
 	return spans
+}
+
+// ExportOpenTelemetry converts the retained privacy-safe spans to the shared
+// tracing contract and sends them through the caller-owned exporter. The
+// recorder remains unchanged when the exporter fails.
+func (recorder *QueryTraceRecorder) ExportOpenTelemetry(ctx context.Context, exporter hatTrace.SpanExporter) error {
+	if recorder == nil {
+		return errors.New("hatSql: query trace recorder is nil")
+	}
+	if exporter == nil {
+		return errors.New("hatSql: query trace span exporter is nil")
+	}
+	spans := recorder.OpenTelemetrySpans()
+	converted := make([]hatTrace.Span, len(spans))
+	for index, span := range spans {
+		converted[index] = hatTrace.Span{
+			TraceID:       span.TraceID,
+			SpanID:        span.SpanID,
+			ParentSpanID:  span.ParentSpanID,
+			Name:          span.Name,
+			StartUnixNano: span.StartUnixNano,
+			EndUnixNano:   span.EndUnixNano,
+			Status:        span.Status,
+			Attributes:    span.Attributes,
+		}
+	}
+	return exporter.Export(ctx, converted)
 }
 
 func queryTraceTraceID(queryID string, sequence uint64) string {

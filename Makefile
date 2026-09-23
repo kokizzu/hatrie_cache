@@ -24715,3 +24715,42 @@ commit-chg34-mutation-control:
 
 push-chg34-mutation-control:
 	bash scripts/push-chg34-mutation-control.sh
+.PHONY: benchmark-chg44
+
+benchmark-chg44:
+	bash ./scripts/benchmark-chg44.sh
+
+.PHONY: benchmark-chg44-exporter
+
+benchmark-chg44-exporter:
+	bash ./scripts/benchmark-chg44-exporter.sh
+.PHONY: test-chg44-exporter
+
+test-chg44-exporter:
+	bash ./scripts/test-chg44-exporter.sh
+
+.PHONY: test-chg44-package race-chg44 vet-chg44
+
+test-chg44-package:
+	bash ./scripts/test-chg44-package.sh
+
+race-chg44:
+	bash ./scripts/race-chg44.sh
+
+vet-chg44:
+	bash ./scripts/vet-chg44.sh
+
+.PHONY: format-chg44
+
+format-chg44:
+	bash ./scripts/format-chg44.sh
+.PHONY: verify-chg44-docs
+verify-chg44-docs:
+	bash ./scripts/verify-chg44-docs.sh
+.PHONY: commit-chg44 push-chg44
+
+commit-chg44:
+	bash ./scripts/commit-chg44.sh
+
+push-chg44:
+	bash ./scripts/push-chg44.sh
