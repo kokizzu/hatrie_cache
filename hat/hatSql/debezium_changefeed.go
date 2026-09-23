@@ -51,12 +51,16 @@ type DebeziumPayload struct {
 
 // DebeziumChange is a key plus a Debezium payload. Frontier, Revision, and ID
 // preserve the source subscription position for durable downstream consumers.
+// StableKey is an optional in-process canonical key cache for adapters.
 type DebeziumChange struct {
 	Key      Row             `json:"key"`
 	Payload  DebeziumPayload `json:"payload"`
 	ID       uint64          `json:"id,omitempty"`
 	Revision uint64          `json:"revision,omitempty"`
 	Frontier uint64          `json:"frontier,omitempty"`
+	// StableKey is an optional in-process canonical key cache. It is omitted
+	// from JSON because the Debezium key row remains the wire representation.
+	StableKey string `json:"-"`
 }
 
 // DebeziumChangefeedOptions configures the stateful differential-to-envelope
@@ -130,7 +134,7 @@ func (feed *DebeziumChangefeed) Apply(batch QuerySubscriptionDeltaBatch) ([]Debe
 		changes := make([]DebeziumChange, 0, len(order))
 		for _, key := range order {
 			row := rows[key]
-			changes = append(changes, feed.change(batch, keyRow(row, feed.keyColumns), nil, row, DebeziumRead, true))
+			changes = append(changes, feed.change(batch, keyRow(row, feed.keyColumns), key, nil, row, DebeziumRead, true))
 		}
 		return changes, nil
 	}
@@ -223,7 +227,7 @@ func (feed *DebeziumChangefeed) applyDeltaBatch(batch QuerySubscriptionDeltaBatc
 			}
 			return nil, ErrDebeziumUnsupportedMultiplicity
 		}
-		changes = append(changes, feed.change(batch, state.keyRow, before, after, operation, false))
+		changes = append(changes, feed.change(batch, state.keyRow, state.key, before, after, operation, false))
 	}
 	for _, key := range order {
 		state := deltas[key]
@@ -249,9 +253,9 @@ func (feed *DebeziumChangefeed) applyReset(batch QuerySubscriptionDeltaBatch) ([
 		before, existed := feed.rows[key]
 		after := next[key]
 		if !existed {
-			changes = append(changes, feed.change(batch, keyRow(after, feed.keyColumns), nil, after, DebeziumCreate, false))
+			changes = append(changes, feed.change(batch, keyRow(after, feed.keyColumns), key, nil, after, DebeziumCreate, false))
 		} else if !reflect.DeepEqual(before, after) {
-			changes = append(changes, feed.change(batch, keyRow(after, feed.keyColumns), before, after, DebeziumUpdate, false))
+			changes = append(changes, feed.change(batch, keyRow(after, feed.keyColumns), key, before, after, DebeziumUpdate, false))
 		}
 	}
 	oldKeys := make([]string, 0, len(feed.rows))
@@ -263,7 +267,7 @@ func (feed *DebeziumChangefeed) applyReset(batch QuerySubscriptionDeltaBatch) ([
 	sort.Strings(oldKeys)
 	for _, key := range oldKeys {
 		before := feed.rows[key]
-		changes = append(changes, feed.change(batch, keyRow(before, feed.keyColumns), before, nil, DebeziumDelete, false))
+		changes = append(changes, feed.change(batch, keyRow(before, feed.keyColumns), key, before, nil, DebeziumDelete, false))
 	}
 	feed.rows = next
 	return changes, nil
@@ -279,7 +283,7 @@ func (feed *DebeziumChangefeed) rowKey(row Row) (string, error) {
 	return querySubscriptionRowKey(keyRow(row, feed.keyColumns)), nil
 }
 
-func (feed *DebeziumChangefeed) change(batch QuerySubscriptionDeltaBatch, key Row, before, after Row, operation DebeziumOperation, snapshot bool) DebeziumChange {
+func (feed *DebeziumChangefeed) change(batch QuerySubscriptionDeltaBatch, key Row, stableKey string, before, after Row, operation DebeziumOperation, snapshot bool) DebeziumChange {
 	source := feed.source
 	source.Snapshot = snapshot
 	return DebeziumChange{
@@ -287,6 +291,7 @@ func (feed *DebeziumChangefeed) change(batch QuerySubscriptionDeltaBatch, key Ro
 		ID:       batch.ID,
 		Revision: batch.Revision,
 		Frontier: batch.Frontier,
+		StableKey: stableKey,
 		Payload: DebeziumPayload{
 			Before: cloneDebeziumRow(before),
 			After:  cloneDebeziumRow(after),

@@ -23288,6 +23288,36 @@ t244-245-commit:
 t244-245-push:
 	bash scripts/push-t244-245.sh
 
+m206-benchmark-baseline:
+	bash scripts/m206-benchmark-baseline.sh
+
+m206-format:
+	bash scripts/m206-format.sh
+
+m206-test:
+	bash scripts/m206-test.sh
+
+m206-test-package:
+	bash scripts/m206-test-package.sh
+
+m206-benchmark:
+	bash scripts/m206-benchmark.sh
+
+m206-race:
+	bash scripts/m206-race.sh
+
+m206-vet:
+	bash scripts/m206-vet.sh
+
+m206-stage:
+	bash scripts/m206-stage.sh
+
+m206-commit:
+	bash scripts/m206-commit.sh
+
+m206-push:
+	bash scripts/m206-push.sh
+
 .PHONY: audit-hatrie-tmp-inventory
 audit-hatrie-tmp-inventory:
 	bash scripts/audit-hatrie-tmp-inventory.sh

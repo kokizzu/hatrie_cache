@@ -22963,6 +22963,51 @@ The exact command was:
 make benchmark-mz015-cdc
 ```
 
+<a id="m206-stable-upsert-envelopes"></a>
+## M206: Stable upsert envelopes
+
+This benchmark measures the opt-in `hatSql.UpsertEnvelope` adapters over 256
+events. The CDC baseline performs only direct current-image assignment with a
+precomputed key. The CDC adapter adds operation and key validation. The
+Debezium baseline also has a precomputed key; the cached adapter consumes
+`DebeziumChange.StableKey` without rebuilding it. The fallback adapter
+canonicalizes a structured key map on every event, representing manually
+constructed changes that do not carry `StableKey`. Five samples were collected
+on an AMD Ryzen 9 5950X, `linux/amd64`.
+
+### Raw Samples
+
+| Benchmark | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| `M206UpsertEnvelopeBaseline` | 561.8, 570.3, 583.0, 570.1, 627.5 | 0, 0, 0, 0, 0 | 0, 0, 0, 0, 0 |
+| `M206AsUpsertEnvelope` | 3560, 3514, 3545, 3543, 3545 | 0, 0, 0, 0, 0 | 0, 0, 0, 0, 0 |
+| `M206DebeziumUpsertEnvelopeBaseline` | 142.3, 148.2, 133.8, 139.7, 137.3 | 0, 0, 0, 0, 0 | 0, 0, 0, 0, 0 |
+| `M206DebeziumAsUpsertEnvelope` | 4408, 4354, 4359, 4720, 4355 | 0, 0, 0, 0, 0 | 0, 0, 0, 0, 0 |
+| `M206DebeziumAsUpsertEnvelopeFallback` | 130266, 129224, 133410, 139097, 140829 | 36946, 36947, 36946, 36946, 36945 | 1536, 1536, 1536, 1536, 1536 |
+
+### Median Comparison
+
+| Operation | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | --- |
+| CDC direct assignment baseline | 570.3 | 0 | 0 | `1.00x` |
+| CDC `AsUpsertEnvelope` | 3545 | 0 | 0 | `6.22x` slower |
+| Debezium direct assignment baseline | 139.7 | 0 | 0 | `1.00x` |
+| Debezium cached-key adapter | 4359 | 0 | 0 | `31.2x` slower |
+| Debezium uncached map-key fallback | 133410 | 36946 | 1536 | `955x` slower |
+
+The shared adapters trade CPU for a validated, reusable current-state contract;
+they add no measured heap allocation when the key is already canonical. The
+large avoidable cost is the Debezium fallback: using the key cached by
+`DebeziumChangefeed` is about `30.6x` faster and removes 36,946 bytes and
+1,536 allocations per 256-event batch in this fixture. This is a boundary
+benchmark, not an end-to-end connector or network measurement.
+
+The exact command was:
+
+```sh
+make m206-benchmark
+```
+
 <a id="mz-017-bounded-partition-restore-workers"></a>
 ## MZ-017 Bounded Partition Restore Workers
 

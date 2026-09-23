@@ -4505,6 +4505,7 @@ lookup and preparation tradeoff is documented in
 - Opt-in BM25-like ranked full-text search over token postings:
   [CHU48_RANKED_FULL_TEXT.md](CHU48_RANKED_FULL_TEXT.md)
 
+- Materialize-style current-state upsert envelopes with stable keys, row images, delete tombstones, and cached Debezium key serialization: [M206_UPSERT_ENVELOPES.md](M206_UPSERT_ENVELOPES.md), with CPU and allocation measurements in [BENCHMARK.md#m206-stable-upsert-envelopes](BENCHMARK.md#m206-stable-upsert-envelopes)
 - [Debezium changefeed adapter](M207_DEBEZIUM_CHANGEFEED.md)
 
 - [Compact request templates](T239_COMPACT_REQUEST_TEMPLATE.md)
