@@ -25,10 +25,12 @@ var (
 )
 
 const (
-	DefaultMaxEntries     = 4_096
-	DefaultMaxBytes       = 16 << 20
-	DefaultTTL            = 5 * time.Minute
-	DefaultMaxRefreshKeys = 256
+	DefaultMaxEntries         = 4_096
+	DefaultMaxBytes           = 16 << 20
+	DefaultTTL                = 5 * time.Minute
+	DefaultMaxRefreshKeys     = 256
+	DefaultNegativeTTL        = 0
+	DefaultMaxNegativeEntries = 1_024
 )
 
 // Source loads a bounded batch of dictionary keys. Keys not present in the
@@ -71,15 +73,17 @@ func (function VersionedSourceFunc) LoadVersioned(ctx context.Context, keys []st
 // default because serving old dimension data must be an explicit availability
 // tradeoff.
 type Options struct {
-	MaxEntries      int
-	MaxBytes        int64
-	TTL             time.Duration
-	MaxRefreshKeys  int
-	StaleIfError    bool
-	Fallback        Source
-	FallbackOnMiss  bool
-	FallbackOnError bool
-	Now             func() time.Time
+	MaxEntries         int
+	MaxBytes           int64
+	TTL                time.Duration
+	MaxRefreshKeys     int
+	NegativeTTL        time.Duration
+	MaxNegativeEntries int
+	StaleIfError       bool
+	Fallback           Source
+	FallbackOnMiss     bool
+	FallbackOnError    bool
+	Now                func() time.Time
 }
 
 // LookupResult describes a dictionary lookup. Value is immutable from the
@@ -105,17 +109,20 @@ type RefreshResult struct {
 
 // Stats reports current bounded state and cumulative activity counters.
 type Stats struct {
-	Entries        int
-	Bytes          int64
-	Hits           uint64
-	Misses         uint64
-	Refreshes      uint64
-	RefreshErrors  uint64
-	StaleFallbacks uint64
+	Entries         int
+	Bytes           int64
+	NegativeEntries int
+	Hits            uint64
+	NegativeHits    uint64
+	Misses          uint64
+	Refreshes       uint64
+	RefreshErrors   uint64
+	StaleFallbacks  uint64
 }
 
 type dictionaryCounters struct {
 	hits           uint64
+	negativeHits   uint64
 	misses         uint64
 	refreshes      uint64
 	refreshErrors  uint64
@@ -152,6 +159,7 @@ type dictionaryEntry struct {
 	touched   uint64
 	version   string
 	fallback  bool
+	negative  bool
 }
 
 // Dictionary is a concurrency-safe, bounded external dictionary cache.
@@ -162,11 +170,12 @@ type Dictionary struct {
 	options Options
 	now     func() time.Time
 
-	mu      sync.RWMutex
-	entries map[string]*dictionaryEntry
-	bytes   int64
-	tick    uint64
-	stats   dictionaryCounters
+	mu              sync.RWMutex
+	entries         map[string]*dictionaryEntry
+	bytes           int64
+	negativeEntries int
+	tick            uint64
+	stats           dictionaryCounters
 
 	refreshMu sync.Mutex
 }
@@ -176,7 +185,7 @@ func New(source Source, options Options) (*Dictionary, error) {
 	if source == nil {
 		return nil, ErrSourceNil
 	}
-	if options.MaxEntries < 0 || options.MaxBytes < 0 || options.MaxRefreshKeys < 0 || options.TTL < 0 {
+	if options.MaxEntries < 0 || options.MaxBytes < 0 || options.MaxRefreshKeys < 0 || options.TTL < 0 || options.NegativeTTL < 0 || options.MaxNegativeEntries < 0 {
 		return nil, ErrOptionsInvalid
 	}
 	if (options.FallbackOnMiss || options.FallbackOnError) && options.Fallback == nil {
@@ -193,6 +202,9 @@ func New(source Source, options Options) (*Dictionary, error) {
 	}
 	if options.TTL == 0 {
 		options.TTL = DefaultTTL
+	}
+	if options.MaxNegativeEntries == 0 {
+		options.MaxNegativeEntries = DefaultMaxNegativeEntries
 	}
 	if options.Now == nil {
 		options.Now = time.Now
@@ -237,6 +249,10 @@ func (dictionary *Dictionary) lookupUnversioned(ctx context.Context, rawKey stri
 	entry, found, fresh := dictionary.readEntry(key)
 	if fresh {
 		dictionary.recordHit()
+		if entry.negative {
+			dictionary.recordNegativeHit()
+			return LookupResult{}, nil
+		}
 		return LookupResult{Value: entry.value, Found: true, Version: entry.version, Fallback: entry.fallback}, nil
 	}
 	dictionary.recordMiss()
@@ -246,18 +262,23 @@ func (dictionary *Dictionary) lookupUnversioned(ctx context.Context, rawKey stri
 	entry, found, fresh = dictionary.readEntry(key)
 	if fresh {
 		dictionary.recordHit()
+		if entry.negative {
+			dictionary.recordNegativeHit()
+			return LookupResult{}, nil
+		}
 		return LookupResult{Value: entry.value, Found: true, Version: entry.version, Fallback: entry.fallback}, nil
 	}
 	staleValue := entry.value
+	staleFound := found && !entry.negative
 	if _, err := dictionary.refreshBatch(ctx, []string{key}, ""); err != nil {
-		if found && dictionary.options.StaleIfError {
+		if staleFound && dictionary.options.StaleIfError {
 			dictionary.recordStaleFallback()
 			return LookupResult{Value: staleValue, Found: true, Stale: true, Version: entry.version, Fallback: entry.fallback}, &StaleError{Cause: err}
 		}
 		return LookupResult{}, err
 	}
 	entry, found, _ = dictionary.readEntry(key)
-	if !found {
+	if !found || entry.negative {
 		return LookupResult{}, nil
 	}
 	return LookupResult{Value: entry.value, Found: true, Version: entry.version, Fallback: entry.fallback}, nil
@@ -277,6 +298,10 @@ func (dictionary *Dictionary) lookupAtVersion(ctx context.Context, rawKey, expec
 	entry, found, fresh := dictionary.readEntry(key)
 	if fresh && dictionary.versionMatches(entry.version, expectedVersion) {
 		dictionary.recordHit()
+		if entry.negative {
+			dictionary.recordNegativeHit()
+			return LookupResult{}, nil
+		}
 		return LookupResult{Value: entry.value, Found: true, Version: entry.version, Fallback: entry.fallback}, nil
 	}
 	dictionary.recordMiss()
@@ -286,10 +311,14 @@ func (dictionary *Dictionary) lookupAtVersion(ctx context.Context, rawKey, expec
 	entry, found, fresh = dictionary.readEntry(key)
 	if fresh && dictionary.versionMatches(entry.version, expectedVersion) {
 		dictionary.recordHit()
+		if entry.negative {
+			dictionary.recordNegativeHit()
+			return LookupResult{}, nil
+		}
 		return LookupResult{Value: entry.value, Found: true, Version: entry.version, Fallback: entry.fallback}, nil
 	}
 	staleValue := entry.value
-	staleFound := found && dictionary.versionMatches(entry.version, expectedVersion)
+	staleFound := found && !entry.negative && dictionary.versionMatches(entry.version, expectedVersion)
 	if _, err := dictionary.refreshBatch(ctx, []string{key}, expectedVersion); err != nil {
 		if staleFound && dictionary.options.StaleIfError {
 			dictionary.recordStaleFallback()
@@ -298,7 +327,7 @@ func (dictionary *Dictionary) lookupAtVersion(ctx context.Context, rawKey, expec
 		return LookupResult{}, err
 	}
 	entry, found, _ = dictionary.readEntry(key)
-	if !found {
+	if !found || entry.negative {
 		return LookupResult{}, nil
 	}
 	if !dictionary.versionMatches(entry.version, expectedVersion) {
@@ -373,6 +402,7 @@ func (dictionary *Dictionary) Stats() Stats {
 	defer dictionary.mu.RUnlock()
 	stats := Stats{
 		Hits:           atomic.LoadUint64(&dictionary.stats.hits),
+		NegativeHits:   atomic.LoadUint64(&dictionary.stats.negativeHits),
 		Misses:         atomic.LoadUint64(&dictionary.stats.misses),
 		Refreshes:      atomic.LoadUint64(&dictionary.stats.refreshes),
 		RefreshErrors:  atomic.LoadUint64(&dictionary.stats.refreshErrors),
@@ -380,6 +410,7 @@ func (dictionary *Dictionary) Stats() Stats {
 	}
 	stats.Entries = len(dictionary.entries)
 	stats.Bytes = dictionary.bytes
+	stats.NegativeEntries = dictionary.negativeEntries
 	return stats
 }
 
@@ -465,13 +496,29 @@ func (dictionary *Dictionary) refreshBatch(ctx context.Context, keys []string, e
 		if !found {
 			if hadOld {
 				dictionary.bytes -= int64(len(key) + len(old.value))
+				if old.negative {
+					dictionary.negativeEntries--
+				}
 				delete(dictionary.entries, key)
+			}
+			if dictionary.negativeCachingEnabled() && int64(len(key)) <= dictionary.options.MaxBytes {
+				dictionary.entries[key] = &dictionaryEntry{
+					fetchedAt: dictionary.now(),
+					touched:   atomic.AddUint64(&dictionary.tick, 1),
+					version:   result.Version,
+					negative:  true,
+				}
+				dictionary.bytes += int64(len(key))
+				dictionary.negativeEntries++
 			}
 			result.Missing++
 			continue
 		}
 		if hadOld {
 			dictionary.bytes -= int64(len(key) + len(old.value))
+			if old.negative {
+				dictionary.negativeEntries--
+			}
 		}
 		entry := &dictionaryEntry{
 			value:     value.value,
@@ -495,6 +542,20 @@ func (dictionary *Dictionary) refreshBatch(ctx context.Context, keys []string, e
 		}
 		entry := dictionary.entries[key]
 		dictionary.bytes -= int64(len(key) + len(entry.value))
+		if entry.negative {
+			dictionary.negativeEntries--
+		}
+		delete(dictionary.entries, key)
+		result.Evicted++
+	}
+	for dictionary.negativeEntries > dictionary.options.MaxNegativeEntries {
+		key, ok := dictionary.oldestNegativeKeyLocked()
+		if !ok {
+			break
+		}
+		entry := dictionary.entries[key]
+		dictionary.bytes -= int64(len(key) + len(entry.value))
+		dictionary.negativeEntries--
 		delete(dictionary.entries, key)
 		result.Evicted++
 	}
@@ -536,7 +597,19 @@ func (dictionary *Dictionary) readEntry(key string) (dictionaryEntry, bool, bool
 		touched:   touched,
 		version:   entry.version,
 		fallback:  entry.fallback,
-	}, true, dictionary.now().Before(entry.fetchedAt.Add(dictionary.options.TTL))
+		negative:  entry.negative,
+	}, true, dictionary.now().Before(entry.fetchedAt.Add(dictionary.entryTTL(entry)))
+}
+
+func (dictionary *Dictionary) entryTTL(entry *dictionaryEntry) time.Duration {
+	if entry.negative {
+		return dictionary.options.NegativeTTL
+	}
+	return dictionary.options.TTL
+}
+
+func (dictionary *Dictionary) negativeCachingEnabled() bool {
+	return dictionary.options.NegativeTTL > 0 && dictionary.options.MaxNegativeEntries > 0
 }
 
 func (dictionary *Dictionary) oldestKeyLocked() (string, bool) {
@@ -552,8 +625,28 @@ func (dictionary *Dictionary) oldestKeyLocked() (string, bool) {
 	return oldestKey, oldestKey != ""
 }
 
+func (dictionary *Dictionary) oldestNegativeKeyLocked() (string, bool) {
+	oldestKey := ""
+	var oldestTick uint64
+	for key, entry := range dictionary.entries {
+		if !entry.negative {
+			continue
+		}
+		touched := atomic.LoadUint64(&entry.touched)
+		if oldestKey == "" || touched < oldestTick || (touched == oldestTick && key < oldestKey) {
+			oldestKey = key
+			oldestTick = touched
+		}
+	}
+	return oldestKey, oldestKey != ""
+}
+
 func (dictionary *Dictionary) recordHit() {
 	atomic.AddUint64(&dictionary.stats.hits, 1)
+}
+
+func (dictionary *Dictionary) recordNegativeHit() {
+	atomic.AddUint64(&dictionary.stats.negativeHits, 1)
 }
 
 func (dictionary *Dictionary) recordMiss() {

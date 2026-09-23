@@ -38549,4 +38549,33 @@ and existing single-relay behavior is untouched.
 
 See [TTG42_PEER_FLOW_CONTROL.md](TTG42_PEER_FLOW_CONTROL.md).
 
+## CH046 Dictionary Negative Cache
+
+This ClickHouse-inspired dictionary path retains source misses only when the
+caller opts in with `NegativeTTL`. The negative entry is bounded by its own
+cardinality limit and the dictionary's existing total entry/byte limits.
+
+The workload repeatedly looks up one missing key after a one-time warm-up.
+Five samples were collected on the repository's AMD Ryzen 9 5950X host:
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative CPU | Improvement |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| Existing source miss | 202.5; 201.0; 205.1; 202.6; 199.1 | 202.5 | 32 | 2 | 1.00x | baseline |
+| Bounded negative-cache hit | 102.5; 105.1; 106.6; 100.5; 96.09 | 102.5 | 0 | 0 | 0.51x | 1.98x faster; zero heap allocations |
+
+The cache avoids the source call and the two allocations on repeated misses.
+It retains key bytes plus normal map/object overhead, so the feature remains
+default-off and requires explicit TTL/capacity configuration. Focused tests
+also cover expiry, LRU/cardinality bounds, default-off compatibility,
+empty-string positives, and version-aware invalidation.
+
+Raw commands:
+
+```text
+make m239-ch-g46-test
+make m239-ch-g46-benchmark
+```
+
+See [CH046_DICTIONARY_NEGATIVE_CACHE.md](CH046_DICTIONARY_NEGATIVE_CACHE.md).
+
 ## CH050 Plan Reproducibility Hash

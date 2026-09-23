@@ -63,7 +63,7 @@ the memory/operational cost is disproportionate to the gain.
 | CH-G43 | Distributed `IN` set shipping with compressed typed payloads | Measure wire bytes and build CPU |
 | CH-G44 | Distributed join broadcast threshold based on observed serialized size | Verify plan stability at threshold boundaries |
 | CH-G45 | Versioned external dictionary reload with atomic reader handoff | Ensure readers see one complete version only |
-| CH-G46 | Dictionary negative-cache entries with bounded expiry | Measure miss amplification and memory |
+| CH-G46 | Dictionary negative-cache entries with bounded expiry | Implemented in [CH046_DICTIONARY_NEGATIVE_CACHE.md](CH046_DICTIONARY_NEGATIVE_CACHE.md); default off and benchmarked in [BENCHMARK.md](BENCHMARK.md#ch046-dictionary-negative-cache) |
 | CH-G47 | Kafka-style transactional source offset plus data checkpoint | Fault-injected restart must not duplicate committed data |
 | CH-G48 | Live result view refresh notifications with dependency frontier | Verify no stale notification after invalidation |
 | CH-G49 | Asynchronous read-ahead budget shared across columns and parts | Compare tail latency and cache pollution |

@@ -27649,6 +27649,46 @@ m233-commit:
 .PHONY: m233-push
 m233-push:
 	bash scripts/m233-push.sh
+.PHONY: m239-ch-g46-test
+m239-ch-g46-test:
+	bash scripts/m239-ch-g46-test.sh
+
+.PHONY: m239-ch-g46-format
+m239-ch-g46-format:
+	bash scripts/m239-ch-g46-format.sh
+
+.PHONY: m239-ch-g46-benchmark
+m239-ch-g46-benchmark:
+	bash scripts/m239-ch-g46-benchmark.sh
+
+.PHONY: m239-ch-g46-package-test
+m239-ch-g46-package-test:
+	bash scripts/m239-ch-g46-package-test.sh
+
+.PHONY: m239-ch-g46-race
+m239-ch-g46-race:
+	bash scripts/m239-ch-g46-race.sh
+
+.PHONY: m239-ch-g46-vet
+m239-ch-g46-vet:
+	bash scripts/m239-ch-g46-vet.sh
+
+.PHONY: m239-ch-g46-docs
+m239-ch-g46-docs:
+	bash scripts/m239-ch-g46-docs.sh
+
+.PHONY: m239-stage
+m239-stage:
+	bash scripts/m239-stage.sh
+
+.PHONY: m239-commit
+m239-commit:
+	bash scripts/m239-commit.sh
+
+.PHONY: m239-push
+m239-push:
+	bash scripts/m239-push.sh
+
 .PHONY: m237-tt-g42-test
 m237-tt-g42-test:
 	bash scripts/m237-tt-g42-test.sh

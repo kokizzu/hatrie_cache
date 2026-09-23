@@ -313,6 +313,7 @@ security guidance before exposing it on a network.
 - Schema-checked compact SQL tables and exact delta aggregates: [Typed SQL tables](TYPED_TABLES.md)
 - Materialize-style guarded SQL columnar dictionary compression: [SQL_COLUMNAR_DICTIONARY.md](SQL_COLUMNAR_DICTIONARY.md)
 - Lookup-aware columnar dictionary admission: [C216_COLUMNAR_DICTIONARY_SHAPES.md](C216_COLUMNAR_DICTIONARY_SHAPES.md)
+- Optional bounded dictionary negative caching for repeated source misses: [CH046_DICTIONARY_NEGATIVE_CACHE.md](CH046_DICTIONARY_NEGATIVE_CACHE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch046-dictionary-negative-cache)
 - Opt-in frontier-driven append-only recursive dataflow maintenance: [RECURSIVE_DATAFLOW.md](RECURSIVE_DATAFLOW.md)
 - Source-metadata selection for append-only aggregate maintenance: [SOURCE_APPEND_ONLY_METADATA.md](SOURCE_APPEND_ONLY_METADATA.md)
 - Kafka-style SQL source offset tracking: [SQL_SOURCE_OFFSET_TRACKING.md](SQL_SOURCE_OFFSET_TRACKING.md)
