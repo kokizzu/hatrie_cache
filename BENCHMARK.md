@@ -36721,3 +36721,46 @@ Reproduce with `make benchmark-t212-before` and `make benchmark-t212`; run
 correctness with `make test-t212`, then run
 `make cleanup-hatrie-tmp-after-test` to remove stale test metadata without
 deleting active worktrees.
+
+## T213: Scheduled Snapshot Checkpoints
+
+T213 adds an opt-in periodic snapshot worker with a checksum-bearing checkpoint
+manifest. The benchmark compares the existing snapshot-and-compaction path
+with the scheduled path that also writes, syncs, and publishes the manifest.
+The scheduled path is intentionally not enabled by default.
+
+### Summary
+
+| Mode | Median time | Bytes/op | Allocs/op | Relative time | Relative bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Existing snapshot | 3.750 ms | 129,403 | 59 | 1.00x | 1.00x |
+| Scheduled with manifest | 4.472 ms | 135,607 | 81 | 1.19x | 1.05x |
+
+The additional cost is the manifest encoding, second synced file, and paired
+publication bookkeeping. It buys a verifiable journal checkpoint and periodic
+operation; it is a durability feature rather than a performance improvement.
+The first baseline run was noisy because it included cold filesystem behavior,
+so the paired control rows above are the meaningful comparison.
+
+### Raw T213 Output
+
+```text
+Before, make benchmark-t213-before:
+BenchmarkT213ScheduledSnapshotBaseline-32  21229894 ns/op  129218 B/op 63 allocs/op
+BenchmarkT213ScheduledSnapshotBaseline-32  40815576 ns/op  129296 B/op 67 allocs/op
+BenchmarkT213ScheduledSnapshotBaseline-32  59003466 ns/op  129382 B/op 70 allocs/op
+
+After, make benchmark-t213:
+BenchmarkT213ScheduledSnapshotModes/ExistingSaveSnapshot-32  5156751 ns/op  129410 B/op 60 allocs/op
+BenchmarkT213ScheduledSnapshotModes/ExistingSaveSnapshot-32  3750428 ns/op  129403 B/op 59 allocs/op
+BenchmarkT213ScheduledSnapshotModes/ExistingSaveSnapshot-32  3618865 ns/op  129402 B/op 59 allocs/op
+BenchmarkT213ScheduledSnapshotModes/ScheduledWithManifest-32  4541779 ns/op  135705 B/op 81 allocs/op
+BenchmarkT213ScheduledSnapshotModes/ScheduledWithManifest-32  4259779 ns/op  135607 B/op 81 allocs/op
+BenchmarkT213ScheduledSnapshotModes/ScheduledWithManifest-32  4471560 ns/op  135636 B/op 81 allocs/op
+PASS
+ok  hatrie_cache/hat/hatCache  9.657s
+```
+
+Reproduce with `make benchmark-t213-before` and `make benchmark-t213`; run
+correctness with `make test-t213`, then run
+`make cleanup-hatrie-tmp-after-test` and `make audit-hatrie-tmp`.

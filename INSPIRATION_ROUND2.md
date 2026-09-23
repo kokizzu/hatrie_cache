@@ -154,7 +154,7 @@ operator control remain the preferred deployment model.
 - [x] T210 Master-master conflict hooks with source and sequence context; see [T210_MASTER_MASTER_CONFLICT_HOOKS.md](T210_MASTER_MASTER_CONFLICT_HOOKS.md) and [BENCHMARK.md](BENCHMARK.md#t210-master-master-conflict-hooks).
 - [x] T211 Configurable WAL synchronization modes with durability reporting; see [T211_CONFIGURABLE_WAL_SYNC.md](T211_CONFIGURABLE_WAL_SYNC.md).
 - [x] T212 WAL retention and rotation policies tied to replica acknowledgments; see [T212_WAL_REPLICA_RETENTION.md](T212_WAL_REPLICA_RETENTION.md) and [BENCHMARK.md](BENCHMARK.md#t212-wal-replica-acknowledgement-retention).
-- [ ] T213 Scheduled snapshots with checkpoint manifests and atomic publication.
+- [x] T213 Scheduled snapshots with checkpoint manifests and atomic publication; see [T213_SCHEDULED_SNAPSHOTS.md](T213_SCHEDULED_SNAPSHOTS.md) and [BENCHMARK.md](BENCHMARK.md#t213-scheduled-snapshot-checkpoints).
 - [ ] T214 Streaming snapshots for replicas without a shared filesystem.
 - [ ] T215 Per-space memtx versus on-disk storage policy.
 - [ ] T216 Vinyl-style run compaction scheduling and space accounting.

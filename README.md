@@ -5036,3 +5036,13 @@ and cursor state must be re-registered after restart. See
 [T212_WAL_REPLICA_RETENTION.md](T212_WAL_REPLICA_RETENTION.md) and the raw
 measurements in
 [BENCHMARK.md](BENCHMARK.md#t212-wal-replica-acknowledgement-retention).
+
+## Scheduled Snapshot Checkpoints
+
+T213 adds an opt-in scheduler that publishes a snapshot and a matching
+checkpoint manifest, verifies the checksum before restore, and compacts the
+journal only after publication. It is disabled unless
+`StartScheduledSnapshots` is called. See
+[T213_SCHEDULED_SNAPSHOTS.md](T213_SCHEDULED_SNAPSHOTS.md) and the raw
+measurements in
+[BENCHMARK.md](BENCHMARK.md#t213-scheduled-snapshot-checkpoints).

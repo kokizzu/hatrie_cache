@@ -25869,6 +25869,50 @@ benchmark-t212-before:
 benchmark-t212:
 	bash ./scripts/benchmark-t212.sh
 
+.PHONY: test-t213
+test-t213:
+	bash ./scripts/test-t213.sh
+
+.PHONY: format-t213
+format-t213:
+	bash ./scripts/format-t213.sh
+
+.PHONY: benchmark-t213-before
+benchmark-t213-before:
+	bash ./scripts/benchmark-t213-before.sh
+
+.PHONY: benchmark-t213
+benchmark-t213:
+	bash ./scripts/benchmark-t213.sh
+
+.PHONY: test-t213-package
+test-t213-package:
+	bash ./scripts/test-t213-package.sh
+
+.PHONY: race-t213
+race-t213:
+	bash ./scripts/race-t213.sh
+
+.PHONY: vet-t213
+vet-t213:
+	bash ./scripts/vet-t213.sh
+
+.PHONY: verify-t213-scope
+verify-t213-scope:
+	bash ./scripts/verify-t213-scope.sh
+
+.PHONY: stage-t213
+stage-t213:
+	bash ./scripts/stage-t213.sh
+
+.PHONY: commit-t213
+commit-t213:
+	bash ./scripts/commit-t213.sh
+
+.PHONY: push-t213
+push-t213:
+	bash ./scripts/push-t213.sh
+
 .PHONY: test-t212-package
 test-t212-package:
 	bash ./scripts/test-t212-package.sh

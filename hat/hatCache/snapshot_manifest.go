@@ -36,14 +36,29 @@ func (journal *CommandJournal) WriteSnapshotWithManifest(trie *HatTrie, writer i
 	if err != nil {
 		return SnapshotManifest{}, err
 	}
+	journal.snapshotMu.Lock()
+	defer journal.snapshotMu.Unlock()
+	return journal.writeSnapshotWithManifestLocked(trie, writer, format)
+}
+
+func (journal *CommandJournal) writeSnapshotWithManifestLocked(trie *HatTrie, writer io.Writer, format SnapshotFormat) (SnapshotManifest, error) {
+	journal.mu.Lock()
+	if journal.closed {
+		journal.mu.Unlock()
+		return SnapshotManifest{}, ErrCommandJournalClosed
+	}
+	journal.mu.Unlock()
 
 	manifestWriter := snapshotManifestWriter{writer: writer, digest: sha256.New()}
-	metadata, err := journal.WriteSnapshotWithFormat(trie, &manifestWriter, format)
+	capture, sequence, err := trie.captureSnapshotStreamForStoreAtBarrier(nil, nil, journal.snapshotCaptureBarrier())
 	if err != nil {
 		return SnapshotManifest{}, err
 	}
+	if err := writeStreamSnapshot(&manifestWriter, sequence, format, capture); err != nil {
+		return SnapshotManifest{}, err
+	}
 	return SnapshotManifest{
-		JournalSequence: metadata.JournalSequence,
+		JournalSequence: sequence,
 		Format:          format,
 		SizeBytes:       manifestWriter.size,
 		SHA256:          hex.EncodeToString(manifestWriter.digest.Sum(nil)),
