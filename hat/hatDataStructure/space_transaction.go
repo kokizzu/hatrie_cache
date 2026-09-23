@@ -9,18 +9,21 @@ var (
 	ErrSpaceTransactionNil       = errors.New("hatDataStructure: space transaction is nil")
 	ErrSpaceTransactionClosed    = errors.New("hatDataStructure: space transaction is closed")
 	ErrSpaceTransactionChildOpen = errors.New("hatDataStructure: nested space transaction is still open")
+	ErrSpaceTransactionConflict  = errors.New("hatDataStructure: space transaction conflict")
 )
 
 // SpaceTransaction stages key/value mutations for one Space. A transaction's
 // staged values are private until Commit succeeds. Transactions are not safe
 // for concurrent use; the owning Space remains safe for concurrent callers.
 type SpaceTransaction struct {
-	space    *Space
-	parent   *SpaceTransaction
-	snapshot *spaceTransactionSnapshot
-	changes  map[string]spaceTransactionChange
-	children int
-	closed   bool
+	space              *Space
+	parent             *SpaceTransaction
+	snapshot           *spaceTransactionSnapshot
+	changes            map[string]spaceTransactionChange
+	conflictDetection  bool
+	conflictGeneration uint64
+	children           int
+	closed             bool
 }
 
 type spaceTransactionChange struct {
@@ -86,10 +89,12 @@ func (tx *SpaceTransaction) BeginNested() (*SpaceTransaction, error) {
 	}
 	tx.children++
 	return &SpaceTransaction{
-		space:    tx.space,
-		parent:   tx,
-		snapshot: tx.snapshot,
-		changes:  make(map[string]spaceTransactionChange),
+		space:              tx.space,
+		parent:             tx,
+		snapshot:           tx.snapshot,
+		changes:            make(map[string]spaceTransactionChange),
+		conflictDetection:  tx.conflictDetection,
+		conflictGeneration: tx.conflictGeneration,
 	}, nil
 }
 
@@ -164,7 +169,7 @@ func (tx *SpaceTransaction) Commit() error {
 		tx.parent.children--
 		return nil
 	}
-	if err := tx.space.commitSpaceTransaction(tx.changes); err != nil {
+	if err := tx.space.commitSpaceTransaction(tx); err != nil {
 		return err
 	}
 	tx.closed = true
@@ -234,9 +239,13 @@ func (space *Space) validateTransactionValue(value []byte) error {
 	return nil
 }
 
-func (space *Space) commitSpaceTransaction(changes map[string]spaceTransactionChange) error {
+func (space *Space) commitSpaceTransaction(tx *SpaceTransaction) error {
 	space.mu.Lock()
 	defer space.mu.Unlock()
+	if err := space.checkSpaceTransactionConflictsLocked(tx); err != nil {
+		return err
+	}
+	changes := tx.changes
 
 	if space.engine == SpaceEngineVinyl {
 		table := space.vinyl
@@ -251,6 +260,7 @@ func (space *Space) commitSpaceTransaction(changes map[string]spaceTransactionCh
 			restoreLSMTableLocked(table, snapshot)
 			return err
 		}
+		space.recordSpaceTransactionMutationsLocked(mutations)
 		space.emitSpaceTransactionCallbacks(mutations)
 		return nil
 	}
@@ -262,6 +272,7 @@ func (space *Space) commitSpaceTransaction(changes map[string]spaceTransactionCh
 	if err := space.applySpaceTransactionMutationsLocked(mutations); err != nil {
 		return err
 	}
+	space.recordSpaceTransactionMutationsLocked(mutations)
 	space.emitSpaceTransactionCallbacks(mutations)
 	return nil
 }

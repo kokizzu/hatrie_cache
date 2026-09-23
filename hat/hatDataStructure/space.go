@@ -22,15 +22,15 @@ const (
 var spaceSnapshotMagic = [4]byte{'H', 'S', 'P', '1'}
 
 var (
-	ErrSpaceNil               = errors.New("hatDataStructure: space is nil")
-	ErrSpaceEngineInvalid     = errors.New("hatDataStructure: space engine is invalid")
-	ErrSpaceOptionsInvalid    = errors.New("hatDataStructure: space options are invalid")
-	ErrSpaceKeyRequired       = errors.New("hatDataStructure: space key is required")
-	ErrSpaceValueTooLarge     = errors.New("hatDataStructure: space value is too large")
-	ErrSpaceFull              = errors.New("hatDataStructure: space is full")
-	ErrSpaceSnapshotCorrupt   = errors.New("hatDataStructure: space snapshot is corrupt")
-	ErrSpaceSnapshotWireLimit = errors.New("hatDataStructure: space snapshot wire limit exceeded")
-	ErrSpaceEngineMismatch    = errors.New("hatDataStructure: space snapshot engine mismatch")
+	ErrSpaceNil                    = errors.New("hatDataStructure: space is nil")
+	ErrSpaceEngineInvalid          = errors.New("hatDataStructure: space engine is invalid")
+	ErrSpaceOptionsInvalid         = errors.New("hatDataStructure: space options are invalid")
+	ErrSpaceKeyRequired            = errors.New("hatDataStructure: space key is required")
+	ErrSpaceValueTooLarge          = errors.New("hatDataStructure: space value is too large")
+	ErrSpaceFull                   = errors.New("hatDataStructure: space is full")
+	ErrSpaceSnapshotCorrupt        = errors.New("hatDataStructure: space snapshot is corrupt")
+	ErrSpaceSnapshotWireLimit      = errors.New("hatDataStructure: space snapshot wire limit exceeded")
+	ErrSpaceEngineMismatch         = errors.New("hatDataStructure: space snapshot engine mismatch")
 	ErrSpaceTransactionIDExhausted = errors.New("hatDataStructure: space transaction id exhausted")
 )
 
@@ -116,15 +116,19 @@ type SpaceStats struct {
 // engine. The selected engine does not change at runtime; create another
 // space and migrate through snapshots when an engine change is required.
 type Space struct {
-	mu            sync.RWMutex
-	engine        SpaceEngine
-	memtxOptions  MemtxSpaceOptions
-	memtx         map[string][]byte
-	vinyl         *LSMTable
-	beforeReplace SpaceBeforeReplace
-	onReplace     SpaceOnReplace
-	afterReplace  SpaceAfterReplace
-	nextTransactionID uint64
+	mu                 sync.RWMutex
+	engine             SpaceEngine
+	memtxOptions       MemtxSpaceOptions
+	memtx              map[string][]byte
+	vinyl              *LSMTable
+	beforeReplace      SpaceBeforeReplace
+	onReplace          SpaceOnReplace
+	afterReplace       SpaceAfterReplace
+	nextTransactionID  uint64
+	conflictGate       sync.RWMutex
+	conflictTracking   bool
+	conflictGeneration uint64
+	conflictVersions   map[string]uint64
 }
 
 // NewSpace creates one independently configured storage space.
@@ -168,7 +172,13 @@ func (space *Space) Put(key string, value []byte) error {
 		return ErrSpaceKeyRequired
 	}
 	if space.engine == SpaceEngineVinyl && space.beforeReplace == nil && space.onReplace == nil && space.afterReplace == nil {
-		return space.vinyl.Put(key, value)
+		space.conflictGate.RLock()
+		if !space.conflictTracking {
+			err := space.vinyl.Put(key, value)
+			space.conflictGate.RUnlock()
+			return err
+		}
+		space.conflictGate.RUnlock()
 	}
 	space.mu.Lock()
 	defer space.mu.Unlock()
@@ -195,6 +205,7 @@ func (space *Space) Put(key string, value []byte) error {
 		if err := space.vinyl.Put(key, value); err != nil {
 			return err
 		}
+		space.recordSpaceMutationLocked(key)
 		if space.onReplace != nil {
 			space.onReplace(onReplace)
 		}
@@ -211,6 +222,7 @@ func (space *Space) Put(key string, value []byte) error {
 	}
 	if space.beforeReplace == nil && space.onReplace == nil && space.afterReplace == nil {
 		space.memtx[key] = append([]byte(nil), value...)
+		space.recordSpaceMutationLocked(key)
 		return nil
 	}
 	oldValue, exists := space.memtx[key]
@@ -230,6 +242,7 @@ func (space *Space) Put(key string, value []byte) error {
 		onReplace = cloneSpaceReplace(key, oldValue, value, exists, false)
 	}
 	space.memtx[key] = append([]byte(nil), value...)
+	space.recordSpaceMutationLocked(key)
 	if space.onReplace != nil {
 		space.onReplace(onReplace)
 	}
@@ -268,10 +281,17 @@ func (space *Space) Delete(key string) error {
 		return ErrSpaceKeyRequired
 	}
 	if space.engine == SpaceEngineVinyl && space.beforeReplace == nil && space.onReplace == nil && space.afterReplace == nil {
-		if _, exists := space.vinyl.Get(key); !exists {
-			return nil
+		space.conflictGate.RLock()
+		if !space.conflictTracking {
+			if _, exists := space.vinyl.Get(key); !exists {
+				space.conflictGate.RUnlock()
+				return nil
+			}
+			err := space.vinyl.Delete(key)
+			space.conflictGate.RUnlock()
+			return err
 		}
-		return space.vinyl.Delete(key)
+		space.conflictGate.RUnlock()
 	}
 	space.mu.Lock()
 	defer space.mu.Unlock()
@@ -298,6 +318,7 @@ func (space *Space) Delete(key string) error {
 		if err := space.vinyl.Delete(key); err != nil {
 			return err
 		}
+		space.recordSpaceMutationLocked(key)
 		if space.onReplace != nil {
 			space.onReplace(onReplace)
 		}
@@ -307,7 +328,10 @@ func (space *Space) Delete(key string) error {
 		return nil
 	}
 	if space.beforeReplace == nil && space.onReplace == nil && space.afterReplace == nil {
-		delete(space.memtx, key)
+		if _, exists := space.memtx[key]; exists {
+			delete(space.memtx, key)
+			space.recordSpaceMutationLocked(key)
+		}
 		return nil
 	}
 	oldValue, exists := space.memtx[key]
@@ -330,6 +354,7 @@ func (space *Space) Delete(key string) error {
 		onReplace = cloneSpaceReplace(key, oldValue, nil, true, true)
 	}
 	delete(space.memtx, key)
+	space.recordSpaceMutationLocked(key)
 	if space.onReplace != nil {
 		space.onReplace(onReplace)
 	}

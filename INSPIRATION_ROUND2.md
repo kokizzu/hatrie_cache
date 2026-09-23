@@ -175,7 +175,7 @@ operator control remain the preferred deployment model.
 - [x] T231 After-replace audit hooks with transaction identity; `SpaceOptions.AfterReplace` emits copied successful mutation images with monotonic per-space IDs while keeping the default path off. See [T231_AFTER_REPLACE_AUDIT.md](T231_AFTER_REPLACE_AUDIT.md) and [BENCHMARK.md](BENCHMARK.md#t231-after-replace-audit-hooks).
 - [x] T232 Atomic transaction scopes with nested rollback boundaries; `Space.BeginTransaction` stages copied writes, supports nested merge/rollback boundaries, validates before mutation, and applies atomic memtx/Vinyl batches while retaining the default path. See [T232_SPACE_TRANSACTIONS.md](T232_SPACE_TRANSACTIONS.md) and [BENCHMARK.md](BENCHMARK.md#t232-atomic-space-transactions).
 - [x] T233 MVCC transactions that permit cooperative yields; `Space.BeginMVCCTransaction` captures shared immutable memtx/LSM read metadata, nested scopes inherit repeatable reads, and `SpaceTransaction.Yield` cooperatively schedules with context cancellation. See [T233_MVCC_TRANSACTIONS.md](T233_MVCC_TRANSACTIONS.md) and [BENCHMARK.md](BENCHMARK.md#t233-mvcc-transactions).
-- [ ] T234 Early conflict detection for competing transactional writes.
+- [x] T234 Early conflict detection for competing transactional writes via opt-in `Space.BeginConflictDetectingTransaction`; see [T234_TRANSACTION_CONFLICTS.md](T234_TRANSACTION_CONFLICTS.md) and [BENCHMARK.md](BENCHMARK.md#t234-early-transaction-conflict-detection).
 - [ ] T235 Cooperative fiber workers for nonblocking application tasks.
 - [ ] T236 Low-overhead mailbox channels between independent workers.
 - [ ] T237 Connection pools with health checks and reconnect backoff.

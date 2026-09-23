@@ -37576,3 +37576,60 @@ BenchmarkT233RegularTransactionReadBaseline-32 3374816 397.6 ns/op 112 B/op 9 al
 BenchmarkT233RegularTransactionReadBaseline-32 3425546 327.7 ns/op 112 B/op 9 allocs/op
 BenchmarkT233RegularTransactionReadBaseline-32 3311298 353.4 ns/op 112 B/op 9 allocs/op
 ```
+
+<a id="t234-early-transaction-conflict-detection"></a>
+## T234 Early Transaction Conflict Detection
+
+This benchmark compares the unchanged last-writer-wins transaction path with
+the opt-in conflict-detecting path. Conflict detection rejects a competing
+same-key root commit while allowing disjoint-key commits to proceed. It adds a
+bounded CPU and memory cost only to callers that request the mode; see
+[T234_TRANSACTION_CONFLICTS.md](T234_TRANSACTION_CONFLICTS.md) for API
+semantics and the rejected atomic-gate experiment.
+
+| Workload | Median CPU | Memory | Relative CPU | Relative memory |
+| --- | ---: | ---: | ---: | ---: |
+| Regular Memtx transaction, before T234 | 532.1 ns/op | 736 B/op, 7 allocs/op | 1.00x | 1.00x |
+| Regular Memtx transaction, after control | 562.7 ns/op | 736 B/op, 7 allocs/op | 1.06x | 1.00x |
+| Conflict-detecting Memtx transaction | 743.0 ns/op | 800 B/op, 8 allocs/op | 1.32x vs after control | 1.09x vs after control |
+| Regular Vinyl transaction, after control | 787.9 ns/op | 1,200 B/op, 9 allocs/op | 1.00x | 1.00x |
+| Conflict-detecting Vinyl transaction | 1,085 ns/op | 1,264 B/op, 10 allocs/op | 1.38x | 1.05x |
+| Rejected same-key conflict | 1,142 ns/op | 1,336 B/op, 12 allocs/op | separate workload | separate workload |
+
+### Raw T234 Output
+
+```text
+Before, make benchmark-t234-before:
+BenchmarkT234RegularTransactionWriteBaseline-32 2224416 532.1 ns/op 736 B/op 7 allocs/op
+BenchmarkT234RegularTransactionWriteBaseline-32 2323850 484.4 ns/op 736 B/op 7 allocs/op
+BenchmarkT234RegularTransactionWriteBaseline-32 2342467 523.8 ns/op 736 B/op 7 allocs/op
+BenchmarkT234RegularTransactionWriteBaseline-32 2171748 561.4 ns/op 736 B/op 7 allocs/op
+BenchmarkT234RegularTransactionWriteBaseline-32 2235478 555.2 ns/op 736 B/op 7 allocs/op
+
+After, make benchmark-t234:
+BenchmarkT234RegularTransactionWriteBaseline-32 2253980 601.0 ns/op 736 B/op 7 allocs/op
+BenchmarkT234RegularTransactionWriteBaseline-32 2119942 573.8 ns/op 736 B/op 7 allocs/op
+BenchmarkT234RegularTransactionWriteBaseline-32 2204472 562.7 ns/op 736 B/op 7 allocs/op
+BenchmarkT234RegularTransactionWriteBaseline-32 1871233 553.8 ns/op 736 B/op 7 allocs/op
+BenchmarkT234RegularTransactionWriteBaseline-32 2189617 555.0 ns/op 736 B/op 7 allocs/op
+BenchmarkT234ConflictTransactionWrite-32 1807196 690.2 ns/op 800 B/op 8 allocs/op
+BenchmarkT234ConflictTransactionWrite-32 1685619 746.0 ns/op 800 B/op 8 allocs/op
+BenchmarkT234ConflictTransactionWrite-32 1497175 783.0 ns/op 800 B/op 8 allocs/op
+BenchmarkT234ConflictTransactionWrite-32 1667044 708.9 ns/op 800 B/op 8 allocs/op
+BenchmarkT234ConflictTransactionWrite-32 1466703 743.0 ns/op 800 B/op 8 allocs/op
+
+After, make benchmark-t234-quick:
+BenchmarkT234RegularTransactionWriteVinylBaseline-32 1476505 787.9 ns/op 1200 B/op 9 allocs/op
+BenchmarkT234RegularTransactionWriteVinylBaseline-32 1452484 787.5 ns/op 1200 B/op 9 allocs/op
+BenchmarkT234RegularTransactionWriteVinylBaseline-32 1543624 879.0 ns/op 1200 B/op 9 allocs/op
+BenchmarkT234ConflictTransactionWriteVinyl-32 1000000 1043 ns/op 1264 B/op 10 allocs/op
+BenchmarkT234ConflictTransactionWriteVinyl-32 970951 1085 ns/op 1264 B/op 10 allocs/op
+BenchmarkT234ConflictTransactionWriteVinyl-32 1148029 1087 ns/op 1264 B/op 10 allocs/op
+BenchmarkT234ConflictTransactionRejected-32 1015650 1143 ns/op 1336 B/op 12 allocs/op
+BenchmarkT234ConflictTransactionRejected-32 1000000 1109 ns/op 1336 B/op 12 allocs/op
+BenchmarkT234ConflictTransactionRejected-32 926556 1142 ns/op 1336 B/op 12 allocs/op
+
+Rejected atomic-gate trial, default Vinyl Put:
+BenchmarkT234DirectVinylPutDefault-32 20167036 59.36 ns/op 8 B/op 1 allocs/op
+BenchmarkT234DirectVinylPutDefault-32 20986054 65.04 ns/op 8 B/op 1 allocs/op
+```

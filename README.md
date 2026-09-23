@@ -239,6 +239,7 @@ security guidance before exposing it on a network.
 - Opt-in after-replace audit hooks with per-space transaction IDs: [T231_AFTER_REPLACE_AUDIT.md](T231_AFTER_REPLACE_AUDIT.md)
 - Opt-in atomic Space transactions with nested rollback boundaries: [T232_SPACE_TRANSACTIONS.md](T232_SPACE_TRANSACTIONS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#t232-atomic-space-transactions)
 - Opt-in MVCC Space transactions with repeatable reads and cooperative yields: [T233_MVCC_TRANSACTIONS.md](T233_MVCC_TRANSACTIONS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#t233-mvcc-transactions)
+- Opt-in early transaction write-conflict detection with disjoint-key concurrency: [T234_TRANSACTION_CONFLICTS.md](T234_TRANSACTION_CONFLICTS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#t234-early-transaction-conflict-detection)
 - Tarantool-inspired adaptive per-tuple compression: [TT045_TUPLE_COMPRESSION.md](TT045_TUPLE_COMPRESSION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#tt-045-tuple-level-compression)
 - Snapshot-consistent ordered index cursors: [ORDERED_SNAPSHOT_CURSOR.md](ORDERED_SNAPSHOT_CURSOR.md)
 - Opt-in per-space memory quotas: [SPACE_MEMORY_QUOTA.md](SPACE_MEMORY_QUOTA.md)
