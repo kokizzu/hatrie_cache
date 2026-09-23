@@ -24908,3 +24908,6 @@ status-c240:
 .PHONY: commit-c240
 commit-c240:
 	@bash scripts/commit-c240.sh
+.PHONY: push-c240
+push-c240:
+	@bash scripts/push-c240.sh
