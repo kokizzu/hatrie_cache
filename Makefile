@@ -25853,6 +25853,50 @@ verify-t210-scope:
 benchmark-t211-before:
 	bash ./scripts/benchmark-t211-before.sh
 
+.PHONY: format-t212
+format-t212:
+	bash ./scripts/format-t212.sh
+
+.PHONY: test-t212
+test-t212:
+	bash ./scripts/test-t212.sh
+
+.PHONY: benchmark-t212-before
+benchmark-t212-before:
+	bash ./scripts/benchmark-t212-before.sh
+
+.PHONY: benchmark-t212
+benchmark-t212:
+	bash ./scripts/benchmark-t212.sh
+
+.PHONY: test-t212-package
+test-t212-package:
+	bash ./scripts/test-t212-package.sh
+
+.PHONY: race-t212
+race-t212:
+	bash ./scripts/race-t212.sh
+
+.PHONY: vet-t212
+vet-t212:
+	bash ./scripts/vet-t212.sh
+
+.PHONY: verify-t212-scope
+verify-t212-scope:
+	bash ./scripts/verify-t212-scope.sh
+
+.PHONY: stage-t212
+stage-t212:
+	bash ./scripts/stage-t212.sh
+
+.PHONY: commit-t212
+commit-t212:
+	bash ./scripts/commit-t212.sh
+
+.PHONY: push-t212
+push-t212:
+	bash ./scripts/push-t212.sh
+
 .PHONY: test-t211-package
 test-t211-package:
 	bash ./scripts/test-t211-package.sh

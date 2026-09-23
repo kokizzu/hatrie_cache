@@ -314,12 +314,16 @@ func (journal *CommandJournal) pruneSegmentsLocked() error {
 		}
 	}
 	maxRemovable := len(segments) - 1
+	replicaRetentionThrough, replicaRetentionProtected := journal.replicaRetentionThroughLocked()
 	removed := 0
 	for index, segment := range segments {
 		if index >= maxRemovable || (remove <= 0 && (journal.retainedBytes <= 0 || totalBytes <= journal.retainedBytes)) {
 			break
 		}
 		if journal.outboxRetainFrom > 0 && segment.end >= journal.outboxRetainFrom {
+			break
+		}
+		if replicaRetentionProtected && segment.end > replicaRetentionThrough {
 			break
 		}
 		if projectionThrough, protected := journal.projectionRetentionThroughLocked(); protected && segment.end > projectionThrough {

@@ -5024,3 +5024,15 @@ with the re-exported `CommandJournalSyncMode*` constants and inspect the
 current recovery boundary with `journal.DurabilityReport()`. See
 [T211_CONFIGURABLE_WAL_SYNC.md](T211_CONFIGURABLE_WAL_SYNC.md) and the raw
 measurements in [BENCHMARK.md](BENCHMARK.md#t211-wal-synchronization).
+
+## WAL Replica-Acknowledgement Retention
+
+T212 adds opt-in retention guards for segmented journals. Set
+`CommandJournalOptions.ReplicaRetentionCapacity` above zero, register each
+replica, and advance its cursor only after durable apply. Segment pruning then
+waits for the slowest registered replica while preserving the existing
+`RetainedSegments` and `RetainedBytes` limits. The default is `0` (disabled),
+and cursor state must be re-registered after restart. See
+[T212_WAL_REPLICA_RETENTION.md](T212_WAL_REPLICA_RETENTION.md) and the raw
+measurements in
+[BENCHMARK.md](BENCHMARK.md#t212-wal-replica-acknowledgement-retention).

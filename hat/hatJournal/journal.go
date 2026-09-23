@@ -86,6 +86,8 @@ const (
 	MaxRetainedBytes           int64         = 1 << 40
 	DefaultIdempotencyCapacity               = 0
 	MaxIdempotencyCapacity                   = 1 << 20
+	DefaultReplicaRetentionCapacity          = 0
+	MaxReplicaRetentionCapacity              = 4096
 )
 
 // Options configures journal encoding, durability synchronization, and
@@ -104,6 +106,9 @@ type Options struct {
 	RetainedSegments    int
 	RetainedBytes       int64
 	IdempotencyCapacity int
+	// ReplicaRetentionCapacity enables bounded per-replica acknowledgement
+	// cursors. Zero keeps replica-aware pruning disabled.
+	ReplicaRetentionCapacity int
 	Encryption          EncryptionOptions
 }
 
@@ -157,6 +162,12 @@ func ValidateOptions(options Options) (Options, error) {
 	}
 	if options.IdempotencyCapacity > MaxIdempotencyCapacity {
 		return Options{}, fmt.Errorf("hatJournal: idempotency capacity must be <= %d", MaxIdempotencyCapacity)
+	}
+	if options.ReplicaRetentionCapacity < 0 {
+		return Options{}, errors.New("hatJournal: replica retention capacity must be non-negative")
+	}
+	if options.ReplicaRetentionCapacity > MaxReplicaRetentionCapacity {
+		return Options{}, fmt.Errorf("hatJournal: replica retention capacity must be <= %d", MaxReplicaRetentionCapacity)
 	}
 	encryption, err := ValidateEncryptionOptions(options.Encryption)
 	if err != nil {

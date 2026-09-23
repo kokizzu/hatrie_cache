@@ -90,6 +90,8 @@ const (
 	MaxCommandJournalRetainedSegments        = hatJournal.MaxRetainedSegments
 	DefaultCommandJournalRetainedBytes       = hatJournal.DefaultRetainedBytes
 	MaxCommandJournalRetainedBytes           = hatJournal.MaxRetainedBytes
+	DefaultCommandJournalReplicaRetentionCapacity = hatJournal.DefaultReplicaRetentionCapacity
+	MaxCommandJournalReplicaRetentionCapacity     = hatJournal.MaxReplicaRetentionCapacity
 	DefaultCommandJournalIdempotencyCapacity = hatJournal.DefaultIdempotencyCapacity
 	MaxCommandJournalIdempotencyCapacity     = hatJournal.MaxIdempotencyCapacity
 )
@@ -247,6 +249,8 @@ type CommandJournal struct {
 	segmentCompression    CommandJournalSegmentCompression
 	retainedSegments      int
 	retainedBytes         int64
+	replicaRetentionCapacity int
+	replicaRetentions     map[string]uint64
 	compactedThrough      uint64
 	activeSegmentStart    uint64
 	groupCommitJobs       chan *commandJournalJob
@@ -378,12 +382,16 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 		segmentCompression:    options.SegmentCompression,
 		retainedSegments:      options.RetainedSegments,
 		retainedBytes:         options.RetainedBytes,
+		replicaRetentionCapacity: options.ReplicaRetentionCapacity,
 		compactedThrough:      compactedThrough,
 		recordBatchChunkBytes: defaultCommandJournalRecordBatchChunkBytes,
 		outboxRetainFrom:      earliestOutboxSequence,
 		subscriptionWake:      make(chan struct{}),
 		closeDone:             make(chan struct{}),
 		idempotency:           idempotency,
+	}
+	if options.ReplicaRetentionCapacity > 0 {
+		journal.replicaRetentions = make(map[string]uint64, options.ReplicaRetentionCapacity)
 	}
 	journal.advanceSequenceLocked(maxSequence)
 	if journal.nextSequence == 0 && !journal.sequenceExhausted {

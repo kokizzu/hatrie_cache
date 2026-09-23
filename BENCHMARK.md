@@ -36667,3 +36667,57 @@ Reproduce with `make benchmark-t211-before` and `make benchmark-t211`; run
 correctness with `make test-t211`, then run the cleanup target
 `make cleanup-hatrie-tmp-after-test` to remove stale test metadata without
 deleting active worktrees.
+
+## T212: WAL Replica-Acknowledgement Retention
+
+T212 adds an opt-in retention guard for segmented command journals. Registered
+replica cursors make the slowest acknowledged sequence a pruning lower bound;
+the default capacity is zero, so the default path remains unchanged.
+
+### Summary
+
+The benchmark performs 20 writes with 256-byte segment rotation and reports
+three repetitions. Physical filesystem rotation makes the timing noisy; the
+retention and allocation columns are the useful tradeoff indicators.
+
+| Mode | Median time | Bytes/op | Allocs/op | Final segments | Relative bytes vs disabled |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Pre-feature baseline | 4.50 ms | 6,397 | 57 | 1 | 1.00x reference |
+| Disabled (post-feature) | 4.36 ms | 6,376 | 57 | 1 | 1.00x |
+| Enabled, replica lagging | 3.90 ms* | 9,924 | 85 | 19 | 1.56x |
+| Enabled, replicas caught up | 4.63 ms* | 8,013 | 84 | 1 | 1.26x |
+
+The timing differences in the enabled rows are not a performance claim; they
+are filesystem benchmark noise. The lagging case demonstrates the intended
+cost: about 56% more benchmark memory and 19 retained segments relative to the
+disabled path. The caught-up case still adds about 26% memory and 27
+allocations per operation for cursor bookkeeping. The feature is a durability
+and retention-safety control, not a write-speed optimization.
+
+### Raw T212 Output
+
+```text
+Before, make benchmark-t212-before:
+BenchmarkT212ReplicaRetentionBaseline-32   3920580 ns/op  1.000 segments  6373 B/op  57 allocs/op
+BenchmarkT212ReplicaRetentionBaseline-32   4708838 ns/op  1.000 segments  6806 B/op  57 allocs/op
+BenchmarkT212ReplicaRetentionBaseline-32   4501169 ns/op  1.000 segments  6397 B/op  57 allocs/op
+
+After, make benchmark-t212:
+BenchmarkT212ReplicaRetentionModes/Baseline-32           4310933 ns/op  1.000 segments  6806 B/op  57 allocs/op
+BenchmarkT212ReplicaRetentionModes/Baseline-32           4292664 ns/op  1.000 segments  6394 B/op  57 allocs/op
+BenchmarkT212ReplicaRetentionModes/Baseline-32           4687597 ns/op  1.000 segments  6788 B/op  57 allocs/op
+BenchmarkT212ReplicaRetentionModes/Disabled-32           4257420 ns/op  1.000 segments  6374 B/op  57 allocs/op
+BenchmarkT212ReplicaRetentionModes/Disabled-32           4449734 ns/op  1.000 segments  6376 B/op  57 allocs/op
+BenchmarkT212ReplicaRetentionModes/Disabled-32           4360904 ns/op  1.000 segments  6804 B/op  57 allocs/op
+BenchmarkT212ReplicaRetentionModes/EnabledLagging-32    3801552 ns/op 19.00 segments  9922 B/op  85 allocs/op
+BenchmarkT212ReplicaRetentionModes/EnabledLagging-32    4149839 ns/op 19.00 segments  9924 B/op  85 allocs/op
+BenchmarkT212ReplicaRetentionModes/EnabledLagging-32    3903416 ns/op 19.00 segments 10332 B/op  85 allocs/op
+BenchmarkT212ReplicaRetentionModes/EnabledCaughtUp-32   4627828 ns/op  1.000 segments  8012 B/op  84 allocs/op
+BenchmarkT212ReplicaRetentionModes/EnabledCaughtUp-32   4643100 ns/op  1.000 segments  8013 B/op  84 allocs/op
+BenchmarkT212ReplicaRetentionModes/EnabledCaughtUp-32   4577266 ns/op  1.000 segments  8073 B/op  84 allocs/op
+```
+
+Reproduce with `make benchmark-t212-before` and `make benchmark-t212`; run
+correctness with `make test-t212`, then run
+`make cleanup-hatrie-tmp-after-test` to remove stale test metadata without
+deleting active worktrees.
