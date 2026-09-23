@@ -38409,3 +38409,25 @@ measured before the change and the final comparison used three samples each.
 The feature remains an open candidate in [IDEA_GAP_CATALOG.md](IDEA_GAP_CATALOG.md)
 and the raw experiment is documented in
 [TTG08_PARALLEL_REPLAY_REJECTED.md](TTG08_PARALLEL_REPLAY_REJECTED.md).
+## TT-G10 WAL Segment Seek
+
+Segmented command-journal replay now treats the existing segment start/end
+sequence names as a range index. A replay after a near-tail sequence skips
+archived segments that cannot contain an applicable entry; full replay and
+unsegmented journals keep the existing path. Journal opening still validates
+the complete journal, so this changes replay I/O and decoding only.
+
+The workload uses 4,096 binary `SETSTR` entries, a 512-byte segment target,
+1,024 retained segments, and replays after sequence 3,968. Values are the
+five samples printed by `make m229-tt-g10-benchmark` on an AMD Ryzen 9 5950X.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Improvement |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Existing full archived-segment scan | 11,751,240; 10,815,438; 10,850,545; 10,842,900; 10,688,909 | 10,842,900 | 3,699,407 | 28,234 | baseline |
+| Range-indexed segment seek | 1,051,896; 1,122,283; 1,039,616; 1,065,587; 1,136,315 | 1,065,587 | 344,563 | 2,702 | 10.18x faster; 10.74x lower heap; 10.45x fewer allocations |
+
+The metadata scan still visits the retained segment-name list, and full or
+near-head replay cannot skip much work. The format, checksums, encryption, and
+command results are unchanged. The focused correctness test also verifies
+that a corrupted segment outside the requested range is not opened by the
+ranged scanner.

@@ -46,6 +46,25 @@ func listCommandJournalSegments(path string) ([]commandJournalSegment, error) {
 	return segments, nil
 }
 
+func commandJournalReplaySegmentBounds(segments []commandJournalSegment, afterSequence, targetSequence uint64) (first, last int) {
+	first = len(segments)
+	last = first
+	for index, segment := range segments {
+		if segment.end <= afterSequence {
+			continue
+		}
+		if first == len(segments) {
+			first = index
+			last = index
+		}
+		if targetSequence != 0 && segment.start > targetSequence {
+			break
+		}
+		last = index + 1
+	}
+	return first, last
+}
+
 func scanCommandJournalSet(path string, segmented bool, visit func(commandJournalEntry) error) (int64, error) {
 	return scanCommandJournalSetWithEncryption(path, segmented, hatJournal.EncryptionOptions{}, visit)
 }
@@ -116,6 +135,81 @@ func scanCommandJournalSetWithEncryption(path string, segmented bool, encryption
 		} else {
 			activeValidBytes = validBytes
 		}
+	}
+	return activeValidBytes, nil
+}
+
+func scanCommandJournalSetAfterSequenceWithEncryption(path string, segmented bool, afterSequence, targetSequence uint64, encryption hatJournal.EncryptionOptions, visit func(commandJournalEntry) error) (int64, error) {
+	if !segmented {
+		return scanCommandJournalEntriesWithEncryption(path, encryption, visit)
+	}
+	segments, err := listCommandJournalSegments(path)
+	if err != nil {
+		return 0, err
+	}
+	first, last := commandJournalReplaySegmentBounds(segments, afterSequence, targetSequence)
+
+	var previousSequence uint64
+	var hasPreviousSequence bool
+	var activeValidBytes int64
+	scanFile := func(filePath string, archived bool, segment commandJournalSegment) error {
+		firstEntry := true
+		var firstMutation uint64
+		var lastMutation uint64
+		validBytes, scanErr := scanCommandJournalEntriesWithEncryption(filePath, encryption, func(entry commandJournalEntry) error {
+			if firstEntry && hasPreviousSequence && entry.Checkpoint {
+				firstEntry = false
+				if entry.Sequence != previousSequence {
+					return fmt.Errorf("hatriecache: journal segment checkpoint %d does not continue after %d", entry.Sequence, previousSequence)
+				}
+				return nil
+			}
+			firstEntry = false
+			if !entry.Checkpoint {
+				if firstMutation == 0 {
+					firstMutation = entry.Sequence
+				}
+				lastMutation = entry.Sequence
+			}
+			if err := validateCommandJournalEntrySequence(previousSequence, hasPreviousSequence, entry); err != nil {
+				return err
+			}
+			if visit != nil {
+				if err := visit(entry); err != nil {
+					return err
+				}
+			}
+			previousSequence = entry.Sequence
+			hasPreviousSequence = true
+			return nil
+		})
+		if scanErr != nil {
+			return scanErr
+		}
+		if !archived {
+			activeValidBytes = validBytes
+			return nil
+		}
+		if firstMutation != segment.start || lastMutation != segment.end {
+			return fmt.Errorf("hatriecache: journal segment %q bounds do not match records %d-%d", filepath.Base(filePath), firstMutation, lastMutation)
+		}
+		info, statErr := os.Stat(filePath)
+		if statErr != nil {
+			return statErr
+		}
+		if validBytes != info.Size() {
+			return fmt.Errorf("hatriecache: archived journal segment %q is truncated", filepath.Base(filePath))
+		}
+		return nil
+	}
+
+	for index := first; index < last; index++ {
+		if err := scanFile(segments[index].path, true, segments[index]); err != nil {
+			return 0, err
+		}
+	}
+	if err := scanFile(path, false, commandJournalSegment{}); err != nil {
+		return 0, err
 	}
 	return activeValidBytes, nil
 }

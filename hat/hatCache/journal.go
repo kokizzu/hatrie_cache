@@ -1400,10 +1400,9 @@ func (journal *CommandJournal) replayThroughWithProgress(trie *HatTrie, afterSeq
 	var compactedThrough uint64
 	var totalEntries uint64
 	if progress != nil {
-		if _, err := scanCommandJournalSetWithEncryption(journal.path, journal.segmented(), journal.encryption, func(entry commandJournalEntry) error {
-			if entry.Sequence > maxSequence {
-				maxSequence = entry.Sequence
-			}
+		maxSequence = journal.lastSequenceLocked()
+		compactedThrough = journal.compactedThrough
+		if _, err := scanCommandJournalSetAfterSequenceWithEncryption(journal.path, journal.segmented(), afterSequence, targetSequence, journal.encryption, func(entry commandJournalEntry) error {
 			if entry.Checkpoint && entry.Sequence > compactedThrough {
 				compactedThrough = entry.Sequence
 			}
@@ -1433,7 +1432,7 @@ func (journal *CommandJournal) replayThroughWithProgress(trie *HatTrie, afterSeq
 	if targetSequence < afterSequence {
 		return 0, fmt.Errorf("hatriecache: requested journal sequence %d precedes snapshot sequence %d", targetSequence, afterSequence)
 	}
-	if _, err := scanCommandJournalSetWithEncryption(journal.path, journal.segmented(), journal.encryption, func(entry commandJournalEntry) error {
+	if _, err := scanCommandJournalSetAfterSequenceWithEncryption(journal.path, journal.segmented(), afterSequence, targetSequence, journal.encryption, func(entry commandJournalEntry) error {
 		if entry.Checkpoint {
 			return nil
 		}

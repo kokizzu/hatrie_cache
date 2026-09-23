@@ -27527,3 +27527,38 @@ m228-commit:
 .PHONY: m228-push
 m228-push:
 	bash scripts/m228-push.sh
+.PHONY: m229-tt-g10-test
+m229-tt-g10-test:
+	bash scripts/m229-tt-g10-test.sh
+
+.PHONY: m229-tt-g10-benchmark
+m229-tt-g10-benchmark:
+	bash scripts/m229-tt-g10-benchmark.sh
+
+.PHONY: m229-tt-g10-format
+m229-tt-g10-format:
+	bash scripts/m229-tt-g10-format.sh
+
+.PHONY: m229-tt-g10-race
+m229-tt-g10-race:
+	bash scripts/m229-tt-g10-race.sh
+
+.PHONY: m229-tt-g10-vet
+m229-tt-g10-vet:
+	bash scripts/m229-tt-g10-vet.sh
+
+.PHONY: m229-tt-g10-package-test
+m229-tt-g10-package-test:
+	bash scripts/m229-tt-g10-package-test.sh
+
+.PHONY: m229-stage
+m229-stage:
+	bash scripts/m229-stage.sh
+
+.PHONY: m229-commit
+m229-commit:
+	bash scripts/m229-commit.sh
+
+.PHONY: m229-push
+m229-push:
+	bash scripts/m229-push.sh

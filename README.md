@@ -122,6 +122,7 @@ security guidance before exposing it on a network.
 - ClickHouse-inspired external-source `ORDER BY` spill: [CHU02_EXTERNAL_ORDER_SPILL.md](CHU02_EXTERNAL_ORDER_SPILL.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u02-external-order-by-spill)
 - ClickHouse-inspired bounded external `GROUP BY` aggregation spill: [CHG01_EXTERNAL_GROUP_SPILL.md](CHG01_EXTERNAL_GROUP_SPILL.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-g01-bounded-external-group-by-aggregation-spill)
 - ClickHouse-inspired external-source `DISTINCT` spill: [CHU04_EXTERNAL_DISTINCT_SPILL.md](CHU04_EXTERNAL_DISTINCT_SPILL.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u04-external-distinct-spill)
+- Tarantool-inspired bounded WAL segment replay seek: [TTG10_WAL_SEGMENT_SEEK.md](TTG10_WAL_SEGMENT_SEEK.md), with measurements in [BENCHMARK.md](BENCHMARK.md#tt-g10-wal-segment-seek)
 - ClickHouse-inspired external-source bounded window streaming: [CHU05_EXTERNAL_WINDOW_STREAM.md](CHU05_EXTERNAL_WINDOW_STREAM.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u05-external-window-streaming)
 - ClickHouse-inspired mutation lifecycle IDs and status lookup: [CHU07_MUTATION_LIFECYCLE.md](CHU07_MUTATION_LIFECYCLE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u07-mutation-lifecycle)
 - ClickHouse-inspired automatic SQL result-cache wiring: [CHU08_AUTOMATIC_SQL_RESULT_CACHE.md](CHU08_AUTOMATIC_SQL_RESULT_CACHE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u08-automatic-sql-result-cache-wiring)
