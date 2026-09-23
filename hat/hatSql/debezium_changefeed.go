@@ -121,6 +121,11 @@ func (feed *DebeziumChangefeed) Apply(batch QuerySubscriptionDeltaBatch) ([]Debe
 	if feed == nil {
 		return nil, ErrDebeziumChangefeedNil
 	}
+	consolidated, err := batch.Consolidate()
+	if err != nil {
+		return nil, err
+	}
+	batch = consolidated
 	if batch.Progress {
 		return nil, nil
 	}
@@ -315,10 +320,10 @@ func (feed *DebeziumChangefeed) change(batch QuerySubscriptionDeltaBatch, key Ro
 	source := feed.source
 	source.Snapshot = snapshot
 	return DebeziumChange{
-		Key:      cloneDebeziumRow(key),
-		ID:       batch.ID,
-		Revision: batch.Revision,
-		Frontier: batch.Frontier,
+		Key:       cloneDebeziumRow(key),
+		ID:        batch.ID,
+		Revision:  batch.Revision,
+		Frontier:  batch.Frontier,
 		StableKey: stableKey,
 		Payload: DebeziumPayload{
 			Before: cloneDebeziumRow(before),

@@ -22,14 +22,42 @@ type QuerySubscriptionDelta struct {
 // consumer must discard its current multiset and apply the batch's positive
 // Deltas as the complete current result before continuing.
 type QuerySubscriptionDeltaBatch struct {
-	ID       uint64
-	Revision uint64
-	Frontier uint64
-	Columns  []string
-	Deltas   []QuerySubscriptionDelta
-	Progress bool
-	Complete bool
-	Reset    bool
+	ID           uint64
+	Revision     uint64
+	Frontier     uint64
+	Columns      []string
+	Deltas       []QuerySubscriptionDelta
+	Progress     bool
+	Complete     bool
+	Reset        bool
+	consolidated bool
+}
+
+// Consolidate combines equal complete row images and removes zero-sum
+// updates before a batch is handed to a downstream consumer. Batches produced
+// by this package are already consolidated and take the zero-work path.
+func (batch QuerySubscriptionDeltaBatch) Consolidate() (QuerySubscriptionDeltaBatch, error) {
+	if batch.consolidated {
+		return batch, nil
+	}
+	if len(batch.Deltas) == 0 || len(batch.Deltas) == 1 && batch.Deltas[0].Diff != 0 {
+		batch.consolidated = true
+		return batch, nil
+	}
+	consolidated, err := consolidateQuerySubscriptionDeltas(batch.Deltas, false)
+	if err != nil {
+		return QuerySubscriptionDeltaBatch{}, err
+	}
+	if !querySubscriptionDeltasChanged(batch.Deltas, consolidated) {
+		batch.consolidated = true
+		return batch, nil
+	}
+	for index := range consolidated {
+		consolidated[index].Row = cloneDifferentialRow(consolidated[index].Row)
+	}
+	batch.Deltas = consolidated
+	batch.consolidated = true
+	return batch, nil
 }
 
 // QueryDifferentialSubscription exposes signed row changes for an opt-in
@@ -84,12 +112,13 @@ func querySubscriptionDeltaBatch(snapshot QuerySubscriptionSnapshot, previous Qu
 
 func querySubscriptionDeltaBatchWithOrder(snapshot QuerySubscriptionSnapshot, previous QueryResult, hasPrevious, deterministic bool) QuerySubscriptionDeltaBatch {
 	batch := QuerySubscriptionDeltaBatch{
-		ID:       snapshot.ID,
-		Revision: snapshot.Revision,
-		Frontier: snapshot.Frontier,
-		Columns:  append([]string(nil), snapshot.Result.Columns...),
-		Progress: snapshot.Progress,
-		Complete: snapshot.Complete,
+		ID:           snapshot.ID,
+		Revision:     snapshot.Revision,
+		Frontier:     snapshot.Frontier,
+		Columns:      append([]string(nil), snapshot.Result.Columns...),
+		Progress:     snapshot.Progress,
+		Complete:     snapshot.Complete,
+		consolidated: true,
 	}
 	if snapshot.Progress {
 		return batch

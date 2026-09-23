@@ -37892,6 +37892,37 @@ The focused tests verify live-state preservation, unavailable discarded
 frontiers, latest-version preservation for an oversized target, and the zero
 frontier no-op. See [M212_LOGICAL_COMPACTION.md](M212_LOGICAL_COMPACTION.md).
 
+## M213: Differential Batch Consolidation
+
+Workload: five `-benchmem` samples at `-benchtime=100ms` for a generated
+128-row differential subscription batch, the same batch through the new
+consolidation boundary, and a prebuilt unmarked batch. Measurements were taken
+on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Workload | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Generated batch before boundary | 137,243 | 71,149 | 970 | 1.00x |
+| Generated batch through boundary | 135,877 | 71,151 | 970 | 0.99x, within noise |
+| Prebuilt unmarked batch consolidation | 211,710 | 50,361 | 2,128 | n/a |
+
+Raw samples:
+
+```text
+Generated baseline ns/op: 137243 139704 137935 135212 133024
+Generated baseline B/op:  71157  71145  71146  71156  71149
+Generated baseline allocs: 970 970 970 970 970
+Boundary ns/op: 139548 122490 140473 130318 135877
+Boundary B/op:  71154 71151 71150 71149 71151
+Boundary allocs: 970 970 970 970 970
+Unmarked ns/op: 227437 208520 230309 211710 209783
+Unmarked B/op: 50361 50364 50359 50361 50360
+Unmarked allocs: 2128 2128 2128 2128 2128
+```
+
+The publisher path has no measured allocation or CPU regression; the primary
+benefit is a single, reusable downstream correctness boundary. See
+[M213_DIFFERENTIAL_CONSOLIDATION.md](M213_DIFFERENTIAL_CONSOLIDATION.md).
+
 # M208: Differential Multiplicity Folding
 
 Workload: 512 distinct query-subscription rows, each repeated as four signed
