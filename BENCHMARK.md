@@ -36507,3 +36507,55 @@ BenchmarkTU208AnonymousMemberFilter-32  80.14 ns/op  32 B/op  1 allocs/op
 BenchmarkTU208AnonymousMemberFilter-32  75.90 ns/op  32 B/op  1 allocs/op
 BenchmarkTU208AnonymousMemberFilter-32  74.94 ns/op  32 B/op  1 allocs/op
 ```
+
+## T209: Relay/Applier Backpressure
+
+T209 adds an opt-in lag guard for asynchronous replication. It uses high/low
+journal-sequence watermarks to pause admission while a downstream applier is
+behind. The default is disabled, and the existing byte-budget path is
+unchanged.
+
+### Summary
+
+| Benchmark | Median | Memory | X / tradeoff |
+| --- | ---: | ---: | --- |
+| Existing byte-admission control | 92.79 ns/op | 16 B/op; 1 alloc/op | Compatibility baseline |
+| Standalone legacy lag comparison | 0.2865 ns/op | 0 B/op; 0 allocs/op | Compatibility baseline |
+| Standalone `RelayBackpressure.Admit` | 7.635 ns/op | 0 B/op; 0 allocs/op | 26.6x synthetic-check cost; no allocation |
+| Integrated legacy relay admission | 10.88 ns/op | 0 B/op; 0 allocs/op | Compatibility baseline |
+| Integrated T209 admission | 128.1 ns/op | 0 B/op; 0 allocs/op | 11.8x enabled-check cost; no allocation |
+
+The CPU cost is an explicit opt-in tradeoff for bounded lag-driven admission.
+The controller adds no measured per-call heap allocation. The default-disabled
+path retains the prior behavior. A measured lock-removal experiment was
+reverted because it increased the enabled benchmark rather than improving it.
+
+### Raw T209 Output
+
+```text
+BenchmarkTR050ReplicationByteBudgetAdmission/legacy-control-32  92.79 ns/op  348.0 estimated_job_bytes/op  16 B/op  1 allocs/op
+BenchmarkTR050ReplicationByteBudgetAdmission/legacy-control-32  92.41 ns/op  348.0 estimated_job_bytes/op  16 B/op  1 allocs/op
+BenchmarkTR050ReplicationByteBudgetAdmission/legacy-control-32  93.28 ns/op  348.0 estimated_job_bytes/op  16 B/op  1 allocs/op
+BenchmarkTR050ReplicationByteBudgetAdmission/legacy-control-32  98.69 ns/op  348.0 estimated_job_bytes/op  16 B/op  1 allocs/op
+BenchmarkTR050ReplicationByteBudgetAdmission/legacy-control-32  92.02 ns/op  348.0 estimated_job_bytes/op  16 B/op  1 allocs/op
+BenchmarkT209RelayBackpressureLegacyLagCheck-32  0.2899 ns/op  0 B/op  0 allocs/op
+BenchmarkT209RelayBackpressureLegacyLagCheck-32  0.2865 ns/op  0 B/op  0 allocs/op
+BenchmarkT209RelayBackpressureLegacyLagCheck-32  0.2752 ns/op  0 B/op  0 allocs/op
+BenchmarkT209RelayBackpressureLegacyLagCheck-32  0.2792 ns/op  0 B/op  0 allocs/op
+BenchmarkT209RelayBackpressureLegacyLagCheck-32  0.2967 ns/op  0 B/op  0 allocs/op
+BenchmarkT209RelayBackpressureAdmit-32  7.635 ns/op  0 B/op  0 allocs/op
+BenchmarkT209RelayBackpressureAdmit-32  7.846 ns/op  0 B/op  0 allocs/op
+BenchmarkT209RelayBackpressureAdmit-32  7.350 ns/op  0 B/op  0 allocs/op
+BenchmarkT209RelayBackpressureAdmit-32  7.556 ns/op  0 B/op  0 allocs/op
+BenchmarkT209RelayBackpressureAdmit-32  8.371 ns/op  0 B/op  0 allocs/op
+BenchmarkT209ReplicationRelayBackpressureLegacyAdmission-32  11.20 ns/op  0 B/op  0 allocs/op
+BenchmarkT209ReplicationRelayBackpressureLegacyAdmission-32  10.88 ns/op  0 B/op  0 allocs/op
+BenchmarkT209ReplicationRelayBackpressureLegacyAdmission-32  9.029 ns/op  0 B/op  0 allocs/op
+BenchmarkT209ReplicationRelayBackpressureLegacyAdmission-32  9.500 ns/op  0 B/op  0 allocs/op
+BenchmarkT209ReplicationRelayBackpressureLegacyAdmission-32  11.26 ns/op  0 B/op  0 allocs/op
+BenchmarkT209ReplicationRelayBackpressureAdmission-32  133.5 ns/op  0 B/op  0 allocs/op
+BenchmarkT209ReplicationRelayBackpressureAdmission-32  128.1 ns/op  0 B/op  0 allocs/op
+BenchmarkT209ReplicationRelayBackpressureAdmission-32  129.0 ns/op  0 B/op  0 allocs/op
+BenchmarkT209ReplicationRelayBackpressureAdmission-32  114.8 ns/op  0 B/op  0 allocs/op
+BenchmarkT209ReplicationRelayBackpressureAdmission-32  116.8 ns/op  0 B/op  0 allocs/op
+```

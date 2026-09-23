@@ -55,6 +55,12 @@ type CircuitBreakerTarget struct {
 type QueueStats struct {
 	Enabled                          bool              `json:"enabled"`
 	Paused                           bool              `json:"paused"`
+	BackpressureEnabled              bool              `json:"backpressure_enabled,omitempty"`
+	BackpressurePaused               bool              `json:"backpressure_paused,omitempty"`
+	BackpressureLag                  uint64            `json:"backpressure_lag,omitempty"`
+	BackpressureHighWatermark        uint64            `json:"backpressure_high_watermark,omitempty"`
+	BackpressureResumeWatermark      uint64            `json:"backpressure_resume_watermark,omitempty"`
+	BackpressureTransitions          uint64            `json:"backpressure_transitions,omitempty"`
 	Depth                            int               `json:"depth"`
 	Capacity                         int               `json:"capacity"`
 	SourceSequence                   uint64            `json:"source_sequence,omitempty"`

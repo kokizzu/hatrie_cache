@@ -82,7 +82,11 @@ type HTTPReplicatorOptions struct {
 	AsyncQueueSize          int
 	// AsyncQueueMaxBytes bounds estimated resident bytes in queued and in-flight
 	// asynchronous replication jobs. Zero disables the byte budget.
-	AsyncQueueMaxBytes       int64
+	AsyncQueueMaxBytes int64
+	// AsyncRelayBackpressure pauses new asynchronous work while the maximum
+	// observed replica lag is above the configured high watermark. It is
+	// disabled by default and uses hysteresis when enabled.
+	AsyncRelayBackpressure   hatReplication.RelayBackpressureOptions
 	AsyncRetryInterval       time.Duration
 	AsyncMaxAttempts         uint
 	AsyncDeadLetterLimit     int
@@ -126,6 +130,7 @@ type HTTPReplicator struct {
 	breakerCooldown          time.Duration
 	batchMaxBytes            int
 	maxQueueBytes            uint64
+	relayBackpressure        *hatReplication.RelayBackpressure
 	maxInFlight              int
 	transport                ReplicationTransport
 	grpcStreamWindow         int
@@ -473,6 +478,9 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 	}
 	if options.AsyncQueueMaxBytes > 0 {
 		replicator.maxQueueBytes = uint64(options.AsyncQueueMaxBytes)
+	}
+	if options.AsyncRelayBackpressure.Enabled {
+		replicator.relayBackpressure = hatReplication.NewRelayBackpressure(options.AsyncRelayBackpressure)
 	}
 	if replicator.maxInFlight == 0 {
 		replicator.maxInFlight = DefaultReplicationMaxInFlightTargets
@@ -1103,6 +1111,21 @@ func (replicator *HTTPReplicator) enqueueReplicationJob(job replicationJob) Repl
 		replicator.recordAsyncDroppedForTasks(tasks)
 		return result
 	}
+	if !replicator.relayBackpressureAllows(job) {
+		if journalBacked {
+			replicator.markAsyncOutboxBacklog()
+			result.Reason = "replication relay backpressure is active; job retained in durable journal backlog"
+			return result
+		}
+		replicator.unreserveAsyncJob(job.id)
+		replicator.deleteAsyncJob(job.id)
+		result.Queued = false
+		result.Skipped = true
+		result.Reason = "replication relay backpressure is active"
+		result.Targets = nil
+		replicator.recordAsyncDroppedForTasks(tasks)
+		return result
+	}
 	replicator.observeAsyncJob(job)
 	if replicator.asyncClosed() {
 		result.Reason = "replication queue is closed; job retained in durable journal backlog"
@@ -1316,6 +1339,75 @@ func (replicator *HTTPReplicator) asyncQueueBytesAvailableLocked(additional uint
 		return false
 	}
 	return additional <= replicator.maxQueueBytes-used
+}
+
+func (replicator *HTTPReplicator) relayBackpressureAllows(job replicationJob) bool {
+	if replicator == nil || replicator.relayBackpressure == nil {
+		return true
+	}
+	replicator.mu.Lock()
+	defer replicator.mu.Unlock()
+	sourceSequence := replicator.queueStats.SourceSequence
+	if sequence := replicationJobSequence(job); sequence > sourceSequence {
+		sourceSequence = sequence
+	}
+	decision := replicator.relayBackpressure.Admit(replicator.maxReplicationLagLocked(sourceSequence, job.tasks))
+	replicator.applyRelayBackpressureDecisionLocked(decision)
+	return decision.Allowed
+}
+
+func (replicator *HTTPReplicator) maxReplicationLagLocked(sourceSequence uint64, tasks []replicationTask) uint64 {
+	if replicator == nil {
+		return 0
+	}
+	maxLag := uint64(0)
+	for _, acknowledged := range replicator.queueStats.LastAcknowledgedSequenceByTarget {
+		if lag := replicationSequenceLag(sourceSequence, acknowledged); lag > maxLag {
+			maxLag = lag
+		}
+	}
+	for _, task := range tasks {
+		targetID := task.target.ID
+		if targetID == "" {
+			continue
+		}
+		acknowledged, known := replicator.queueStats.LastAcknowledgedSequenceByTarget[targetID]
+		if !known {
+			continue
+		}
+		if lag := replicationSequenceLag(sourceSequence, acknowledged); lag > maxLag {
+			maxLag = lag
+		}
+	}
+	return maxLag
+}
+
+func replicationSequenceLag(sourceSequence, acknowledgedSequence uint64) uint64 {
+	if sourceSequence <= acknowledgedSequence {
+		return 0
+	}
+	return sourceSequence - acknowledgedSequence
+}
+
+func (replicator *HTTPReplicator) refreshRelayBackpressureLocked() {
+	if replicator == nil || replicator.relayBackpressure == nil {
+		return
+	}
+	decision := replicator.relayBackpressure.Admit(replicator.maxReplicationLagLocked(replicator.queueStats.SourceSequence, nil))
+	replicator.applyRelayBackpressureDecisionLocked(decision)
+}
+
+func (replicator *HTTPReplicator) applyRelayBackpressureDecisionLocked(decision hatReplication.RelayBackpressureDecision) {
+	if replicator == nil || replicator.relayBackpressure == nil {
+		return
+	}
+	snapshot := replicator.relayBackpressure.Snapshot()
+	replicator.queueStats.BackpressureEnabled = snapshot.Enabled
+	replicator.queueStats.BackpressurePaused = decision.Paused
+	replicator.queueStats.BackpressureLag = decision.Lag
+	replicator.queueStats.BackpressureHighWatermark = snapshot.HighWatermark
+	replicator.queueStats.BackpressureResumeWatermark = snapshot.ResumeWatermark
+	replicator.queueStats.BackpressureTransitions = snapshot.Transitions
 }
 
 func replicationJobTargetIDs(tasks []replicationTask) []string {
@@ -1579,6 +1671,7 @@ func (replicator *HTTPReplicator) recordAsyncAttempt(job replicationJob, result 
 		replicator.queueStats.LastRetryKey = result.Key
 	}
 	replicator.refreshReplicationLagLocked()
+	replicator.refreshRelayBackpressureLocked()
 }
 
 func replicationJobEntriesForTarget(job replicationJob, target string) uint64 {
@@ -1627,6 +1720,7 @@ func (replicator *HTTPReplicator) observeAsyncJob(job replicationJob) {
 		}
 	}
 	replicator.refreshReplicationLagLocked()
+	replicator.refreshRelayBackpressureLocked()
 }
 
 func (replicator *HTTPReplicator) refreshReplicationLagLocked() {

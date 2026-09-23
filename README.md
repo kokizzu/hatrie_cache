@@ -4992,3 +4992,15 @@ also use typed `hatReplication.QuorumMember` values through
 count toward read or write quorum acknowledgements. See
 [T208_ANONYMOUS_REPLICAS.md](T208_ANONYMOUS_REPLICAS.md) and the measurements in
 [BENCHMARK.md](BENCHMARK.md#t208-anonymous-replicas).
+
+## Relay/Applier Backpressure
+
+Asynchronous replication can optionally pause new relay admission when a
+known replica falls behind in journal acknowledgements. Configure
+`HTTPReplicatorOptions.AsyncRelayBackpressure` with a high watermark and a
+lower resume watermark; it is disabled by default. Durable journal-backed jobs
+remain retained for later replay, while non-durable jobs report
+`replication relay backpressure is active`. Queue health exposes the current
+lag and pause state. See
+[T209_RELAY_APPLIER_BACKPRESSURE.md](T209_RELAY_APPLIER_BACKPRESSURE.md) and
+[BENCHMARK.md](BENCHMARK.md#t209-relayapplier-backpressure).
