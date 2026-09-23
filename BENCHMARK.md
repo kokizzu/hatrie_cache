@@ -38469,3 +38469,29 @@ replay, inspection, and CRC corruption rejection:
 ```text
 make m231-tt-g11-zstd-test
 ```
+## MZ038 Source Lag Alerts
+
+This pass adds a bounded Materialize-style source-lag alert registry. The
+registry applies warning/critical thresholds with recovery hysteresis, tracks
+per-source transitions without allocations on the steady-state path, and
+validates snapshot restore atomically.
+
+Workload: one existing `orders` source observed with lag values cycling through
+0..2,000; Linux `amd64`; AMD Ryzen 9 5950X; five samples per benchmark.
+
+| Path | Samples (ns/op) | Median ns/op | Median B/op | Median allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Registry observation | 46.45; 44.82; 44.29; 44.43; 44.36 | 44.43 | 0 | 0 |
+| Direct threshold control | 1.507; 1.496; 1.491; 1.531; 1.663 | 1.507 | 0 | 0 |
+
+The registry costs about `29.7x` the direct threshold control because it also
+performs synchronized bounded map state updates. Its absolute steady-state cost
+is `44.43 ns/op` with no heap allocation; it is an opt-in source-status path,
+not a row-processing path. Source limits, name limits, hysteresis, and atomic
+restore are covered by focused tests.
+
+Raw command:
+
+```text
+make m233-mz-g38-benchmark
+```

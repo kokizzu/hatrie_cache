@@ -110,7 +110,7 @@ the memory/operational cost is disproportionate to the gain.
 | MZ-G35 | Hydration burst-cluster admission and automatic retirement | Faster hydration without steady-state resource leak |
 | MZ-G36 | Durable arrangement-compaction checkpoints with resume | Crash resumes at a verified input frontier |
 | MZ-G37 | Read-hold leak detection with owner and age diagnostics | No false cancellation of active readers |
-| MZ-G38 | Source lag threshold policies with alert state transitions | Monotone alerts and restart-safe state |
+| MZ-G38 | Source lag threshold policies with alert state transitions | Implemented and measured in `MZ038_SOURCE_LAG_ALERTS.md` and `BENCHMARK.md`: bounded hysteresis registry with atomic snapshot/restore |
 | MZ-G39 | Timestamp-oracle lease rotation without halting readers | No duplicate timestamps across lease handoff |
 | MZ-G40 | Persisted timeline WAL retention tied to live snapshot tokens | Retention never deletes a required timestamp |
 | MZ-G41 | Online dual-write type migration for materialized views | Old and new schemas compare before cutover |

@@ -173,6 +173,7 @@ security guidance before exposing it on a network.
 - Materialize-inspired snapshot-free command-journal subscriptions: [M203_SNAPSHOT_FREE_SUBSCRIPTIONS.md](M203_SNAPSHOT_FREE_SUBSCRIPTIONS.md)
 - Materialize-inspired point-read and subscription consistency fences: [M249_READ_FENCE.md](M249_READ_FENCE.md)
 - Materialize-inspired bounded journal subscriptions: [M204_BOUNDED_SUBSCRIPTIONS.md](M204_BOUNDED_SUBSCRIPTIONS.md)
+- Materialize-inspired bounded source-lag alert hysteresis with restart-safe snapshots: [MZ038_SOURCE_LAG_ALERTS.md](MZ038_SOURCE_LAG_ALERTS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz038-source-lag-alerts)
 - ClickHouse-inspired result-cache hit, miss, bypass, and eviction metrics: [C208_RESULT_CACHE_METRICS.md](C208_RESULT_CACHE_METRICS.md)
 - ClickHouse-inspired typed-table column statistics: [C209_TYPED_TABLE_STATS.md](C209_TYPED_TABLE_STATS.md)
 - ClickHouse-inspired compact typed-table histograms: [C210_TYPED_TABLE_HISTOGRAM.md](C210_TYPED_TABLE_HISTOGRAM.md)

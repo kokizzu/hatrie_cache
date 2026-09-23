@@ -27609,3 +27609,43 @@ m231-commit:
 .PHONY: m231-push
 m231-push:
 	bash scripts/m231-push.sh
+
+.PHONY: m233-mz-g38-test
+m233-mz-g38-test:
+	bash scripts/m233-mz-g38-test.sh
+
+.PHONY: m233-mz-g38-format
+m233-mz-g38-format:
+	bash scripts/m233-mz-g38-format.sh
+
+.PHONY: m233-mz-g38-benchmark
+m233-mz-g38-benchmark:
+	bash scripts/m233-mz-g38-benchmark.sh
+
+.PHONY: m233-mz-g38-race
+m233-mz-g38-race:
+	bash scripts/m233-mz-g38-race.sh
+
+.PHONY: m233-mz-g38-vet
+m233-mz-g38-vet:
+	bash scripts/m233-mz-g38-vet.sh
+
+.PHONY: m233-mz-g38-package-test
+m233-mz-g38-package-test:
+	bash scripts/m233-mz-g38-package-test.sh
+
+.PHONY: m233-mz-g38-docs
+m233-mz-g38-docs:
+	bash scripts/m233-mz-g38-docs.sh
+
+.PHONY: m233-stage
+m233-stage:
+	bash scripts/m233-stage.sh
+
+.PHONY: m233-commit
+m233-commit:
+	bash scripts/m233-commit.sh
+
+.PHONY: m233-push
+m233-push:
+	bash scripts/m233-push.sh
