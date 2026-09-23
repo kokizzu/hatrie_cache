@@ -202,6 +202,10 @@ type SQLQueryOptions struct {
 	// planner; partial_merge requires an ordered source resolver and otherwise
 	// falls back to the existing planner.
 	JoinAlgorithm SQLJoinAlgorithm
+	// JoinWorkers enables opt-in partitioned parallel build/probe for eligible
+	// inner equality hash joins. Zero and one preserve the deterministic
+	// sequential default.
+	JoinWorkers int
 	// MaxJoinBytes bounds in-memory hash partitions. Combined with
 	// SpillDirectory and MaxSpillBytes it enables a streamed spill hash join
 	// for a direct two-source INNER equality join. Zero keeps the existing
@@ -12438,7 +12442,18 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			inputRows := len(rows) + len(wrapped)
 			var next []sqlExecRow
 			matchedRight := make([]bool, len(wrapped))
-			if hashJoin {
+			joinWorkers := 0
+			if control != nil {
+				joinWorkers = control.options.JoinWorkers
+			}
+			parallelHashJoin := hashJoin && join.kind == "INNER" && joinWorkers > 1 && len(rows) > 1 && len(wrapped) > 1
+			if parallelHashJoin {
+				var err error
+				next, err = executeSQLParallelInnerHashJoinShared(control, rows, wrapped, leftQualifier, leftField, join.source.alias, rightField, joinWorkers, maxRows)
+				if err != nil {
+					return SQLQueryResult{}, err
+				}
+			} else if hashJoin {
 				buckets := newSQLJoinHashIndex(len(wrapped))
 				for rightIndex, row := range wrapped {
 					if err := control.addJoinWork(1); err != nil {
@@ -12519,7 +12534,9 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 				detail += " ON " + sqlExplainExpression(join.on)
 			}
 			node := "JOIN"
-			if hashJoin {
+			if parallelHashJoin {
+				node = "PARALLEL TYPED HASH JOIN"
+			} else if hashJoin {
 				node = "TYPED HASH JOIN"
 			}
 			metrics.record(node, detail, inputRows, len(next), started)

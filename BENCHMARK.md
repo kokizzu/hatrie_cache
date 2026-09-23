@@ -38571,6 +38571,43 @@ BenchmarkCH002GraceHashJoin
 
 See [CH002_GRACE_HASH_JOIN.md](CH002_GRACE_HASH_JOIN.md).
 
+## CH-G03: Parallel Hash Join
+
+This benchmark compares the existing sequential typed hash join with the
+opt-in shared-index parallel probe path over two 16,384-row sources. The
+parallel path uses `JoinWorkers=4`. Five samples were collected with
+`-benchtime=2s -benchmem`.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Existing sequential hash join | 36,697,536 | 41,918,983 | 196,747 | Reference |
+| Opt-in shared-index parallel probe | 31,359,796 | 41,083,763 | 196,803 | 1.17x faster; 1.02x lower bytes; 1.00x allocations |
+
+The opt-in path is about 14.5% faster and uses about 2.0% fewer cumulative
+allocated bytes for this workload. It performs about 0.03% more allocations,
+so the default remains sequential. The shared index disables mutable adaptive
+Bloom sampling while workers probe it concurrently. `B/op` is cumulative
+allocation, not retained or peak heap.
+
+### Raw output
+
+```text
+BenchmarkCH003HashJoinBaseline
+38184663 ns/op 41919315 B/op 196748 allocs/op
+34725632 ns/op 41918974 B/op 196747 allocs/op
+36697536 ns/op 41918992 B/op 196747 allocs/op
+35729655 ns/op 41918983 B/op 196747 allocs/op
+39028050 ns/op 41918909 B/op 196747 allocs/op
+BenchmarkCH003ParallelHashJoin
+31359796 ns/op 41083935 B/op 196803 allocs/op
+32243139 ns/op 41083763 B/op 196803 allocs/op
+29895409 ns/op 41083735 B/op 196802 allocs/op
+29308561 ns/op 41083689 B/op 196802 allocs/op
+33119623 ns/op 41083862 B/op 196803 allocs/op
+```
+
+See [CH003_PARALLEL_HASH_JOIN.md](CH003_PARALLEL_HASH_JOIN.md).
+
 ## CH050 Plan Reproducibility Hash
 
 This ClickHouse-inspired diagnostic hashes a normalized SQL shape, required

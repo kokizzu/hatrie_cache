@@ -23243,6 +23243,34 @@ push-tu33-function-grants:
 audit-hatrie-tmp:
 	bash scripts/audit-hatrie-tmp.sh
 
+m244-ch-g03-test:
+	bash scripts/m244-ch-g03-test.sh
+
+m246-ch-g03-baseline:
+	bash scripts/m246-ch-g03-baseline.sh
+
+m247-ch-g03-format:
+	bash scripts/m247-ch-g03-format.sh
+
+m248-ch-g03-benchmark:
+	bash scripts/m248-ch-g03-benchmark.sh
+
+m249-ch-g03-race:
+	bash scripts/m249-ch-g03-race.sh
+
+m250-ch-g03-docs:
+	bash scripts/m250-ch-g03-docs.sh
+
+stage-ch-g03:
+	bash scripts/stage-ch-g03.sh
+
+commit-ch-g03:
+	bash scripts/commit-ch-g03.sh
+
+push-ch-g03:
+	bash scripts/push-ch-g03.sh
+
+
 t242-benchmark-baseline:
 	bash scripts/t242-benchmark-baseline.sh
 
@@ -27761,6 +27789,7 @@ m242-ch-g02-commit:
 m242-ch-g02-push:
 	bash scripts/m242-ch-g02-push.sh
 
+.PHONY: m243-inspect-ch003
 .PHONY: m237-tt-g42-test
 m237-tt-g42-test:
 	bash scripts/m237-tt-g42-test.sh
