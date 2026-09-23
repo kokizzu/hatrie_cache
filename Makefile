@@ -23271,6 +23271,13 @@ push-ch-g03:
 	bash scripts/push-ch-g03.sh
 
 
+m256-ch-g05-test:
+	bash scripts/m256-ch-g05-test.sh
+
+m257-ch-g05-format:
+	bash scripts/m257-ch-g05-format.sh
+
+
 t242-benchmark-baseline:
 	bash scripts/t242-benchmark-baseline.sh
 
@@ -27869,3 +27876,23 @@ m235-commit:
 .PHONY: m235-push
 m235-push:
 	bash scripts/m235-push.sh
+.PHONY: m258-ch-g05-benchmark
+m258-ch-g05-benchmark:
+	bash scripts/m258-ch-g05-benchmark.sh
+.PHONY: m260-ch-g05-docs
+m260-ch-g05-docs:
+	bash scripts/m260-ch-g05-docs.sh
+.PHONY: m259-ch-g05-race
+m259-ch-g05-race:
+	bash scripts/m259-ch-g05-race.sh
+.PHONY: stage-ch-g05
+stage-ch-g05:
+	bash scripts/stage-ch-g05.sh
+
+.PHONY: commit-ch-g05
+commit-ch-g05:
+	bash scripts/commit-ch-g05.sh
+
+.PHONY: push-ch-g05
+push-ch-g05:
+	bash scripts/push-ch-g05.sh

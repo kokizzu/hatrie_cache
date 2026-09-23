@@ -120,6 +120,24 @@ type PartitionPruningSourceResolver interface {
 	ResolveSQLSourcePartitionsForPredicate(name string, key string, predicate SQLPartitionPredicate) ([]SQLSourcePartition, bool, error)
 }
 
+// SQLRuntimeJoinBounds describes the inclusive range of typed equality keys
+// observed on the already-materialized side of a join. A resolver may use it
+// to omit physical partitions whose recorded range cannot overlap; the SQL
+// executor still performs the exact join predicate after resolution.
+type SQLRuntimeJoinBounds struct {
+	Field string
+	Min   interface{}
+	Max   interface{}
+}
+
+// RuntimeJoinPartitionPruningSourceResolver optionally prunes a remote or
+// partitioned join source using runtime bounds. Returning available=false
+// preserves the ordinary source-resolution path. Implementations must never
+// omit a partition that could contain an equal join key.
+type RuntimeJoinPartitionPruningSourceResolver interface {
+	ResolveSQLSourcePartitionsForJoinBounds(name string, key string, bounds SQLRuntimeJoinBounds) ([]SQLSourcePartition, bool, error)
+}
+
 // HistoricalSourceResolver optionally resolves a source at an immutable
 // sequence frontier. It is required for QuerySubscriptionDefinition.AsOf;
 // callers that only need live UpTo/progress delivery can use SourceResolver.

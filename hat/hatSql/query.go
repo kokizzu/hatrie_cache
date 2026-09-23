@@ -224,7 +224,11 @@ type SQLQueryOptions struct {
 	// equality joins with a much larger probe side. It is disabled by default;
 	// balanced and hot-key joins retain the established map path.
 	RuntimeJoinBloomFilter bool
-	MaxResultBytes         int
+	// RuntimeJoinPartitionFilter enables an opt-in min/max filter propagated
+	// from the materialized join side to a partition-aware right source. The
+	// exact hash join remains authoritative after partition resolution.
+	RuntimeJoinPartitionFilter bool
+	MaxResultBytes             int
 	// Workers enables bounded parallel CPU work for eligible query operators.
 	// Zero keeps the deterministic sequential default.
 	Workers int
@@ -12423,9 +12427,30 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 				}
 			}
 			right := pushedRight
+			runtimePartitionPruned := false
 			if !rightPushed {
 				var err error
-				right, err = resolveSQLSource(join.source, resolver, ctes, metrics, control)
+				if control != nil && control.options.RuntimeJoinPartitionFilter && hashJoin && join.kind == "INNER" {
+					if bounds, ok := sqlRuntimeJoinBounds(rows, leftQualifier, leftField); ok {
+						if pruning, ok := resolver.(RuntimeJoinPartitionPruningSourceResolver); ok {
+							partitions, available, pruneErr := pruning.ResolveSQLSourcePartitionsForJoinBounds(
+								join.source.kind,
+								join.source.key,
+								SQLRuntimeJoinBounds{Field: rightField, Min: bounds.Min, Max: bounds.Max},
+							)
+							if pruneErr != nil {
+								return SQLQueryResult{}, pruneErr
+							}
+							if available {
+								right = flattenSQLSourcePartitions(partitions)
+								runtimePartitionPruned = true
+							}
+						}
+					}
+				}
+				if !runtimePartitionPruned {
+					right, err = resolveSQLSource(join.source, resolver, ctes, metrics, control)
+				}
 				if err != nil {
 					return SQLQueryResult{}, err
 				}
@@ -12532,6 +12557,9 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			detail := join.kind + " JOIN " + sqlExplainSource(join.source)
 			if join.kind != "CROSS" {
 				detail += " ON " + sqlExplainExpression(join.on)
+			}
+			if runtimePartitionPruned {
+				detail += " WITH RUNTIME JOIN BOUNDS"
 			}
 			node := "JOIN"
 			if parallelHashJoin {

@@ -38608,6 +38608,25 @@ BenchmarkCH003ParallelHashJoin
 
 See [CH003_PARALLEL_HASH_JOIN.md](CH003_PARALLEL_HASH_JOIN.md).
 
+## CH-G05: Runtime Join Partition Bounds
+
+This benchmark compares ordinary full right-source materialization with the
+opt-in runtime min/max partition filter. The fixture has 128 left rows and
+128 right partitions of 256 rows each; the left keys overlap one partition.
+Five samples were collected with `-benchtime=2s -benchmem` on an AMD Ryzen 9
+5950X.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Existing full right-source materialization | 15,864,057 | 18,345,703 | 99,641 | Reference |
+| Opt-in runtime min/max partition pruning | 174,885 | 281,329 | 1,463 | 90.7x faster; 65.2x lower bytes; 68.1x fewer allocations |
+
+The result is selective-workload dependent: when most partitions overlap, the
+resolver can return almost the whole source and the option adds a bounds scan.
+It is therefore disabled by default. See
+[CH005_RUNTIME_JOIN_PARTITION_FILTER.md](CH005_RUNTIME_JOIN_PARTITION_FILTER.md)
+for the resolver contract and raw samples.
+
 ## CH050 Plan Reproducibility Hash
 
 This ClickHouse-inspired diagnostic hashes a normalized SQL shape, required

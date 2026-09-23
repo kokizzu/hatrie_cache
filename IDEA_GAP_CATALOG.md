@@ -22,7 +22,7 @@ the memory/operational cost is disproportionate to the gain.
 | CH-G02 | Implemented: streamed grace/partitioned hash join spill with bounded disk space | Verified duplicate-key results, spill reload, disk-budget failure, cleanup, and measured in `CH002_GRACE_HASH_JOIN.md` |
 | CH-G03 | Implemented: opt-in parallel typed hash-join probes with a shared immutable index and deterministic output merge | Duplicate/NULL/unsupported-key correctness, one-row fallback, row-limit enforcement, race test, and measured in `CH003_PARALLEL_HASH_JOIN.md` |
 | CH-G04 | Adaptive runtime Bloom precheck for large numeric/boolean hash joins; lazy admission after a miss-heavy probe sample | Implemented and measured in `BENCHMARK.md`: 1.53x miss-heavy microbenchmark win, 3.021% false-positive rate, no small-index allocation |
-| CH-G05 | Runtime min/max filters propagated from a small join side to remote partitions | Verify no false negatives across partition boundaries |
+| CH-G05 | Implemented: opt-in runtime min/max bounds propagated from a materialized join side to a partition-aware right source | Duplicate/mixed-key/outer-join correctness, default-off behavior, and measured in `CH005_RUNTIME_JOIN_PARTITION_FILTER.md` and `BENCHMARK.md` |
 | CH-G06 | Join-side prefetch scheduling based on mark selectivity | Compare read amplification and tail latency |
 | CH-G07 | SQL `GROUPING SETS`, `ROLLUP`, and `CUBE` over typed grouped execution | Differential result tests including empty groups |
 | CH-G08 | Explicit aggregate totals rows with a stable totals policy | Verify totals with LIMIT, HAVING, and empty input |
