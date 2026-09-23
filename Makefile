@@ -26423,3 +26423,26 @@ commit-t222:
 
 push-t222:
 	bash ./scripts/push-t222.sh
+.PHONY: format-t226 test-t226 benchmark-t226 race-t226 vet-t226 verify-t226 test-t226-package review-t226 stage-t226 commit-t226 push-t226
+format-t226:
+	bash scripts/format-t226.sh
+test-t226:
+	bash scripts/test-t226.sh
+benchmark-t226:
+	bash scripts/benchmark-t226.sh
+race-t226:
+	bash scripts/race-t226.sh
+vet-t226:
+	bash scripts/vet-t226.sh
+verify-t226:
+	bash scripts/verify-t226.sh
+test-t226-package:
+	bash scripts/test-t226-package.sh
+review-t226:
+	bash scripts/review-t226.sh
+stage-t226:
+	bash scripts/stage-t226.sh
+commit-t226:
+	bash scripts/commit-t226.sh
+push-t226:
+	bash scripts/push-t226.sh

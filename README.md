@@ -4293,6 +4293,15 @@ candidate decisions omit both fields, so existing result columns and JSON
 shape remain unchanged. See [SQL_EXPLAIN_OPTIMIZER.md](SQL_EXPLAIN_OPTIMIZER.md)
 for the contract and example.
 
+## SQL Index Strategy Hints and Inspection
+
+Use `SQLIndexHint` for an explicit, per-query `FORCE` or `FORBID` diagnostic
+override, or `ExplainSQLIndexStrategy` to inspect caller-supplied candidates
+without changing indexes or planner state. The strategy inspection path is
+opt-in and remains off the ordinary query hot path. See
+[T226_INDEX_HINTS.md](T226_INDEX_HINTS.md) and
+[TU26_INDEX_STRATEGY_INSPECTION.md](TU26_INDEX_STRATEGY_INSPECTION.md).
+
 ## SQL Logical Predicate Short-Circuiting
 
 Columnar batch evaluation short-circuits deterministic, total right-hand

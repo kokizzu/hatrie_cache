@@ -37264,3 +37264,24 @@ BenchmarkT218MultiPartTreePrefixScan-32    196.1 ns/op  0 B/op  0 allocs/op
 BenchmarkT218MultiPartTreePrefixScan-32    196.6 ns/op  0 B/op  0 allocs/op
 BenchmarkT218MultiPartTreePrefixScan-32    180.9 ns/op  0 B/op  0 allocs/op
 ```
+<a id="t226-explicit-index-hints-and-planner-diagnostics"></a>
+## T226 Explicit Index Hints and Planner Diagnostics
+
+`SQLIndexHint` and `ExplainSQLIndexStrategy` are opt-in diagnostic controls.
+The benchmark compares the existing-style candidate selection control with a
+four-candidate deterministic inspection report. It does not claim that
+inspection accelerates a query; its purpose is to quantify the cost of using
+the diagnostic API and keep it off the normal query hot path.
+
+Command: `make benchmark-tu26`
+Platform: Linux/amd64, AMD Ryzen 9 5950X
+Samples: five `-benchmem` runs; table values are medians.
+
+| Workload | Median CPU | Memory | Relative CPU |
+| --- | ---: | ---: | ---: |
+| Existing-style candidate selection control | 8.023 ns/op | 0 B/op, 0 allocs/op | 1.00x |
+| `ExplainSQLIndexStrategy` with four candidates | 486.4 ns/op | 600 B/op, 4 allocs/op | 60.6x |
+
+The inspection call is bounded by the supplied candidate slice and is not
+invoked by ordinary query execution. The measurable cost is therefore paid
+only by callers that explicitly request planner diagnostics.

@@ -82,9 +82,9 @@ Five `-benchmem` samples on Linux/amd64, AMD Ryzen 9 5950X:
 
 | Workload | Median CPU | Memory | Interpretation |
 | --- | ---: | ---: | --- |
-| Existing-style candidate selection control | 8.46 ns/op | 0 B/op, 0 allocs/op | Hot selection baseline |
-| `ExplainSQLIndexStrategy` with four candidates | 518.3 ns/op | 600 B/op, 4 allocs/op | Explicit inspection only |
+| Existing-style candidate selection control | 8.023 ns/op | 0 B/op, 0 allocs/op | Hot selection baseline |
+| `ExplainSQLIndexStrategy` with four candidates | 486.4 ns/op | 600 B/op, 4 allocs/op | Explicit inspection only |
 
-The inspection path is approximately 61.3x slower than the tiny control loop,
+The inspection path is approximately 60.6x slower than the tiny control loop,
 so it must remain off the query hot path. Ordinary query execution does not
 call it. Reproduce with `make benchmark-tu26`.
