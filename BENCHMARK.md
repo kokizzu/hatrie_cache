@@ -37661,3 +37661,27 @@ single-owner scheduler: it is about 3.71x faster than the goroutine baseline
 for this workload, while using about 8.9x more bytes/op and 4.9x more
 allocations/op than that baseline. The direct scheduler remains the best path
 when one goroutine can own the event loop.
+# T236: Mailbox Channels
+
+Workload: four producer goroutines send 4,096 integers through a capacity-256
+queue. The channel baseline receives one value at a time. `Mailbox.ReceiveBatch`
+waits for the first value and then drains up to 64 values. Results are medians
+from five clean one-sample invocations on AMD Ryzen 9 5950X.
+
+| Workload | Median ns/op | Median B/op | Allocs/op | Relative time |
+| --- | ---: | ---: | ---: | ---: |
+| Existing `chan` baseline | 228,010 | 2,573 | 7 | 1.00x |
+| `Mailbox.ReceiveBatch` | 153,153 | 2,747 | 10 | 1.49x faster |
+
+Raw samples:
+
+```text
+Channel ns/op:  228010 221741 228739 225040 237785
+Channel B/op:   2601   2573   2570   2564   2596
+Mailbox ns/op:  153478 150571 154307 144353 153153
+Mailbox B/op:   2759   2747   2737   2740   2767
+```
+
+The mailbox is about 1.49x faster on this batched workload, at about 6.8% more
+bytes/op and three more allocations per benchmark iteration. It is opt-in;
+ordinary channels remain the better fit when batch draining is not useful.

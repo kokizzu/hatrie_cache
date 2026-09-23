@@ -5155,3 +5155,10 @@ worker and returns `Future` values for completion. Existing direct scheduler
 users are unchanged and remain the lowest-overhead path. See
 [T235_COOPERATIVE_WORKER_POOL.md](T235_COOPERATIVE_WORKER_POOL.md) for API
 semantics, defaults, limits, and benchmark tradeoffs.
+## Mailbox Channels
+
+Use the opt-in generic `hat/hatFiber.NewMailbox[T]` for bounded FIFO traffic
+between independent worker goroutines. It provides context-aware blocking,
+nonblocking operations, and batch draining without per-element allocation. See
+[T236_MAILBOX.md](T236_MAILBOX.md) for semantics, limits, and benchmark
+tradeoffs.

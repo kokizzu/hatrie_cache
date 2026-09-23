@@ -26835,3 +26835,44 @@ commit-t235:
 
 push-t235:
 	bash scripts/push-t235.sh
+
+benchmark-t236-before:
+	bash scripts/benchmark-t236-before.sh
+
+benchmark-t236-before-one:
+	BENCHMARK_COUNT=1 bash scripts/benchmark-t236-before.sh
+
+test-t236:
+	bash scripts/test-t236.sh
+
+format-t236:
+	bash scripts/format-t236.sh
+
+benchmark-t236:
+	bash scripts/benchmark-t236.sh
+
+benchmark-t236-mailbox:
+	bash scripts/benchmark-t236-mailbox.sh
+
+benchmark-t236-mailbox-one:
+	BENCHMARK_COUNT=1 bash scripts/benchmark-t236-mailbox.sh
+
+race-t236:
+	bash scripts/race-t236.sh
+
+vet-t236:
+	bash scripts/vet-t236.sh
+
+test-t236-package:
+	bash scripts/test-t236-package.sh
+
+verify-t236: format-t236 test-t236 race-t236 vet-t236 test-t236-package benchmark-t236
+
+stage-t236:
+	bash scripts/stage-t236.sh
+
+commit-t236:
+	bash scripts/commit-t236.sh
+
+push-t236:
+	bash scripts/push-t236.sh
