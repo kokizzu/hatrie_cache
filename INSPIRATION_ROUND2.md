@@ -111,7 +111,7 @@ operator control remain the preferred deployment model.
 - [x] M222 Replicated compute workers for highly available maintained indexes. See [M222_REPLICATED_INDEX_WORKERS.md](M222_REPLICATED_INDEX_WORKERS.md) and [BENCHMARK.md](BENCHMARK.md#m222-replicated-index-workers).
 - [x] M223 Hydration state machines distinguish cold, hydrating, and ready materialized-view point indexes. See [M223_MATERIALIZED_VIEW_HYDRATION.md](M223_MATERIALIZED_VIEW_HYDRATION.md) and [BENCHMARK.md](BENCHMARK.md#m223-materialized-view-hydration-states).
 - [x] M224 Hydration progress and estimated remaining work metrics. See [M224_HYDRATION_PROGRESS.md](M224_HYDRATION_PROGRESS.md) and [BENCHMARK.md](BENCHMARK.md#m224-hydration-progress).
-- [ ] M225 Persisted shard leases that prevent duplicate state ownership.
+- [x] M225 Persisted shard leases prevent duplicate state ownership through the opt-in `SQLShardLeaseRegistry`, monotonic fencing tokens, and CRC-checked binary checkpoints. See [M225_PERSISTED_SHARD_LEASES.md](M225_PERSISTED_SHARD_LEASES.md) and [BENCHMARK.md](BENCHMARK.md#m225-persisted-shard-leases).
 - [ ] M226 Durable consensus metadata for state shard and frontier ownership.
 - [ ] M227 Source snapshot offsets coupled atomically to the first live frontier.
 - [ ] M228 Exactly-once source restart from a committed source offset.

@@ -5294,3 +5294,10 @@ hydrating. The estimate is informational and is derived from the current
 worker's observed rate. See
 [M224_HYDRATION_PROGRESS.md](M224_HYDRATION_PROGRESS.md) and
 [BENCHMARK.md](BENCHMARK.md#m224-hydration-progress).
+
+`SQLShardLeaseRegistry` is an opt-in persisted ownership primitive for state
+shards. It prevents duplicate live owners with expiry and monotonic fencing
+tokens, and supports bounded CRC-checked binary checkpoints; callers own the
+durable commit, restore-before-startup, renewal, and downstream fencing checks.
+See [M225_PERSISTED_SHARD_LEASES.md](M225_PERSISTED_SHARD_LEASES.md) and
+[BENCHMARK.md](BENCHMARK.md#m225-persisted-shard-leases).

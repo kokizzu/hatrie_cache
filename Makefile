@@ -27372,6 +27372,7 @@ m224-commit:
 m224-push:
 	bash scripts/m224-push.sh
 
+
 m219-stage:
 	bash scripts/m219-stage.sh
 
@@ -27380,3 +27381,38 @@ m219-commit:
 
 m219-push:
 	bash scripts/m219-push.sh
+.PHONY: m225-test
+m225-test:
+	bash scripts/m225-test.sh
+
+.PHONY: m225-format
+m225-format:
+	bash scripts/m225-format.sh
+
+.PHONY: m225-benchmark
+m225-benchmark:
+	bash scripts/m225-benchmark.sh
+
+.PHONY: m225-race
+m225-race:
+	bash scripts/m225-race.sh
+
+.PHONY: m225-vet
+m225-vet:
+	bash scripts/m225-vet.sh
+
+.PHONY: m225-status
+m225-status:
+	bash scripts/m225-status.sh
+
+.PHONY: m225-stage
+m225-stage:
+	bash scripts/m225-stage.sh
+
+.PHONY: m225-commit
+m225-commit:
+	bash scripts/m225-commit.sh
+
+.PHONY: m225-push
+m225-push:
+	bash scripts/m225-push.sh

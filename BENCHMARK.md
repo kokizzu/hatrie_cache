@@ -38262,3 +38262,43 @@ This is an observability tradeoff on a control-plane call. `PointLookup`
 behavior and allocation profile are unchanged. See
 [M224_HYDRATION_PROGRESS.md](M224_HYDRATION_PROGRESS.md) for field semantics,
 ETA limitations, and the focused test.
+
+<a id="m225-persisted-shard-leases"></a>
+## M225: Persisted Shard Leases
+
+M225 adds the opt-in `SQLShardLeaseRegistry` ownership and fencing primitive.
+The empty loop is a control only; it is not a previous implementation of
+ownership. The feature is intentionally measured as an absolute control-plane
+cost because existing SQL and materialized-view paths do not call it.
+
+Raw results from `make m225-benchmark` on the AMD Ryzen 9 5950X host, five
+runs per benchmark:
+
+```text
+BenchmarkM225ShardLeaseDisabledControl ns/op: 0.2948, 0.2852, 0.2679, 0.3037, 0.2581
+BenchmarkM225ShardLeaseAcquireRelease ns/op: 120.4, 107.8, 103.8, 114.8, 102.5
+BenchmarkM225ShardLeaseGet ns/op: 32.45, 41.23, 36.66, 34.32, 33.77
+BenchmarkM225ShardLeaseRenew ns/op: 63.94, 61.13, 59.24, 59.16, 60.09
+BenchmarkM225ShardLeaseMarshalBinary ns/op: 27589, 28224, 27890, 28142, 27774
+BenchmarkM225ShardLeaseMarshalBinary B/op: 19080 on every sample; allocs/op: 5 on every sample
+All other paths B/op: 0; allocs/op: 0 on every sample
+```
+
+| Path | Median ns/op | B/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Empty disabled control | 0.2852 | 0 | 0 | 1.00x control |
+| Acquire then release | 107.8 | 0 | 0 | 378x empty control; ownership correctness |
+| Get active lease | 34.32 | 0 | 0 | 120x empty control; ownership visibility |
+| Renew active lease | 60.09 | 0 | 0 | 211x empty control; lease liveness |
+| Marshal 128 active leases | 27,890 | 19,080 | 5 | 149 B/lease; persistence cost |
+
+The control ratios are not product speedups: an empty loop performs no
+ownership work. The meaningful regression gate is zero allocation on Acquire,
+Get, and Renew plus no default-path calls. Checkpoint cost is bounded and
+explicit, and the checksum adds corruption detection without changing the hot
+lease path. Compared with the pre-checksum measurement of 25,649 ns/op, the
+checksum makes checkpointing 1.09x slower (+8.7%); that cost is confined to
+explicit persistence. The correctness gain is duplicate-owner prevention and
+stale-owner fencing, not raw SQL throughput. See
+[M225_PERSISTED_SHARD_LEASES.md](M225_PERSISTED_SHARD_LEASES.md) for the
+durability workflow and security boundary.
