@@ -57,6 +57,27 @@ type MaterializedViewPointLookupBuildRequest struct {
 	Fields   []string
 }
 
+// MaterializedViewHydrationState describes the availability of an optional
+// maintained point index without changing the view's ordinary snapshot path.
+type MaterializedViewHydrationState string
+
+const (
+	MaterializedViewHydrationCold      MaterializedViewHydrationState = "cold"
+	MaterializedViewHydrationHydrating MaterializedViewHydrationState = "hydrating"
+	MaterializedViewHydrationReady     MaterializedViewHydrationState = "ready"
+)
+
+// MaterializedViewHydrationStatus reports the state of one view's optional
+// point indexes. A queued or running rebuild is hydrating; failed and
+// canceled rebuilds fall back to the current published index state.
+type MaterializedViewHydrationStatus struct {
+	Name     string                         `json:"name"`
+	State    MaterializedViewHydrationState `json:"state"`
+	Revision uint64                         `json:"revision"`
+	Fields   []string                       `json:"fields,omitempty"`
+	TaskID   string                         `json:"task_id,omitempty"`
+}
+
 // MaterializedViewStorageUsage reports logical rows and encoded row bytes
 // retained by a registry. Bytes are accounted when MaxBytes is configured.
 type MaterializedViewStorageUsage struct {
@@ -77,6 +98,7 @@ type MaterializedView struct {
 type MaterializedViews struct {
 	mu         sync.RWMutex
 	views      map[string]materializedView
+	hydration  map[string]materializedViewHydration
 	dependents map[string][]string
 	maxRows    int
 	maxBytes   int64
@@ -94,6 +116,12 @@ type materializedView struct {
 	readGate       *materializedViewReadGate
 	storedRows     int
 	storedBytes    int64
+}
+
+type materializedViewHydration struct {
+	queue  *SQLIndexRebuildQueue
+	taskID string
+	fields []string
 }
 
 // materializedViewReadGate drains readers of one immutable view generation
@@ -118,6 +146,7 @@ func NewMaterializedViewsWithOptions(options MaterializedViewsOptions) (*Materia
 	}
 	return &MaterializedViews{
 		views:      make(map[string]materializedView),
+		hydration:  make(map[string]materializedViewHydration),
 		dependents: make(map[string][]string),
 		maxRows:    options.MaxRows,
 		maxBytes:   options.MaxBytes,
@@ -264,7 +293,20 @@ func (views *MaterializedViews) EnqueuePointLookupBuild(queue *SQLIndexRebuildQu
 	result := view.snapshot.Result
 	views.mu.RUnlock()
 
-	return queue.Enqueue(SQLIndexRebuildRequest{
+	views.mu.Lock()
+	current, currentExists := views.views[request.ViewName]
+	if !currentExists || current.snapshot.Status.Revision != revision ||
+		!sameMaterializedViewPointLookupFields(current.definition.PointLookupFields, originalFields) {
+		views.mu.Unlock()
+		return SQLIndexRebuildStatus{}, fmt.Errorf("materialized view %q changed during point lookup build", request.ViewName)
+	}
+	previousHydration, hadPreviousHydration := views.hydration[request.ViewName]
+	views.hydration[request.ViewName] = materializedViewHydration{
+		queue:  queue,
+		taskID: request.ID,
+		fields: append([]string(nil), definition.PointLookupFields...),
+	}
+	status, err := queue.Enqueue(SQLIndexRebuildRequest{
 		ID:       request.ID,
 		Name:     request.ViewName,
 		Priority: request.Priority,
@@ -278,16 +320,34 @@ func (views *MaterializedViews) EnqueuePointLookupBuild(queue *SQLIndexRebuildQu
 			}
 			views.mu.Lock()
 			defer views.mu.Unlock()
+			hydration, hydrationExists := views.hydration[request.ViewName]
+			if !hydrationExists || hydration.taskID != request.ID {
+				return fmt.Errorf("materialized view %q point lookup build is no longer current", request.ViewName)
+			}
 			current, exists := views.views[request.ViewName]
 			if !exists || current.snapshot.Status.Revision != revision || !sameMaterializedViewPointLookupFields(current.definition.PointLookupFields, originalFields) {
 				return fmt.Errorf("materialized view %q changed during point lookup build", request.ViewName)
 			}
 			current.definition.PointLookupFields = append([]string(nil), definition.PointLookupFields...)
 			current.pointLookups = lookups
+			hydration.fields = nil
+			views.hydration[request.ViewName] = hydration
 			views.views[request.ViewName] = current
 			return nil
 		},
 	})
+	if err != nil {
+		if hadPreviousHydration {
+			views.hydration[request.ViewName] = previousHydration
+		} else {
+			delete(views.hydration, request.ViewName)
+		}
+	}
+	views.mu.Unlock()
+	if err != nil {
+		return SQLIndexRebuildStatus{}, err
+	}
+	return status, nil
 }
 
 // Get returns an independent copy of the named materialized-view snapshot.
@@ -302,6 +362,74 @@ func (views *MaterializedViews) Get(name string) (MaterializedView, bool) {
 		return MaterializedView{}, false
 	}
 	return cloneMaterializedView(view.snapshot), true
+}
+
+// HydrationStatus returns the current optional point-index state for a view.
+// It is deliberately separate from MaterializedViewStatus so existing
+// snapshot consumers do not need to understand background index lifecycle.
+func (views *MaterializedViews) HydrationStatus(name string) (MaterializedViewHydrationStatus, bool) {
+	if views == nil {
+		return MaterializedViewHydrationStatus{}, false
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return MaterializedViewHydrationStatus{}, false
+	}
+	views.mu.RLock()
+	view, exists := views.views[name]
+	if !exists {
+		views.mu.RUnlock()
+		return MaterializedViewHydrationStatus{}, false
+	}
+	state := materializedViewHydrationBaseState(view)
+	status := MaterializedViewHydrationStatus{
+		Name:     name,
+		State:    state,
+		Revision: view.snapshot.Status.Revision,
+		Fields:   append([]string(nil), view.definition.PointLookupFields...),
+	}
+	hydration := views.hydration[name]
+	views.mu.RUnlock()
+
+	queue := hydration.queue
+	taskID := hydration.taskID
+	if queue == nil || taskID == "" {
+		return status, true
+	}
+	task, exists := queue.Status(taskID)
+	if !exists {
+		return status, true
+	}
+	switch task.State {
+	case SQLIndexRebuildQueued, SQLIndexRebuildRunning:
+		status.State = MaterializedViewHydrationHydrating
+		status.Fields = append([]string(nil), hydration.fields...)
+		status.TaskID = taskID
+	case SQLIndexRebuildSucceeded:
+		if state == MaterializedViewHydrationReady {
+			status.TaskID = taskID
+		}
+	case SQLIndexRebuildFailed, SQLIndexRebuildCanceled:
+		// The currently published index, if any, remains authoritative after
+		// a failed or canceled replacement build.
+	}
+	return status, true
+}
+
+func materializedViewHydrationBaseState(view materializedView) MaterializedViewHydrationState {
+	if len(view.definition.PointLookupFields) == 0 {
+		return MaterializedViewHydrationCold
+	}
+	for _, field := range view.definition.PointLookupFields {
+		if _, indexed := view.pointLookups[field]; !indexed {
+			return MaterializedViewHydrationCold
+		}
+	}
+	return MaterializedViewHydrationReady
+}
+
+func (views *MaterializedViews) clearMaterializedViewHydration(name string) {
+	delete(views.hydration, name)
 }
 
 // PointLookup returns complete rows from an opt-in maintained point index.
@@ -388,6 +516,7 @@ func (views *MaterializedViews) DropPointLookupFields(name string, fields ...str
 	if len(remove) == 0 {
 		view.definition.PointLookupFields = nil
 		view.pointLookups = nil
+		views.clearMaterializedViewHydration(name)
 		views.views[name] = view
 		return nil
 	}
@@ -409,6 +538,7 @@ func (views *MaterializedViews) DropPointLookupFields(name string, fields ...str
 	}
 	view.definition.PointLookupFields = remainingFields
 	view.pointLookups = remainingLookups
+	views.clearMaterializedViewHydration(name)
 	views.views[name] = view
 	return nil
 }
@@ -431,6 +561,7 @@ func (views *MaterializedViews) Drop(name string) error {
 		return fmt.Errorf("materialized view %q does not exist", name)
 	}
 	delete(views.views, name)
+	views.clearMaterializedViewHydration(name)
 	views.rows -= view.storedRows
 	views.bytes -= view.storedBytes
 	for dependency, dependents := range views.dependents {
@@ -546,6 +677,7 @@ func (views *MaterializedViews) RefreshChangedWithMetadata(ctx context.Context, 
 		current.snapshot.Status.IdempotencyKeys = append([]string(nil), metadataKeys...)
 		current.storedRows = resultRows[candidate.definition.Name]
 		current.storedBytes = resultBytes[candidate.definition.Name]
+		views.clearMaterializedViewHydration(candidate.definition.Name)
 		views.views[candidate.definition.Name] = current
 		statuses = append(statuses, cloneMaterializedViewStatus(current.snapshot.Status))
 	}

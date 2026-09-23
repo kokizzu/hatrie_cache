@@ -5272,3 +5272,10 @@ see the remaining indexes or the normal arrangement-scan fallback. The
 operation is idempotent for already absent fields. See
 [M220_SAFE_INDEX_REMOVAL.md](M220_SAFE_INDEX_REMOVAL.md) and
 [BENCHMARK.md](BENCHMARK.md#m220-safe-materialized-index-removal).
+
+`MaterializedViews.HydrationStatus` exposes whether optional point postings are
+`cold`, `hydrating`, or `ready`. Background builds report `hydrating` from queue
+acceptance through publication, and stale, failed, canceled, or removed builds
+cannot leave a view stuck in that state. See
+[M223_MATERIALIZED_VIEW_HYDRATION.md](M223_MATERIALIZED_VIEW_HYDRATION.md) and
+[BENCHMARK.md](BENCHMARK.md#m223-materialized-view-hydration-states).

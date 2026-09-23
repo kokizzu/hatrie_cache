@@ -27299,6 +27299,30 @@ m220-commit:
 m220-push:
 	bash scripts/m220-push.sh
 
+m223-test:
+	bash scripts/m223-test.sh
+
+m223-format:
+	bash scripts/m223-format.sh
+
+m223-benchmark:
+	bash scripts/m223-benchmark.sh
+
+m223-race:
+	bash scripts/m223-race.sh
+
+m223-vet:
+	bash scripts/m223-vet.sh
+
+m223-stage:
+	bash scripts/m223-stage.sh
+
+m223-commit:
+	bash scripts/m223-commit.sh
+
+m223-push:
+	bash scripts/m223-push.sh
+
 m219-stage:
 	bash scripts/m219-stage.sh
 

@@ -38176,3 +38176,35 @@ B/op: 22032 on every sample; allocs/op: 130 on every sample
 
 See [M220_SAFE_INDEX_REMOVAL.md](M220_SAFE_INDEX_REMOVAL.md) for API behavior,
 reader-drain semantics, and the test commands.
+
+<a id="m223-materialized-view-hydration-states"></a>
+## M223: Materialized View Hydration States
+
+This feature adds control-plane state reporting for optional point-posting
+builds. It is not intended to make `PointLookup` faster; the regression gate is
+unchanged bytes and allocations on the existing lookup path, while the new
+status call is measured separately.
+
+Raw results from `make m223-benchmark` on the test host:
+
+```text
+BenchmarkM220MaterializedViewIndexLifecycle/point_lookup-32: 17489, 17714, 17575, 16851, 18022 ns/op
+BenchmarkM220MaterializedViewIndexLifecycle/point_lookup_parallel-32: 7023, 6786, 6866, 6755, 7127 ns/op
+BenchmarkM223MaterializedViewHydrationStatus-32: 100.2, 100.6, 102.4, 93.21, 96.77 ns/op
+Point lookup B/op: 22032 on every sample; allocs/op: 130 on every sample
+Hydration status B/op: 16 on every sample; allocs/op: 1 on every sample
+```
+
+| Path | Prior reference | M223 median | Relative result |
+| --- | ---: | ---: | ---: |
+| Point lookup | 17,972 ns/op | 17,575 ns/op | 1.02x faster |
+| Parallel point lookup | 6,487 ns/op | 6,866 ns/op | 0.94x, within host noise |
+| Hydration status | n/a | 96.77 ns/op | New control-plane call |
+
+The existing point lookup continues to report 22,032 B/op and 130 allocs/op;
+the new status call reports 16 B/op and 1 alloc/op for its defensive field-list
+clone. Because M223 is an operability/correctness feature rather than a lookup
+algorithm change, the unchanged allocation profile is the regression gate; the
+small ns/op variation is not presented as a throughput improvement.
+See [M223_MATERIALIZED_VIEW_HYDRATION.md](M223_MATERIALIZED_VIEW_HYDRATION.md)
+for state transitions and invalidation semantics.
