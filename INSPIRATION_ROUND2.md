@@ -110,7 +110,7 @@ operator control remain the preferred deployment model.
 - [x] M221 Isolated compute clusters with independent resource budgets; already covered by the existing named compute pools and per-cluster serving/maintenance admission controls. See [MZ047_SESSION_COMPUTE_ROUTING.md](MZ047_SESSION_COMPUTE_ROUTING.md), [MU023_CLUSTER_QUERY_ADMISSION.md](MU023_CLUSTER_QUERY_ADMISSION.md), and [BENCHMARK.md](BENCHMARK.md#mz-047-session-compute-routing).
 - [x] M222 Replicated compute workers for highly available maintained indexes. See [M222_REPLICATED_INDEX_WORKERS.md](M222_REPLICATED_INDEX_WORKERS.md) and [BENCHMARK.md](BENCHMARK.md#m222-replicated-index-workers).
 - [x] M223 Hydration state machines distinguish cold, hydrating, and ready materialized-view point indexes. See [M223_MATERIALIZED_VIEW_HYDRATION.md](M223_MATERIALIZED_VIEW_HYDRATION.md) and [BENCHMARK.md](BENCHMARK.md#m223-materialized-view-hydration-states).
-- [ ] M224 Hydration progress and estimated remaining work metrics.
+- [x] M224 Hydration progress and estimated remaining work metrics. See [M224_HYDRATION_PROGRESS.md](M224_HYDRATION_PROGRESS.md) and [BENCHMARK.md](BENCHMARK.md#m224-hydration-progress).
 - [ ] M225 Persisted shard leases that prevent duplicate state ownership.
 - [ ] M226 Durable consensus metadata for state shard and frontier ownership.
 - [ ] M227 Source snapshot offsets coupled atomically to the first live frontier.

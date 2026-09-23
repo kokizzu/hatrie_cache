@@ -5287,3 +5287,10 @@ configurable success quorum, and keeps per-replica status visible; existing
 single-queue builds remain the default. See
 [M222_REPLICATED_INDEX_WORKERS.md](M222_REPLICATED_INDEX_WORKERS.md) and
 [BENCHMARK.md](BENCHMARK.md#m222-replicated-index-workers).
+
+`MaterializedViews.HydrationStatus` also reports completed rows, total rows,
+progress fraction, and an estimated remaining duration while a point index is
+hydrating. The estimate is informational and is derived from the current
+worker's observed rate. See
+[M224_HYDRATION_PROGRESS.md](M224_HYDRATION_PROGRESS.md) and
+[BENCHMARK.md](BENCHMARK.md#m224-hydration-progress).

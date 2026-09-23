@@ -38234,3 +38234,31 @@ algorithm change, the unchanged allocation profile is the regression gate; the
 small ns/op variation is not presented as a throughput improvement.
 See [M223_MATERIALIZED_VIEW_HYDRATION.md](M223_MATERIALIZED_VIEW_HYDRATION.md)
 for state transitions and invalidation semantics.
+
+<a id="m224-hydration-progress"></a>
+## M224: Hydration Progress
+
+M224 exposes completed rows, total rows, a progress fraction, and an
+estimated remaining duration through `MaterializedViews.HydrationStatus`.
+The benchmark compares the current M224 status path with the M223 ready-status
+baseline on the same host. It does not measure the point-lookup data path.
+
+Raw results from `make m223-benchmark` and `make m224-benchmark`:
+
+```text
+M223 pre-M224 ready status ns/op: 91.61, 94.15, 94.11, 91.87, 93.00
+M224 running status ns/op: 162.0, 159.0, 157.6, 157.7, 167.0
+M224 ready status ns/op: 157.1, 143.6, 145.4, 146.8, 151.1
+B/op: 16 on every sample; allocs/op: 1 on every sample
+```
+
+| Path | Median ns/op | B/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | ---: |
+| M223 pre-M224 ready status | 93.00 | 16 | 1 | 1.00x |
+| M224 ready status | 146.8 | 16 | 1 | 1.58x slower |
+| M224 running status | 159.0 | 16 | 1 | 1.71x slower |
+
+This is an observability tradeoff on a control-plane call. `PointLookup`
+behavior and allocation profile are unchanged. See
+[M224_HYDRATION_PROGRESS.md](M224_HYDRATION_PROGRESS.md) for field semantics,
+ETA limitations, and the focused test.

@@ -55,6 +55,9 @@ type MaterializedViewPointLookupBuildRequest struct {
 	ViewName string
 	Priority int
 	Fields   []string
+	// Progress receives the same monotonic completed/total callbacks used by
+	// the rebuild queue. It is optional and does not affect publication.
+	Progress SQLIndexRebuildProgressFunc
 }
 
 // MaterializedViewHydrationState describes the availability of an optional
@@ -71,11 +74,15 @@ const (
 // point indexes. A queued or running rebuild is hydrating; failed and
 // canceled rebuilds fall back to the current published index state.
 type MaterializedViewHydrationStatus struct {
-	Name     string                         `json:"name"`
-	State    MaterializedViewHydrationState `json:"state"`
-	Revision uint64                         `json:"revision"`
-	Fields   []string                       `json:"fields,omitempty"`
-	TaskID   string                         `json:"task_id,omitempty"`
+	Name                      string                         `json:"name"`
+	State                     MaterializedViewHydrationState `json:"state"`
+	Revision                  uint64                         `json:"revision"`
+	Completed                 int                            `json:"completed"`
+	Total                     int                            `json:"total"`
+	Progress                  float64                        `json:"progress"`
+	EstimatedRemainingSeconds float64                        `json:"estimated_remaining_seconds,omitempty"`
+	Fields                    []string                       `json:"fields,omitempty"`
+	TaskID                    string                         `json:"task_id,omitempty"`
 }
 
 // MaterializedViewStorageUsage reports logical rows and encoded row bytes
@@ -318,6 +325,7 @@ func (views *MaterializedViews) EnqueuePointLookupBuild(queue *SQLIndexRebuildQu
 				originalFields: originalFields,
 				revision:       revision,
 				result:         result,
+				progress:       request.Progress,
 			}, request.ID)
 		},
 	})
@@ -377,6 +385,7 @@ func (views *MaterializedViews) EnqueueReplicatedPointLookupBuild(replicas *SQLI
 		originalFields: originalFields,
 		revision:       view.snapshot.Status.Revision,
 		result:         view.snapshot.Result,
+		progress:       request.Progress,
 	}
 	views.mu.RUnlock()
 
@@ -421,9 +430,19 @@ type materializedPointLookupBuild struct {
 	originalFields []string
 	revision       uint64
 	result         QueryResult
+	progress       SQLIndexRebuildProgressFunc
 }
 
 func (views *MaterializedViews) runMaterializedViewPointLookupBuild(ctx context.Context, progress SQLIndexRebuildProgressFunc, build materializedPointLookupBuild, operationID string) error {
+	if build.progress != nil {
+		queueProgress := progress
+		progress = func(completed, total int) {
+			if queueProgress != nil {
+				queueProgress(completed, total)
+			}
+			build.progress(completed, total)
+		}
+	}
 	lookups, err := buildMaterializedViewPointLookupsWithProgress(ctx, build.definition, build.result, progress)
 	if err != nil {
 		return err
@@ -501,6 +520,9 @@ func (views *MaterializedViews) HydrationStatus(name string) (MaterializedViewHy
 		if !exists {
 			return status, true
 		}
+		if task, ok := materializedViewHydrationReplicaTask(replicated); ok {
+			applyMaterializedViewHydrationProgress(&status, task)
+		}
 		switch replicated.State {
 		case SQLIndexRebuildQueued, SQLIndexRebuildRunning:
 			status.State = MaterializedViewHydrationHydrating
@@ -521,6 +543,7 @@ func (views *MaterializedViews) HydrationStatus(name string) (MaterializedViewHy
 	if !exists {
 		return status, true
 	}
+	applyMaterializedViewHydrationProgress(&status, task)
 	switch task.State {
 	case SQLIndexRebuildQueued, SQLIndexRebuildRunning:
 		status.State = MaterializedViewHydrationHydrating
@@ -535,6 +558,67 @@ func (views *MaterializedViews) HydrationStatus(name string) (MaterializedViewHy
 		// a failed or canceled replacement build.
 	}
 	return status, true
+}
+
+func applyMaterializedViewHydrationProgress(status *MaterializedViewHydrationStatus, task SQLIndexRebuildStatus) {
+	completed := task.Completed
+	if completed < 0 {
+		completed = 0
+	}
+	total := task.Total
+	if total < 0 {
+		total = 0
+	}
+	if completed > total && total > 0 {
+		completed = total
+	}
+	status.Completed = completed
+	status.Total = total
+	status.Progress = 0
+	if total > 0 {
+		status.Progress = float64(completed) / float64(total)
+	} else if task.State == SQLIndexRebuildSucceeded {
+		status.Progress = 1
+	}
+	status.EstimatedRemainingSeconds = 0
+	if task.State == SQLIndexRebuildRunning && completed > 0 && total > completed && !task.StartedAt.IsZero() {
+		elapsed := time.Since(task.StartedAt)
+		if elapsed > 0 {
+			status.EstimatedRemainingSeconds = elapsed.Seconds() * float64(total-completed) / float64(completed)
+		}
+	}
+}
+
+func materializedViewHydrationReplicaTask(status SQLIndexRebuildReplicaStatus) (SQLIndexRebuildStatus, bool) {
+	best := SQLIndexRebuildStatus{}
+	found := false
+	for _, task := range status.ReplicaStatuses {
+		if status.State == SQLIndexRebuildSucceeded && task.State != SQLIndexRebuildSucceeded {
+			continue
+		}
+		if status.State != SQLIndexRebuildSucceeded && task.State != SQLIndexRebuildRunning && task.State != SQLIndexRebuildQueued {
+			continue
+		}
+		if !found || materializedViewHydrationTaskProgress(task) > materializedViewHydrationTaskProgress(best) {
+			best = task
+			found = true
+		}
+	}
+	return best, found
+}
+
+func materializedViewHydrationTaskProgress(task SQLIndexRebuildStatus) float64 {
+	if task.State == SQLIndexRebuildSucceeded && task.Total == 0 {
+		return 1
+	}
+	if task.Total <= 0 || task.Completed <= 0 {
+		return 0
+	}
+	completed := task.Completed
+	if completed > task.Total {
+		completed = task.Total
+	}
+	return float64(completed) / float64(task.Total)
 }
 
 func materializedViewHydrationBaseState(view materializedView) MaterializedViewHydrationState {
