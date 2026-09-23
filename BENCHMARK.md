@@ -37419,3 +37419,47 @@ BenchmarkT229SpaceBeforeReplace  10647303  99.28 ns/op 24 B/op  3 allocs/op
 BenchmarkT229SpaceBeforeReplace  11661644 102.4 ns/op 24 B/op  3 allocs/op
 BenchmarkT229SpaceBeforeReplace  10524669 108.5 ns/op 24 B/op  3 allocs/op
 ```
+
+<a id="t231-after-replace-audit-hooks"></a>
+## T231 After-Replace Audit Hooks
+
+This benchmark compares the existing memtx replacement path before T231, the
+same path after T231 with `AfterReplace` disabled, and a no-op audit callback.
+The enabled row includes copied old/new images and per-space transaction ID
+assignment.
+
+Command: `make benchmark-t231` (`-benchmem -count=5 -cpu=1`)
+Platform: Linux/amd64, AMD Ryzen 9 5950X
+Samples: five runs; table values are medians.
+
+| Workload | Median CPU | Memory | Relative CPU |
+| --- | ---: | ---: | ---: |
+| Existing path before T231 | 50.04 ns/op | 8 B/op, 1 alloc/op | 1.00x |
+| Hook disabled after T231 | 49.80 ns/op | 8 B/op, 1 alloc/op | 1.00x |
+| Hook enabled, no-op callback | 106.7 ns/op | 24 B/op, 3 allocs/op | 2.14x |
+
+The default path retains the original allocation profile. The opt-in audit
+hook adds 56.9 ns/op, 16 B/op, and two allocations in this workload.
+
+### Raw T231 Output
+
+```text
+Before, make benchmark-t231-before:
+BenchmarkT231SpacePutBaseline  26173512  49.60 ns/op  8 B/op  1 allocs/op
+BenchmarkT231SpacePutBaseline  23497686  50.04 ns/op  8 B/op  1 allocs/op
+BenchmarkT231SpacePutBaseline  23763570  50.04 ns/op  8 B/op  1 allocs/op
+BenchmarkT231SpacePutBaseline  25804761  50.25 ns/op  8 B/op  1 allocs/op
+BenchmarkT231SpacePutBaseline  25546009  49.63 ns/op  8 B/op  1 allocs/op
+
+After, make benchmark-t231:
+BenchmarkT231SpacePutBaseline   25248904  49.13 ns/op  8 B/op  1 allocs/op
+BenchmarkT231SpacePutBaseline   23532393  51.08 ns/op  8 B/op  1 allocs/op
+BenchmarkT231SpacePutBaseline   21580893  51.59 ns/op  8 B/op  1 allocs/op
+BenchmarkT231SpacePutBaseline   20553444  49.81 ns/op  8 B/op  1 allocs/op
+BenchmarkT231SpacePutBaseline   26374258  49.80 ns/op  8 B/op  1 allocs/op
+BenchmarkT231SpaceAfterReplace  11125641 102.6 ns/op 24 B/op  3 allocs/op
+BenchmarkT231SpaceAfterReplace  11518623 107.9 ns/op 24 B/op  3 allocs/op
+BenchmarkT231SpaceAfterReplace  11146887 106.7 ns/op 24 B/op  3 allocs/op
+BenchmarkT231SpaceAfterReplace  11207346 106.7 ns/op 24 B/op  3 allocs/op
+BenchmarkT231SpaceAfterReplace  11317712 103.9 ns/op 24 B/op  3 allocs/op
+```

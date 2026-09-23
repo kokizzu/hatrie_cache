@@ -31,6 +31,7 @@ var (
 	ErrSpaceSnapshotCorrupt   = errors.New("hatDataStructure: space snapshot is corrupt")
 	ErrSpaceSnapshotWireLimit = errors.New("hatDataStructure: space snapshot wire limit exceeded")
 	ErrSpaceEngineMismatch    = errors.New("hatDataStructure: space snapshot engine mismatch")
+	ErrSpaceTransactionIDExhausted = errors.New("hatDataStructure: space transaction id exhausted")
 )
 
 // SpaceEngine selects the storage engine for one space. The engine is fixed
@@ -60,6 +61,7 @@ type SpaceOptions struct {
 	Vinyl         LSMTableOptions
 	BeforeReplace SpaceBeforeReplace
 	OnReplace     SpaceOnReplace
+	AfterReplace  SpaceAfterReplace
 }
 
 // SpaceReplace describes one key mutation image. OldValue and NewValue are
@@ -81,12 +83,24 @@ type SpaceBeforeReplace func(SpaceReplace) error
 // has accepted it. The callback runs while the space mutation is serialized.
 type SpaceOnReplace func(SpaceReplace)
 
+// SpaceReplaceAudit is a successful replacement image with the transaction
+// identity assigned by its Space instance.
+type SpaceReplaceAudit struct {
+	TransactionID uint64
+	SpaceReplace
+}
+
+// SpaceAfterReplace observes a successful replacement after storage accepts
+// it. The transaction ID is monotonic for one Space instance.
+type SpaceAfterReplace func(SpaceReplaceAudit)
+
 type normalizedSpaceOptions struct {
 	engine        SpaceEngine
 	memtx         MemtxSpaceOptions
 	vinyl         LSMTableOptions
 	beforeReplace SpaceBeforeReplace
 	onReplace     SpaceOnReplace
+	afterReplace  SpaceAfterReplace
 }
 
 // SpaceStats reports engine-specific structural counters without materializing
@@ -109,6 +123,8 @@ type Space struct {
 	vinyl         *LSMTable
 	beforeReplace SpaceBeforeReplace
 	onReplace     SpaceOnReplace
+	afterReplace  SpaceAfterReplace
+	nextTransactionID uint64
 }
 
 // NewSpace creates one independently configured storage space.
@@ -122,6 +138,7 @@ func NewSpace(options SpaceOptions) (*Space, error) {
 		memtxOptions:  normalized.memtx,
 		beforeReplace: normalized.beforeReplace,
 		onReplace:     normalized.onReplace,
+		afterReplace:  normalized.afterReplace,
 	}
 	if normalized.engine == SpaceEngineMemtx {
 		space.memtx = make(map[string][]byte)
@@ -150,7 +167,7 @@ func (space *Space) Put(key string, value []byte) error {
 	if key == "" {
 		return ErrSpaceKeyRequired
 	}
-	if space.engine == SpaceEngineVinyl && space.beforeReplace == nil && space.onReplace == nil {
+	if space.engine == SpaceEngineVinyl && space.beforeReplace == nil && space.onReplace == nil && space.afterReplace == nil {
 		return space.vinyl.Put(key, value)
 	}
 	space.mu.Lock()
@@ -163,6 +180,14 @@ func (space *Space) Put(key string, value []byte) error {
 		if err := space.runBeforeReplaceLocked(key, oldValue, value, exists, false); err != nil {
 			return err
 		}
+		var afterEvent SpaceReplaceAudit
+		if space.afterReplace != nil {
+			transactionID, err := space.reserveTransactionIDLocked()
+			if err != nil {
+				return err
+			}
+			afterEvent = cloneSpaceReplaceAudit(transactionID, key, oldValue, value, exists, false)
+		}
 		var onReplace SpaceReplace
 		if space.onReplace != nil {
 			onReplace = cloneSpaceReplace(key, oldValue, value, exists, false)
@@ -173,6 +198,9 @@ func (space *Space) Put(key string, value []byte) error {
 		if space.onReplace != nil {
 			space.onReplace(onReplace)
 		}
+		if space.afterReplace != nil {
+			space.afterReplace(afterEvent)
+		}
 		return nil
 	}
 	if len(value) > space.memtxOptions.MaxValueBytes {
@@ -181,13 +209,21 @@ func (space *Space) Put(key string, value []byte) error {
 	if _, exists := space.memtx[key]; !exists && len(space.memtx) >= space.memtxOptions.MaxRecords {
 		return ErrSpaceFull
 	}
-	if space.beforeReplace == nil && space.onReplace == nil {
+	if space.beforeReplace == nil && space.onReplace == nil && space.afterReplace == nil {
 		space.memtx[key] = append([]byte(nil), value...)
 		return nil
 	}
 	oldValue, exists := space.memtx[key]
 	if err := space.runBeforeReplaceLocked(key, oldValue, value, exists, false); err != nil {
 		return err
+	}
+	var afterEvent SpaceReplaceAudit
+	if space.afterReplace != nil {
+		transactionID, err := space.reserveTransactionIDLocked()
+		if err != nil {
+			return err
+		}
+		afterEvent = cloneSpaceReplaceAudit(transactionID, key, oldValue, value, exists, false)
 	}
 	var onReplace SpaceReplace
 	if space.onReplace != nil {
@@ -197,6 +233,9 @@ func (space *Space) Put(key string, value []byte) error {
 	if space.onReplace != nil {
 		space.onReplace(onReplace)
 	}
+	if space.afterReplace != nil {
+		space.afterReplace(afterEvent)
+	}
 	return nil
 }
 
@@ -205,7 +244,7 @@ func (space *Space) Get(key string) ([]byte, bool) {
 	if space == nil || key == "" {
 		return nil, false
 	}
-	if space.engine == SpaceEngineVinyl && space.beforeReplace == nil && space.onReplace == nil {
+	if space.engine == SpaceEngineVinyl && space.beforeReplace == nil && space.onReplace == nil && space.afterReplace == nil {
 		return space.vinyl.Get(key)
 	}
 	space.mu.RLock()
@@ -228,7 +267,7 @@ func (space *Space) Delete(key string) error {
 	if key == "" {
 		return ErrSpaceKeyRequired
 	}
-	if space.engine == SpaceEngineVinyl && space.beforeReplace == nil && space.onReplace == nil {
+	if space.engine == SpaceEngineVinyl && space.beforeReplace == nil && space.onReplace == nil && space.afterReplace == nil {
 		if _, exists := space.vinyl.Get(key); !exists {
 			return nil
 		}
@@ -244,6 +283,14 @@ func (space *Space) Delete(key string) error {
 		if err := space.runBeforeReplaceLocked(key, oldValue, nil, true, true); err != nil {
 			return err
 		}
+		var afterEvent SpaceReplaceAudit
+		if space.afterReplace != nil {
+			transactionID, err := space.reserveTransactionIDLocked()
+			if err != nil {
+				return err
+			}
+			afterEvent = cloneSpaceReplaceAudit(transactionID, key, oldValue, nil, true, true)
+		}
 		var onReplace SpaceReplace
 		if space.onReplace != nil {
 			onReplace = cloneSpaceReplace(key, oldValue, nil, true, true)
@@ -254,9 +301,12 @@ func (space *Space) Delete(key string) error {
 		if space.onReplace != nil {
 			space.onReplace(onReplace)
 		}
+		if space.afterReplace != nil {
+			space.afterReplace(afterEvent)
+		}
 		return nil
 	}
-	if space.beforeReplace == nil && space.onReplace == nil {
+	if space.beforeReplace == nil && space.onReplace == nil && space.afterReplace == nil {
 		delete(space.memtx, key)
 		return nil
 	}
@@ -267,6 +317,14 @@ func (space *Space) Delete(key string) error {
 	if err := space.runBeforeReplaceLocked(key, oldValue, nil, true, true); err != nil {
 		return err
 	}
+	var afterEvent SpaceReplaceAudit
+	if space.afterReplace != nil {
+		transactionID, err := space.reserveTransactionIDLocked()
+		if err != nil {
+			return err
+		}
+		afterEvent = cloneSpaceReplaceAudit(transactionID, key, oldValue, nil, true, true)
+	}
 	var onReplace SpaceReplace
 	if space.onReplace != nil {
 		onReplace = cloneSpaceReplace(key, oldValue, nil, true, true)
@@ -274,6 +332,9 @@ func (space *Space) Delete(key string) error {
 	delete(space.memtx, key)
 	if space.onReplace != nil {
 		space.onReplace(onReplace)
+	}
+	if space.afterReplace != nil {
+		space.afterReplace(afterEvent)
 	}
 	return nil
 }
@@ -293,6 +354,21 @@ func cloneSpaceReplace(key string, oldValue, newValue []byte, exists, deleting b
 		NewValue: append([]byte(nil), newValue...),
 		Exists:   exists,
 		Delete:   deleting,
+	}
+}
+
+func (space *Space) reserveTransactionIDLocked() (uint64, error) {
+	if space.nextTransactionID == ^uint64(0) {
+		return 0, ErrSpaceTransactionIDExhausted
+	}
+	space.nextTransactionID++
+	return space.nextTransactionID, nil
+}
+
+func cloneSpaceReplaceAudit(transactionID uint64, key string, oldValue, newValue []byte, exists, deleting bool) SpaceReplaceAudit {
+	return SpaceReplaceAudit{
+		TransactionID: transactionID,
+		SpaceReplace:  cloneSpaceReplace(key, oldValue, newValue, exists, deleting),
 	}
 }
 
@@ -486,6 +562,7 @@ func normalizeSpaceOptions(options SpaceOptions) (normalizedSpaceOptions, error)
 		vinyl:         options.Vinyl,
 		beforeReplace: options.BeforeReplace,
 		onReplace:     options.OnReplace,
+		afterReplace:  options.AfterReplace,
 	}, nil
 }
 

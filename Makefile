@@ -26574,6 +26574,54 @@ commit-t230:
 push-t230:
 	bash scripts/push-t230.sh
 
+.PHONY: format-t231
+format-t231:
+	bash scripts/format-t231.sh
+
+.PHONY: test-t231
+test-t231:
+	bash scripts/test-t231.sh
+
+.PHONY: benchmark-t231-before
+benchmark-t231-before:
+	bash scripts/benchmark-t231-before.sh
+
+.PHONY: benchmark-t231
+benchmark-t231:
+	bash scripts/benchmark-t231.sh
+
+.PHONY: race-t231
+race-t231:
+	bash scripts/race-t231.sh
+
+.PHONY: vet-t231
+vet-t231:
+	bash scripts/vet-t231.sh
+
+.PHONY: test-t231-package
+test-t231-package:
+	bash scripts/test-t231-package.sh
+
+.PHONY: verify-t231
+verify-t231:
+	bash scripts/verify-t231.sh
+
+.PHONY: review-t231
+review-t231:
+	bash scripts/review-t231.sh
+
+.PHONY: stage-t231
+stage-t231:
+	bash scripts/stage-t231.sh
+
+.PHONY: commit-t231
+commit-t231:
+	bash scripts/commit-t231.sh
+
+.PHONY: push-t231
+push-t231:
+	bash scripts/push-t231.sh
+
 .PHONY: stage-t229
 stage-t229:
 	bash scripts/stage-t229.sh
