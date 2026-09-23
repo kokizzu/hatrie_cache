@@ -160,7 +160,7 @@ operator control remain the preferred deployment model.
 - [x] T216 Vinyl-style run compaction scheduling and space accounting; see [T216_COMPACTION_SCHEDULING.md](T216_COMPACTION_SCHEDULING.md) and [BENCHMARK.md](BENCHMARK.md#t216-vinyl-style-compaction-scheduling).
 - [x] T217 Columnar batch ingest for analytical typed tables; see [T217_COLUMNAR_BATCH_INGEST.md](T217_COLUMNAR_BATCH_INGEST.md) and [BENCHMARK.md](BENCHMARK.md#t217-columnar-batch-ingest).
 - [x] T218 Multi-part TREE indexes with ordered prefix and range scans; see [T218_MULTI_PART_TREE_INDEX.md](T218_MULTI_PART_TREE_INDEX.md) and [BENCHMARK.md](BENCHMARK.md#t218-multi-part-tree-index-prefix-scans).
-- [ ] T219 HASH indexes for constant-time exact lookups.
+- [x] T219 HASH indexes for constant-time exact lookups; see [T219_HASH_INDEX.md](T219_HASH_INDEX.md) and [BENCHMARK.md](BENCHMARK.md#t219-typed-hash-index).
 - [ ] T220 RTREE indexes for spatial bounding-box searches.
 - [ ] T221 BITSET indexes for low-cardinality membership predicates.
 - [ ] T222 Multikey indexes over array-valued fields.

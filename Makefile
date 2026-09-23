@@ -26208,3 +26208,39 @@ commit-t218:
 .PHONY: push-t218
 push-t218:
 	bash scripts/push-t218.sh
+
+.PHONY: format-t219
+format-t219:
+	bash scripts/format-t219.sh
+
+.PHONY: test-t219
+test-t219:
+	bash scripts/test-t219.sh
+
+.PHONY: benchmark-t219
+benchmark-t219:
+	bash scripts/benchmark-t219.sh
+
+.PHONY: race-t219
+race-t219:
+	bash scripts/race-t219.sh
+
+.PHONY: vet-t219
+vet-t219:
+	bash scripts/vet-t219.sh
+
+.PHONY: verify-t219-scope
+verify-t219-scope:
+	bash scripts/verify-t219-scope.sh
+
+.PHONY: stage-t219
+stage-t219:
+	bash scripts/stage-t219.sh
+
+.PHONY: commit-t219
+commit-t219:
+	bash scripts/commit-t219.sh
+
+.PHONY: push-t219
+push-t219:
+	bash scripts/push-t219.sh

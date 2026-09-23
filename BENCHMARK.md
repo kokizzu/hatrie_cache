@@ -17902,6 +17902,37 @@ order. For the normal fresh-result path it removes intermediate append growth;
 for reusable scratch it only checks the known cardinality against capacity and
 does not allocate when capacity is sufficient.
 
+<a id="t219-typed-hash-index"></a>
+## T219: Typed HASH Index
+
+This benchmark compares the typed `HashIndex` with the existing
+`FunctionalIndex` on 10,000 integer records in the same process. The exact
+lookup cases reuse their result storage. The build cases include index creation
+and all 10,000 upserts. Each row has three `-benchmem` samples on Linux/amd64
+with an AMD Ryzen 9 5950X.
+
+| Workload | HASH median | Functional median | Relative result |
+| --- | ---: | ---: | ---: |
+| Unique exact lookup, reusable result | 43.37 ns/op, 0 B/op, 0 allocs/op | 46.59 ns/op, 0 B/op, 0 allocs/op | **1.07x faster** |
+| Non-unique lookup, reusable IDs | 43.09 ns/op, 0 B/op, 0 allocs/op | 38.87 ns/op, 0 B/op, 0 allocs/op | 1.11x slower |
+| Unique build, 10,000 rows | 1,037,623 ns/op, 732,590 B/op, 69 allocs/op | 1,012,599 ns/op, 873,879 B/op, 69 allocs/op | 2.5% slower, 16% less B/op |
+
+The result supports HASH for unique or highly selective exact predicates, but
+not as a universal replacement: the existing functional index wins the
+non-unique reusable-ID case. Ordered prefix/range queries remain the job of
+`OrderedIndex` and `MultiPartTreeIndex`.
+
+### Raw T219 Output
+
+```text
+hash unique lookup:       43.37, 37.86, 47.70 ns/op; 0 B/op; 0 allocs/op
+functional value lookup:  46.08, 48.28, 46.59 ns/op; 0 B/op; 0 allocs/op
+hash nonunique IDs:       43.78, 40.47, 43.09 ns/op; 0 B/op; 0 allocs/op
+functional IDs:           36.44, 41.99, 38.87 ns/op; 0 B/op; 0 allocs/op
+hash build:          947599, 1037623, 1300966 ns/op; 732626, 732590, 732589 B/op; 69 allocs/op
+functional build:   1561650, 1012599, 1004124 ns/op; 873904, 873879, 873883 B/op; 69 allocs/op
+```
+
 <a id="monotonic-posting-insertion"></a>
 ## Monotonic Posting Insertion
 
