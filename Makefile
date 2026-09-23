@@ -27689,6 +27689,50 @@ m239-commit:
 m239-push:
 	bash scripts/m239-push.sh
 
+.PHONY: m240-ch-g01-baseline
+m240-ch-g01-baseline:
+	bash scripts/m240-ch-g01-baseline.sh
+
+.PHONY: m240-ch-g01-test
+m240-ch-g01-test:
+	bash scripts/m240-ch-g01-test.sh
+
+.PHONY: m240-ch-g01-format
+m240-ch-g01-format:
+	bash scripts/m240-ch-g01-format.sh
+
+.PHONY: m240-ch-g01-benchmark
+m240-ch-g01-benchmark:
+	bash scripts/m240-ch-g01-benchmark.sh
+
+.PHONY: m240-ch-g01-docs
+m240-ch-g01-docs:
+	bash scripts/m240-ch-g01-docs.sh
+
+.PHONY: m240-ch-g01-package-test
+m240-ch-g01-package-test:
+	bash scripts/m240-ch-g01-package-test.sh
+
+.PHONY: m240-ch-g01-race
+m240-ch-g01-race:
+	bash scripts/m240-ch-g01-race.sh
+
+.PHONY: m240-ch-g01-vet
+m240-ch-g01-vet:
+	bash scripts/m240-ch-g01-vet.sh
+
+.PHONY: m240-ch-g01-stage
+m240-ch-g01-stage:
+	bash scripts/m240-ch-g01-stage.sh
+
+.PHONY: m240-ch-g01-commit
+m240-ch-g01-commit:
+	bash scripts/m240-ch-g01-commit.sh
+
+.PHONY: m240-ch-g01-push
+m240-ch-g01-push:
+	bash scripts/m240-ch-g01-push.sh
+
 .PHONY: m237-tt-g42-test
 m237-tt-g42-test:
 	bash scripts/m237-tt-g42-test.sh

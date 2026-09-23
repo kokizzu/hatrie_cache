@@ -198,6 +198,10 @@ type SQLQueryOptions struct {
 	// MaxRows/default behavior.
 	MaxIntermediateRows int
 	MaxJoinWork         int
+	// JoinAlgorithm is opt-in. Empty and hash preserve the established join
+	// planner; partial_merge requires an ordered source resolver and otherwise
+	// falls back to the existing planner.
+	JoinAlgorithm SQLJoinAlgorithm
 	// MaxJoinBytes bounds in-memory hash partitions. Combined with
 	// SpillDirectory and MaxSpillBytes it enables a streamed spill hash join
 	// for a direct two-source INNER equality join. Zero keeps the existing
@@ -12108,6 +12112,28 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 				pushedRight, err = resolveSQLJoinPushedSource(join.source, rightCondition, resolver, ctes, metrics, control, maxRows)
 				if err != nil {
 					return SQLQueryResult{}, err
+				}
+			}
+			if control != nil && control.options.JoinAlgorithm == SQLJoinAlgorithmPartialMerge && hashJoin && join.kind == "INNER" && !rightPushed {
+				if ordered, ok := resolver.(SQLOrderedSourceResolver); ok {
+					right, available, err := ordered.ResolveSQLOrderedSource(join.source.kind, join.source.key, rightField, false, false, false)
+					if err != nil {
+						return SQLQueryResult{}, err
+					}
+					if available {
+						if len(right) > maxRows {
+							return SQLQueryResult{}, fmt.Errorf("SQL source %q exceeds the %d row limit", join.source.alias, maxRows)
+						}
+						started := time.Now()
+						next, err := executeSQLPartialMergeJoin(rows, right, leftAliases, leftQualifier, leftField, join.source.alias, rightField, control, maxRows)
+						if err != nil {
+							return SQLQueryResult{}, err
+						}
+						metrics.record("PARTIAL MERGE JOIN", join.kind+" JOIN "+sqlExplainSource(join.source)+" ON "+sqlExplainExpression(join.on), len(rows)+len(right), len(next), started)
+						rows = next
+						leftAliases = append(leftAliases, join.source.alias)
+						continue
+					}
 				}
 			}
 			forceHashJoin := false

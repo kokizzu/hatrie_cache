@@ -38495,6 +38495,45 @@ Raw command:
 ```text
 make m233-mz-g38-benchmark
 ```
+## CH-G01: Ordered Partial-Merge Join
+
+This benchmark compares the existing hash join with the opt-in ordered
+partial-merge path over two 4,096-row sources. Both paths use the same resolver
+implementation. The partial-merge path is enabled with
+`SQLJoinAlgorithmPartialMerge`; the baseline uses the default empty option.
+Five samples were collected with `-benchtime=2s -benchmem`.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Existing hash join | 6,184,046 | 9,817,381 | 49,230 | Reference |
+| Opt-in partial merge | 5,781,669 | 6,659,298 | 36,908 | 1.07x faster; 1.47x lower bytes; 1.33x fewer allocations |
+
+The measured partial-merge path is about 6.5% faster, with about 32.2% fewer
+allocated bytes and 25.0% fewer allocations for this workload. It remains
+opt-in because its cost depends on ordered-source availability and left-side
+ordering. Automatic selection, streaming ordered input, and grace-hash spill
+are still separate follow-up work.
+
+### Raw output
+
+```text
+BenchmarkCH001HashJoinBaseline
+5955048 ns/op 9817393 B/op 49230 allocs/op
+6234442 ns/op 9817381 B/op 49230 allocs/op
+5990453 ns/op 9817380 B/op 49230 allocs/op
+6184046 ns/op 9817377 B/op 49230 allocs/op
+6794796 ns/op 9817383 B/op 49230 allocs/op
+
+BenchmarkCH001PartialMergeJoin
+5908251 ns/op 6659298 B/op 36908 allocs/op
+5555882 ns/op 6659297 B/op 36908 allocs/op
+5769898 ns/op 6659298 B/op 36908 allocs/op
+5781669 ns/op 6659296 B/op 36908 allocs/op
+5843252 ns/op 6659299 B/op 36908 allocs/op
+```
+
+See [CH001_ADAPTIVE_JOIN.md](CH001_ADAPTIVE_JOIN.md).
+
 ## CH050 Plan Reproducibility Hash
 
 This ClickHouse-inspired diagnostic hashes a normalized SQL shape, required
