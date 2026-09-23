@@ -38643,6 +38643,24 @@ per-partition fetch contract with direct read-amplification and tail-latency
 measurements. See [CH006_RUNTIME_JOIN_PREFETCH.md](CH006_RUNTIME_JOIN_PREFETCH.md)
 for raw samples and the rollback rationale.
 
+## CH-G07: GROUPING SETS, ROLLUP, and CUBE
+
+The current implementation expands grouping-set syntax into `UNION ALL`
+branches over the existing grouped executor. It is semantically covered and
+bounded by a 12-dimension `CUBE` limit. A single-pass typed aggregate is not
+claimed by this measurement.
+
+Machine: AMD Ryzen 9 5950X, Linux amd64. Command:
+`make m271-ch-g07-benchmark` (`-benchmem -count=5`).
+
+| Workload | Median ns/op | Median B/op | Median allocs/op |
+| --- | ---: | ---: | ---: |
+| `GROUPING SETS` result expansion | 42,266 | 28,587 | 242 |
+| `GROUPING SETS` plus `GROUPING()` identifiers | 51,659 | 33,871 | 286 |
+
+Raw samples and the correctness/race commands are in
+[CH007_GROUPING_SETS.md](CH007_GROUPING_SETS.md).
+
 ## CH050 Plan Reproducibility Hash
 
 This ClickHouse-inspired diagnostic hashes a normalized SQL shape, required

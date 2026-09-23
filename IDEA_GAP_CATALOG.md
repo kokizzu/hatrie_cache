@@ -24,7 +24,7 @@ the memory/operational cost is disproportionate to the gain.
 | CH-G04 | Adaptive runtime Bloom precheck for large numeric/boolean hash joins; lazy admission after a miss-heavy probe sample | Implemented and measured in `BENCHMARK.md`: 1.53x miss-heavy microbenchmark win, 3.021% false-positive rate, no small-index allocation |
 | CH-G05 | Implemented: opt-in runtime min/max bounds propagated from a materialized join side to a partition-aware right source | Duplicate/mixed-key/outer-join correctness, default-off behavior, and measured in `CH005_RUNTIME_JOIN_PARTITION_FILTER.md` and `BENCHMARK.md` |
 | CH-G06 | Rejected for now: join-side mark-selective prefetch scheduling | Fair partition-backed comparison was 1.057x slower, 0.19% more cumulative bytes, and 0.39% more allocations; revisit only with asynchronous remote fetch and first-result latency semantics, measured in `CH006_RUNTIME_JOIN_PREFETCH.md` |
-| CH-G07 | SQL `GROUPING SETS`, `ROLLUP`, and `CUBE` over typed grouped execution | Differential result tests including empty groups |
+| CH-G07 | Audited/implemented: SQL `GROUPING SETS`, `ROLLUP`, and `CUBE` semantics through the existing grouped executor; a typed single-pass optimization remains future work | Focused result tests, grouping-identifier validation, race run, and benchmark in `CH007_GROUPING_SETS.md` and `BENCHMARK.md` |
 | CH-G08 | Explicit aggregate totals rows with a stable totals policy | Verify totals with LIMIT, HAVING, and empty input |
 | CH-G09 | Per-group `LIMIT BY` execution using bounded top-k state | Compare memory with full sort and tie ordering |
 | CH-G10 | General `ARRAY JOIN` expansion with typed nested columns | Validate NULL, empty-array, and row-multiplication semantics |

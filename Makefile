@@ -27911,3 +27911,27 @@ commit-ch-g06-rejection:
 .PHONY: push-ch-g06-rejection
 push-ch-g06-rejection:
 	bash scripts/push-ch-g06-rejection.sh
+.PHONY: inspect-idea-gap-catalog
+inspect-idea-gap-catalog:
+	bash scripts/inspect-idea-gap-catalog.sh
+.PHONY: inspect-ch-g07-context
+inspect-ch-g07-context:
+	bash scripts/inspect-ch-g07-context.sh
+.PHONY: m270-ch-g07-test
+m270-ch-g07-test:
+	bash scripts/m270-ch-g07-test.sh
+.PHONY: m271-ch-g07-benchmark
+m271-ch-g07-benchmark:
+	bash scripts/m271-ch-g07-benchmark.sh
+.PHONY: m272-ch-g07-race
+m272-ch-g07-race:
+	bash scripts/m272-ch-g07-race.sh
+.PHONY: stage-ch-g07-audit
+stage-ch-g07-audit:
+	bash scripts/stage-ch-g07-audit.sh
+.PHONY: commit-ch-g07-audit
+commit-ch-g07-audit:
+	bash scripts/commit-ch-g07-audit.sh
+.PHONY: push-ch-g07-audit
+push-ch-g07-audit:
+	bash scripts/push-ch-g07-audit.sh
