@@ -23729,6 +23729,9 @@ cleanup-hatrie-tmp-after-test:
 	bash ./scripts/cleanup-hatrie-build-tmp.sh verify
 	bash ./scripts/cleanup-hatrie-tmp-safe.sh plan
 	bash ./scripts/cleanup-hatrie-tmp-safe.sh apply
+	bash ./scripts/cleanup-go-build-tmp-safe.sh plan
+	bash ./scripts/cleanup-go-build-tmp-safe.sh apply
+	bash ./scripts/cleanup-go-build-tmp-safe.sh clean-metadata
 	bash ./scripts/audit-hatrie-tmp.sh clean-metadata
 .PHONY: test-hatrie-tmp-cleanup
 test-hatrie-tmp-cleanup:
@@ -25747,3 +25750,49 @@ commit-t207:
 
 push-t207:
 	@bash scripts/push-t207.sh
+
+.PHONY: benchmark-t208-before
+benchmark-t208-before:
+	@bash scripts/benchmark-t208-before.sh
+
+.PHONY: test-t208
+test-t208:
+	@bash scripts/test-t208.sh
+
+.PHONY: format-t208 test-t208-package race-t208 vet-t208 benchmark-t208
+format-t208:
+	@bash scripts/format-t208.sh
+
+test-t208-package:
+	@bash scripts/test-t208-package.sh
+
+race-t208:
+	@bash scripts/race-t208.sh
+
+vet-t208:
+	@bash scripts/vet-t208.sh
+
+benchmark-t208:
+	@bash scripts/benchmark-t208.sh
+
+.PHONY: stage-t208 commit-t208 push-t208
+stage-t208:
+	@bash scripts/stage-t208.sh
+
+commit-t208:
+	@bash scripts/commit-t208.sh
+
+push-t208:
+	@bash scripts/push-t208.sh
+
+.PHONY: preview-go-build-tmp-clean apply-go-build-tmp-clean cleanup-go-build-tmp-after-test
+preview-go-build-tmp-clean:
+	@bash scripts/cleanup-go-build-tmp-safe.sh plan
+
+apply-go-build-tmp-clean:
+	@bash scripts/cleanup-go-build-tmp-safe.sh apply
+
+cleanup-go-build-tmp-after-test:
+	@bash scripts/cleanup-go-build-tmp-safe.sh plan
+	@bash scripts/cleanup-go-build-tmp-safe.sh apply
+	@bash scripts/cleanup-go-build-tmp-safe.sh clean-metadata

@@ -75,7 +75,7 @@ func SingleNodeTopology(nodeID, address string) ClusterTopology {
 		nodeID = "local"
 	}
 	return ClusterTopology{Version: Version, Mode: TopologyModeFullReplica, Self: nodeID,
-		Nodes: []TopologyNode{{ID: nodeID, Address: strings.TrimSpace(address), Role: "primary"}}}
+		Nodes: []TopologyNode{{ID: nodeID, Address: strings.TrimSpace(address), Role: TopologyRolePrimary}}}
 }
 
 // LoadTopology reads and validates one topology JSON file.
@@ -146,6 +146,7 @@ func Normalize(topology ClusterTopology) (ClusterTopology, error) {
 	out := Clone(topology)
 	out.Self = strings.TrimSpace(out.Self)
 	nodeIDs := map[string]bool{}
+	nodeRoles := map[string]string{}
 	for idx := range out.Nodes {
 		node := &out.Nodes[idx]
 		node.ID, node.Address, node.GRPCAddress, node.Role = strings.TrimSpace(node.ID), strings.TrimSpace(node.Address), strings.TrimSpace(node.GRPCAddress), strings.TrimSpace(node.Role)
@@ -161,10 +162,11 @@ func Normalize(topology ClusterTopology) (ClusterTopology, error) {
 		if nodeIDs[node.ID] {
 			return ClusterTopology{}, errors.New("hatriecache: duplicate topology node")
 		}
-		if node.Role != "" && node.Role != "primary" && node.Role != "replica" {
-			return ClusterTopology{}, errors.New("hatriecache: topology node role must be primary or replica")
+		if !isValidTopologyRole(node.Role) {
+			return ClusterTopology{}, errors.New("hatriecache: topology node role must be primary, replica, or anonymous")
 		}
 		nodeIDs[node.ID] = true
+		nodeRoles[node.ID] = node.Role
 	}
 	if out.Self != "" && !nodeIDs[out.Self] {
 		return ClusterTopology{}, errors.New("hatriecache: topology self node is not registered")
@@ -178,6 +180,9 @@ func Normalize(topology ClusterTopology) (ClusterTopology, error) {
 		}
 		if !nodeIDs[shard.Primary] {
 			return ClusterTopology{}, errors.New("hatriecache: topology shard primary is not registered")
+		}
+		if nodeRoles[shard.Primary] == TopologyRoleAnonymous {
+			return ClusterTopology{}, errors.New("hatriecache: anonymous topology node cannot be a shard primary")
 		}
 		shardIDs[shard.ID] = true
 		replicas, seen := make([]string, 0, len(shard.Replicas)), map[string]bool{shard.Primary: true}

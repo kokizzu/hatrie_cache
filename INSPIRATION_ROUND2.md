@@ -149,7 +149,7 @@ operator control remain the preferred deployment model.
 - [x] T205 LSN-based replication lag and apply-throughput metrics; see [T205_LSN_REPLICATION_METRICS.md](T205_LSN_REPLICATION_METRICS.md) and [BENCHMARK.md](BENCHMARK.md#t205-lsn-replication-metrics).
 - [x] T206 Deterministic replica bootstrap and join workflow; see [T206_DETERMINISTIC_REPLICA_BOOTSTRAP.md](T206_DETERMINISTIC_REPLICA_BOOTSTRAP.md) and [BENCHMARK.md](BENCHMARK.md#t206-deterministic-replica-bootstrap).
 - [x] T207 Replica eviction, rejoin, and stale-state recovery protocol; see [T207_REPLICA_RECOVERY.md](T207_REPLICA_RECOVERY.md) and [BENCHMARK.md](BENCHMARK.md#t207-replica-eviction-rejoin-and-stale-state-recovery).
-- [ ] T208 Anonymous replicas that do not participate in quorum decisions.
+- [x] T208 Anonymous replicas that do not participate in quorum decisions; see [T208_ANONYMOUS_REPLICAS.md](T208_ANONYMOUS_REPLICAS.md) and [BENCHMARK.md](BENCHMARK.md#t208-anonymous-replicas).
 - [ ] T209 Relay/applier backpressure when a replica falls behind.
 - [ ] T210 Master-master conflict hooks with source and sequence context.
 - [ ] T211 Configurable WAL synchronization modes with durability reporting.

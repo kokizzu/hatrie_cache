@@ -23,6 +23,7 @@ var (
 type JournalWriteQuorumOptions struct {
 	Enabled  bool
 	Voters   []string
+	Members  []QuorumMember
 	Required int
 }
 
@@ -69,9 +70,11 @@ type JournalWriteQuorumDecision struct {
 // The callback must bind its response to the supplied node and proposal.
 type JournalWriteQuorumAcknowledgeFunc func(context.Context, string, JournalWriteQuorumProposal) (JournalWriteQuorumAcknowledgement, error)
 
-// NewJournalWriteQuorum creates an opt-in journal write quorum. Disabled
-// options return a reusable no-op coordinator and intentionally skip all
-// voter validation, preserving the default-off configuration path.
+// NewJournalWriteQuorum creates an opt-in journal write quorum. Members may be
+// used to derive voters while explicitly excluding anonymous replicas. Voters
+// remains supported for compatibility. Disabled options return a reusable
+// no-op coordinator and intentionally skip all voter validation, preserving
+// the default-off configuration path.
 func NewJournalWriteQuorum(options JournalWriteQuorumOptions) (*JournalWriteQuorum, error) {
 	if !options.Enabled {
 		return &JournalWriteQuorum{}, nil
@@ -189,16 +192,28 @@ func (quorum *JournalWriteQuorum) beginDecision(proposal JournalWriteQuorumPropo
 }
 
 func normalizeJournalWriteQuorumOptions(options JournalWriteQuorumOptions) ([]string, int, error) {
-	if len(options.Voters) == 0 {
-		return nil, 0, ErrJournalWriteQuorumInvalidOptions
-	}
-	voters := make([]string, len(options.Voters))
-	for index, voter := range options.Voters {
-		voter = strings.TrimSpace(voter)
-		if voter == "" || journalWriteQuorumVoterIndex(voters[:index], voter) >= 0 {
+	var voters []string
+	if len(options.Members) > 0 {
+		if len(options.Voters) > 0 {
 			return nil, 0, ErrJournalWriteQuorumInvalidOptions
 		}
-		voters[index] = voter
+		derived, err := QuorumVoterIDs(options.Members)
+		if err != nil {
+			return nil, 0, fmt.Errorf("%w: %v", ErrJournalWriteQuorumInvalidOptions, err)
+		}
+		voters = derived
+	} else {
+		if len(options.Voters) == 0 {
+			return nil, 0, ErrJournalWriteQuorumInvalidOptions
+		}
+		voters = make([]string, len(options.Voters))
+		for index, voter := range options.Voters {
+			voter = strings.TrimSpace(voter)
+			if voter == "" || journalWriteQuorumVoterIndex(voters[:index], voter) >= 0 {
+				return nil, 0, ErrJournalWriteQuorumInvalidOptions
+			}
+			voters[index] = voter
+		}
 	}
 	required := options.Required
 	if required == 0 {

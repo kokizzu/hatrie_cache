@@ -4982,3 +4982,13 @@ It does not perform network transfer, WAL replay, topology mutation, or
 consensus; those remain caller-owned. See
 [T207_REPLICA_RECOVERY.md](T207_REPLICA_RECOVERY.md) and the measurements in
 [BENCHMARK.md](BENCHMARK.md#t207-replica-eviction-rejoin-and-stale-state-recovery).
+
+## Anonymous Replicas
+
+`hatTopology` accepts an explicit `anonymous` node role and
+`QuorumVoterIDs` filters it from quorum membership. Journal write quorums can
+also use typed `hatReplication.QuorumMember` values through
+`JournalWriteQuorumOptions.Members`; anonymous members may replicate but never
+count toward read or write quorum acknowledgements. See
+[T208_ANONYMOUS_REPLICAS.md](T208_ANONYMOUS_REPLICAS.md) and the measurements in
+[BENCHMARK.md](BENCHMARK.md#t208-anonymous-replicas).

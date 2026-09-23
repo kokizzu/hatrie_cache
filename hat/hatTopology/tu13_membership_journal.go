@@ -391,7 +391,7 @@ func normalizeMembershipNode(node TopologyNode) (TopologyNode, error) {
 	node.Region = strings.TrimSpace(node.Region)
 	node.MaintenanceReason = strings.TrimSpace(node.MaintenanceReason)
 	node.MaintenanceSince = strings.TrimSpace(node.MaintenanceSince)
-	if node.ID == "" || (node.Role != "" && node.Role != "primary" && node.Role != "replica") {
+	if node.ID == "" || !isValidTopologyRole(node.Role) {
 		return TopologyNode{}, ErrMembershipJournalInvalidChange
 	}
 	if !node.Maintenance {

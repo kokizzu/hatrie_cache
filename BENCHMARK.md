@@ -36452,3 +36452,58 @@ BenchmarkTU207RecoverySnapshot-32  733.1 ns/op  88 B/op  2 allocs/op
 BenchmarkTU207RecoverySnapshot-32  773.7 ns/op  88 B/op  2 allocs/op
 BenchmarkTU207RecoverySnapshot-32  705.6 ns/op  88 B/op  2 allocs/op
 ```
+
+## T208: Anonymous Replicas
+
+T208 adds an explicit anonymous role and a typed quorum-member configuration.
+Anonymous nodes remain available for ordinary replication, but are excluded
+from voter IDs, cannot be shard primaries, and cannot satisfy a journal write
+quorum. The existing explicit `Voters` path is retained as the compatibility
+control.
+
+### Summary
+
+| Benchmark | Median | Memory | Improvement / tradeoff |
+| --- | ---: | ---: | --- |
+| Existing explicit voters, setup | 94.09 ns/op | 96 B/op; 2 allocs/op | Compatibility control; no regression |
+| Typed members, setup | 143.0 ns/op | 96 B/op; 2 allocs/op | 1.52x slower one-time setup; no memory increase |
+| Existing explicit voters, evaluate | 64.56 ns/op | 0 B/op; 0 allocs/op | Compatibility control |
+| Typed members, evaluate | 63.83 ns/op | 0 B/op; 0 allocs/op | Within noise; no steady-state allocation cost |
+| Typed member filter | 74.94 ns/op | 32 B/op; 1 alloc/op | One-time sorted voter extraction |
+
+The setup cost is paid once at configuration construction. The optimization
+removed unused capacity for anonymous entries and reduced the typed setup from
+roughly 203 ns/op and 112 B/op to 143 ns/op and 96 B/op. The filter fell from
+roughly 128 ns/op and 48 B/op to 75 ns/op and 32 B/op. The before benchmark
+for the legacy path was 96.13 ns/op, 96 B/op, and 2 allocs/op for setup, and
+62.71 ns/op, 0 B/op, and 0 allocs/op for evaluation.
+
+### Raw T208 Output
+
+```text
+BenchmarkTU208ExistingExplicitWriteQuorumSetup-32  94.09 ns/op  96 B/op  2 allocs/op
+BenchmarkTU208ExistingExplicitWriteQuorumSetup-32  94.29 ns/op  96 B/op  2 allocs/op
+BenchmarkTU208ExistingExplicitWriteQuorumSetup-32  91.59 ns/op  96 B/op  2 allocs/op
+BenchmarkTU208ExistingExplicitWriteQuorumSetup-32  91.65 ns/op  96 B/op  2 allocs/op
+BenchmarkTU208ExistingExplicitWriteQuorumSetup-32  95.35 ns/op  96 B/op  2 allocs/op
+BenchmarkTU208ExistingExplicitWriteQuorumEvaluate-32  63.74 ns/op  0 B/op  0 allocs/op
+BenchmarkTU208ExistingExplicitWriteQuorumEvaluate-32  64.66 ns/op  0 B/op  0 allocs/op
+BenchmarkTU208ExistingExplicitWriteQuorumEvaluate-32  64.56 ns/op  0 B/op  0 allocs/op
+BenchmarkTU208ExistingExplicitWriteQuorumEvaluate-32  64.55 ns/op  0 B/op  0 allocs/op
+BenchmarkTU208ExistingExplicitWriteQuorumEvaluate-32  64.81 ns/op  0 B/op  0 allocs/op
+BenchmarkTU208AnonymousMemberWriteQuorumSetup-32  150.3 ns/op  96 B/op  2 allocs/op
+BenchmarkTU208AnonymousMemberWriteQuorumSetup-32  143.0 ns/op  96 B/op  2 allocs/op
+BenchmarkTU208AnonymousMemberWriteQuorumSetup-32  144.7 ns/op  96 B/op  2 allocs/op
+BenchmarkTU208AnonymousMemberWriteQuorumSetup-32  139.9 ns/op  96 B/op  2 allocs/op
+BenchmarkTU208AnonymousMemberWriteQuorumSetup-32  140.1 ns/op  96 B/op  2 allocs/op
+BenchmarkTU208AnonymousMemberWriteQuorumEvaluate-32  62.51 ns/op  0 B/op  0 allocs/op
+BenchmarkTU208AnonymousMemberWriteQuorumEvaluate-32  62.57 ns/op  0 B/op  0 allocs/op
+BenchmarkTU208AnonymousMemberWriteQuorumEvaluate-32  64.15 ns/op  0 B/op  0 allocs/op
+BenchmarkTU208AnonymousMemberWriteQuorumEvaluate-32  63.83 ns/op  0 B/op  0 allocs/op
+BenchmarkTU208AnonymousMemberWriteQuorumEvaluate-32  68.55 ns/op  0 B/op  0 allocs/op
+BenchmarkTU208AnonymousMemberFilter-32  74.13 ns/op  32 B/op  1 allocs/op
+BenchmarkTU208AnonymousMemberFilter-32  73.33 ns/op  32 B/op  1 allocs/op
+BenchmarkTU208AnonymousMemberFilter-32  80.14 ns/op  32 B/op  1 allocs/op
+BenchmarkTU208AnonymousMemberFilter-32  75.90 ns/op  32 B/op  1 allocs/op
+BenchmarkTU208AnonymousMemberFilter-32  74.94 ns/op  32 B/op  1 allocs/op
+```
