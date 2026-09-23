@@ -26470,3 +26470,50 @@ commit-t227:
 	bash scripts/commit-t227.sh
 push-t227:
 	bash scripts/push-t227.sh
+.PHONY: benchmark-t228-before
+benchmark-t228-before:
+	bash scripts/benchmark-t228-before.sh
+
+.PHONY: test-t228
+test-t228:
+	bash scripts/test-t228.sh
+
+.PHONY: test-t228-package
+test-t228-package:
+	bash scripts/test-t228-package.sh
+
+.PHONY: format-t228
+format-t228:
+	bash scripts/format-t228.sh
+
+.PHONY: benchmark-t228
+benchmark-t228:
+	bash scripts/benchmark-t228.sh
+
+.PHONY: race-t228
+race-t228:
+	bash scripts/race-t228.sh
+
+.PHONY: vet-t228
+vet-t228:
+	bash scripts/vet-t228.sh
+
+.PHONY: verify-t228
+verify-t228:
+	bash scripts/verify-t228.sh
+
+.PHONY: review-t228
+review-t228:
+	bash scripts/review-t228.sh
+
+.PHONY: stage-t228
+stage-t228:
+	bash scripts/stage-t228.sh
+
+.PHONY: commit-t228
+commit-t228:
+	bash scripts/commit-t228.sh
+
+.PHONY: push-t228
+push-t228:
+	bash scripts/push-t228.sh

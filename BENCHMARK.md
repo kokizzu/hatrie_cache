@@ -37305,3 +37305,27 @@ Samples: five `-benchmem` runs; table values are medians.
 The new checks add 20.1 ns/op, about 10.4% CPU, and no allocations. The
 validation is explicit and read-only; callers pay it to prevent malformed
 typed or nullable values from reaching later constraint evaluation.
+
+<a id="t228-tuple-format-compatible-readers"></a>
+## T228 Tuple Format Compatible Readers
+
+`TupleFormatReader` provides an explicit, prefix-safe adapter for additive
+schema versions. The benchmark keeps an exact `TupleFormat.Unpack` control,
+measures the exact-shape reader fast path, and separately measures reading a
+two-field legacy tuple into a four-field target with a default and nullable
+suffix. The last row is a migration workload, not a direct speed comparison
+with the four-field control.
+
+Command: `make benchmark-t228` (`-benchmem -count=5 -cpu=1`)
+Platform: Linux/amd64, AMD Ryzen 9 5950X
+Samples: five runs; table values are medians from the same invocation.
+
+| Workload | Median CPU | Memory | Relative CPU |
+| --- | ---: | ---: | ---: |
+| Existing exact `TupleFormat.Unpack` control | 308.2 ns/op | 456 B/op, 3 allocs/op | 1.00x |
+| Exact-shape `TupleFormatReader` | 309.6 ns/op | 456 B/op, 3 allocs/op | 1.005x |
+| Two-field legacy tuple to four-field target | 244.3 ns/op | 456 B/op, 2 allocs/op | migration-only workload |
+
+The exact-shape reader adds about 1.4 ns/op, or 0.5% CPU, with no memory or
+allocation increase. The compatibility path validates all source fields,
+resolves target suffix fields in order, and rejects unsafe schema changes.

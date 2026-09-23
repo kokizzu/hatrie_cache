@@ -62,6 +62,27 @@ returns `ErrTupleFormatNoCompatibleVersion` when no exact match exists. Multiple
 common names are resolved deterministically by highest version, then name, then
 fingerprint bytes.
 
+## Compatible Readers
+
+Exact capability negotiation stays conservative because tuple bytes are
+positional. For an intentional rolling schema change, construct a reader from
+the known source and target definitions:
+
+```go
+reader, err := targetFormat.ReaderFor(sourceFormat)
+if err != nil {
+	return err
+}
+values, err := reader.UnpackVersioned(versionedTuple)
+```
+
+`TupleFormatReader` permits only additive trailing fields with safe defaults,
+generators, or nullability. It rejects field renames, reordering, type changes,
+nullable-to-required changes, missing required fields, wrong source field
+counts, and wrong versioned envelopes. See
+[T228_TUPLE_FORMAT_COMPATIBILITY.md](T228_TUPLE_FORMAT_COMPATIBILITY.md) for
+the complete contract and measurements.
+
 ## Wire Format
 
 `MarshalTupleFormatCapabilities` is the default compact representation:
