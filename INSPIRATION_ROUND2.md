@@ -166,7 +166,7 @@ operator control remain the preferred deployment model.
 - [x] T222 Multikey indexes over array-valued fields; existing SQL JSON and typed tuple implementations were reverified with focused tests, race/vet checks, and fresh lookup/build benchmarks. See [T222_MULTIKEY_INDEX.md](T222_MULTIKEY_INDEX.md) and [BENCHMARK.md](BENCHMARK.md#t222-multikey-array-indexes).
 - [x] T223 Functional indexes over derived field expressions; existing typed, conditional, materialized SQL, and `LOWER(...)` expression paths were reverified with focused tests, race/vet checks, and fresh before/after benchmarks. See [T223_FUNCTIONAL_INDEX.md](T223_FUNCTIONAL_INDEX.md) and [BENCHMARK.md](BENCHMARK.md#t223-functional-indexes-over-derived-expressions).
 - [x] T224 Partial indexes restricted by a validated predicate; existing conditional functional/catalog and SQL JSON partial-index paths were reverified with focused tests, race/vet checks, and fresh selective-refresh benchmarks. See [T224_PARTIAL_INDEX.md](T224_PARTIAL_INDEX.md) and [BENCHMARK.md](BENCHMARK.md#t224-partial-indexes-with-validated-predicates).
-- [ ] T225 Covering indexes that return projected fields without row fetches.
+- [x] T225 Covering indexes that return projected fields without row fetches; existing TR-024 materialized SQL covering indexes were reverified with resolver/query tests, race/vet checks, and fresh projection benchmarks. See [T225_COVERING_INDEX.md](T225_COVERING_INDEX.md) and [BENCHMARK.md](BENCHMARK.md#t225-covering-indexes-for-projected-fields).
 - [ ] T226 Explicit index hints with planner diagnostics.
 - [ ] T227 Per-field nullability, type, and constraint validation.
 - [ ] T228 Tuple-format schema versions with compatible readers.

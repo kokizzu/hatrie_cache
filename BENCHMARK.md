@@ -26844,6 +26844,37 @@ The gain depends on predicate selectivity. Predicate validation and maintenance
 remain part of the write/rebuild path, while failed or canceled rebuilds must
 not publish partial state.
 
+<a id="t225-covering-indexes-for-projected-fields"></a>
+## T225: Covering Indexes For Projected Fields
+
+This round-2 item was already implemented by the TR-024 materialized covering
+index path. The fresh run compares an indexed query that fetches its source row
+with a covering query that returns projected fields directly from the index.
+Runs used `-benchmem -count=5` on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Workload | ns/op | bytes/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Source-fetch indexed projection | 760,333 | 567,264 | 1,909 | 1.00x |
+| Covering indexed projection | 250,510 | 284,265 | 1,283 | 3.04x faster; 2.00x fewer bytes; 1.49x fewer allocations |
+
+Raw output:
+
+```text
+BenchmarkTR024BaselineIndexedProjection-32  680332 ns/op 567276 B/op 1909 allocs/op
+BenchmarkTR024BaselineIndexedProjection-32  790944 ns/op 567264 B/op 1909 allocs/op
+BenchmarkTR024BaselineIndexedProjection-32  760333 ns/op 567264 B/op 1909 allocs/op
+BenchmarkTR024BaselineIndexedProjection-32  785333 ns/op 567259 B/op 1909 allocs/op
+BenchmarkTR024BaselineIndexedProjection-32  746972 ns/op 567257 B/op 1909 allocs/op
+BenchmarkTR024CoveringIndexedProjection-32  233152 ns/op 284265 B/op 1283 allocs/op
+BenchmarkTR024CoveringIndexedProjection-32  253961 ns/op 284263 B/op 1283 allocs/op
+BenchmarkTR024CoveringIndexedProjection-32  260277 ns/op 284265 B/op 1283 allocs/op
+BenchmarkTR024CoveringIndexedProjection-32  233181 ns/op 284264 B/op 1283 allocs/op
+BenchmarkTR024CoveringIndexedProjection-32  250510 ns/op 284265 B/op 1283 allocs/op
+```
+
+The per-query improvement does not include retained covering-payload memory or
+source-update maintenance; those costs are why the feature remains opt-in.
+
 <a id="tr-026-typed-bitmap-index"></a>
 ## TR-026 Typed Bitmap Index
 
