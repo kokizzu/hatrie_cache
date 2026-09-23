@@ -6,16 +6,18 @@ import "time"
 // compaction callback attempts. Scheduled, Completed, and Failed count task
 // executions, not duplicate Schedule calls that were coalesced.
 type CompactionSchedulerStats struct {
-	MaxConcurrent        int    `json:"max_concurrent"`
-	Pending              int    `json:"pending"`
-	Running              int    `json:"running"`
-	Scheduled            uint64 `json:"scheduled"`
-	Completed            uint64 `json:"completed"`
-	Failed               uint64 `json:"failed"`
-	IOBytesPerSecond     uint64 `json:"io_bytes_per_second"`
-	IOThrottledTaskCount uint64 `json:"io_throttled_task_count"`
-	IOThrottledBytes     uint64 `json:"io_throttled_bytes"`
-	IOWaitNanoseconds    uint64 `json:"io_wait_nanoseconds"`
+	MaxConcurrent         int    `json:"max_concurrent"`
+	Pending               int    `json:"pending"`
+	Running               int    `json:"running"`
+	PendingEstimatedBytes uint64 `json:"pending_estimated_bytes"`
+	RunningEstimatedBytes uint64 `json:"running_estimated_bytes"`
+	Scheduled             uint64 `json:"scheduled"`
+	Completed             uint64 `json:"completed"`
+	Failed                uint64 `json:"failed"`
+	IOBytesPerSecond      uint64 `json:"io_bytes_per_second"`
+	IOThrottledTaskCount  uint64 `json:"io_throttled_task_count"`
+	IOThrottledBytes      uint64 `json:"io_throttled_bytes"`
+	IOWaitNanoseconds     uint64 `json:"io_wait_nanoseconds"`
 }
 
 // CompactionSchedulerAgeStats is a point-in-time view of the oldest queued
@@ -35,20 +37,31 @@ func (scheduler *CompactionScheduler) Stats() CompactionSchedulerStats {
 	scheduler.mu.Lock()
 	defer scheduler.mu.Unlock()
 	var ioStats compactionIOThrottleStats
-	if scheduler.ioState != nil {
+	if scheduler.ioState != nil && scheduler.ioState.throttle != nil {
 		ioStats = scheduler.ioState.throttle.stats()
 	}
+	pending := len(scheduler.pending)
+	if scheduler.priorityPending != nil {
+		pending = len(scheduler.priorityPending)
+		for name := range scheduler.running {
+			if _, queued := scheduler.priorityPending[name]; queued {
+				pending--
+			}
+		}
+	}
 	return CompactionSchedulerStats{
-		MaxConcurrent:        scheduler.maxConcurrent,
-		Pending:              len(scheduler.pending),
-		Running:              len(scheduler.running),
-		Scheduled:            scheduler.scheduled,
-		Completed:            scheduler.completed,
-		Failed:               scheduler.failed,
-		IOBytesPerSecond:     ioStats.bytesPerSecond,
-		IOThrottledTaskCount: ioStats.throttledTasks,
-		IOThrottledBytes:     ioStats.throttledBytes,
-		IOWaitNanoseconds:    ioStats.waitNanoseconds,
+		MaxConcurrent:         scheduler.maxConcurrent,
+		Pending:               pending,
+		Running:               len(scheduler.running),
+		PendingEstimatedBytes: scheduler.pendingBytes,
+		RunningEstimatedBytes: scheduler.runningBytes,
+		Scheduled:             scheduler.scheduled,
+		Completed:             scheduler.completed,
+		Failed:                scheduler.failed,
+		IOBytesPerSecond:      ioStats.bytesPerSecond,
+		IOThrottledTaskCount:  ioStats.throttledTasks,
+		IOThrottledBytes:      ioStats.throttledBytes,
+		IOWaitNanoseconds:     ioStats.waitNanoseconds,
 	}
 }
 

@@ -76,6 +76,9 @@ type CompactionArrangementDiagnostics struct {
 	TotalObservations     uint64             `json:"total_observations"`
 	SuccessfulCompactions uint64             `json:"successful_compactions"`
 	FailedCompactions     uint64             `json:"failed_compactions"`
+	SuccessfulInputBytes  uint64             `json:"successful_input_bytes"`
+	SuccessfulOutputBytes uint64             `json:"successful_output_bytes"`
+	WriteAmplification    float64            `json:"write_amplification"`
 	Last                  CompactionSample   `json:"last"`
 	History               []CompactionSample `json:"history"`
 }
@@ -85,6 +88,8 @@ type compactionDiagnosticsEntry struct {
 	totalObservations     uint64
 	successfulCompactions uint64
 	failedCompactions     uint64
+	successfulInputBytes  uint64
+	successfulOutputBytes uint64
 	last                  CompactionSample
 	history               []CompactionSample
 	nextHistoryIndex      int
@@ -200,6 +205,8 @@ func (diagnostics *CompactionDiagnostics) Record(observation CompactionObservati
 	entry.totalObservations = saturatingCompactionDiagnosticsIncrement(entry.totalObservations)
 	if observation.Outcome == CompactionSucceeded {
 		entry.successfulCompactions = saturatingCompactionDiagnosticsIncrement(entry.successfulCompactions)
+		entry.successfulInputBytes = saturatingCompactionBytes(entry.successfulInputBytes, observation.InputBytes)
+		entry.successfulOutputBytes = saturatingCompactionBytes(entry.successfulOutputBytes, observation.OutputBytes)
 	} else {
 		entry.failedCompactions = saturatingCompactionDiagnosticsIncrement(entry.failedCompactions)
 	}
@@ -234,6 +241,9 @@ func (diagnostics *CompactionDiagnostics) Snapshot() []CompactionArrangementDiag
 			TotalObservations:     entry.totalObservations,
 			SuccessfulCompactions: entry.successfulCompactions,
 			FailedCompactions:     entry.failedCompactions,
+			SuccessfulInputBytes:  entry.successfulInputBytes,
+			SuccessfulOutputBytes: entry.successfulOutputBytes,
+			WriteAmplification:    compactionWriteAmplification(entry.successfulInputBytes, entry.successfulOutputBytes),
 			Last:                  entry.last,
 			History:               diagnostics.copyHistory(entry),
 		}
@@ -306,4 +316,18 @@ func saturatingCompactionDiagnosticsIncrement(value uint64) uint64 {
 		return value
 	}
 	return value + 1
+}
+
+func saturatingCompactionBytes(left, right uint64) uint64 {
+	if ^uint64(0)-left < right {
+		return ^uint64(0)
+	}
+	return left + right
+}
+
+func compactionWriteAmplification(inputBytes, outputBytes uint64) float64 {
+	if inputBytes == 0 {
+		return 0
+	}
+	return float64(outputBytes) / float64(inputBytes)
 }

@@ -24827,3 +24827,45 @@ commit-c238:
 
 push-c238:
 	@bash scripts/push-c238.sh
+.PHONY: benchmark-c239
+
+benchmark-c239:
+	@bash scripts/benchmark-c239.sh
+
+.PHONY: test-c239-package
+
+test-c239-package:
+	@bash scripts/test-c239-package.sh
+
+.PHONY: race-c239
+
+race-c239:
+	@bash scripts/race-c239.sh
+
+.PHONY: vet-c239
+
+vet-c239:
+	@bash scripts/vet-c239.sh
+
+.PHONY: verify-c239-docs
+
+verify-c239-docs:
+	@bash scripts/verify-c239-docs.sh
+
+.PHONY: commit-c239
+
+commit-c239:
+	@bash scripts/commit-c239.sh
+
+.PHONY: push-c239
+
+push-c239:
+	@bash scripts/push-c239.sh
+.PHONY: test-c239
+
+test-c239:
+	@bash scripts/test-c239.sh
+.PHONY: format-c239
+
+format-c239:
+	@bash scripts/format-c239.sh

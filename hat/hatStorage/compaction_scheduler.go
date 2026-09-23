@@ -91,6 +91,8 @@ type CompactionScheduler struct {
 	scheduled       uint64
 	completed       uint64
 	failed          uint64
+	pendingBytes    uint64
+	runningBytes    uint64
 	ioState         *compactionSchedulerIOState
 }
 
@@ -143,8 +145,10 @@ func (scheduler *CompactionScheduler) schedule(name string, ioBytes uint64, run 
 		}
 		if pending, exists := scheduler.priorityPending[name]; exists {
 			if ioBytes > pending.estimatedBytes {
+				scheduler.pendingBytes = saturatingCompactionBytes(scheduler.pendingBytes, ioBytes-pending.estimatedBytes)
 				pending.estimatedBytes = ioBytes
 				scheduler.priorityPending[name] = pending
+				scheduler.setIOEstimateLocked(name, ioBytes)
 			}
 			return false, nil
 		}
@@ -157,6 +161,7 @@ func (scheduler *CompactionScheduler) schedule(name string, ioBytes uint64, run 
 			enqueuedAt:     scheduler.now(),
 		}
 		scheduler.setIOEstimateLocked(name, ioBytes)
+		scheduler.pendingBytes = saturatingCompactionBytes(scheduler.pendingBytes, ioBytes)
 		return true, nil
 	}
 	if scheduler.pending == nil {
@@ -173,6 +178,7 @@ func (scheduler *CompactionScheduler) schedule(name string, ioBytes uint64, run 
 	}
 	scheduler.pending[name] = compactionPendingTask{run: run}
 	scheduler.setIOEstimateLocked(name, ioBytes)
+	scheduler.pendingBytes = saturatingCompactionBytes(scheduler.pendingBytes, ioBytes)
 	return true, nil
 }
 
@@ -227,6 +233,7 @@ func (scheduler *CompactionScheduler) scheduleWithPriority(name string, priority
 			pending.priority = priority
 		}
 		if ioBytes > pending.estimatedBytes {
+			scheduler.pendingBytes = saturatingCompactionBytes(scheduler.pendingBytes, ioBytes-pending.estimatedBytes)
 			pending.estimatedBytes = ioBytes
 		}
 		scheduler.priorityPending[name] = pending
@@ -243,6 +250,7 @@ func (scheduler *CompactionScheduler) scheduleWithPriority(name string, priority
 		enqueuedAt:     scheduler.now(),
 	}
 	scheduler.setIOEstimateLocked(name, ioBytes)
+	scheduler.pendingBytes = saturatingCompactionBytes(scheduler.pendingBytes, ioBytes)
 	return true, nil
 }
 
@@ -334,7 +342,9 @@ func (scheduler *CompactionScheduler) Run(ctx context.Context) (CompactionRun, e
 	failures := make([]error, 0)
 	for index, task := range tasks {
 		err := errs[index]
+		estimatedBytes := scheduler.ioEstimateLocked(task.name)
 		delete(scheduler.running, task.name)
+		scheduler.runningBytes = subtractCompactionBytes(scheduler.runningBytes, estimatedBytes)
 		_, priorityTask := scheduler.priorityPending[task.name]
 		if err == nil {
 			if priorityTask {
@@ -353,16 +363,19 @@ func (scheduler *CompactionScheduler) Run(ctx context.Context) (CompactionRun, e
 			if scheduler.oldestPending.IsZero() {
 				scheduler.oldestPending = scheduler.now()
 			}
+			scheduler.pendingBytes = saturatingCompactionBytes(scheduler.pendingBytes, estimatedBytes)
 		} else if scheduler.priorityPending != nil {
 			if scheduler.oldestPending.IsZero() {
 				scheduler.oldestPending = scheduler.now()
 			}
-			scheduler.priorityPending[task.name] = compactionPriorityTask{run: task.run}
+			scheduler.priorityPending[task.name] = compactionPriorityTask{run: task.run, estimatedBytes: estimatedBytes}
+			scheduler.pendingBytes = saturatingCompactionBytes(scheduler.pendingBytes, estimatedBytes)
 		} else if _, alreadyQueued := scheduler.pending[task.name]; !alreadyQueued {
 			if scheduler.oldestPending.IsZero() {
 				scheduler.oldestPending = scheduler.now()
 			}
 			scheduler.pending[task.name] = compactionPendingTask{run: task.run}
+			scheduler.pendingBytes = saturatingCompactionBytes(scheduler.pendingBytes, estimatedBytes)
 		}
 		failures = append(failures, fmt.Errorf("compaction task %q: %w", task.name, err))
 	}
@@ -442,7 +455,9 @@ func (scheduler *CompactionScheduler) finishSingle(task compactionTask, err erro
 	scheduler.mu.Lock()
 	defer scheduler.mu.Unlock()
 	scheduler.oldestRunning = time.Time{}
+	estimatedBytes := scheduler.ioEstimateLocked(task.name)
 	delete(scheduler.running, task.name)
+	scheduler.runningBytes = subtractCompactionBytes(scheduler.runningBytes, estimatedBytes)
 	_, priorityTask := scheduler.priorityPending[task.name]
 	if err == nil {
 		if priorityTask {
@@ -460,16 +475,19 @@ func (scheduler *CompactionScheduler) finishSingle(task compactionTask, err erro
 		if scheduler.oldestPending.IsZero() {
 			scheduler.oldestPending = scheduler.now()
 		}
+		scheduler.pendingBytes = saturatingCompactionBytes(scheduler.pendingBytes, estimatedBytes)
 	} else if scheduler.priorityPending != nil {
 		if scheduler.oldestPending.IsZero() {
 			scheduler.oldestPending = scheduler.now()
 		}
-		scheduler.priorityPending[task.name] = compactionPriorityTask{run: task.run}
+		scheduler.priorityPending[task.name] = compactionPriorityTask{run: task.run, estimatedBytes: estimatedBytes}
+		scheduler.pendingBytes = saturatingCompactionBytes(scheduler.pendingBytes, estimatedBytes)
 	} else if _, alreadyQueued := scheduler.pending[task.name]; !alreadyQueued {
 		if scheduler.oldestPending.IsZero() {
 			scheduler.oldestPending = scheduler.now()
 		}
 		scheduler.pending[task.name] = compactionPendingTask{run: task.run}
+		scheduler.pendingBytes = saturatingCompactionBytes(scheduler.pendingBytes, estimatedBytes)
 	}
 	if len(scheduler.priorityPending) == 0 {
 		scheduler.priorityPending = nil
@@ -492,6 +510,8 @@ func (scheduler *CompactionScheduler) takePending() ([]compactionTask, bool) {
 			}
 			tasks = append(tasks, compactionTask{name: name, run: pending.run})
 			scheduler.running[name] = struct{}{}
+			scheduler.pendingBytes = subtractCompactionBytes(scheduler.pendingBytes, pending.estimatedBytes)
+			scheduler.runningBytes = saturatingCompactionBytes(scheduler.runningBytes, pending.estimatedBytes)
 		}
 		scheduler.oldestPending = time.Time{}
 		scheduler.oldestRunning = startedAt
@@ -504,9 +524,12 @@ func (scheduler *CompactionScheduler) takePending() ([]compactionTask, bool) {
 	startedAt := scheduler.now()
 	tasks := make([]compactionTask, 0, len(scheduler.pending))
 	for name, pending := range scheduler.pending {
+		estimatedBytes := scheduler.ioEstimateLocked(name)
 		tasks = append(tasks, compactionTask{name: name, run: pending.run})
 		delete(scheduler.pending, name)
 		scheduler.running[name] = struct{}{}
+		scheduler.pendingBytes = subtractCompactionBytes(scheduler.pendingBytes, estimatedBytes)
+		scheduler.runningBytes = saturatingCompactionBytes(scheduler.runningBytes, estimatedBytes)
 	}
 	scheduler.oldestPending = time.Time{}
 	scheduler.oldestRunning = startedAt
@@ -527,8 +550,11 @@ func (scheduler *CompactionScheduler) executeTask(ctx context.Context, task comp
 }
 
 func (scheduler *CompactionScheduler) setIOEstimateLocked(name string, bytes uint64) {
-	if scheduler.ioState == nil || bytes == 0 {
+	if bytes == 0 {
 		return
+	}
+	if scheduler.ioState == nil {
+		scheduler.ioState = &compactionSchedulerIOState{}
 	}
 	if scheduler.ioState.estimates == nil {
 		scheduler.ioState.estimates = make(map[string]uint64)
@@ -536,6 +562,13 @@ func (scheduler *CompactionScheduler) setIOEstimateLocked(name string, bytes uin
 	if previous := scheduler.ioState.estimates[name]; bytes > previous {
 		scheduler.ioState.estimates[name] = bytes
 	}
+}
+
+func subtractCompactionBytes(total, bytes uint64) uint64 {
+	if bytes >= total {
+		return 0
+	}
+	return total - bytes
 }
 
 func (scheduler *CompactionScheduler) ioEstimate(name string) uint64 {

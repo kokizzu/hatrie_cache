@@ -35619,3 +35619,13 @@ Submit/wait retained 446 B/op and 7 allocs/op. The absolute snapshot cost is
 about 103 ns in this fixture; callers that poll status should account for the
 expected clock and estimate calculation cost. See
 [C238_MUTATION_PROGRESS.md](C238_MUTATION_PROGRESS.md).
+## C239: Compaction Metrics
+
+Command: `make benchmark-c239`; five benchmark samples per row; median on AMD Ryzen 9 5950X, Linux/amd64.
+
+| Feature benchmarked | Before C239 | After C239 | Relative cost | Memory / allocations |
+| --- | ---: | ---: | ---: | ---: |
+| Compaction diagnostics record | 38.59 ns/op | 38.82 ns/op | 1.006x (+0.6%) | 0 B/op, 0 allocs/op |
+| Compaction scheduler stats read | 7.651 ns/op | 8.190 ns/op | 1.070x (+7.0%) | 0 B/op, 0 allocs/op |
+
+The initial map-scan implementation was measured at about 58 ns/op for the stats read and was discarded. The final version keeps counters updated on queue transitions, avoiding a per-read scan.
