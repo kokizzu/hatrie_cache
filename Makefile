@@ -23366,6 +23366,30 @@ m209-commit:
 m209-push:
 	bash scripts/m209-push.sh
 
+m210-format:
+	bash scripts/m210-format.sh
+
+m210-test:
+	bash scripts/m210-test.sh
+
+m210-race:
+	bash scripts/m210-race.sh
+
+m210-vet:
+	bash scripts/m210-vet.sh
+
+m210-benchmark:
+	bash scripts/m210-benchmark.sh
+
+m210-stage:
+	bash scripts/m210-stage.sh
+
+m210-commit:
+	bash scripts/m210-commit.sh
+
+m210-push:
+	bash scripts/m210-push.sh
+
 .PHONY: audit-hatrie-tmp-inventory
 audit-hatrie-tmp-inventory:
 	bash scripts/audit-hatrie-tmp-inventory.sh

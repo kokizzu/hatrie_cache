@@ -37814,6 +37814,33 @@ successful materialized, streamed, or paged read; the focused tests also cover
 failed reads, initial subscription frontiers, change notifications, and
 heartbeats.
 
+## M210: Retained Logical State
+
+Workload: four-row exact historical `AS OF` queries and retained-state
+publishes, measured with `go test -bench '^BenchmarkM210' -benchmem -count=5`
+on Linux/amd64 with an AMD Ryzen 9 5950X. The direct provider is a deliberately
+minimal baseline that returns the same rows without retaining versions.
+
+| Workload | Median ns/op | B/op | allocs/op | Relative CPU vs direct provider |
+| --- | ---: | ---: | ---: | ---: |
+| Retained-state `AS OF` query | 10,935 | 7,320 | 30 | 1.31x |
+| Direct provider `AS OF` query | 8,360 | 5,912 | 23 | 1.00x |
+| Four-row retained-state publish | 1,979 | 2,016 | 12 | n/a |
+
+Raw samples, in ns/op:
+
+```text
+BenchmarkM210RetainedStateAsOfQuery: 11763, 11084, 10385, 10644, 10935
+BenchmarkM210DirectProviderAsOfQuery: 8368, 8143, 8316, 8360, 8389
+BenchmarkM210RetainedStatePublish: 2182, 2070, 1979, 1865, 1930
+```
+
+The retained query costs 30.7% more CPU, 23.8% more bytes, and seven more
+allocations than the trivial provider baseline. This is an explicit capability
+tradeoff for exact bounded historical versions, immutable caller isolation, and
+copy-on-write reuse of unchanged source rows. The implementation does not
+replace durable storage or replication.
+
 # M208: Differential Multiplicity Folding
 
 Workload: 512 distinct query-subscription rows, each repeated as four signed

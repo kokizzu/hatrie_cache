@@ -4508,6 +4508,7 @@ lookup and preparation tradeoff is documented in
 - Materialize-style current-state upsert envelopes with stable keys, row images, delete tombstones, and cached Debezium key serialization: [M206_UPSERT_ENVELOPES.md](M206_UPSERT_ENVELOPES.md), with CPU and allocation measurements in [BENCHMARK.md#m206-stable-upsert-envelopes](BENCHMARK.md#m206-stable-upsert-envelopes)
 - [Debezium changefeed adapter](M207_DEBEZIUM_CHANGEFEED.md)
 - Opt-in monotone logical frontiers for SQL historical reads and query streams: [M209_LOGICAL_FRONTIERS.md](M209_LOGICAL_FRONTIERS.md), with CPU and allocation measurements in [BENCHMARK.md#m209-monotone-logical-frontiers](BENCHMARK.md#m209-monotone-logical-frontiers)
+- Bounded copy-on-write retained logical state for exact historical SQL `AS OF` reads and subscriptions: [M210_RETAINED_STATE.md](M210_RETAINED_STATE.md), with measured retention overhead in [BENCHMARK.md#m210-retained-logical-state](BENCHMARK.md#m210-retained-logical-state)
 - Differential multiplicity folding for repeated query-subscription CDC deltas: [M208_DIFFERENTIAL_MULTIPLICITY.md](M208_DIFFERENTIAL_MULTIPLICITY.md), with the CPU, memory, and allocation tradeoff in [BENCHMARK.md#m208-differential-multiplicity-folding](BENCHMARK.md#m208-differential-multiplicity-folding)
 
 - [Compact request templates](T239_COMPACT_REQUEST_TEMPLATE.md)
