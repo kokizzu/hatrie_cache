@@ -32,6 +32,27 @@ var (
 	ErrLSMTableCompaction    = errors.New("hatDataStructure: lsm table compaction limit exceeded")
 )
 
+// LSMCompactionMode controls when immutable runs are compacted.
+type LSMCompactionMode uint8
+
+const (
+	// LSMCompactionImmediate preserves the original synchronous compaction
+	// behavior and is the zero-value default.
+	LSMCompactionImmediate LSMCompactionMode = iota
+	// LSMCompactionDeferred leaves compaction to CompactIfNeeded or an
+	// LSMCompactionScheduler owned by the caller.
+	LSMCompactionDeferred
+)
+
+// LSMCompactionPolicy configures the compaction trigger. Deferred mode uses
+// the run threshold by default and can additionally compact when older-run
+// wire bytes reach MaxDebtBytes. Either positive threshold is sufficient.
+type LSMCompactionPolicy struct {
+	Mode         LSMCompactionMode
+	MaxDebtRuns  int
+	MaxDebtBytes int
+}
+
 // LSMTableOptions configures the opt-in Vinyl-style mutable table. The
 // memtable is copied into immutable SealedUpsertRun values at the threshold;
 // all zero fields use bounded defaults.
@@ -40,6 +61,7 @@ type LSMTableOptions struct {
 	MaxRunsBeforeCompaction int
 	RunOptions              SealedUpsertRunOptions
 	MaxWireBytes            int
+	Compaction              LSMCompactionPolicy
 }
 
 type lsmTableConfig struct {
@@ -48,6 +70,7 @@ type lsmTableConfig struct {
 	maxWireBytes            int
 	runOptions              SealedUpsertRunOptions
 	runConfig               sealedUpsertRunConfig
+	compaction              LSMCompactionPolicy
 }
 
 type lsmTableRecord struct {
@@ -58,9 +81,16 @@ type lsmTableRecord struct {
 // LSMTableStats describes the current mutable and immutable portions without
 // materializing all keys.
 type LSMTableStats struct {
-	MemtableRecords int
-	RunCount        int
-	ImmutableBytes  int
+	MemtableRecords       int
+	MemtableBytes         int
+	MemtableTombstones    int
+	RunCount              int
+	ImmutableBytes        int
+	CompactionDebtRuns    int
+	CompactionDebtBytes   int
+	CompactionCount       uint64
+	CompactionInputBytes  uint64
+	CompactionOutputBytes uint64
 }
 
 // LSMTable is an opt-in bounded log-structured table for byte values. Runs
@@ -73,6 +103,13 @@ type LSMTable struct {
 	config   lsmTableConfig
 	memtable map[string]lsmTableRecord
 	runs     []*SealedUpsertRun
+
+	memtableBytes      int
+	memtableTombstones int
+
+	compactionCount       uint64
+	compactionInputBytes  uint64
+	compactionOutputBytes uint64
 }
 
 // NewLSMTable creates an empty table with copied, validated options.
@@ -104,14 +141,14 @@ func (table *LSMTable) Put(key string, value []byte) error {
 	if table.memtable == nil {
 		table.memtable = make(map[string]lsmTableRecord)
 	}
-	table.memtable[key] = lsmTableRecord{value: append([]byte(nil), value...)}
+	table.replaceMemtableRecordLocked(key, lsmTableRecord{value: append([]byte(nil), value...)})
 	if len(table.memtable) < table.config.memtableMaxRecords {
 		return nil
 	}
 	if err := table.flushMemtableLocked(); err != nil {
 		return err
 	}
-	if len(table.runs) >= table.config.maxRunsBeforeCompaction {
+	if table.config.compaction.Mode == LSMCompactionImmediate && len(table.runs) >= table.config.maxRunsBeforeCompaction {
 		return table.compactRunsLocked()
 	}
 	return nil
@@ -131,14 +168,14 @@ func (table *LSMTable) Delete(key string) error {
 	if table.memtable == nil {
 		table.memtable = make(map[string]lsmTableRecord)
 	}
-	table.memtable[key] = lsmTableRecord{deleted: true}
+	table.replaceMemtableRecordLocked(key, lsmTableRecord{deleted: true})
 	if len(table.memtable) < table.config.memtableMaxRecords {
 		return nil
 	}
 	if err := table.flushMemtableLocked(); err != nil {
 		return err
 	}
-	if len(table.runs) >= table.config.maxRunsBeforeCompaction {
+	if table.config.compaction.Mode == LSMCompactionImmediate && len(table.runs) >= table.config.maxRunsBeforeCompaction {
 		return table.compactRunsLocked()
 	}
 	return nil
@@ -196,6 +233,38 @@ func (table *LSMTable) Compact() error {
 	return table.compactRunsLocked()
 }
 
+// CompactionDue reports whether the current immutable runs meet the deferred
+// compaction policy. Pending memtable records are not included until Flush or
+// CompactIfNeeded seals them.
+func (table *LSMTable) CompactionDue() bool {
+	if table == nil {
+		return false
+	}
+	table.mu.RLock()
+	defer table.mu.RUnlock()
+	return table.compactionDueLocked()
+}
+
+// CompactIfNeeded flushes pending writes and performs one compaction when the
+// configured deferred policy is due. It returns false when no work was due.
+func (table *LSMTable) CompactIfNeeded() (bool, error) {
+	if table == nil {
+		return false, ErrLSMTableNil
+	}
+	table.mu.Lock()
+	defer table.mu.Unlock()
+	if err := table.flushMemtableLocked(); err != nil {
+		return false, err
+	}
+	if !table.compactionDueLocked() {
+		return false, nil
+	}
+	if err := table.compactRunsLocked(); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
 // Stats returns bounded structural counters for the current table.
 func (table *LSMTable) Stats() LSMTableStats {
 	if table == nil {
@@ -203,7 +272,17 @@ func (table *LSMTable) Stats() LSMTableStats {
 	}
 	table.mu.RLock()
 	defer table.mu.RUnlock()
-	stats := LSMTableStats{MemtableRecords: len(table.memtable), RunCount: len(table.runs)}
+	stats := LSMTableStats{
+		MemtableRecords:       len(table.memtable),
+		MemtableBytes:         table.memtableBytes,
+		MemtableTombstones:    table.memtableTombstones,
+		RunCount:              len(table.runs),
+		CompactionDebtRuns:    table.compactionDebtRunsLocked(),
+		CompactionDebtBytes:   table.compactionDebtBytesLocked(),
+		CompactionCount:       table.compactionCount,
+		CompactionInputBytes:  table.compactionInputBytes,
+		CompactionOutputBytes: table.compactionOutputBytes,
+	}
 	for _, run := range table.runs {
 		if run != nil {
 			stats.ImmutableBytes += run.WireBytes()
@@ -304,7 +383,10 @@ func UnmarshalLSMTable(data []byte, options LSMTableOptions) (*LSMTable, error) 
 }
 
 func normalizeLSMTableOptions(options LSMTableOptions) (lsmTableConfig, error) {
-	if options.MemtableMaxRecords < 0 || options.MaxRunsBeforeCompaction < 0 || options.MaxWireBytes < 0 {
+	if options.MemtableMaxRecords < 0 || options.MaxRunsBeforeCompaction < 0 || options.MaxWireBytes < 0 || options.Compaction.MaxDebtRuns < 0 || options.Compaction.MaxDebtBytes < 0 {
+		return lsmTableConfig{}, ErrLSMTableOptions
+	}
+	if options.Compaction.Mode != LSMCompactionImmediate && options.Compaction.Mode != LSMCompactionDeferred {
 		return lsmTableConfig{}, ErrLSMTableOptions
 	}
 	runConfig, err := normalizeSealedUpsertRunOptions(options.RunOptions)
@@ -322,6 +404,10 @@ func normalizeLSMTableOptions(options LSMTableOptions) (lsmTableConfig, error) {
 	if maxRuns == 0 {
 		maxRuns = DefaultLSMTableMaxRunsBeforeCompaction
 	}
+	compaction := options.Compaction
+	if compaction.Mode == LSMCompactionDeferred && compaction.MaxDebtRuns == 0 {
+		compaction.MaxDebtRuns = maxRuns
+	}
 	maxWireBytes := options.MaxWireBytes
 	if maxWireBytes == 0 {
 		maxWireBytes = DefaultLSMTableMaxWireBytes
@@ -335,6 +421,7 @@ func normalizeLSMTableOptions(options LSMTableOptions) (lsmTableConfig, error) {
 		maxWireBytes:            maxWireBytes,
 		runOptions:              options.RunOptions,
 		runConfig:               runConfig,
+		compaction:              compaction,
 	}, nil
 }
 
@@ -356,6 +443,8 @@ func (table *LSMTable) flushMemtableLocked() error {
 	}
 	table.runs = append([]*SealedUpsertRun{run}, table.runs...)
 	table.memtable = make(map[string]lsmTableRecord)
+	table.memtableBytes = 0
+	table.memtableTombstones = 0
 	return nil
 }
 
@@ -363,11 +452,13 @@ func (table *LSMTable) compactRunsLocked() error {
 	if len(table.runs) < 2 {
 		return nil
 	}
+	inputBytes := uint64(0)
 	latest := make(map[string]SealedUpsertRecord)
 	for _, run := range table.runs {
 		if run == nil {
 			return ErrLSMTableCorrupt
 		}
+		inputBytes += uint64(run.WireBytes())
 		run.ForEach(func(record SealedUpsertRecord) {
 			if _, exists := latest[record.Key]; !exists {
 				latest[record.Key] = record
@@ -386,6 +477,7 @@ func (table *LSMTable) compactRunsLocked() error {
 	}
 	if len(records) == 0 {
 		table.runs = nil
+		table.recordCompactionLocked(inputBytes, 0)
 		return nil
 	}
 	run, err := NewSealedUpsertRun(records, table.config.runOptions)
@@ -393,7 +485,58 @@ func (table *LSMTable) compactRunsLocked() error {
 		return ErrLSMTableCompaction
 	}
 	table.runs = []*SealedUpsertRun{run}
+	table.recordCompactionLocked(inputBytes, uint64(run.WireBytes()))
 	return nil
+}
+
+func (table *LSMTable) replaceMemtableRecordLocked(key string, record lsmTableRecord) {
+	if previous, exists := table.memtable[key]; exists {
+		table.memtableBytes -= len(key) + len(previous.value)
+		if previous.deleted {
+			table.memtableTombstones--
+		}
+	}
+	table.memtable[key] = record
+	table.memtableBytes += len(key) + len(record.value)
+	if record.deleted {
+		table.memtableTombstones++
+	}
+}
+
+func (table *LSMTable) compactionDueLocked() bool {
+	if table.config.compaction.Mode != LSMCompactionDeferred {
+		return false
+	}
+	debtRuns := table.compactionDebtRunsLocked()
+	debtBytes := table.compactionDebtBytesLocked()
+	return (table.config.compaction.MaxDebtRuns > 0 && debtRuns >= table.config.compaction.MaxDebtRuns) ||
+		(table.config.compaction.MaxDebtBytes > 0 && debtBytes >= table.config.compaction.MaxDebtBytes)
+}
+
+func (table *LSMTable) compactionDebtRunsLocked() int {
+	if len(table.runs) < 2 {
+		return 0
+	}
+	return len(table.runs) - 1
+}
+
+func (table *LSMTable) compactionDebtBytesLocked() int {
+	if len(table.runs) < 2 {
+		return 0
+	}
+	debtBytes := 0
+	for _, run := range table.runs[1:] {
+		if run != nil {
+			debtBytes += run.WireBytes()
+		}
+	}
+	return debtBytes
+}
+
+func (table *LSMTable) recordCompactionLocked(inputBytes, outputBytes uint64) {
+	table.compactionCount++
+	table.compactionInputBytes += inputBytes
+	table.compactionOutputBytes += outputBytes
 }
 
 func equalLSMTableMagic(value []byte) bool {

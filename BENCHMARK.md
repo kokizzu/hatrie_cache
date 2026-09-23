@@ -36862,3 +36862,55 @@ BenchmarkT215StorageSpace/VinylPutGet-32                     10057575  107.9 ns/
 BenchmarkT215StorageSpace/VinylPutGet-32                     10767861  104.2 ns/op  24 B/op  3 allocs/op
 BenchmarkT215StorageSpace/VinylPutGet-32                     11154992  106.3 ns/op  24 B/op  3 allocs/op
 ```
+
+## T216: Vinyl-Style Compaction Scheduling
+
+This benchmark uses the same fixed workload for every row: eight immutable
+runs, 128 records per run, 128-byte memtable threshold, and a 2-run immediate
+compaction threshold. The benchmark excludes table construction from timing.
+The machine was Linux/amd64 on an AMD Ryzen 9 5950X; each final row has three
+`-benchmem` samples.
+
+| Workload | Median ns/op | B/op | allocs/op | Relative to final immediate | Interpretation |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Before immediate writes | 336,161 | 233,419 | 2,644 | 1.006x | Existing control |
+| Final immediate writes | 334,231 | 233,418 | 2,644 | 1.00x | Default behavior, effectively unchanged |
+| Deferred writes only | 238,063 | 149,369 | 2,109 | 1.40x faster | Does not pay compaction during writes |
+| Deferred writes plus compaction | 399,061 | 320,794 | 2,788 | 1.19x slower | Full work including deferred maintenance |
+
+The deferred write-only row is not a free memory reduction: its lower `B/op`
+is cumulative allocation during the timed path, not retained heap. The
+accounting fixture retained four runs with `176` immutable wire bytes, of which
+`132` bytes were older-run debt. After compaction it retained one `80`-byte
+run. Deferred mode therefore improves write latency only when the caller can
+accept temporary run/read amplification and schedule the later CPU and memory
+work.
+
+### Raw T216 Output
+
+```text
+Before, make benchmark-t216-before:
+BenchmarkT216CompactionBaselineImmediateWrites-32    3656  336161 ns/op  233419 B/op  2644 allocs/op
+BenchmarkT216CompactionBaselineImmediateWrites-32    3321  335695 ns/op  233418 B/op  2644 allocs/op
+BenchmarkT216CompactionBaselineImmediateWrites-32    3688  343920 ns/op  233420 B/op  2644 allocs/op
+
+After, make benchmark-t216:
+BenchmarkT216CompactionBaselineImmediateWrites-32    3682  334231 ns/op  233419 B/op  2644 allocs/op
+BenchmarkT216CompactionBaselineImmediateWrites-32    3417  336973 ns/op  233417 B/op  2644 allocs/op
+BenchmarkT216CompactionBaselineImmediateWrites-32    3427  329236 ns/op  233418 B/op  2644 allocs/op
+BenchmarkT216CompactionDeferredWrites-32             5428  220670 ns/op  149369 B/op  2109 allocs/op
+BenchmarkT216CompactionDeferredWrites-32             5074  238063 ns/op  149369 B/op  2109 allocs/op
+BenchmarkT216CompactionDeferredWrites-32             4828  245406 ns/op  149369 B/op  2109 allocs/op
+BenchmarkT216CompactionDeferredWritesWithCompact-32  2716  402207 ns/op  320795 B/op  2788 allocs/op
+BenchmarkT216CompactionDeferredWritesWithCompact-32  2764  396858 ns/op  320794 B/op  2788 allocs/op
+BenchmarkT216CompactionDeferredWritesWithCompact-32  2800  399061 ns/op  320794 B/op  2788 allocs/op
+PASS
+ok  hatrie_cache/hat/hatDataStructure  13.526s
+```
+
+Raw structural accounting from `make report-t216-accounting`:
+
+```text
+deferred accounting: runs=4 debt-runs=3 immutable-bytes=176 debt-bytes=132
+compacted accounting: runs=1 debt-runs=0 immutable-bytes=80 debt-bytes=0 count=1 input-bytes=176 output-bytes=80
+```

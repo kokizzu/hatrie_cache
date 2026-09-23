@@ -157,7 +157,7 @@ operator control remain the preferred deployment model.
 - [x] T213 Scheduled snapshots with checkpoint manifests and atomic publication; see [T213_SCHEDULED_SNAPSHOTS.md](T213_SCHEDULED_SNAPSHOTS.md) and [BENCHMARK.md](BENCHMARK.md#t213-scheduled-snapshot-checkpoints).
 - [x] T214 Streaming snapshots for replicas without a shared filesystem; see [T214_SNAPSHOT_STREAMING.md](T214_SNAPSHOT_STREAMING.md) and [BENCHMARK.md](BENCHMARK.md#t214-streaming-snapshots).
 - [x] T215 Per-space memtx versus on-disk storage policy; see [T215_PER_SPACE_STORAGE_POLICY.md](T215_PER_SPACE_STORAGE_POLICY.md) and [BENCHMARK.md](BENCHMARK.md#t215-per-space-storage-policy).
-- [ ] T216 Vinyl-style run compaction scheduling and space accounting.
+- [x] T216 Vinyl-style run compaction scheduling and space accounting; see [T216_COMPACTION_SCHEDULING.md](T216_COMPACTION_SCHEDULING.md) and [BENCHMARK.md](BENCHMARK.md#t216-vinyl-style-compaction-scheduling).
 - [ ] T217 In-memory columnar storage for analytical spaces.
 - [ ] T218 Multi-part TREE indexes with ordered prefix and range scans.
 - [ ] T219 HASH indexes for constant-time exact lookups.

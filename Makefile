@@ -26082,3 +26082,41 @@ commit-t215:
 
 push-t215:
 	bash scripts/push-t215.sh
+.PHONY: test-t216 benchmark-t216-before format-t216
+test-t216:
+	bash scripts/test-t216.sh
+
+benchmark-t216-before:
+	bash scripts/benchmark-t216-before.sh
+
+format-t216:
+	bash scripts/format-t216.sh
+
+.PHONY: test-t216-package race-t216 vet-t216 benchmark-t216
+test-t216-package:
+	bash scripts/test-t216-package.sh
+
+race-t216:
+	bash scripts/race-t216.sh
+
+vet-t216:
+	bash scripts/vet-t216.sh
+
+benchmark-t216:
+	bash scripts/benchmark-t216.sh
+
+report-t216-accounting:
+	bash scripts/report-t216-accounting.sh
+
+.PHONY: verify-t216-scope stage-t216 commit-t216 push-t216
+verify-t216-scope:
+	bash scripts/verify-t216-scope.sh
+
+stage-t216:
+	bash scripts/stage-t216.sh
+
+commit-t216:
+	bash scripts/commit-t216.sh
+
+push-t216:
+	bash scripts/push-t216.sh
