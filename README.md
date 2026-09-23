@@ -4972,3 +4972,13 @@ bootstrap lifecycle, and rejects duplicate or stale source metadata. Snapshot
 transfer, replay, and topology publication remain caller-owned. See
 [T206_DETERMINISTIC_REPLICA_BOOTSTRAP.md](T206_DETERMINISTIC_REPLICA_BOOTSTRAP.md)
 and its measurements in [BENCHMARK.md](BENCHMARK.md#t206-deterministic-replica-bootstrap).
+
+## Replica Recovery and Rejoin
+
+`hatReplication.NewReplicaRecoveryProtocol` retains bounded node incarnation
+state and eviction tombstones, rejects stale or future state, and produces a
+generation-fenced decision to resume WAL replay or bootstrap from a snapshot.
+It does not perform network transfer, WAL replay, topology mutation, or
+consensus; those remain caller-owned. See
+[T207_REPLICA_RECOVERY.md](T207_REPLICA_RECOVERY.md) and the measurements in
+[BENCHMARK.md](BENCHMARK.md#t207-replica-eviction-rejoin-and-stale-state-recovery).

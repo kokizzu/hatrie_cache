@@ -36404,3 +36404,51 @@ BenchmarkTU206PlanReplicaBootstrap-32  2835 ns/op  0 B/op  0 allocs/op
 BenchmarkTU206PlanReplicaBootstrap-32  2586 ns/op  0 B/op  0 allocs/op
 BenchmarkTU206PlanReplicaBootstrap-32  2846 ns/op  0 B/op  0 allocs/op
 ```
+
+## T207: Replica Eviction, Rejoin, and Stale-State Recovery
+
+T207 adds a bounded recovery registry with tombstones for evicted node
+incarnations. The hot decision path is allocation-free. A detached registry
+snapshot allocates only its result slice and remains bounded by the configured
+node limit.
+
+### Summary
+
+| Benchmark | Median | Memory | Improvement / tradeoff |
+| --- | ---: | ---: | --- |
+| Existing one-node membership snapshot | 151.9 ns/op | 352 B/op; 2 allocs/op | Baseline control-plane snapshot; not a semantic equivalent |
+| Existing one-node membership marshal | 1.093 us/op | 1,122 B/op; 5 allocs/op | Baseline serialized membership state; not a semantic equivalent |
+| T207 rejoin decision | 68.53 ns/op | 0 B/op; 0 allocs/op | 2.22x lower CPU than the existing snapshot baseline; zero allocation |
+| T207 recovery snapshot | 733.1 ns/op | 88 B/op; 2 allocs/op | 4.83x higher CPU but 75% fewer bytes than the existing snapshot baseline; same allocation count |
+
+The decision and membership snapshot rows are not interchangeable APIs. The
+comparison shows the cost of adding the recovery checks, not a claim that one
+operation can replace the other. The recovery snapshot retains more lifecycle
+state and is sorted and detached, so its higher CPU cost is expected; its
+lower bytes/op comes from the compact recovery record rather than the richer
+topology node representation.
+
+### Raw T207 Output
+
+```text
+BenchmarkTU13MembershipSnapshot-32  149.0 ns/op  352 B/op  2 allocs/op
+BenchmarkTU13MembershipSnapshot-32  156.3 ns/op  352 B/op  2 allocs/op
+BenchmarkTU13MembershipSnapshot-32  149.7 ns/op  352 B/op  2 allocs/op
+BenchmarkTU13MembershipSnapshot-32  155.0 ns/op  352 B/op  2 allocs/op
+BenchmarkTU13MembershipSnapshot-32  151.9 ns/op  352 B/op  2 allocs/op
+BenchmarkTU13MembershipMarshal-32  1093 ns/op  1122 B/op  5 allocs/op
+BenchmarkTU13MembershipMarshal-32  1036 ns/op  1122 B/op  5 allocs/op
+BenchmarkTU13MembershipMarshal-32  1047 ns/op  1122 B/op  5 allocs/op
+BenchmarkTU13MembershipMarshal-32  1116 ns/op  1122 B/op  5 allocs/op
+BenchmarkTU13MembershipMarshal-32  1107 ns/op  1122 B/op  5 allocs/op
+BenchmarkTU207EvaluateRejoin-32  68.44 ns/op  0 B/op  0 allocs/op
+BenchmarkTU207EvaluateRejoin-32  67.35 ns/op  0 B/op  0 allocs/op
+BenchmarkTU207EvaluateRejoin-32  68.53 ns/op  0 B/op  0 allocs/op
+BenchmarkTU207EvaluateRejoin-32  70.50 ns/op  0 B/op  0 allocs/op
+BenchmarkTU207EvaluateRejoin-32  72.33 ns/op  0 B/op  0 allocs/op
+BenchmarkTU207RecoverySnapshot-32  719.5 ns/op  88 B/op  2 allocs/op
+BenchmarkTU207RecoverySnapshot-32  762.3 ns/op  88 B/op  2 allocs/op
+BenchmarkTU207RecoverySnapshot-32  733.1 ns/op  88 B/op  2 allocs/op
+BenchmarkTU207RecoverySnapshot-32  773.7 ns/op  88 B/op  2 allocs/op
+BenchmarkTU207RecoverySnapshot-32  705.6 ns/op  88 B/op  2 allocs/op
+```

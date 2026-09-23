@@ -25713,3 +25713,37 @@ commit-t206:
 
 push-t206:
 	@bash scripts/push-t206.sh
+
+
+
+.PHONY: format-t207 benchmark-t207-before benchmark-t207 test-t207 test-t207-package race-t207 vet-t207
+format-t207:
+	@bash scripts/format-t207.sh
+
+benchmark-t207-before:
+	@bash scripts/benchmark-t207-before.sh
+
+benchmark-t207:
+	@bash scripts/benchmark-t207.sh
+
+test-t207:
+	@bash scripts/test-t207.sh
+
+test-t207-package:
+	@bash scripts/test-t207-package.sh
+
+race-t207:
+	@bash scripts/race-t207.sh
+
+vet-t207:
+	@bash scripts/vet-t207.sh
+
+.PHONY: stage-t207 commit-t207 push-t207
+stage-t207:
+	@bash scripts/stage-t207.sh
+
+commit-t207:
+	@bash scripts/commit-t207.sh
+
+push-t207:
+	@bash scripts/push-t207.sh
