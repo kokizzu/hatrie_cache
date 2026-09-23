@@ -36914,3 +36914,45 @@ Raw structural accounting from `make report-t216-accounting`:
 deferred accounting: runs=4 debt-runs=3 immutable-bytes=176 debt-bytes=132
 compacted accounting: runs=1 debt-runs=0 immutable-bytes=80 debt-bytes=0 count=1 input-bytes=176 output-bytes=80
 ```
+
+## T217: Columnar Batch Ingest
+
+This benchmark compares the existing row-wise `TypedTable.Upsert` path with
+`TypedTable.AppendColumnarBatch` for a 2,048-row batch containing string,
+int64, and bool columns. Table construction is included in both paths. The
+batch path validates the complete block before one write-lock section and
+still emits one ordered changefeed record per inserted row. Each final row is
+one of five `-benchmem` samples on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Workload | Median ns/op | B/op | allocs/op | Relative |
+| --- | ---: | ---: | ---: | ---: |
+| Row-wise `Upsert` control | 1,495,132 | 1,806,735 | 4,228 | 1.00x |
+| `AppendColumnarBatch` | 1,170,323 | 1,553,082 | 2,177 | 1.28x faster |
+
+The batch API reduces cumulative allocation by about 14% and allocation count
+by about 1.94x. This is a write-path optimization, not a new duplicate table
+engine: the existing typed table remains columnar in memory. The tradeoff is
+intentional append-only semantics; existing keys must use `Upsert`.
+
+### Raw T217 Output
+
+```text
+Before, make benchmark-t217-before:
+BenchmarkT217TypedTableRowUpsertBaseline-32    164  1850242 ns/op  1806813 B/op  4228 allocs/op
+BenchmarkT217TypedTableRowUpsertBaseline-32    100  2034172 ns/op  1806758 B/op  4228 allocs/op
+BenchmarkT217TypedTableRowUpsertBaseline-32    152  1508562 ns/op  1806735 B/op  4228 allocs/op
+BenchmarkT217TypedTableRowUpsertBaseline-32    100  2077442 ns/op  1806750 B/op  4228 allocs/op
+BenchmarkT217TypedTableRowUpsertBaseline-32    146  1586335 ns/op  1806737 B/op  4228 allocs/op
+
+After, make benchmark-t217:
+BenchmarkT217TypedTableRowUpsertBaseline-32      148  1495132 ns/op  1806745 B/op  4228 allocs/op
+BenchmarkT217TypedTableRowUpsertBaseline-32      166  1517405 ns/op  1806733 B/op  4228 allocs/op
+BenchmarkT217TypedTableRowUpsertBaseline-32      157  1711138 ns/op  1806738 B/op  4228 allocs/op
+BenchmarkT217TypedTableRowUpsertBaseline-32      156  1484794 ns/op  1806735 B/op  4228 allocs/op
+BenchmarkT217TypedTableRowUpsertBaseline-32      176  1478460 ns/op  1806733 B/op  4228 allocs/op
+BenchmarkT217TypedTableAppendColumnarBatch-32    198  1209917 ns/op  1553082 B/op  2177 allocs/op
+BenchmarkT217TypedTableAppendColumnarBatch-32    195  1170323 ns/op  1553083 B/op  2177 allocs/op
+BenchmarkT217TypedTableAppendColumnarBatch-32    205  1148628 ns/op  1553083 B/op  2177 allocs/op
+BenchmarkT217TypedTableAppendColumnarBatch-32    200  1213057 ns/op  1553081 B/op  2177 allocs/op
+BenchmarkT217TypedTableAppendColumnarBatch-32    200  1159740 ns/op  1553081 B/op  2177 allocs/op
+```
