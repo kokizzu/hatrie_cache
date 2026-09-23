@@ -26280,3 +26280,39 @@ commit-t220:
 .PHONY: push-t220
 push-t220:
 	bash scripts/push-t220.sh
+
+.PHONY: format-t221
+format-t221:
+	bash scripts/format-t221.sh
+
+.PHONY: test-t221
+test-t221:
+	bash scripts/test-t221.sh
+
+.PHONY: benchmark-t221
+benchmark-t221:
+	bash scripts/benchmark-t221.sh
+
+.PHONY: race-t221
+race-t221:
+	bash scripts/race-t221.sh
+
+.PHONY: vet-t221
+vet-t221:
+	bash scripts/vet-t221.sh
+
+.PHONY: verify-t221-scope
+verify-t221-scope:
+	bash scripts/verify-t221-scope.sh
+
+.PHONY: stage-t221
+stage-t221:
+	bash scripts/stage-t221.sh
+
+.PHONY: commit-t221
+commit-t221:
+	bash scripts/commit-t221.sh
+
+.PHONY: push-t221
+push-t221:
+	bash scripts/push-t221.sh

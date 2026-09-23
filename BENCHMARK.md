@@ -26660,6 +26660,33 @@ BenchmarkMU015CatalogSourceStatus-32     59604 20131 ns/op 16336 B/op 87 allocs/
 BenchmarkMU015CatalogSourceStatus-32     60884 20248 ns/op 16336 B/op 87 allocs/op
 ```
 
+<a id="t221-typed-bitsetbitmap-index"></a>
+## T221: Typed BITSET/Bitmap Index
+
+This current-branch benchmark compares a linear scan with the typed bitmap
+index for 100,000 rows and 16 repeating values. `BitmapIndex.Visit` streams
+matching row IDs without a result allocation; the build row is the one-time
+derived-index cost. Each row has five samples on Linux/amd64 with an AMD Ryzen
+9 5950X.
+
+| Workload | Median ns/op | B/op | allocs/op | Relative |
+| --- | ---: | ---: | ---: | ---: |
+| Linear scan | 49,225 | 0 | 0 | 1.00x |
+| Bitmap `Visit` | 11,983 | 0 | 0 | **4.11x faster** |
+| Bitmap build | 5,477,014 | 672,300 | 440 | one-time cost |
+
+The fixture retains `200,000` bitmap bytes. The index is therefore useful for
+low-cardinality, read-heavy predicates but should not be enabled indiscriminately
+for high-cardinality or write-heavy fields.
+
+### Raw T221 Output
+
+```text
+Linear scan:   55997, 49225, 48315, 51588, 48909 ns/op; 0 B/op; 0 allocs/op
+Bitmap Visit:  12537, 12150, 11869, 11879, 11983 ns/op; 0 B/op; 0 allocs/op
+Bitmap build: 5474809, 5477014, 5434687, 5741687, 5978742 ns/op; 672300 B/op; 440 allocs/op
+```
+
 <a id="tr-026-typed-bitmap-index"></a>
 ## TR-026 Typed Bitmap Index
 
