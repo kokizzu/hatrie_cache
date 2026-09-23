@@ -8,6 +8,7 @@ security guidance before exposing it on a network.
 
 ## Start Here
 
+- Per-space memtx versus Vinyl-style storage policy: [T215_PER_SPACE_STORAGE_POLICY.md](T215_PER_SPACE_STORAGE_POLICY.md), with measured selector overhead in [BENCHMARK.md](BENCHMARK.md#t215-per-space-storage-policy).
 - Clean finished generic Go build temp directories with `make cleanup-go-build-preview` followed by `make cleanup-go-build`; active Hatrie worktrees are never selected.
 - Opt-in Tarantool-style health-aware failover route caching with generation fencing: [TT003_FAILOVER_ROUTE_CACHE.md](TT003_FAILOVER_ROUTE_CACHE.md), with lookup measurements in [BENCHMARK.md](BENCHMARK.md#tt-003-failover-route-cache).
 - New to the cache commands and value types: [DATA_STRUCTURE.md](DATA_STRUCTURE.md)

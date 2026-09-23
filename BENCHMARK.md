@@ -36807,3 +36807,58 @@ ok  hatrie_cache/hat/hatCache  21.238s
 
 Reproduce with `make benchmark-t214-before` and `make benchmark-t214`; run
 correctness with `make test-t214`, then run the cleanup and audit targets.
+# T215 Per-Space Storage Policy
+
+Command targets:
+
+```text
+make benchmark-t215-before
+make benchmark-t215
+```
+
+The before run measures the direct map and existing `LSMTable` paths. The final
+run includes those controls plus the new common `Space` selector. Each case is
+three `-benchmem` samples on Linux/amd64, AMD Ryzen 9 5950X.
+
+| Workload | Before median | Final median | B/op | allocs/op | Final vs control |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Direct unprotected map put/get | 78.18 ns | 76.07 ns | 16 | 2 | control |
+| Direct locked/copying map put/get | N/A | 99.19 ns | 24 | 3 | fair control |
+| `SpaceEngineMemtx` put/get | N/A | 109.9 ns | 24 | 3 | 1.11x slower than fair control |
+| Direct `LSMTable` put/get | 103.4 ns | 105.2 ns | 24 | 3 | control |
+| `SpaceEngineVinyl` put/get | N/A | 106.3 ns | 24 | 3 | 1.01x slower than direct control |
+
+The first post-implementation run measured Vinyl at 124.5 ns/op due to a
+redundant wrapper lock. The final run removes that lock and records the result
+above. The feature is opt-in and does not alter existing direct-engine paths.
+
+Raw before output:
+
+```text
+BenchmarkT215StorageSpaceBaseline/MapMemtxPutGet-32  15329770  78.18 ns/op  16 B/op  2 allocs/op
+BenchmarkT215StorageSpaceBaseline/MapMemtxPutGet-32  15898192  77.77 ns/op  16 B/op  2 allocs/op
+BenchmarkT215StorageSpaceBaseline/MapMemtxPutGet-32  16043985  79.71 ns/op  16 B/op  2 allocs/op
+BenchmarkT215StorageSpaceBaseline/LSMVinylPutGet-32  11520721  106.5 ns/op  24 B/op  3 allocs/op
+BenchmarkT215StorageSpaceBaseline/LSMVinylPutGet-32  10656861  102.7 ns/op  24 B/op  3 allocs/op
+BenchmarkT215StorageSpaceBaseline/LSMVinylPutGet-32  11831959  103.4 ns/op  24 B/op  3 allocs/op
+```
+
+Raw final output:
+
+```text
+BenchmarkT215StorageSpaceBaseline/MapMemtxPutGet-32          16525754  77.68 ns/op  16 B/op  2 allocs/op
+BenchmarkT215StorageSpaceBaseline/MapMemtxPutGet-32          14889889  76.07 ns/op  16 B/op  2 allocs/op
+BenchmarkT215StorageSpaceBaseline/MapMemtxPutGet-32          15102216  74.52 ns/op  16 B/op  2 allocs/op
+BenchmarkT215StorageSpaceBaseline/LockedMapMemtxPutGet-32    11496454  107.3 ns/op  24 B/op  3 allocs/op
+BenchmarkT215StorageSpaceBaseline/LockedMapMemtxPutGet-32    12689469  98.08 ns/op  24 B/op  3 allocs/op
+BenchmarkT215StorageSpaceBaseline/LockedMapMemtxPutGet-32    10855711  99.19 ns/op  24 B/op  3 allocs/op
+BenchmarkT215StorageSpaceBaseline/LSMVinylPutGet-32          10599520  108.1 ns/op  24 B/op  3 allocs/op
+BenchmarkT215StorageSpaceBaseline/LSMVinylPutGet-32          12916453  105.2 ns/op  24 B/op  3 allocs/op
+BenchmarkT215StorageSpaceBaseline/LSMVinylPutGet-32          11704266  102.7 ns/op  24 B/op  3 allocs/op
+BenchmarkT215StorageSpace/MemtxPutGet-32                     10580980  109.6 ns/op  24 B/op  3 allocs/op
+BenchmarkT215StorageSpace/MemtxPutGet-32                     10474048  109.9 ns/op  24 B/op  3 allocs/op
+BenchmarkT215StorageSpace/MemtxPutGet-32                     10562109  111.9 ns/op  24 B/op  3 allocs/op
+BenchmarkT215StorageSpace/VinylPutGet-32                     10057575  107.9 ns/op  24 B/op  3 allocs/op
+BenchmarkT215StorageSpace/VinylPutGet-32                     10767861  104.2 ns/op  24 B/op  3 allocs/op
+BenchmarkT215StorageSpace/VinylPutGet-32                     11154992  106.3 ns/op  24 B/op  3 allocs/op
+```

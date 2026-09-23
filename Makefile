@@ -26047,3 +26047,38 @@ cleanup-go-build-tmp-after-test:
 	@bash scripts/cleanup-go-build-tmp-safe.sh plan
 	@bash scripts/cleanup-go-build-tmp-safe.sh apply
 	@bash scripts/cleanup-go-build-tmp-safe.sh clean-metadata
+.PHONY: test-t215 benchmark-t215-before format-t215
+test-t215:
+	bash scripts/test-t215.sh
+
+benchmark-t215-before:
+	bash scripts/benchmark-t215-before.sh
+
+format-t215:
+	bash scripts/format-t215.sh
+
+.PHONY: benchmark-t215 test-t215-package race-t215 vet-t215
+benchmark-t215:
+	bash scripts/benchmark-t215.sh
+
+test-t215-package:
+	bash scripts/test-t215-package.sh
+
+race-t215:
+	bash scripts/race-t215.sh
+
+vet-t215:
+	bash scripts/vet-t215.sh
+
+.PHONY: verify-t215-scope stage-t215 commit-t215 push-t215
+verify-t215-scope:
+	bash scripts/verify-t215-scope.sh
+
+stage-t215:
+	bash scripts/stage-t215.sh
+
+commit-t215:
+	bash scripts/commit-t215.sh
+
+push-t215:
+	bash scripts/push-t215.sh
