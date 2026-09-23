@@ -185,8 +185,10 @@ func (options *SQLQueryOptions) normalizeSQLSnapshotToken() error {
 			return err
 		}
 	}
-	if options.LogicalFrontier == nil || options.AsOfFrontier == nil {
-		return nil
+	if options.LogicalFrontier != nil && options.AsOfFrontier != nil {
+		if err := options.LogicalFrontier.Validate(*options.AsOfFrontier); err != nil {
+			return err
+		}
 	}
-	return options.LogicalFrontier.Validate(*options.AsOfFrontier)
+	return options.normalizeSQLAsOfBounds()
 }

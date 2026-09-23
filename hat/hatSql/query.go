@@ -398,6 +398,12 @@ type SQLQueryOptions struct {
 	// frontier. Nil preserves the live/default execution path; a non-nil
 	// pointer also permits an explicit frontier of zero.
 	AsOfFrontier *uint64
+	// AsOfSince is an optional inclusive lower bound for AsOfFrontier. It is
+	// disabled by default and requires a concrete AsOfFrontier (or token).
+	AsOfSince *uint64
+	// AsOfUpper is an optional exclusive upper bound for AsOfFrontier. It is
+	// disabled by default and requires a concrete AsOfFrontier (or token).
+	AsOfUpper *uint64
 	// LogicalFrontier optionally rejects reads whose AsOfFrontier moves
 	// backwards. Nil preserves the existing stateless read behavior.
 	LogicalFrontier *SQLLogicalFrontier

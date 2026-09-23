@@ -37841,6 +37841,30 @@ tradeoff for exact bounded historical versions, immutable caller isolation, and
 copy-on-write reuse of unchanged source rows. The implementation does not
 replace durable storage or replication.
 
+## M211: Explicit AS OF Bounds
+
+Workload: repeated snapshot-option normalization with no bounds versus an
+inclusive `since` and exclusive `upper`, measured with
+`go test -bench '^BenchmarkM211' -benchmem -count=5` on Linux/amd64 with an
+AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | B/op | allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Default normalization | 3.41 | 0 | 0 | 1.00x |
+| Bounded normalization | 5.54 | 0 | 0 | 1.63x |
+
+Raw samples, in ns/op:
+
+```text
+BenchmarkM211AsOfBoundsDefaultPath: 3.471, 3.232, 3.379, 3.437, 3.407
+BenchmarkM211AsOfBoundsGuardedPath: 5.298, 5.258, 5.641, 5.594, 5.543
+```
+
+The opt-in validator adds about 2.14 ns in this isolated path and no
+allocations. Focused tests verify inclusive lower-bound behavior, exclusive
+upper-bound behavior, malformed intervals, signed token normalization, and
+provider non-invocation on every supported read entry point.
+
 # M208: Differential Multiplicity Folding
 
 Workload: 512 distinct query-subscription rows, each repeated as four signed
