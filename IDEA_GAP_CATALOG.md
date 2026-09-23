@@ -135,7 +135,7 @@ the memory/operational cost is disproportionate to the gain.
 | TT-G05 | Resumable replica bootstrap from snapshot plus WAL range | Retry does not duplicate or skip an LSN |
 | TT-G06 | Multi-master conflict records with deterministic resolution hooks | Conflict is observable and never silently dropped |
 | TT-G07 | WAL request delta encoding for updates and deletes | Compare bytes against full-row records |
-| TT-G08 | Bounded key-affine parallel WAL decode and apply | Same-key order and final digest equal serial replay |
+| TT-G08 | Bounded key-affine parallel WAL decode and apply | Initial shared-trie implementation rejected: 2.58x slower and 6.26x higher measured bytes; revisit only with shard-local state and a merge design |
 | TT-G09 | WAL group-commit policy with latency/throughput controls | Measure fsync count, latency, and loss window |
 | TT-G10 | WAL segment index for bounded recovery seek | Recovery scans only the requested LSN range |
 | TT-G11 | Independent WAL segment compression with checksummed frames | Corruption is detected before apply |
@@ -186,8 +186,7 @@ The product concepts are grounded in the official documentation for
 [Materialize concepts and arrangements](https://materialize.com/docs/fundamentals/concepts/),
 and [Tarantool's platform, transactions, WAL, replication, and indexes](https://www.tarantool.io/en/doc/latest/singlepage/).
 
-The first implementation selected from this catalog is `TT-G08`, bounded
-key-affine parallel WAL/journal replay. It is opt-in, falls back to the
-existing serial path for unsupported or cross-key commands, and must prove a
-real recovery improvement on a sufficiently large independent-key workload
-before it is retained.
+The first implementation attempt selected from this catalog was `TT-G08`,
+bounded key-affine parallel WAL/journal replay. The shared-trie design was
+rejected after measurement; see
+[TTG08_PARALLEL_REPLAY_REJECTED.md](TTG08_PARALLEL_REPLAY_REJECTED.md).

@@ -38343,3 +38343,19 @@ frontier callers pay nothing until they opt in. The checkpoint path is bounded
 and explicit; the feature does not claim raw frontier throughput improvement.
 See [M226_DURABLE_CONSENSUS_METADATA.md](M226_DURABLE_CONSENSUS_METADATA.md)
 for CAS conflict handling and the security boundary.
+## TT-G08: Rejected Shared-Trie Parallel Replay
+
+The first TT-G08 experiment grouped independent scalar journal entries by key
+and applied four groups concurrently to one destination trie. Focused tests
+passed, but the shared mutation structure and planning allocations made it a
+regression, so the implementation was rolled back. The serial baseline was
+measured before the change and the final comparison used three samples each.
+
+| Path | Samples (ns/op) | Median ns/op | B/op | allocs/op | Relative to serial |
+| --- | --- | ---: | ---: | ---: | --- |
+| Existing serial replay | 19,690,571; 32,819,961; 22,993,483; 20,882,721; 20,440,002 | 20,882,721 | 5,653,477 | 81,966 | 1.00x |
+| Rejected four-worker replay | 47,239,272; 48,798,333; 51,144,423 | 48,798,333 | 35,377,609 | 98,452 | 2.58x slower; 6.26x B/op |
+
+The feature remains an open candidate in [IDEA_GAP_CATALOG.md](IDEA_GAP_CATALOG.md)
+and the raw experiment is documented in
+[TTG08_PARALLEL_REPLAY_REJECTED.md](TTG08_PARALLEL_REPLAY_REJECTED.md).
