@@ -37714,3 +37714,29 @@ measured bytes/op or allocation increase. The disabled path retains the
 zero-allocation fast path. Stale-idle recovery and cancellation behavior are
 covered by focused tests; see
 [T237_CONNECTION_POOL_HEALTH.md](T237_CONNECTION_POOL_HEALTH.md).
+
+# T241: Role-Based and Per-Space Authorization
+
+Workload: one exact role, command, and space rule evaluated against a trusted
+request. The baseline uses the same callback-shaped arguments but returns
+without policy work. Results are medians from five samples on AMD Ryzen 9
+5950X with `-benchmem`.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative time |
+| --- | ---: | ---: | ---: | ---: |
+| No-op authorization baseline | 0.2698 | 0 | 0 | 1.00x |
+| One-rule role authorizer | 12.45 | 0 | 0 | 46.1x the no-op baseline |
+
+Raw samples:
+
+```text
+No-op ns/op: 0.2666 0.2698 0.2682 0.2746 0.3000
+No-op B/op:  0     0     0     0     0
+Role ns/op:  12.59 12.37 12.45 12.56 11.95
+Role B/op:   0     0     0     0     0
+```
+
+The opt-in policy is allocation-free but adds CPU for matching. Focused tests
+also verify that denied requests do not invoke the handler, space boundaries are
+enforced, cancellation propagates, and authorization internals are normalized
+to the stable denial error.

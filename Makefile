@@ -26909,3 +26909,30 @@ commit-t237:
 
 push-t237:
 	bash scripts/push-t237.sh
+
+benchmark-t241-before:
+	bash scripts/benchmark-t241-before.sh
+
+test-t241:
+	bash scripts/test-t241.sh
+
+format-t241:
+	bash scripts/format-t241.sh
+
+benchmark-t241:
+	bash scripts/benchmark-t241.sh
+
+race-t241:
+	bash scripts/race-t241.sh
+
+vet-t241:
+	bash scripts/vet-t241.sh
+
+stage-t241:
+	bash scripts/stage-t241.sh
+
+commit-t241:
+	bash scripts/commit-t241.sh
+
+push-t241:
+	bash scripts/push-t241.sh

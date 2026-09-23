@@ -66,8 +66,17 @@ type CompactPeerSessionOptions struct {
 	MaxInFlight int
 	Context     context.Context
 	Handler     CompactPeerHandler
-	Lifecycle   *PeerLifecycleRegistry
-	PeerID      string
+	// PeerID and Roles identify the trusted server-side principal used by
+	// AuthorizeRequest. They must be selected by the connection owner, never
+	// copied from request payloads.
+	Roles []string
+	// SpaceExtractor derives the logical space for request authorization.
+	SpaceExtractor CompactPeerSpaceExtractor
+	// AuthorizeRequest runs after connection authorization and before Handler.
+	// A nil value preserves the existing unguarded handler path.
+	AuthorizeRequest CompactPeerRequestAuthorizer
+	Lifecycle        *PeerLifecycleRegistry
+	PeerID           string
 	// EnableRequestCancellation sends a best-effort reserved request when a
 	// caller context cancels. The remote session cancels the matching handler
 	// context. It is disabled by default to preserve existing wire behavior.
@@ -91,24 +100,27 @@ func CompactPeerSessionOptionsForNegotiatedHandshake(options CompactPeerSessionO
 // opt-in adapter; it does not open listeners, select authentication, or
 // replace the existing HTTP/gRPC/replication servers.
 type CompactPeerSession struct {
-	conn         net.Conn
-	protocol     CompactProtocol
-	multiplex    *CompactMultiplexer
-	handler      CompactPeerHandler
-	inflight     chan struct{}
-	context      context.Context
-	cancel       context.CancelFunc
-	lifecycle    *PeerLifecycleRegistry
-	peerID       string
-	done         chan struct{}
-	readDone     chan struct{}
-	closeOnce    sync.Once
-	writeMu      sync.Mutex
-	writeBuffer  []byte
-	stateMu      sync.Mutex
-	cancellation *compactPeerCancellationState
-	closed       bool
-	closeError   error
+	conn              net.Conn
+	protocol          CompactProtocol
+	multiplex         *CompactMultiplexer
+	handler           CompactPeerHandler
+	roles             []string
+	spaceExtractor    CompactPeerSpaceExtractor
+	requestAuthorizer CompactPeerRequestAuthorizer
+	inflight          chan struct{}
+	context           context.Context
+	cancel            context.CancelFunc
+	lifecycle         *PeerLifecycleRegistry
+	peerID            string
+	done              chan struct{}
+	readDone          chan struct{}
+	closeOnce         sync.Once
+	writeMu           sync.Mutex
+	writeBuffer       []byte
+	stateMu           sync.Mutex
+	cancellation      *compactPeerCancellationState
+	closed            bool
+	closeError        error
 }
 
 type compactPeerCancellationState struct {
@@ -149,18 +161,21 @@ func NewCompactPeerSession(conn net.Conn, options CompactPeerSessionOptions) (*C
 		cancellation = &compactPeerCancellationState{active: make(map[uint64]context.CancelFunc)}
 	}
 	session := &CompactPeerSession{
-		conn:         conn,
-		protocol:     protocol,
-		multiplex:    multiplexer,
-		handler:      options.Handler,
-		inflight:     make(chan struct{}, maxInFlight),
-		context:      ctx,
-		cancel:       cancel,
-		lifecycle:    options.Lifecycle,
-		peerID:       options.PeerID,
-		done:         make(chan struct{}),
-		readDone:     make(chan struct{}),
-		cancellation: cancellation,
+		conn:              conn,
+		protocol:          protocol,
+		multiplex:         multiplexer,
+		handler:           options.Handler,
+		roles:             append([]string(nil), options.Roles...),
+		spaceExtractor:    options.SpaceExtractor,
+		requestAuthorizer: options.AuthorizeRequest,
+		inflight:          make(chan struct{}, maxInFlight),
+		context:           ctx,
+		cancel:            cancel,
+		lifecycle:         options.Lifecycle,
+		peerID:            options.PeerID,
+		done:              make(chan struct{}),
+		readDone:          make(chan struct{}),
+		cancellation:      cancellation,
 	}
 	go session.readLoop()
 	go session.watchContext()
@@ -407,7 +422,13 @@ func (session *CompactPeerSession) handle(ctx context.Context, request CompactFr
 			cancel()
 		}()
 	}
-	response, err := session.handler(ctx, request)
+	var response CompactFrame
+	var err error
+	if session.requestAuthorizer == nil {
+		response, err = session.handler(ctx, request)
+	} else if err = session.authorizeRequest(ctx, request); err == nil {
+		response, err = session.handler(ctx, request)
+	}
 	if err != nil {
 		response = CompactFrame{Kind: CompactError, Command: request.Command, Payload: compactPeerErrorPayload(session.protocol, err)}
 	} else {
@@ -420,6 +441,33 @@ func (session *CompactPeerSession) handle(ctx context.Context, request CompactFr
 	if err := session.write(response); err != nil {
 		session.fail(err)
 	}
+}
+
+func (session *CompactPeerSession) authorizeRequest(ctx context.Context, request CompactFrame) error {
+	space := ""
+	if session.spaceExtractor != nil {
+		var err error
+		space, err = session.spaceExtractor(ctx, request)
+		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			return ErrCompactPeerRequestDenied
+		}
+	}
+	if err := session.requestAuthorizer(ctx, CompactPeerAuthorizationRequest{
+		PeerID:  session.peerID,
+		Roles:   session.roles,
+		Command: request.Command,
+		Payload: request.Payload,
+		Space:   space,
+	}); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		return ErrCompactPeerRequestDenied
+	}
+	return nil
 }
 
 func (session *CompactPeerSession) registerInbound(requestID uint64, cancel context.CancelFunc) {

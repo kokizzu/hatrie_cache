@@ -182,7 +182,7 @@ operator control remain the preferred deployment model.
 - [x] T238 Batched binary protocol requests with ordered responses; see [T238_BATCHED_BINARY_PROTOCOL.md](T238_BATCHED_BINARY_PROTOCOL.md) and [BENCHMARK.md](BENCHMARK.md#t238-batched-binary-protocol-requests).
 - [x] T239 Prepared request templates that reuse encoded field metadata. `hatPeer.CompactRequestTemplate` copies command metadata once and supports caller-buffer reuse without changing the wire format; the paired benchmark measured `23-25 ns/op`, `0 B/op`, and `0 allocs/op` versus direct marshal at `36-38 ns/op`, `32 B/op`, and `1 alloc/op`; see [T239_COMPACT_REQUEST_TEMPLATE.md](T239_COMPACT_REQUEST_TEMPLATE.md).
 - [x] T240 Request cancellation and deadline propagation through the protocol. `CompactPeerSessionOptions.EnableRequestCancellation` sends a best-effort reserved request that cancels the matching remote handler context; the default remains off. See [T240_COMPACT_REQUEST_CANCELLATION.md](T240_COMPACT_REQUEST_CANCELLATION.md).
-- [ ] T241 Role-based authentication and per-space authorization.
+- [x] T241 Role-based authentication and per-space authorization; `hatPeer.CompactPeerRoleAuthorizer` adds default-deny command/space rules after the mandatory connection authorization, with an opt-in request callback and no wire-format change. See [T241_ROLE_BASED_AUTHORIZATION.md](T241_ROLE_BASED_AUTHORIZATION.md) and [BENCHMARK.md](BENCHMARK.md#t241-role-based-and-per-space-authorization).
 - [ ] T242 Append-only audit logging for administrative and data operations.
 - [x] T243 Mutual TLS authentication with certificate rotation; see [T243_MTLS_CERTIFICATE_ROTATION.md](T243_MTLS_CERTIFICATE_ROTATION.md).
 - [ ] T244 Queue task delay and deadline scheduling.

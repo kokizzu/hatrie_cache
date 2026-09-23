@@ -5172,3 +5172,14 @@ disabled by default, does not start a background goroutine, and does not check
 newly dialed connections twice. See
 [T237_CONNECTION_POOL_HEALTH.md](T237_CONNECTION_POOL_HEALTH.md) for the API,
 operational guidance, counters, and measured overhead.
+
+## Role-Based Authorization
+
+The compact peer session keeps connection authentication mandatory and adds an
+opt-in request boundary through `CompactPeerSessionOptions.AuthorizeRequest`.
+Use `CompactPeerRoleAuthorizer` with trusted server-side roles, exact command
+rules, and an optional `SpaceExtractor` for per-space authorization. Denied
+requests do not reach the handler, policy details are not exposed on the wire,
+and the default nil authorizer preserves the existing path. See
+[T241_ROLE_BASED_AUTHORIZATION.md](T241_ROLE_BASED_AUTHORIZATION.md) for the
+policy model, security constraints, and benchmark tradeoff.
