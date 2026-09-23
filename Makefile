@@ -27733,6 +27733,34 @@ m240-ch-g01-commit:
 m240-ch-g01-push:
 	bash scripts/m240-ch-g01-push.sh
 
+.PHONY: m242-ch-g02-format
+m242-ch-g02-format:
+	bash scripts/m242-ch-g02-format.sh
+
+.PHONY: m242-ch-g02-test
+m242-ch-g02-test:
+	bash scripts/m242-ch-g02-test.sh
+
+.PHONY: m242-ch-g02-benchmark
+m242-ch-g02-benchmark:
+	bash scripts/m242-ch-g02-benchmark.sh
+
+.PHONY: m242-ch-g02-docs
+m242-ch-g02-docs:
+	bash scripts/m242-ch-g02-docs.sh
+
+.PHONY: m242-ch-g02-stage
+m242-ch-g02-stage:
+	bash scripts/m242-ch-g02-stage.sh
+
+.PHONY: m242-ch-g02-commit
+m242-ch-g02-commit:
+	bash scripts/m242-ch-g02-commit.sh
+
+.PHONY: m242-ch-g02-push
+m242-ch-g02-push:
+	bash scripts/m242-ch-g02-push.sh
+
 .PHONY: m237-tt-g42-test
 m237-tt-g42-test:
 	bash scripts/m237-tt-g42-test.sh

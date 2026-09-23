@@ -38534,6 +38534,43 @@ BenchmarkCH001PartialMergeJoin
 
 See [CH001_ADAPTIVE_JOIN.md](CH001_ADAPTIVE_JOIN.md).
 
+## CH-G02: Bounded Grace-Hash Join
+
+This benchmark compares the existing in-memory hash join with the existing
+bounded streamed partitioned hash join over two 4,096-row sources. The spill
+path uses `MaxJoinBytes=4 KiB`, `MaxSpillBytes=64 MiB`, and a temporary spill
+directory. Five samples were collected with `-benchtime=2s -benchmem`.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| In-memory hash join | 6,666,469 | 9,817,394 | 49,230 | Reference |
+| Bounded grace-hash spill | 90,904,394 | 22,165,976 | 450,414 | 13.64x slower; 2.26x cumulative bytes; 9.15x allocations |
+
+This is an availability/resource-bound feature, not a speed improvement. The
+spill path pays for partition encoding and temporary I/O so a join can obey a
+memory and disk budget. The default remains the in-memory join when
+`MaxJoinBytes=0`.
+
+### Raw output
+
+```text
+BenchmarkCH002HashJoinBaseline
+6935902 ns/op 9817401 B/op 49230 allocs/op
+6665742 ns/op 9817394 B/op 49230 allocs/op
+6768044 ns/op 9817397 B/op 49230 allocs/op
+6666469 ns/op 9817383 B/op 49230 allocs/op
+6605016 ns/op 9817382 B/op 49230 allocs/op
+
+BenchmarkCH002GraceHashJoin
+103697319 ns/op 22166123 B/op 450415 allocs/op
+86559401 ns/op 22165892 B/op 450415 allocs/op
+122301348 ns/op 22165976 B/op 450421 allocs/op
+84855765 ns/op 22166124 B/op 450414 allocs/op
+90904394 ns/op 22165656 B/op 450414 allocs/op
+```
+
+See [CH002_GRACE_HASH_JOIN.md](CH002_GRACE_HASH_JOIN.md).
+
 ## CH050 Plan Reproducibility Hash
 
 This ClickHouse-inspired diagnostic hashes a normalized SQL shape, required

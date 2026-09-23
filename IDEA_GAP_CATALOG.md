@@ -19,7 +19,7 @@ the memory/operational cost is disproportionate to the gain.
 | ID | Candidate idea not yet complete here | First verification gate |
 | --- | --- | --- |
 | CH-G01 | Partial implementation: opt-in ordered partial-merge inner equality join; automatic hash/grace-hash selection remains pending | Same result rows; compare CPU, spill bytes, and peak memory; measured in `CH001_ADAPTIVE_JOIN.md` |
-| CH-G02 | Grace-hash join partition spill with bounded disk space | Fault-injected spill/reload and bounded peak memory |
+| CH-G02 | Implemented: streamed grace/partitioned hash join spill with bounded disk space | Verified duplicate-key results, spill reload, disk-budget failure, cleanup, and measured in `CH002_GRACE_HASH_JOIN.md` |
 | CH-G03 | Parallel hash-join build/probe partitions with deterministic output merge | Compare against serial join on duplicate and NULL keys |
 | CH-G04 | Adaptive runtime Bloom precheck for large numeric/boolean hash joins; lazy admission after a miss-heavy probe sample | Implemented and measured in `BENCHMARK.md`: 1.53x miss-heavy microbenchmark win, 3.021% false-positive rate, no small-index allocation |
 | CH-G05 | Runtime min/max filters propagated from a small join side to remote partitions | Verify no false negatives across partition boundaries |
