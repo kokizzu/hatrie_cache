@@ -26736,6 +26736,82 @@ sets. The index is therefore most useful when repeated reads amortize build and
 update work. See [T222_MULTIKEY_INDEX.md](T222_MULTIKEY_INDEX.md) for limits and
 reproduction commands.
 
+<a id="t223-functional-indexes-over-derived-expressions"></a>
+## T223: Functional Indexes Over Derived Expressions
+
+This round-2 item was already implemented by the typed functional index,
+conditional functional index, materialized SQL functional index, and registered
+`LOWER(...)` expression path. The fresh before/after runs below verify the
+existing behavior and expose the build/maintenance tradeoff. Runs used
+`-benchmem -count=5` on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+### Materialized functional SQL index
+
+| Workload | ns/op | bytes/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Full SQL scan | 24,805,323 | 9,986,633 | 70,235 | 1.00x |
+| Functional-index lookup | 140,285 | 113,420 | 734 | 176.8x faster; 88.0x fewer bytes; 95.7x fewer allocations |
+| Equivalent scan control | 646,951 | 80,000 | 10,000 | Control workload |
+| Functional-index build | 8,762,816 | 4,836,936 | 50,845 | 5.24x slower and 4.51x more bytes than equivalent scan-build control |
+
+Raw benchmark rows:
+
+```text
+BenchmarkTR023BeforeFunctionalIndexSQLScan-32             27662132 ns/op  9987085 B/op 70236 allocs/op
+BenchmarkTR023BeforeFunctionalIndexSQLScan-32             24461303 ns/op  9986625 B/op 70235 allocs/op
+BenchmarkTR023BeforeFunctionalIndexSQLScan-32             25148932 ns/op  9986633 B/op 70235 allocs/op
+BenchmarkTR023BeforeFunctionalIndexSQLScan-32             24805323 ns/op  9986622 B/op 70235 allocs/op
+BenchmarkTR023BeforeFunctionalIndexSQLScan-32             14178712 ns/op  9986798 B/op 70235 allocs/op
+BenchmarkTR023AfterFunctionalIndexSQLLookup-32              138935 ns/op   113420 B/op   734 allocs/op
+BenchmarkTR023AfterFunctionalIndexSQLLookup-32              134192 ns/op   113420 B/op   734 allocs/op
+BenchmarkTR023AfterFunctionalIndexSQLLookup-32              140285 ns/op   113421 B/op   734 allocs/op
+BenchmarkTR023AfterFunctionalIndexSQLLookup-32              144445 ns/op   113421 B/op   734 allocs/op
+BenchmarkTR023AfterFunctionalIndexSQLLookup-32              149517 ns/op   113420 B/op   734 allocs/op
+BenchmarkTR023AfterFunctionalIndexBuild-32                 8144695 ns/op  4836924 B/op 50844 allocs/op
+BenchmarkTR023AfterFunctionalIndexBuild-32                 8762816 ns/op  4836936 B/op 50845 allocs/op
+BenchmarkTR023AfterFunctionalIndexBuild-32                 8948561 ns/op  4836937 B/op 50845 allocs/op
+BenchmarkTR023AfterFunctionalIndexBuild-32                 8916307 ns/op  4836957 B/op 50845 allocs/op
+BenchmarkTR023AfterFunctionalIndexBuild-32                 8523486 ns/op  4836897 B/op 50844 allocs/op
+```
+
+### SQL `LOWER(...)` expression resolution
+
+| Workload | ns/op | bytes/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Equality scan | 15,363,862 | 7,971,049 | 135,249 | 1.00x |
+| Equality via lower index | 134,798 | 113,960 | 750 | 114.0x faster; 70.0x fewer bytes; 180.3x fewer allocations |
+| Literal-`IN` scan | 18,803,990 | 7,729,570 | 135,650 | 1.00x |
+| Literal-`IN` index union | 301,683 | 325,768 | 2,038 | 62.3x faster; 23.7x fewer bytes; 66.6x fewer allocations |
+
+Raw benchmark rows:
+
+```text
+BenchmarkSQLJSONLowerIndexEquality/scan-32          13296552 ns/op 7971041 B/op 135248 allocs/op
+BenchmarkSQLJSONLowerIndexEquality/scan-32          16410804 ns/op 7971054 B/op 135249 allocs/op
+BenchmarkSQLJSONLowerIndexEquality/scan-32          15363862 ns/op 7971049 B/op 135249 allocs/op
+BenchmarkSQLJSONLowerIndexEquality/scan-32          16308013 ns/op 7971058 B/op 135249 allocs/op
+BenchmarkSQLJSONLowerIndexEquality/scan-32          12673703 ns/op 7971033 B/op 135248 allocs/op
+BenchmarkSQLJSONLowerIndexEquality/lower_index-32     189309 ns/op  113974 B/op    750 allocs/op
+BenchmarkSQLJSONLowerIndexEquality/lower_index-32     203582 ns/op  114255 B/op    757 allocs/op
+BenchmarkSQLJSONLowerIndexEquality/lower_index-32     134798 ns/op  113960 B/op    750 allocs/op
+BenchmarkSQLJSONLowerIndexEquality/lower_index-32     119218 ns/op  113792 B/op    746 allocs/op
+BenchmarkSQLJSONLowerIndexEquality/lower_index-32      96479 ns/op  113782 B/op    746 allocs/op
+BenchmarkSQLJSONLowerIndexLiteralIN/scan-32          18803990 ns/op 7729661 B/op 135650 allocs/op
+BenchmarkSQLJSONLowerIndexLiteralIN/scan-32          20470306 ns/op 7729570 B/op 135650 allocs/op
+BenchmarkSQLJSONLowerIndexLiteralIN/scan-32          17304744 ns/op 7729560 B/op 135650 allocs/op
+BenchmarkSQLJSONLowerIndexLiteralIN/scan-32          16711425 ns/op 7729544 B/op 135650 allocs/op
+BenchmarkSQLJSONLowerIndexLiteralIN/scan-32          21731553 ns/op 7729583 B/op 135651 allocs/op
+BenchmarkSQLJSONLowerIndexLiteralIN/lower_index_union-32 343437 ns/op 325876 B/op 2038 allocs/op
+BenchmarkSQLJSONLowerIndexLiteralIN/lower_index_union-32 298750 ns/op 325769 B/op 2038 allocs/op
+BenchmarkSQLJSONLowerIndexLiteralIN/lower_index_union-32 301683 ns/op 325768 B/op 2038 allocs/op
+BenchmarkSQLJSONLowerIndexLiteralIN/lower_index_union-32 301467 ns/op 325767 B/op 2038 allocs/op
+BenchmarkSQLJSONLowerIndexLiteralIN/lower_index_union-32 306837 ns/op 325766 B/op 2038 allocs/op
+```
+
+The large read win is workload-dependent: derived-key evaluation and posting
+maintenance make index construction substantially more expensive, so ordinary
+scans remain the fallback and the functional path stays opt-in.
+
 <a id="tr-026-typed-bitmap-index"></a>
 ## TR-026 Typed Bitmap Index
 

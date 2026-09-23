@@ -26319,6 +26319,33 @@ push-t221:
 format-t222:
 	bash ./scripts/format-t222.sh
 
+format-t223:
+	bash ./scripts/format-t223.sh
+
+test-t223:
+	bash ./scripts/test-t223.sh
+
+benchmark-t223:
+	bash ./scripts/benchmark-t223.sh
+
+race-t223:
+	bash ./scripts/race-t223.sh
+
+vet-t223:
+	bash ./scripts/vet-t223.sh
+
+verify-t223-scope:
+	bash ./scripts/verify-t223-scope.sh
+
+stage-t223:
+	bash ./scripts/stage-t223.sh
+
+commit-t223:
+	bash ./scripts/commit-t223.sh
+
+push-t223:
+	bash ./scripts/push-t223.sh
+
 test-t222:
 	bash ./scripts/test-t222.sh
 
