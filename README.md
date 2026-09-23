@@ -5004,3 +5004,14 @@ remain retained for later replay, while non-durable jobs report
 lag and pause state. See
 [T209_RELAY_APPLIER_BACKPRESSURE.md](T209_RELAY_APPLIER_BACKPRESSURE.md) and
 [BENCHMARK.md](BENCHMARK.md#t209-relayapplier-backpressure).
+
+## Master-Master Conflict Hooks
+
+`hatReplication.ConflictPolicy` accepts an optional `ConflictHook` for
+application-specific master-master conflict handling. The callback receives
+both `ConflictVersion` values, including source/node IDs and sequences, plus
+an optional caller-supplied key digest. It can keep local, accept remote,
+continue with the configured policy, or reject the conflict. Hooks are only
+called for distinct versions and are disabled by default. See
+[T210_MASTER_MASTER_CONFLICT_HOOKS.md](T210_MASTER_MASTER_CONFLICT_HOOKS.md)
+and [BENCHMARK.md](BENCHMARK.md#t210-master-master-conflict-hooks).

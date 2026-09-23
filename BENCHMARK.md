@@ -36559,3 +36559,59 @@ BenchmarkT209ReplicationRelayBackpressureAdmission-32  129.0 ns/op  0 B/op  0 al
 BenchmarkT209ReplicationRelayBackpressureAdmission-32  114.8 ns/op  0 B/op  0 allocs/op
 BenchmarkT209ReplicationRelayBackpressureAdmission-32  116.8 ns/op  0 B/op  0 allocs/op
 ```
+
+## T210: Master-Master Conflict Hooks
+
+T210 adds an opt-in callback at the existing deterministic conflict-policy
+boundary. The default resolver remains allocation-free; the enabled hook path
+adds only callback and conflict-context CPU cost.
+
+### Summary
+
+| Benchmark | Median | Memory | X / tradeoff |
+| --- | ---: | ---: | --- |
+| Direct LWW before | 2.725 ns/op | 0 B/op; 0 allocs/op | Baseline |
+| Direct LWW after | 2.760 ns/op | 0 B/op; 0 allocs/op | 0.99x throughput; within noise |
+| Registry default before | 21.15 ns/op | 0 B/op; 0 allocs/op | Baseline |
+| Registry default after | 22.32 ns/op | 0 B/op; 0 allocs/op | 0.95x throughput; no enabled hook |
+| Enabled hook, use policy | 29.44 ns/op | 0 B/op; 0 allocs/op | 0.72x baseline throughput; opt-in cost |
+| Enabled hook, accept remote | 24.11 ns/op | 0 B/op; 0 allocs/op | 0.88x baseline throughput; opt-in cost |
+
+The small default-path difference is within normal benchmark variance and has
+no allocation or wire/memory-retention cost. Hook-enabled numbers are an
+intentional tradeoff for application-controlled conflict decisions. The raw
+before run used `make benchmark-t210-before`; the after run used
+`make benchmark-t210`.
+
+### Raw T210 Output
+
+```text
+Before, make benchmark-t210-before:
+BenchmarkConflictPolicyResolution/direct-lww-32  2.725 ns/op  0 B/op  0 allocs/op
+BenchmarkConflictPolicyResolution/direct-lww-32  2.809 ns/op  0 B/op  0 allocs/op
+BenchmarkConflictPolicyResolution/direct-lww-32  2.732 ns/op  0 B/op  0 allocs/op
+BenchmarkConflictPolicyResolution/direct-lww-32  2.716 ns/op  0 B/op  0 allocs/op
+BenchmarkConflictPolicyResolution/direct-lww-32  2.695 ns/op  0 B/op  0 allocs/op
+BenchmarkConflictPolicyResolution/registry-default-32  20.83 ns/op  0 B/op  0 allocs/op
+BenchmarkConflictPolicyResolution/registry-default-32  22.15 ns/op  0 B/op  0 allocs/op
+BenchmarkConflictPolicyResolution/registry-default-32  25.97 ns/op  0 B/op  0 allocs/op
+BenchmarkConflictPolicyResolution/registry-default-32  21.08 ns/op  0 B/op  0 allocs/op
+BenchmarkConflictPolicyResolution/registry-default-32  21.15 ns/op  0 B/op  0 allocs/op
+
+After, make benchmark-t210:
+BenchmarkConflictPolicyResolution/direct-lww-32  2.760 ns/op  0 B/op  0 allocs/op
+BenchmarkConflictPolicyResolution/direct-lww-32  2.850 ns/op  0 B/op  0 allocs/op
+BenchmarkConflictPolicyResolution/direct-lww-32  2.695 ns/op  0 B/op  0 allocs/op
+BenchmarkConflictPolicyResolution/registry-default-32  22.17 ns/op  0 B/op  0 allocs/op
+BenchmarkConflictPolicyResolution/registry-default-32  22.32 ns/op  0 B/op  0 allocs/op
+BenchmarkConflictPolicyResolution/registry-default-32  22.70 ns/op  0 B/op  0 allocs/op
+BenchmarkT210ConflictHook/default-fastpath-32  17.89 ns/op  0 B/op  0 allocs/op
+BenchmarkT210ConflictHook/default-fastpath-32  17.48 ns/op  0 B/op  0 allocs/op
+BenchmarkT210ConflictHook/default-fastpath-32  17.50 ns/op  0 B/op  0 allocs/op
+BenchmarkT210ConflictHook/hook-use-policy-32  29.77 ns/op  0 B/op  0 allocs/op
+BenchmarkT210ConflictHook/hook-use-policy-32  29.27 ns/op  0 B/op  0 allocs/op
+BenchmarkT210ConflictHook/hook-use-policy-32  29.44 ns/op  0 B/op  0 allocs/op
+BenchmarkT210ConflictHook/hook-accept-remote-32  24.11 ns/op  0 B/op  0 allocs/op
+BenchmarkT210ConflictHook/hook-accept-remote-32  24.07 ns/op  0 B/op  0 allocs/op
+BenchmarkT210ConflictHook/hook-accept-remote-32  24.82 ns/op  0 B/op  0 allocs/op
+```

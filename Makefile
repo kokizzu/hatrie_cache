@@ -25829,6 +25829,35 @@ commit-t209:
 push-t209:
 	@bash scripts/push-t209.sh
 
+.PHONY: test-t210 test-t210-package benchmark-t210-before format-t210 benchmark-t210 race-t210 vet-t210
+test-t210:
+	@bash scripts/test-t210.sh
+test-t210-package:
+	@bash scripts/test-t210-package.sh
+benchmark-t210-before:
+	@bash scripts/benchmark-t210-before.sh
+format-t210:
+	@bash scripts/format-t210.sh
+benchmark-t210:
+	@bash scripts/benchmark-t210.sh
+race-t210:
+	@bash scripts/race-t210.sh
+vet-t210:
+	@bash scripts/vet-t210.sh
+
+.PHONY: verify-t210-scope
+verify-t210-scope:
+	@bash scripts/verify-t210-scope.sh
+
+.PHONY: stage-t210 commit-t210 push-t210
+stage-t210:
+	@bash scripts/stage-t210.sh
+commit-t210:
+	@bash scripts/commit-t210.sh
+push-t210:
+	@bash scripts/push-t210.sh
+
+
 
 .PHONY: preview-go-build-tmp-clean apply-go-build-tmp-clean cleanup-go-build-tmp-after-test
 preview-go-build-tmp-clean:

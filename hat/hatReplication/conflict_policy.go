@@ -38,6 +38,7 @@ const (
 type ConflictPolicy struct {
 	Mode           ConflictPolicyMode
 	SourcePriority []string
+	Hook           ConflictHook
 }
 
 // ConflictPolicyRegistry stores an optional default and per-space overrides.
@@ -118,7 +119,37 @@ func (registry *ConflictPolicyRegistry) Resolve(space string, left, right Confli
 		policy = registry.defaultPolicy
 	}
 	registry.mu.RUnlock()
-	return resolveConflictWithPolicy(policy, left, right)
+	if policy.Hook == nil {
+		return resolveConflictWithPolicy(policy, left, right)
+	}
+	return resolveConflictWithPolicyContext(policy, ConflictHookContext{
+		Space:  space,
+		Local:  left,
+		Remote: right,
+	})
+}
+
+// ResolveWithContext applies the configured policy and optional hook to a
+// conflict. The hook receives both source/node IDs and sequences through the
+// Local and Remote versions, plus the caller-supplied key digest.
+func (registry *ConflictPolicyRegistry) ResolveWithContext(context ConflictHookContext) (ConflictVersion, error) {
+	if registry == nil {
+		return ConflictVersion{}, ErrConflictPolicyRegistryNil
+	}
+	context.Space = strings.TrimSpace(context.Space)
+	if context.Space == "" {
+		return ConflictVersion{}, ErrConflictPolicySpaceRequired
+	}
+	registry.mu.RLock()
+	policy, exists := registry.spaceOverrides[context.Space]
+	if !exists {
+		policy = registry.defaultPolicy
+	}
+	registry.mu.RUnlock()
+	if policy.Hook == nil {
+		return resolveConflictWithPolicy(policy, context.Local, context.Remote)
+	}
+	return resolveConflictWithPolicyContext(policy, context)
 }
 
 func normalizeConflictPolicy(policy ConflictPolicy) (ConflictPolicy, error) {
@@ -127,7 +158,7 @@ func normalizeConflictPolicy(policy ConflictPolicy) (ConflictPolicy, error) {
 		if len(policy.SourcePriority) != 0 {
 			return ConflictPolicy{}, fmt.Errorf("%w: source priority is only valid with source-priority mode", ErrConflictPolicyInvalid)
 		}
-		return ConflictPolicy{Mode: policy.Mode}, nil
+		return ConflictPolicy{Mode: policy.Mode, Hook: policy.Hook}, nil
 	case ConflictPolicySourcePriority:
 		if len(policy.SourcePriority) == 0 || len(policy.SourcePriority) > MaxConflictPolicySources {
 			return ConflictPolicy{}, fmt.Errorf("%w: source priority must contain 1..%d sources", ErrConflictPolicyInvalid, MaxConflictPolicySources)
@@ -145,7 +176,7 @@ func normalizeConflictPolicy(policy ConflictPolicy) (ConflictPolicy, error) {
 			}
 			sources[index] = source
 		}
-		return ConflictPolicy{Mode: policy.Mode, SourcePriority: sources}, nil
+		return ConflictPolicy{Mode: policy.Mode, SourcePriority: sources, Hook: policy.Hook}, nil
 	default:
 		return ConflictPolicy{}, fmt.Errorf("%w: unsupported mode %d", ErrConflictPolicyInvalid, policy.Mode)
 	}

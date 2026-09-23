@@ -151,7 +151,7 @@ operator control remain the preferred deployment model.
 - [x] T207 Replica eviction, rejoin, and stale-state recovery protocol; see [T207_REPLICA_RECOVERY.md](T207_REPLICA_RECOVERY.md) and [BENCHMARK.md](BENCHMARK.md#t207-replica-eviction-rejoin-and-stale-state-recovery).
 - [x] T208 Anonymous replicas that do not participate in quorum decisions; see [T208_ANONYMOUS_REPLICAS.md](T208_ANONYMOUS_REPLICAS.md) and [BENCHMARK.md](BENCHMARK.md#t208-anonymous-replicas).
 - [x] T209 Relay/applier backpressure when a replica falls behind; see [T209_RELAY_APPLIER_BACKPRESSURE.md](T209_RELAY_APPLIER_BACKPRESSURE.md) and [BENCHMARK.md](BENCHMARK.md#t209-relayapplier-backpressure).
-- [ ] T210 Master-master conflict hooks with source and sequence context.
+- [x] T210 Master-master conflict hooks with source and sequence context; see [T210_MASTER_MASTER_CONFLICT_HOOKS.md](T210_MASTER_MASTER_CONFLICT_HOOKS.md) and [BENCHMARK.md](BENCHMARK.md#t210-master-master-conflict-hooks).
 - [ ] T211 Configurable WAL synchronization modes with durability reporting.
 - [ ] T212 WAL retention and rotation policies tied to replica acknowledgments.
 - [ ] T213 Scheduled snapshots with checkpoint manifests and atomic publication.
