@@ -13,7 +13,9 @@ git add \
 	hat/hatDataStructure/t232_space_transaction_test.go \
 	scripts/benchmark-t232-before.sh \
 	scripts/benchmark-t232.sh \
+	scripts/commit-t232.sh \
 	scripts/format-t232.sh \
+	scripts/push-t232.sh \
 	scripts/race-t232.sh \
 	scripts/stage-t232.sh \
 	scripts/test-t232-package.sh \
