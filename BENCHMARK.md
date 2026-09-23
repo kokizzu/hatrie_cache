@@ -36956,3 +36956,38 @@ BenchmarkT217TypedTableAppendColumnarBatch-32    205  1148628 ns/op  1553083 B/o
 BenchmarkT217TypedTableAppendColumnarBatch-32    200  1213057 ns/op  1553081 B/op  2177 allocs/op
 BenchmarkT217TypedTableAppendColumnarBatch-32    200  1159740 ns/op  1553081 B/op  2177 allocs/op
 ```
+
+## T218: Multi-Part TREE Index Prefix Scans
+
+This benchmark loads 32,768 records across 16 regions and selects one region.
+The baseline scans every record and checks the region. The indexed case uses a
+one-part prefix scan on a two-part `(region, order)` key. The index is built
+outside the timed region. Each final row is one of three `-benchmem` samples on
+Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Workload | Median ns/op | B/op | allocs/op | Relative |
+| --- | ---: | ---: | ---: | ---: |
+| Full scan and filter | 35,019 | 0 | 0 | 1.00x |
+| Multi-part prefix scan | 196.1 | 0 | 0 | **~179x faster** |
+
+The final paired run shows the selective query improvement without an
+allocation tradeoff. The write path still inherits the compact sorted-vector
+cost of `OrderedIndex`; this feature adds a composite read path rather than a
+second pointer-heavy tree structure.
+
+### Raw T218 Output
+
+```text
+Before, make benchmark-t218-before:
+BenchmarkT218PrefixScanBaseline-32    32061 ns/op  0 B/op  0 allocs/op
+BenchmarkT218PrefixScanBaseline-32    34660 ns/op  0 B/op  0 allocs/op
+BenchmarkT218PrefixScanBaseline-32    31338 ns/op  0 B/op  0 allocs/op
+
+After, make benchmark-t218:
+BenchmarkT218PrefixScanBaseline-32    35019 ns/op  0 B/op  0 allocs/op
+BenchmarkT218PrefixScanBaseline-32    33412 ns/op  0 B/op  0 allocs/op
+BenchmarkT218PrefixScanBaseline-32    38433 ns/op  0 B/op  0 allocs/op
+BenchmarkT218MultiPartTreePrefixScan-32    196.1 ns/op  0 B/op  0 allocs/op
+BenchmarkT218MultiPartTreePrefixScan-32    196.6 ns/op  0 B/op  0 allocs/op
+BenchmarkT218MultiPartTreePrefixScan-32    180.9 ns/op  0 B/op  0 allocs/op
+```

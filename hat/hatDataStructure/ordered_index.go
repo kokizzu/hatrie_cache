@@ -89,6 +89,13 @@ func (index *OrderedIndex[T, K]) Upsert(id uint64, value T) error {
 		return ErrOrderedIndexNil
 	}
 	key := index.extractor(value)
+	return index.upsertKey(id, value, key)
+}
+
+func (index *OrderedIndex[T, K]) upsertKey(id uint64, value T, key K) error {
+	if index == nil {
+		return ErrOrderedIndexNil
+	}
 	index.mu.Lock()
 	defer index.mu.Unlock()
 	if index.active.Load() == 0 {
