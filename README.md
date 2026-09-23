@@ -4510,6 +4510,7 @@ lookup and preparation tradeoff is documented in
 - Opt-in monotone logical frontiers for SQL historical reads and query streams: [M209_LOGICAL_FRONTIERS.md](M209_LOGICAL_FRONTIERS.md), with CPU and allocation measurements in [BENCHMARK.md#m209-monotone-logical-frontiers](BENCHMARK.md#m209-monotone-logical-frontiers)
 - Bounded copy-on-write retained logical state for exact historical SQL `AS OF` reads and subscriptions: [M210_RETAINED_STATE.md](M210_RETAINED_STATE.md), with measured retention overhead in [BENCHMARK.md#m210-retained-logical-state](BENCHMARK.md#m210-retained-logical-state)
 - Explicit inclusive `since` and exclusive `upper` bounds for historical SQL reads: [M211_AS_OF_BOUNDS.md](M211_AS_OF_BOUNDS.md), with zero-allocation validation measurements in [BENCHMARK.md#m211-explicit-as-of-bounds](BENCHMARK.md#m211-explicit-as-of-bounds)
+- Logical compaction for retained SQL history keeps the live version readable without rewriting current rows: [M212_LOGICAL_COMPACTION.md](M212_LOGICAL_COMPACTION.md), with update/compaction measurements in [BENCHMARK.md#m212-logical-compaction](BENCHMARK.md#m212-logical-compaction)
 - Differential multiplicity folding for repeated query-subscription CDC deltas: [M208_DIFFERENTIAL_MULTIPLICITY.md](M208_DIFFERENTIAL_MULTIPLICITY.md), with the CPU, memory, and allocation tradeoff in [BENCHMARK.md#m208-differential-multiplicity-folding](BENCHMARK.md#m208-differential-multiplicity-folding)
 
 - [Compact request templates](T239_COMPACT_REQUEST_TEMPLATE.md)

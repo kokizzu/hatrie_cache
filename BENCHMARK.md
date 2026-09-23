@@ -37865,6 +37865,33 @@ allocations. Focused tests verify inclusive lower-bound behavior, exclusive
 upper-bound behavior, malformed intervals, signed token normalization, and
 provider non-invocation on every supported read entry point.
 
+## M212: Logical Compaction
+
+Workload: an empty retained-state publish followed by compaction of one old
+version, measured with `go test -bench '^BenchmarkM212' -benchmem -count=5` on
+Linux/amd64 with an AMD Ryzen 9 5950X. This measures the update/retention path,
+not an end-to-end SQL query or a direct no-compaction baseline.
+
+| Workload | Median ns/op | B/op | Allocs/op |
+| --- | ---: | ---: | ---: |
+| Empty publish plus one-version compaction | 186.8 | 120 | 3 |
+
+Raw samples:
+
+```text
+BenchmarkM212RetainedStatePublishAndCompact-32  6004707  186.2 ns/op  120 B/op  3 allocs/op
+BenchmarkM212RetainedStatePublishAndCompact-32  6460635  186.8 ns/op  120 B/op  3 allocs/op
+BenchmarkM212RetainedStatePublishAndCompact-32  6487531  188.2 ns/op  120 B/op  3 allocs/op
+BenchmarkM212RetainedStatePublishAndCompact-32  6585782  185.9 ns/op  120 B/op  3 allocs/op
+BenchmarkM212RetainedStatePublishAndCompact-32  6229074  196.1 ns/op  120 B/op  3 allocs/op
+```
+
+Compaction is a retention and memory-reclamation capability, so this isolated
+benchmark reports its maintenance cost rather than claiming a query speedup.
+The focused tests verify live-state preservation, unavailable discarded
+frontiers, latest-version preservation for an oversized target, and the zero
+frontier no-op. See [M212_LOGICAL_COMPACTION.md](M212_LOGICAL_COMPACTION.md).
+
 # M208: Differential Multiplicity Folding
 
 Workload: 512 distinct query-subscription rows, each repeated as four signed

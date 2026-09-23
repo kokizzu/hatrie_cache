@@ -152,6 +152,34 @@ func (state *SQLRetainedState) Publish(frontier uint64, sources []SQLRetainedSta
 	return nil
 }
 
+// Compact discards retained exact frontiers at or below frontier while
+// preserving the latest version so the live state remains readable at its
+// current frontier. It does not rewrite current source maps or rows.
+func (state *SQLRetainedState) Compact(frontier uint64) (int, error) {
+	if state == nil {
+		return 0, ErrSQLRetainedStateNil
+	}
+	if frontier == 0 {
+		return 0, nil
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if len(state.history) <= 1 {
+		return 0, nil
+	}
+	searchLimit := len(state.history) - 1
+	drop := sort.Search(searchLimit, func(index int) bool {
+		return state.history[index].frontier > frontier
+	})
+	if drop == 0 {
+		return 0, nil
+	}
+	retained := make([]sqlRetainedStateHistory, len(state.history)-drop)
+	copy(retained, state.history[drop:])
+	state.history = retained
+	return drop, nil
+}
+
 // ResolveSQLSource returns an independent copy of the current source rows.
 func (state *SQLRetainedState) ResolveSQLSource(name, key string) ([]Row, error) {
 	if state == nil {

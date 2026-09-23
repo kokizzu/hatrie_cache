@@ -23414,6 +23414,21 @@ m211-commit:
 m211-push:
 	bash scripts/m211-push.sh
 
+m212-format:
+	bash scripts/m212-format.sh
+
+m212-test:
+	bash scripts/m212-test.sh
+
+m212-race:
+	bash scripts/m212-race.sh
+
+m212-vet:
+	bash scripts/m212-vet.sh
+
+m212-benchmark:
+	bash scripts/m212-benchmark.sh
+
 .PHONY: audit-hatrie-tmp-inventory
 audit-hatrie-tmp-inventory:
 	bash scripts/audit-hatrie-tmp-inventory.sh
@@ -27107,3 +27122,11 @@ commit-t241:
 
 push-t241:
 	bash scripts/push-t241.sh
+m212-stage:
+	bash scripts/m212-stage.sh
+
+m212-commit:
+	bash scripts/m212-commit.sh
+
+m212-push:
+	bash scripts/m212-push.sh
