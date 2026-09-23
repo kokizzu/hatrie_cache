@@ -17,6 +17,7 @@ var (
 type SpaceTransaction struct {
 	space    *Space
 	parent   *SpaceTransaction
+	snapshot *spaceTransactionSnapshot
 	changes  map[string]spaceTransactionChange
 	children int
 	closed   bool
@@ -62,6 +63,20 @@ func (space *Space) BeginTransaction() (*SpaceTransaction, error) {
 	}, nil
 }
 
+func (space *Space) beginSpaceTransaction(mvcc bool) (*SpaceTransaction, error) {
+	if space == nil {
+		return nil, ErrSpaceNil
+	}
+	tx := &SpaceTransaction{
+		space:   space,
+		changes: make(map[string]spaceTransactionChange),
+	}
+	if mvcc {
+		tx.snapshot = space.captureSpaceTransactionSnapshot()
+	}
+	return tx, nil
+}
+
 // BeginNested starts a child transaction. A child Commit merges its final
 // changes into the parent without touching storage; a child Rollback discards
 // only the child changes.
@@ -71,9 +86,10 @@ func (tx *SpaceTransaction) BeginNested() (*SpaceTransaction, error) {
 	}
 	tx.children++
 	return &SpaceTransaction{
-		space:   tx.space,
-		parent:  tx,
-		changes: make(map[string]spaceTransactionChange),
+		space:    tx.space,
+		parent:   tx,
+		snapshot: tx.snapshot,
+		changes:  make(map[string]spaceTransactionChange),
 	}, nil
 }
 
@@ -105,6 +121,9 @@ func (tx *SpaceTransaction) Get(key string) ([]byte, bool) {
 	}
 	if tx.parent != nil {
 		return tx.parent.Get(key)
+	}
+	if tx.snapshot != nil {
+		return tx.snapshot.Get(key)
 	}
 	return tx.space.Get(key)
 }

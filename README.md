@@ -238,6 +238,7 @@ security guidance before exposing it on a network.
 - Opt-in on-replace changefeed hooks with old/new images: [T230_ON_REPLACE_CHANGEFEED.md](T230_ON_REPLACE_CHANGEFEED.md)
 - Opt-in after-replace audit hooks with per-space transaction IDs: [T231_AFTER_REPLACE_AUDIT.md](T231_AFTER_REPLACE_AUDIT.md)
 - Opt-in atomic Space transactions with nested rollback boundaries: [T232_SPACE_TRANSACTIONS.md](T232_SPACE_TRANSACTIONS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#t232-atomic-space-transactions)
+- Opt-in MVCC Space transactions with repeatable reads and cooperative yields: [T233_MVCC_TRANSACTIONS.md](T233_MVCC_TRANSACTIONS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#t233-mvcc-transactions)
 - Tarantool-inspired adaptive per-tuple compression: [TT045_TUPLE_COMPRESSION.md](TT045_TUPLE_COMPRESSION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#tt-045-tuple-level-compression)
 - Snapshot-consistent ordered index cursors: [ORDERED_SNAPSHOT_CURSOR.md](ORDERED_SNAPSHOT_CURSOR.md)
 - Opt-in per-space memory quotas: [SPACE_MEMORY_QUOTA.md](SPACE_MEMORY_QUOTA.md)
@@ -4361,6 +4362,16 @@ is opt-in; ordinary `Put`, `Get`, and `Delete` calls retain their existing
 default path. See [T232_SPACE_TRANSACTIONS.md](T232_SPACE_TRANSACTIONS.md) and
 the measured CPU and memory tradeoff in
 [BENCHMARK.md](BENCHMARK.md#t232-atomic-space-transactions).
+
+## MVCC Space Transactions
+
+`Space.BeginMVCCTransaction` gives a transaction a repeatable read view while
+allowing other Space operations to proceed between method calls.
+`SpaceTransaction.Yield(ctx)` cooperates with the Go scheduler and observes
+context cancellation without releasing or holding a storage lock. The feature
+is opt-in; regular transactions and writes keep their existing behavior. See
+[T233_MVCC_TRANSACTIONS.md](T233_MVCC_TRANSACTIONS.md) and the measured
+snapshot cost in [BENCHMARK.md](BENCHMARK.md#t233-mvcc-transactions).
 
 ## SQL Logical Predicate Short-Circuiting
 

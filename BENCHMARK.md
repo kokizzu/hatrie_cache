@@ -37522,3 +37522,57 @@ BenchmarkT232TransactionalBatch-32            417927 2424 ns/op   2896 B/op 36 a
 BenchmarkT232TransactionalBatch-32            435266 2509 ns/op   2896 B/op 36 allocs/op
 BenchmarkT232TransactionalBatch-32            534766 2458 ns/op   2896 B/op 36 allocs/op
 ```
+
+<a id="t233-mvcc-transactions"></a>
+## T233 MVCC Transactions
+
+This benchmark compares the regular T232 eight-key transaction read control
+with the opt-in MVCC read view and its cooperative yield operation. The MVCC
+view copies only map/run metadata and shares immutable value bytes, but that
+metadata is still a measurable cost. The regular transaction allocation
+profile remains 112 B/op and 9 allocs/op.
+
+| Workload | Median CPU | Memory | Relative CPU | Relative memory |
+| --- | ---: | ---: | ---: | ---: |
+| Regular eight-key transaction read, before T233 | 363.5 ns/op | 112 B/op, 9 allocs/op | 1.00x | 1.00x |
+| Regular eight-key transaction read, same-tree control | 364.1 ns/op | 112 B/op, 9 allocs/op | 1.00x | 1.00x |
+| MVCC eight-key transaction read | 828.3 ns/op | 592 B/op, 13 allocs/op | 2.28x | 5.29x |
+| MVCC begin plus one cooperative yield | 448.2 ns/op | 176 B/op, 4 allocs/op | workload differs | workload differs |
+
+MVCC is therefore opt-in for repeatable reads and cooperative application
+work. It is not enabled on ordinary transactions or writes.
+
+### Raw T233 Output
+
+```text
+Before, make benchmark-t233-before:
+BenchmarkT233RegularTransactionReadBaseline-32 3159680 366.5 ns/op 112 B/op 9 allocs/op
+BenchmarkT233RegularTransactionReadBaseline-32 3294040 363.5 ns/op 112 B/op 9 allocs/op
+BenchmarkT233RegularTransactionReadBaseline-32 3378792 373.7 ns/op 112 B/op 9 allocs/op
+BenchmarkT233RegularTransactionReadBaseline-32 3397534 354.7 ns/op 112 B/op 9 allocs/op
+BenchmarkT233RegularTransactionReadBaseline-32 3181076 345.9 ns/op 112 B/op 9 allocs/op
+
+After, make benchmark-t233:
+BenchmarkT233RegularTransactionReadBaseline-32 3215751 392.7 ns/op 112 B/op 9 allocs/op
+BenchmarkT233RegularTransactionReadBaseline-32 2881831 402.4 ns/op 112 B/op 9 allocs/op
+BenchmarkT233RegularTransactionReadBaseline-32 2950935 398.8 ns/op 112 B/op 9 allocs/op
+BenchmarkT233RegularTransactionReadBaseline-32 2968538 400.6 ns/op 112 B/op 9 allocs/op
+BenchmarkT233RegularTransactionReadBaseline-32 3199609 394.1 ns/op 112 B/op 9 allocs/op
+BenchmarkT233MVCCTransactionRead-32 1000000 1032 ns/op 592 B/op 13 allocs/op
+BenchmarkT233MVCCTransactionRead-32 1000000 1025 ns/op 592 B/op 13 allocs/op
+BenchmarkT233MVCCTransactionRead-32 1338994 813.7 ns/op 592 B/op 13 allocs/op
+BenchmarkT233MVCCTransactionRead-32 1413614 828.3 ns/op 592 B/op 13 allocs/op
+BenchmarkT233MVCCTransactionRead-32 1523499 807.7 ns/op 592 B/op 13 allocs/op
+BenchmarkT233MVCCTransactionYield-32 2714761 432.1 ns/op 176 B/op 4 allocs/op
+BenchmarkT233MVCCTransactionYield-32 2597443 448.2 ns/op 176 B/op 4 allocs/op
+BenchmarkT233MVCCTransactionYield-32 2719776 454.6 ns/op 176 B/op 4 allocs/op
+BenchmarkT233MVCCTransactionYield-32 2616337 464.4 ns/op 176 B/op 4 allocs/op
+BenchmarkT233MVCCTransactionYield-32 2552239 432.2 ns/op 176 B/op 4 allocs/op
+
+Same-tree control rerun, make benchmark-t233-before:
+BenchmarkT233RegularTransactionReadBaseline-32 3173666 370.0 ns/op 112 B/op 9 allocs/op
+BenchmarkT233RegularTransactionReadBaseline-32 3428236 364.1 ns/op 112 B/op 9 allocs/op
+BenchmarkT233RegularTransactionReadBaseline-32 3374816 397.6 ns/op 112 B/op 9 allocs/op
+BenchmarkT233RegularTransactionReadBaseline-32 3425546 327.7 ns/op 112 B/op 9 allocs/op
+BenchmarkT233RegularTransactionReadBaseline-32 3311298 353.4 ns/op 112 B/op 9 allocs/op
+```
