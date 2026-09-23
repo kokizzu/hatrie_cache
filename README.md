@@ -13,6 +13,7 @@ security guidance before exposing it on a network.
 - ClickHouse-style columnar batch ingest for analytical `hatSql.TypedTable` spaces: [T217_COLUMNAR_BATCH_INGEST.md](T217_COLUMNAR_BATCH_INGEST.md), with raw row-wise versus batch measurements in [BENCHMARK.md](BENCHMARK.md#t217-columnar-batch-ingest).
 - Composite multi-part TREE-style indexes with allocation-free short-prefix scans and inclusive ranges: [T218_MULTI_PART_TREE_INDEX.md](T218_MULTI_PART_TREE_INDEX.md), with selective prefix measurements in [BENCHMARK.md](BENCHMARK.md#t218-multi-part-tree-index-prefix-scans).
 - Typed HASH secondary indexes for exact-match predicates, with unique and compact non-unique posting modes: [T219_HASH_INDEX.md](T219_HASH_INDEX.md), with measured CPU and memory tradeoffs in [BENCHMARK.md](BENCHMARK.md#t219-typed-hash-index).
+- Mutable R-tree indexes for validated spatial rectangle and point searches: [T220_RTREE_INDEX.md](T220_RTREE_INDEX.md), with selective-query and reusable-buffer measurements in [BENCHMARK.md](BENCHMARK.md#t220-r-tree-spatial-index).
 - Clean finished generic Go build temp directories with `make cleanup-go-build-preview` followed by `make cleanup-go-build`; active Hatrie worktrees are never selected.
 - Opt-in Tarantool-style health-aware failover route caching with generation fencing: [TT003_FAILOVER_ROUTE_CACHE.md](TT003_FAILOVER_ROUTE_CACHE.md), with lookup measurements in [BENCHMARK.md](BENCHMARK.md#tt-003-failover-route-cache).
 - New to the cache commands and value types: [DATA_STRUCTURE.md](DATA_STRUCTURE.md)

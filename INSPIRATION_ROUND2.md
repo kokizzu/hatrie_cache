@@ -161,7 +161,7 @@ operator control remain the preferred deployment model.
 - [x] T217 Columnar batch ingest for analytical typed tables; see [T217_COLUMNAR_BATCH_INGEST.md](T217_COLUMNAR_BATCH_INGEST.md) and [BENCHMARK.md](BENCHMARK.md#t217-columnar-batch-ingest).
 - [x] T218 Multi-part TREE indexes with ordered prefix and range scans; see [T218_MULTI_PART_TREE_INDEX.md](T218_MULTI_PART_TREE_INDEX.md) and [BENCHMARK.md](BENCHMARK.md#t218-multi-part-tree-index-prefix-scans).
 - [x] T219 HASH indexes for constant-time exact lookups; see [T219_HASH_INDEX.md](T219_HASH_INDEX.md) and [BENCHMARK.md](BENCHMARK.md#t219-typed-hash-index).
-- [ ] T220 RTREE indexes for spatial bounding-box searches.
+- [x] T220 RTREE indexes for spatial bounding-box searches; see [T220_RTREE_INDEX.md](T220_RTREE_INDEX.md), [TR027_RTREE_SPATIAL_INDEX.md](TR027_RTREE_SPATIAL_INDEX.md), and [BENCHMARK.md](BENCHMARK.md#t220-r-tree-spatial-index).
 - [ ] T221 BITSET indexes for low-cardinality membership predicates.
 - [ ] T222 Multikey indexes over array-valued fields.
 - [ ] T223 Functional indexes over derived field expressions.

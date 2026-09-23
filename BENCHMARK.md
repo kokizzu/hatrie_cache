@@ -18012,6 +18012,33 @@ one worker and 64 queued tasks:
 The existing default scheduler benchmark retained `3,400 B/op` and `12
 allocs/op` after the change. See [CHU27_PRIORITY_MERGE_SCHEDULER.md](CHU27_PRIORITY_MERGE_SCHEDULER.md).
 
+<a id="t220-r-tree-spatial-index"></a>
+## T220: R-tree Spatial Index
+
+This benchmark indexes 10,000 half-unit rectangles and queries a small
+rectangle. It compares the mutable R-tree with a linear scan and includes the
+caller-buffer form. Each row has five samples on Linux/amd64 with an AMD Ryzen
+9 5950X.
+
+| Workload | Median ns/op | B/op | allocs/op | Relative |
+| --- | ---: | ---: | ---: | ---: |
+| Linear scan | 15,913 | 2,040 | 8 | 1.00x |
+| Mutable R-tree `Search` | 3,024 | 2,040 | 8 | **5.26x faster** |
+| Mutable R-tree `SearchInto` | 1,458 | 0 | 0 | **10.9x faster** |
+
+The reusable buffer removes result allocation without changing result order or
+the spatial predicate. The mutable tree has higher update and retained-node
+cost than a flat slice; read-mostly callers can choose the packed immutable
+R-tree instead.
+
+### Raw T220 Output
+
+```text
+RTree Search:       3024, 3041, 3163, 2915, 2979 ns/op; 2040 B/op; 8 allocs/op
+RTree SearchInto:   1481, 1463, 1423, 1458, 1413 ns/op; 0 B/op; 0 allocs/op
+Linear scan:       16226, 15762, 15913, 17134, 15896 ns/op; 2040 B/op; 8 allocs/op
+```
+
 ## R-tree Small-Result Sort Fast Paths
 
 Command: `make benchmark-rtree-c219`.
