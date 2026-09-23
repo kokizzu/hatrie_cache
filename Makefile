@@ -27448,3 +27448,26 @@ m226-commit:
 .PHONY: m226-push
 m226-push:
 	bash scripts/m226-push.sh
+.PHONY: m227-landscape
+m227-landscape:
+	bash scripts/m227-landscape.sh
+
+.PHONY: m227-replay-context
+m227-replay-context:
+	bash scripts/m227-replay-context.sh
+
+.PHONY: m227-verify-catalog
+m227-verify-catalog:
+	bash scripts/m227-verify-catalog.sh
+
+.PHONY: m227-stage
+m227-stage:
+	bash scripts/m227-stage.sh
+
+.PHONY: m227-commit
+m227-commit:
+	bash scripts/m227-commit.sh
+
+.PHONY: m227-push
+m227-push:
+	bash scripts/m227-push.sh
