@@ -36314,3 +36314,57 @@ BenchmarkT202LeaderForKey/HeartbeatRequired-32            2804860  411.7 ns/op  
 BenchmarkT202LeaderForKey/HeartbeatRequired-32            2927066  441.1 ns/op  172 B/op  7 allocs/op
 PASS
 ```
+## T205: LSN Replication Metrics
+
+T205 adds acknowledgement-observed per-target apply counters and rates to the
+existing source-sequence and target-lag state. It does not change the command,
+wire, storage, or default replication path when no target acknowledgement is
+observed.
+
+### Summary
+
+| Benchmark | Pre-T205 | T205 | Improvement | Memory tradeoff |
+| --- | ---: | ---: | ---: | --- |
+| Existing metrics observe path | 14.71 ns/op; 0 B; 0 allocs | 14.73 ns/op; 0 B; 0 allocs | 1.00x; within run-to-run noise | None measured |
+| Existing idle metrics snapshot | 1,560 ns/op; 2,944 B; 16 allocs | 1,630 ns/op; 2,944 B; 16 allocs | 0.96x; same memory and allocations | Small monitoring-snapshot timing variance, no heap change |
+| New target apply observer | Not available | 21.69 ns/op; 0 B; 0 allocs | New capability | Per-target state is allocated only after the first valid acknowledgement |
+| New active-target snapshot | Not available | 279.1 ns/op; 624 B; 2 allocs | New capability | 624 B and 2 allocs for one target snapshot |
+
+The existing observe result is the median of five runs at 14.71, 14.21,
+14.18, 14.95, and 15.31 ns/op before T205, versus 16.22, 15.80, 14.41,
+14.54, and 14.73 ns/op in the latest T205 run. The existing snapshot result is
+the median of five runs at 1,531, 1,495, 1,593, 1,618, and 1,560 ns/op before
+T205, versus 1,648, 1,610, 1,606, 1,630, and 1,644 ns/op in the latest run.
+All runs remained at 0 B/op and 0 allocs/op for observation, and 2,944 B/op
+and 16 allocs/op for the idle snapshot. The timing variance is confined to
+the monitoring metrics snapshot; no resident-memory or allocation increase
+was measured.
+
+### Raw T205 Output
+
+```text
+BenchmarkT205MetricsObserveExisting-32  77474659  16.22 ns/op  0 B/op  0 allocs/op
+BenchmarkT205MetricsObserveExisting-32  67582130  15.80 ns/op  0 B/op  0 allocs/op
+BenchmarkT205MetricsObserveExisting-32  79879650  14.41 ns/op  0 B/op  0 allocs/op
+BenchmarkT205MetricsObserveExisting-32  75927165  14.54 ns/op  0 B/op  0 allocs/op
+BenchmarkT205MetricsObserveExisting-32  83429824  14.73 ns/op  0 B/op  0 allocs/op
+BenchmarkT205MetricsSnapshotExisting-32  685665  1648 ns/op  2944 B/op  16 allocs/op
+BenchmarkT205MetricsSnapshotExisting-32  775658  1610 ns/op  2944 B/op  16 allocs/op
+BenchmarkT205MetricsSnapshotExisting-32  696648  1606 ns/op  2944 B/op  16 allocs/op
+BenchmarkT205MetricsSnapshotExisting-32  749167  1630 ns/op  2944 B/op  16 allocs/op
+BenchmarkT205MetricsSnapshotExisting-32  786122  1644 ns/op  2944 B/op  16 allocs/op
+BenchmarkT205MetricsObserveApply-32  59346516  23.61 ns/op  0 B/op  0 allocs/op
+BenchmarkT205MetricsObserveApply-32  52462380  22.58 ns/op  0 B/op  0 allocs/op
+BenchmarkT205MetricsObserveApply-32  47860148  21.39 ns/op  0 B/op  0 allocs/op
+BenchmarkT205MetricsObserveApply-32  49915570  20.11 ns/op  0 B/op  0 allocs/op
+BenchmarkT205MetricsObserveApply-32  53755885  21.69 ns/op  0 B/op  0 allocs/op
+BenchmarkT205MetricsSnapshotApply-32  4158219  279.1 ns/op  624 B/op  2 allocs/op
+BenchmarkT205MetricsSnapshotApply-32  4322419  278.0 ns/op  624 B/op  2 allocs/op
+BenchmarkT205MetricsSnapshotApply-32  4260115  273.3 ns/op  624 B/op  2 allocs/op
+BenchmarkT205MetricsSnapshotApply-32  4415792  281.2 ns/op  624 B/op  2 allocs/op
+BenchmarkT205MetricsSnapshotApply-32  4169046  281.2 ns/op  624 B/op  2 allocs/op
+```
+
+The apply snapshot allocation is bounded by the number of observed targets and
+occurs when monitoring copies the snapshot. The command and acknowledgement
+observation paths remain zero-allocation in the benchmark.

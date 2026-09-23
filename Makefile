@@ -25659,3 +25659,26 @@ commit-t203:
 .PHONY: push-t203
 push-t203:
 	bash scripts/push-t203.sh
+test-t205:
+	@bash scripts/test-t205.sh
+format-t205:
+	@bash scripts/format-t205.sh
+benchmark-t205:
+	@bash scripts/benchmark-t205.sh
+
+test-t205-package:
+	@bash scripts/test-t205-package.sh
+
+race-t205:
+	@bash scripts/race-t205.sh
+
+vet-t205:
+	@bash scripts/vet-t205.sh
+stage-t205:
+	@bash scripts/stage-t205.sh
+
+commit-t205:
+	@bash scripts/commit-t205.sh
+
+push-t205:
+	@bash scripts/push-t205.sh

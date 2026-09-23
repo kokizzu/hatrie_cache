@@ -17,12 +17,25 @@ var queueTimingMillisBuckets = []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 
 // replication metrics.
 type HistogramSnapshot = hatMetrics.HistogramSnapshot
 
+// ApplyMetricsSnapshot reports acknowledgement-observed replication apply
+// work for one target. Rates use the elapsed time between the first and most
+// recent accepted sequence observation.
+type ApplyMetricsSnapshot struct {
+	LastAppliedSequence          uint64  `json:"last_applied_sequence,omitempty"`
+	AppliedBatches               uint64  `json:"applied_batches"`
+	AppliedEntries               uint64  `json:"applied_entries"`
+	AppliedPayloadBytes          uint64  `json:"applied_payload_bytes"`
+	AppliedEntriesPerSecond      float64 `json:"applied_entries_per_second,omitempty"`
+	AppliedPayloadBytesPerSecond float64 `json:"applied_payload_bytes_per_second,omitempty"`
+}
+
 // MetricsSnapshot is an immutable copy of replication transport metrics.
 type MetricsSnapshot struct {
 	TargetLatencyMillis       map[string]HistogramSnapshot
 	TargetBatchItems          map[string]HistogramSnapshot
 	TargetWireBytes           map[string]map[string]uint64
 	TargetWireRequests        map[string]map[string]uint64
+	TargetApply               map[string]ApplyMetricsSnapshot
 	RetryDelayMillis          HistogramSnapshot
 	QueueWaitMillis           HistogramSnapshot
 	QueueServiceMillis        HistogramSnapshot
@@ -37,10 +50,20 @@ type Metrics struct {
 	targetBatchItems   map[string]*hatMetrics.Histogram
 	targetWireBytes    map[string]map[string]uint64
 	targetWireRequests map[string]map[string]uint64
+	targetApply        map[string]*targetApplyMetrics
 	retryDelayMillis   *hatMetrics.Histogram
 	queueWaitMillis    *hatMetrics.Histogram
 	queueServiceMillis *hatMetrics.Histogram
 	breakerTransitions map[string]map[string]uint64
+}
+
+type targetApplyMetrics struct {
+	lastAppliedSequence uint64
+	appliedBatches      uint64
+	appliedEntries      uint64
+	appliedPayloadBytes uint64
+	firstAt             time.Time
+	lastAt              time.Time
 }
 
 // ObserveTargetLatency records one completed transport attempt.
@@ -90,6 +113,42 @@ func (metrics *Metrics) ObserveTargetWireBytes(target, encoding string, bytes ui
 		metrics.targetWireRequests[target] = map[string]uint64{}
 	}
 	metrics.targetWireRequests[target][encoding]++
+}
+
+// ObserveTargetApply records one successfully acknowledged target apply. A
+// sequence is accepted at most once per target, so retries and out-of-order
+// completions cannot inflate throughput counters.
+func (metrics *Metrics) ObserveTargetApply(target string, sequence, entries, payloadBytes uint64, at time.Time) {
+	if metrics == nil || strings.TrimSpace(target) == "" || sequence == 0 || entries == 0 {
+		return
+	}
+	target = strings.TrimSpace(target)
+	if at.IsZero() {
+		at = time.Now()
+	}
+	metrics.mu.Lock()
+	defer metrics.mu.Unlock()
+	if metrics.targetApply == nil {
+		metrics.targetApply = map[string]*targetApplyMetrics{}
+	}
+	apply := metrics.targetApply[target]
+	if apply == nil {
+		apply = &targetApplyMetrics{}
+		metrics.targetApply[target] = apply
+	}
+	if sequence <= apply.lastAppliedSequence {
+		return
+	}
+	if apply.appliedBatches == 0 {
+		apply.firstAt = at
+	}
+	apply.lastAppliedSequence = sequence
+	apply.appliedBatches++
+	apply.appliedEntries += entries
+	apply.appliedPayloadBytes += payloadBytes
+	if at.After(apply.lastAt) {
+		apply.lastAt = at
+	}
 }
 
 // ObserveRetryDelay records one asynchronous retry delay.
@@ -154,16 +213,48 @@ func (metrics *Metrics) Snapshot() MetricsSnapshot {
 	}
 	metrics.mu.Lock()
 	defer metrics.mu.Unlock()
+	var targetApply map[string]ApplyMetricsSnapshot
+	if len(metrics.targetApply) > 0 {
+		targetApply = snapshotTargetApply(metrics.targetApply)
+	}
 	return MetricsSnapshot{
 		TargetLatencyMillis:       snapshotHistogramMap(metrics.targetLatency),
 		TargetBatchItems:          snapshotHistogramMap(metrics.targetBatchItems),
 		TargetWireBytes:           snapshotCounterMap(metrics.targetWireBytes),
 		TargetWireRequests:        snapshotCounterMap(metrics.targetWireRequests),
+		TargetApply:               targetApply,
 		RetryDelayMillis:          snapshotHistogram(metrics.retryDelayMillis),
 		QueueWaitMillis:           snapshotHistogram(metrics.queueWaitMillis),
 		QueueServiceMillis:        snapshotHistogram(metrics.queueServiceMillis),
 		CircuitBreakerTransitions: snapshotTransitions(metrics.breakerTransitions),
 	}
+}
+
+func snapshotTargetApply(source map[string]*targetApplyMetrics) map[string]ApplyMetricsSnapshot {
+	if len(source) == 0 {
+		return nil
+	}
+	out := make(map[string]ApplyMetricsSnapshot, len(source))
+	for target, apply := range source {
+		if apply == nil {
+			continue
+		}
+		snapshot := ApplyMetricsSnapshot{
+			LastAppliedSequence: apply.lastAppliedSequence,
+			AppliedBatches:      apply.appliedBatches,
+			AppliedEntries:      apply.appliedEntries,
+			AppliedPayloadBytes: apply.appliedPayloadBytes,
+		}
+		if elapsed := apply.lastAt.Sub(apply.firstAt).Seconds(); elapsed > 0 {
+			snapshot.AppliedEntriesPerSecond = float64(apply.appliedEntries) / elapsed
+			snapshot.AppliedPayloadBytesPerSecond = float64(apply.appliedPayloadBytes) / elapsed
+		}
+		out[target] = snapshot
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (metrics *Metrics) targetHistogramLocked(targets *map[string]*hatMetrics.Histogram, target string, bounds []float64) *hatMetrics.Histogram {

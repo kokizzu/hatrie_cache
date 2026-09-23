@@ -146,7 +146,7 @@ operator control remain the preferred deployment model.
   with an opt-in heartbeat requirement and caller-owned refresh loop.
 - [x] T203 Strict leader fencing against stale writers after failover; see [T203_LEADER_FENCING.md](T203_LEADER_FENCING.md) and [BENCHMARK.md](BENCHMARK.md#t203-strict-leader-fencing).
 - [x] T204 Supervised failover with explicit operator override and recovery state; see [T204_SUPERVISED_FAILOVER.md](T204_SUPERVISED_FAILOVER.md) and [BENCHMARK.md](BENCHMARK.md#t204-supervised-failover).
-- [ ] T205 LSN-based replication lag and apply-throughput metrics.
+- [x] T205 LSN-based replication lag and apply-throughput metrics; see [T205_LSN_REPLICATION_METRICS.md](T205_LSN_REPLICATION_METRICS.md) and [BENCHMARK.md](BENCHMARK.md#t205-lsn-replication-metrics).
 - [ ] T206 Deterministic replica bootstrap and join workflow.
 - [ ] T207 Replica eviction, rejoin, and stale-state recovery protocol.
 - [ ] T208 Anonymous replicas that do not participate in quorum decisions.

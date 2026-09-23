@@ -168,6 +168,7 @@ type ReplicationQueueStats = hatReplication.QueueStats
 type ReplicationTargetResult = hatReplication.TargetResult
 type ReplicationMetricsSnapshot = hatReplication.MetricsSnapshot
 type ReplicationHistogramSnapshot = hatReplication.HistogramSnapshot
+type ReplicationApplyMetricsSnapshot = hatReplication.ApplyMetricsSnapshot
 type replicationMetrics = hatReplication.Metrics
 
 func (replicator *HTTPReplicator) recordReplicationTargetLatency(target TopologyNode, duration time.Duration) {
@@ -185,6 +186,12 @@ func (replicator *HTTPReplicator) recordReplicationBatchSize(target TopologyNode
 func (replicator *HTTPReplicator) recordReplicationWireBytes(target TopologyNode, bytes uint64, contentEncoding string) {
 	if replicator != nil {
 		replicator.metrics.ObserveTargetWireBytes(replicationMetricsTarget(target), contentEncoding, bytes)
+	}
+}
+
+func (replicator *HTTPReplicator) recordReplicationTargetApply(target string, sequence, entries, payloadBytes uint64, at time.Time) {
+	if replicator != nil {
+		replicator.metrics.ObserveTargetApply(target, sequence, entries, payloadBytes, at)
 	}
 }
 
@@ -1531,10 +1538,23 @@ func (replicator *HTTPReplicator) recordAsyncAttempt(job replicationJob, result 
 		replicator.queueStats.SourceSequence = sequence
 	}
 	replicator.queueStats.Attempts += uint64(len(result.Targets))
+	var appliedAt time.Time
 	for _, target := range result.Targets {
 		if target.OK {
 			replicator.queueStats.Successes++
 			if target.Node != "" && sequence > 0 {
+				entries := uint64(0)
+				if result.Entries > 0 {
+					entries = uint64(result.Entries)
+				} else {
+					entries = replicationJobEntriesForTarget(job, target.Node)
+				}
+				if entries > 0 {
+					if appliedAt.IsZero() {
+						appliedAt = time.Now()
+					}
+					replicator.recordReplicationTargetApply(target.Node, sequence, entries, replicationJobPayloadBytesForTarget(job, target.Node), appliedAt)
+				}
 				if replicator.queueStats.LastAcknowledgedSequenceByTarget == nil {
 					replicator.queueStats.LastAcknowledgedSequenceByTarget = map[string]uint64{}
 				}
@@ -1559,6 +1579,27 @@ func (replicator *HTTPReplicator) recordAsyncAttempt(job replicationJob, result 
 		replicator.queueStats.LastRetryKey = result.Key
 	}
 	replicator.refreshReplicationLagLocked()
+}
+
+func replicationJobEntriesForTarget(job replicationJob, target string) uint64 {
+	var entries uint64
+	for _, task := range job.tasks {
+		if task.target.ID == target {
+			entries++
+		}
+	}
+	return entries
+}
+
+func replicationJobPayloadBytesForTarget(job replicationJob, target string) uint64 {
+	var payloadBytes uint64
+	for _, task := range job.tasks {
+		if task.target.ID != target || task.payloadBytes <= 0 {
+			continue
+		}
+		payloadBytes += uint64(task.payloadBytes)
+	}
+	return payloadBytes
 }
 
 func (replicator *HTTPReplicator) observeAsyncJob(job replicationJob) {

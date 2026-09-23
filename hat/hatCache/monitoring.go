@@ -1212,6 +1212,30 @@ func writePrometheusReplicationMetrics(builder *strings.Builder, node string, sn
 			writePrometheusTargetHistogram(builder, "hatrie_cache_replication_batch_items", node, target, snapshot.TargetBatchItems[target])
 		}
 	}
+	if len(snapshot.TargetApply) > 0 {
+		writePrometheusHelp(builder, "hatrie_cache_replication_target_apply_batches_total", "Successful replication batches acknowledged by each target.")
+		writePrometheusType(builder, "hatrie_cache_replication_target_apply_batches_total", "counter")
+		writePrometheusHelp(builder, "hatrie_cache_replication_target_apply_entries_total", "Entries acknowledged as applied by each replication target.")
+		writePrometheusType(builder, "hatrie_cache_replication_target_apply_entries_total", "counter")
+		writePrometheusHelp(builder, "hatrie_cache_replication_target_apply_payload_bytes_total", "Estimated replication payload bytes acknowledged as applied by each target.")
+		writePrometheusType(builder, "hatrie_cache_replication_target_apply_payload_bytes_total", "counter")
+		writePrometheusHelp(builder, "hatrie_cache_replication_target_last_applied_sequence", "Latest source replication sequence acknowledged as applied by each target.")
+		writePrometheusType(builder, "hatrie_cache_replication_target_last_applied_sequence", "gauge")
+		writePrometheusHelp(builder, "hatrie_cache_replication_target_apply_entries_per_second", "Acknowledged replication apply entry throughput per target, measured from the first and latest accepted sequence.")
+		writePrometheusType(builder, "hatrie_cache_replication_target_apply_entries_per_second", "gauge")
+		writePrometheusHelp(builder, "hatrie_cache_replication_target_apply_payload_bytes_per_second", "Acknowledged replication apply payload throughput per target, measured from the first and latest accepted sequence.")
+		writePrometheusType(builder, "hatrie_cache_replication_target_apply_payload_bytes_per_second", "gauge")
+		for _, target := range sortedReplicationMetricTargets(snapshot.TargetApply) {
+			apply := snapshot.TargetApply[target]
+			labels := fmt.Sprintf("node=\"%s\",target=\"%s\"", node, prometheusLabelValue(target))
+			fmt.Fprintf(builder, "hatrie_cache_replication_target_apply_batches_total{%s} %d\n", labels, apply.AppliedBatches)
+			fmt.Fprintf(builder, "hatrie_cache_replication_target_apply_entries_total{%s} %d\n", labels, apply.AppliedEntries)
+			fmt.Fprintf(builder, "hatrie_cache_replication_target_apply_payload_bytes_total{%s} %d\n", labels, apply.AppliedPayloadBytes)
+			fmt.Fprintf(builder, "hatrie_cache_replication_target_last_applied_sequence{%s} %d\n", labels, apply.LastAppliedSequence)
+			fmt.Fprintf(builder, "hatrie_cache_replication_target_apply_entries_per_second{%s} %g\n", labels, apply.AppliedEntriesPerSecond)
+			fmt.Fprintf(builder, "hatrie_cache_replication_target_apply_payload_bytes_per_second{%s} %g\n", labels, apply.AppliedPayloadBytesPerSecond)
+		}
+	}
 	if snapshot.RetryDelayMillis.Count > 0 {
 		writePrometheusHelp(builder, "hatrie_cache_replication_retry_delay_millis", "Async replication retry wait duration in milliseconds.")
 		writePrometheusType(builder, "hatrie_cache_replication_retry_delay_millis", "histogram")
