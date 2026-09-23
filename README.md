@@ -5198,3 +5198,14 @@ requests do not reach the handler, policy details are not exposed on the wire,
 and the default nil authorizer preserves the existing path. See
 [T241_ROLE_BASED_AUTHORIZATION.md](T241_ROLE_BASED_AUTHORIZATION.md) for the
 policy model, security constraints, and benchmark tradeoff.
+
+## Sorted Arrangement Reuse
+
+`hatSql.NewTypedTableSortedArrangements` is an opt-in reference-counted
+registry for sharing sorted typed-table state across compatible query plans.
+An existing longer `ORDER BY` can serve an identical shorter prefix when field
+direction and NULL placement match; dictionary encoding flags are storage
+hints. Apply source changes once to the shared lease and call `Release` when a
+plan is done. The default direct constructor is unchanged. See
+[M214_SORTED_ARRANGEMENT_REUSE.md](M214_SORTED_ARRANGEMENT_REUSE.md) and
+[BENCHMARK.md](BENCHMARK.md#m214-sorted-arrangement-reuse).

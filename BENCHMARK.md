@@ -37973,3 +37973,35 @@ BenchmarkT242AuditAllOperationsEnabled-32     241102  5324 ns/op  2712 B/op  24 
 The enabled mode adds about `2,546 ns/op`, `1,300 B/op`, and 8 allocations for
 this request shape. See [T242_APPEND_ONLY_AUDIT.md](T242_APPEND_ONLY_AUDIT.md)
 for semantics, configuration, and verification details.
+
+## M214: Sorted Arrangement Reuse
+
+Workload: five `-benchmem` samples on Linux/amd64 with an AMD Ryzen 9 5950X.
+The direct path constructs a fresh compatible prefix arrangement and reads one
+row. The registry path keeps a longer composite arrangement live, then
+acquires a compatible prefix lease, reads one row, and releases that lease.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative CPU | Relative bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Direct compatible-prefix construction | 108,676 | 63,528 | 283 | 1.00x | 1.00x |
+| Registry compatible-prefix reuse | 489.2 | 232 | 6 | 0.0045x (`~222x` faster) | 0.0037x (`~274x` lower) |
+
+The registry uses about `47x` fewer allocations in this repeated-plan path. It
+is opt-in and retains the backing arrangement until its final lease is
+released. The same run measured direct composite construction at `230,722
+ns/op`, `141,950 B/op`, and `858 allocs/op`, so the shared registry avoids a
+second maintained ordering rather than changing the direct constructor.
+
+Raw samples:
+
+```text
+Direct compatible-prefix ns/op: 116000 108676 114356 107109 107462
+Direct compatible-prefix B/op:   63528  63528  63528  63528  63528
+Direct compatible-prefix allocs:   283    283    283    283    283
+Registry reuse ns/op:             489.2  489.4  485.0  507.1  477.5
+Registry reuse B/op:              232    232    232    232    232
+Registry reuse allocs:              6      6      6      6      6
+```
+
+See [M214_SORTED_ARRANGEMENT_REUSE.md](M214_SORTED_ARRANGEMENT_REUSE.md) for
+compatibility rules and the tie-order refinement caveat.

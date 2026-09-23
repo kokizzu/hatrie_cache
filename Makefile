@@ -27149,3 +27149,26 @@ m213-commit:
 
 m213-push:
 	bash scripts/m213-push.sh
+m214-test:
+	bash scripts/m214-test.sh
+
+m214-benchmark:
+	bash scripts/m214-benchmark.sh
+
+m214-format:
+	bash scripts/m214-format.sh
+
+m214-race:
+	bash scripts/m214-race.sh
+
+m214-vet:
+	bash scripts/m214-vet.sh
+
+m214-stage:
+	bash scripts/m214-stage.sh
+
+m214-commit:
+	bash scripts/m214-commit.sh
+
+m214-push:
+	bash scripts/m214-push.sh
