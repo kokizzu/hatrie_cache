@@ -27475,3 +27475,55 @@ m227-push:
 .PHONY: m227-verify-rollback
 m227-verify-rollback:
 	bash scripts/m227-verify-rollback.sh
+
+.PHONY: m228-ch-g04-test
+m228-ch-g04-test:
+	bash scripts/m228-ch-g04-test.sh
+
+.PHONY: m228-ch-g04-benchmark
+m228-ch-g04-benchmark:
+	bash scripts/m228-ch-g04-benchmark.sh
+
+.PHONY: m228-ch-g04-format
+m228-ch-g04-format:
+	bash scripts/m228-ch-g04-format.sh
+
+.PHONY: m228-ch-g04-join-test
+m228-ch-g04-join-test:
+	bash scripts/m228-ch-g04-join-test.sh
+
+.PHONY: m228-ch-g04-race
+m228-ch-g04-race:
+	bash scripts/m228-ch-g04-race.sh
+
+.PHONY: m228-ch-g04-vet
+m228-ch-g04-vet:
+	bash scripts/m228-ch-g04-vet.sh
+
+.PHONY: m228-ch-g04-compare
+m228-ch-g04-compare:
+	bash scripts/m228-ch-g04-compare.sh
+
+.PHONY: m228-ch-g04-full-test
+m228-ch-g04-full-test:
+	bash scripts/m228-ch-g04-full-test.sh
+
+.PHONY: m228-ch-g04-compare-1cpu
+m228-ch-g04-compare-1cpu:
+	bash scripts/m228-ch-g04-compare-1cpu.sh
+
+.PHONY: m228-ch-g04-fpr
+m228-ch-g04-fpr:
+	bash scripts/m228-ch-g04-fpr.sh
+
+.PHONY: m228-stage
+m228-stage:
+	bash scripts/m228-stage.sh
+
+.PHONY: m228-commit
+m228-commit:
+	bash scripts/m228-commit.sh
+
+.PHONY: m228-push
+m228-push:
+	bash scripts/m228-push.sh

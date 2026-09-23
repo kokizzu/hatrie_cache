@@ -1,5 +1,55 @@
 # Benchmark
 
+## CH-G04 Adaptive Runtime Bloom Precheck
+
+The SQL hash-join index now has an adaptive runtime Bloom precheck for large
+numeric and boolean build sides. It is deliberately lazy: indexes below 1,024
+build slots never allocate a filter; larger indexes sample 64 probes and build
+the filter only when at least 75% of the sample misses. The exact hash map
+remains authoritative, so Bloom false positives only cause an ordinary map
+lookup and cannot change query results. String joins keep their existing path
+because adding a second string hash would cost more than it saves in the
+common case.
+
+Linux/amd64, AMD Ryzen 9 5950X, five samples per case, `-benchmem`.
+
+| Case | Baseline median | Adaptive median | Baseline memory | Adaptive memory | Relative result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 4,096-key numeric, miss-heavy | 28.53 ns/op | 18.70 ns/op | 0 B/op, 0 allocs/op | 0 B/op, 0 allocs/op | 1.53x faster |
+| 4,096-key numeric, hit-heavy | 32.24 ns/op | 31.43 ns/op | 0 B/op, 0 allocs/op | 0 B/op, 0 allocs/op | 1.03x faster, within noise |
+| C213 SQL hash join | 3,543,392 ns/op | 3,451,770 ns/op | 4,922,457 B/op, 24,642 allocs/op | 4,922,552 B/op, 24,643 allocs/op | 1.03x faster |
+| 256-key numeric index guard | 25,759 ns/op | 24,121 ns/op | 20,568 B/op, 260 allocs/op | 20,568 B/op, 260 allocs/op | no filter allocation |
+
+### Raw Samples
+
+```text
+4,096-key numeric miss-heavy baseline:
+27.99 28.53 27.43 28.65 29.28 ns/op
+4,096-key numeric miss-heavy adaptive:
+18.70 18.85 18.51 18.48 19.10 ns/op
+
+4,096-key numeric hit-heavy baseline:
+32.31 32.24 32.77 30.71 30.08 ns/op
+4,096-key numeric hit-heavy adaptive:
+30.03 33.28 31.43 32.53 31.15 ns/op
+
+C213 SQL hash join before:
+3,723,783 3,273,558 3,466,214 3,573,610 3,543,392 ns/op
+C213 SQL hash join after:
+3,451,770 3,401,165 3,388,324 3,452,215 3,463,685 ns/op
+
+256-key numeric index before:
+25,759 26,145 25,073 25,804 25,602 ns/op
+256-key numeric index after:
+23,705 24,118 24,575 24,591 24,121 ns/op
+```
+
+The deterministic false-positive measurement is 3,021/100,000, or 3.021%,
+with zero false negatives. The filter uses 8 bits per admitted build slot and
+three probes; its memory is paid only after a miss-heavy sample activates it.
+Run `make m228-ch-g04-benchmark` and `make m228-ch-g04-fpr` for the focused
+measurements.
+
 ## C231 SQL Workload Groups
 
 Linux/amd64, AMD Ryzen 9 5950X, five samples per case.
