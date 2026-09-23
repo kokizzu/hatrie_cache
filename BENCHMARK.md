@@ -36615,3 +36615,55 @@ BenchmarkT210ConflictHook/hook-accept-remote-32  24.11 ns/op  0 B/op  0 allocs/o
 BenchmarkT210ConflictHook/hook-accept-remote-32  24.07 ns/op  0 B/op  0 allocs/op
 BenchmarkT210ConflictHook/hook-accept-remote-32  24.82 ns/op  0 B/op  0 allocs/op
 ```
+
+## T211: WAL Synchronization
+
+T211 adds a configurable journal synchronization mode and a durability
+watermark. `periodic` remains the default; `immediate` forces one sync boundary
+per committed record; `disabled` skips explicit syncs and reports an unsafe
+durability boundary. These benchmarks install a no-op sync hook, so they
+measure journal dispatch and append work rather than physical filesystem sync
+latency.
+
+### Summary
+
+| Mode | Median ns/op | Memory | Syncs/op | Relative to periodic |
+| --- | ---: | ---: | ---: | --- |
+| `periodic` | 9,685 | 1,552 B; 6 allocs | 1.000 | Baseline |
+| `immediate` | 4,777 | 256 B; 2 allocs | 1.000 | 2.03x faster; 6.06x lower bytes |
+| `disabled` | 10,437 | 1,552 B; 6 allocs | 0.000 | 1.08x slower; sync call removed |
+
+The immediate result is a mode-path comparison under this benchmark harness,
+not a claim that physical `fsync` is cheaper. With real storage, immediate
+syncing is expected to be more latency-sensitive. Disabled mode removes the
+sync call but does not make the overall append path faster in this small
+sequential workload. The default path remains periodic and has no new
+allocation for the report unless the caller requests it.
+
+### Raw T211 Output
+
+```text
+Before, make benchmark-t211-before:
+BenchmarkT211JournalSyncBaseline/ImmediateBatch1-32  5721 ns/op  314 B/op  3 allocs/op  1.000 syncs/op
+BenchmarkT211JournalSyncBaseline/ImmediateBatch1-32  5654 ns/op  314 B/op  3 allocs/op  1.000 syncs/op
+BenchmarkT211JournalSyncBaseline/ImmediateBatch1-32  4942 ns/op  315 B/op  3 allocs/op  1.000 syncs/op
+BenchmarkT211JournalSyncBaseline/PeriodicBatch64-32  11601 ns/op  1610 B/op  7 allocs/op  1.000 syncs/op
+BenchmarkT211JournalSyncBaseline/PeriodicBatch64-32  13899 ns/op  1616 B/op  7 allocs/op  1.000 syncs/op
+BenchmarkT211JournalSyncBaseline/PeriodicBatch64-32  16828 ns/op  1616 B/op  7 allocs/op  1.000 syncs/op
+
+After, make benchmark-t211:
+BenchmarkT211JournalSyncModes/Periodic-32   8046 ns/op  1552 B/op  6 allocs/op  1.000 syncs/op
+BenchmarkT211JournalSyncModes/Periodic-32  10117 ns/op  1552 B/op  6 allocs/op  1.000 syncs/op
+BenchmarkT211JournalSyncModes/Periodic-32   9685 ns/op  1552 B/op  6 allocs/op  1.000 syncs/op
+BenchmarkT211JournalSyncModes/Immediate-32  8187 ns/op   256 B/op  2 allocs/op  1.000 syncs/op
+BenchmarkT211JournalSyncModes/Immediate-32  4777 ns/op   256 B/op  2 allocs/op  1.000 syncs/op
+BenchmarkT211JournalSyncModes/Immediate-32  4654 ns/op   256 B/op  2 allocs/op  1.000 syncs/op
+BenchmarkT211JournalSyncModes/Disabled-32  10437 ns/op  1552 B/op  6 allocs/op  0 syncs/op
+BenchmarkT211JournalSyncModes/Disabled-32   9292 ns/op  1552 B/op  6 allocs/op  0 syncs/op
+BenchmarkT211JournalSyncModes/Disabled-32  11246 ns/op  1558 B/op  6 allocs/op  0 syncs/op
+```
+
+Reproduce with `make benchmark-t211-before` and `make benchmark-t211`; run
+correctness with `make test-t211`, then run the cleanup target
+`make cleanup-hatrie-tmp-after-test` to remove stale test metadata without
+deleting active worktrees.

@@ -98,6 +98,27 @@ const (
 // import hat/hatJournal directly.
 type CommandJournalOptions = hatJournal.Options
 
+// CommandJournalSyncMode is the cache-package alias for journal durability
+// synchronization modes.
+type CommandJournalSyncMode = hatJournal.SyncMode
+
+const (
+	CommandJournalSyncModePeriodic  = hatJournal.SyncModePeriodic
+	CommandJournalSyncModeImmediate = hatJournal.SyncModeImmediate
+	CommandJournalSyncModeDisabled  = hatJournal.SyncModeDisabled
+)
+
+// CommandJournalDurabilityReport describes the journal's synchronization
+// watermark. UnsyncedSequences is the number of appended records after the
+// last successful sync. Disabled mode intentionally reports Durable=false.
+type CommandJournalDurabilityReport struct {
+	SyncMode           hatJournal.SyncMode `json:"sync_mode"`
+	Durable            bool                `json:"durable"`
+	LastSequence       uint64              `json:"last_sequence"`
+	LastSyncedSequence uint64              `json:"last_synced_sequence"`
+	UnsyncedSequences  uint64              `json:"unsynced_sequences"`
+}
+
 // InspectCommandJournal validates a journal without modifying it. It combines
 // portable framing and sequence inspection with cache-specific command
 // validation, so a successful report is safe to use as a restore preflight.
@@ -236,6 +257,8 @@ type CommandJournal struct {
 	subscriptionCount     uint64
 	subscriptions         map[*CommandJournalSubscription]struct{}
 	closeErr              error
+	syncMode              hatJournal.SyncMode
+	lastSyncedSequence    uint64
 	syncHook              func() error
 	writeHook             func([]byte) (int, error)
 	recordBatchChunkBytes int
@@ -276,6 +299,9 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 		return nil, err
 	}
 	options = normalized
+	if options.SyncMode == hatJournal.SyncModeImmediate {
+		options.GroupCommitMaxBatch = 1
+	}
 	format := options.Format
 	var encryptor *hatJournal.RecordEncryptor
 	if options.Encryption.Enabled() {
@@ -347,6 +373,7 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 		groupCommitWindow:     options.GroupCommitWindow,
 		groupCommitMaxBatch:   options.GroupCommitMaxBatch,
 		adaptiveGroupCommit:   options.AdaptiveGroupCommit,
+		syncMode:              options.SyncMode,
 		segmentMaxBytes:       options.SegmentMaxBytes,
 		segmentCompression:    options.SegmentCompression,
 		retainedSegments:      options.RetainedSegments,
@@ -361,6 +388,9 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 	journal.advanceSequenceLocked(maxSequence)
 	if journal.nextSequence == 0 && !journal.sequenceExhausted {
 		journal.nextSequence = 1
+	}
+	if journal.syncMode != hatJournal.SyncModeDisabled {
+		journal.lastSyncedSequence = journal.lastSequenceLocked()
 	}
 	journal.activeSegmentStart, err = commandJournalActiveSegmentStartWithEncryption(path, journal.lastSequenceLocked(), journal.encryption)
 	if err != nil {
@@ -1696,6 +1726,31 @@ func (journal *CommandJournal) Sequence() uint64 {
 	return journal.lastSequenceLocked()
 }
 
+// DurabilityReport returns the synchronization watermark for operational
+// monitoring. A report is durable only when the configured mode permits
+// synchronization and every appended record is covered by the last sync.
+func (journal *CommandJournal) DurabilityReport() CommandJournalDurabilityReport {
+	if journal == nil {
+		return CommandJournalDurabilityReport{}
+	}
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+
+	lastSequence := journal.lastSequenceLocked()
+	lastSyncedSequence := journal.lastSyncedSequence
+	if lastSyncedSequence > lastSequence {
+		lastSyncedSequence = lastSequence
+	}
+	unsynced := lastSequence - lastSyncedSequence
+	return CommandJournalDurabilityReport{
+		SyncMode:           journal.syncMode,
+		Durable:            journal.syncMode.Durable() && unsynced == 0,
+		LastSequence:       lastSequence,
+		LastSyncedSequence: lastSyncedSequence,
+		UnsyncedSequences:  unsynced,
+	}
+}
+
 // WithPersistenceBarrier runs persist while journal appends and applications
 // are paused. The callback receives the latest fully applied sequence, allowing
 // persistent data and its replay watermark to be committed atomically.
@@ -1912,13 +1967,22 @@ func resolveJournalReplicationJobs(journal *CommandJournal, jobs []replicationJo
 }
 
 func (journal *CommandJournal) syncLocked() error {
+	if journal.syncMode == hatJournal.SyncModeDisabled {
+		return nil
+	}
+	var err error
 	if journal.syncHook != nil {
-		return journal.syncHook()
+		err = journal.syncHook()
+	} else {
+		if journal.file == nil {
+			return ErrCommandJournalClosed
+		}
+		err = journal.file.Sync()
 	}
-	if journal.file == nil {
-		return ErrCommandJournalClosed
+	if err == nil {
+		journal.lastSyncedSequence = journal.lastSequenceLocked()
 	}
-	return journal.file.Sync()
+	return err
 }
 
 func (journal *CommandJournal) rollbackFailedAppendLocked(state commandJournalAppendState, cause error) error {
@@ -1947,6 +2011,9 @@ func (journal *CommandJournal) rollbackAppendWithoutSyncLocked(state commandJour
 	}
 	journal.nextSequence = state.nextSequence
 	journal.sequenceExhausted = state.sequenceExhausted
+	if journal.lastSyncedSequence > journal.lastSequenceLocked() {
+		journal.lastSyncedSequence = journal.lastSequenceLocked()
+	}
 	return nil
 }
 

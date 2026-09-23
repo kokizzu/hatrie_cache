@@ -88,11 +88,13 @@ const (
 	MaxIdempotencyCapacity                   = 1 << 20
 )
 
-// Options configures journal encoding, durable group commit, and optional
-// bounded segment rotation. SegmentMaxBytes zero keeps one active file.
+// Options configures journal encoding, durability synchronization, and
+// optional bounded segment rotation. SegmentMaxBytes zero keeps one active
+// file. SyncModePeriodic is the zero-value default after validation.
 type Options struct {
 	Format              Format
 	SegmentCompression  SegmentCompression
+	SyncMode            SyncMode
 	GroupCommitWindow   time.Duration
 	GroupCommitMaxBatch int
 	// AdaptiveGroupCommit shortens the collection window when queued writers
@@ -105,8 +107,9 @@ type Options struct {
 	Encryption          EncryptionOptions
 }
 
-// ValidateOptions verifies journal options and returns a copy with a
-// canonical format. A batch size of one uses immediate fsync behavior.
+// ValidateOptions verifies journal options and returns a copy with canonical
+// format and synchronization values. A batch size of one uses an immediate
+// group boundary, while SyncModeImmediate is enforced by the cache journal.
 func ValidateOptions(options Options) (Options, error) {
 	format, err := ParseFormat(string(options.Format))
 	if err != nil {
@@ -115,6 +118,12 @@ func ValidateOptions(options Options) (Options, error) {
 	segmentCompression, err := ParseSegmentCompression(string(options.SegmentCompression))
 	if err != nil {
 		return Options{}, err
+	}
+	if options.SyncMode == 0 {
+		options.SyncMode = SyncModePeriodic
+	}
+	if !validSpaceSyncPolicy(options.SyncMode) {
+		return Options{}, ErrSpaceSyncPolicyInvalid
 	}
 	if options.GroupCommitWindow < 0 {
 		return Options{}, errors.New("hatJournal: group commit window must be non-negative")

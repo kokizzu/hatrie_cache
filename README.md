@@ -5015,3 +5015,12 @@ continue with the configured policy, or reject the conflict. Hooks are only
 called for distinct versions and are disabled by default. See
 [T210_MASTER_MASTER_CONFLICT_HOOKS.md](T210_MASTER_MASTER_CONFLICT_HOOKS.md)
 and [BENCHMARK.md](BENCHMARK.md#t210-master-master-conflict-hooks).
+
+## Configurable WAL Synchronization
+
+T211 adds explicit `periodic`, `immediate`, and `disabled` journal sync modes;
+the default remains `periodic`. Configure `CommandJournalOptions.SyncMode`
+with the re-exported `CommandJournalSyncMode*` constants and inspect the
+current recovery boundary with `journal.DurabilityReport()`. See
+[T211_CONFIGURABLE_WAL_SYNC.md](T211_CONFIGURABLE_WAL_SYNC.md) and the raw
+measurements in [BENCHMARK.md](BENCHMARK.md#t211-wal-synchronization).

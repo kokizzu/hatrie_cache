@@ -25849,6 +25849,51 @@ vet-t210:
 verify-t210-scope:
 	@bash scripts/verify-t210-scope.sh
 
+.PHONY: benchmark-t211-before
+benchmark-t211-before:
+	bash ./scripts/benchmark-t211-before.sh
+
+.PHONY: test-t211-package
+test-t211-package:
+	bash ./scripts/test-t211-package.sh
+
+.PHONY: race-t211
+race-t211:
+	bash ./scripts/race-t211.sh
+
+.PHONY: vet-t211
+vet-t211:
+	bash ./scripts/vet-t211.sh
+
+.PHONY: verify-t211-scope
+verify-t211-scope:
+	bash ./scripts/verify-t211-scope.sh
+
+.PHONY: stage-t211
+stage-t211:
+	bash ./scripts/stage-t211.sh
+
+.PHONY: commit-t211
+commit-t211:
+	bash ./scripts/commit-t211.sh
+
+.PHONY: push-t211
+push-t211:
+	bash ./scripts/push-t211.sh
+
+.PHONY: benchmark-t211
+benchmark-t211:
+	bash ./scripts/benchmark-t211.sh
+
+.PHONY: format-t211
+format-t211:
+	@bash scripts/format-t211.sh
+
+.PHONY: test-t211
+test-t211:
+	@bash scripts/test-t211.sh
+
+
 .PHONY: stage-t210 commit-t210 push-t210
 stage-t210:
 	@bash scripts/stage-t210.sh

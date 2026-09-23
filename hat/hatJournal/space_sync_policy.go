@@ -38,6 +38,16 @@ const (
 	SpaceSyncPolicyDisabled
 )
 
+// SyncMode is the journal-level name for a durability policy. It aliases
+// SpaceSyncPolicy so existing per-space policy registries remain compatible.
+type SyncMode = SpaceSyncPolicy
+
+const (
+	SyncModePeriodic  = SpaceSyncPolicyPeriodic
+	SyncModeImmediate = SpaceSyncPolicyImmediate
+	SyncModeDisabled  = SpaceSyncPolicyDisabled
+)
+
 func (policy SpaceSyncPolicy) String() string {
 	switch policy {
 	case SpaceSyncPolicyPeriodic:
