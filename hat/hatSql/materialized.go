@@ -91,8 +91,16 @@ type materializedView struct {
 	sourceVersions map[string]string
 	collation      SQLCollation
 	pointLookups   map[string]map[string][]int
+	readGate       *materializedViewReadGate
 	storedRows     int
 	storedBytes    int64
+}
+
+// materializedViewReadGate drains readers of one immutable view generation
+// before a selected point index is removed. The pointer is shared by copied
+// generations, while the maps and rows themselves are replaced atomically.
+type materializedViewReadGate struct {
+	mu sync.RWMutex
 }
 
 // NewMaterializedViews creates an empty materialized-view registry.
@@ -202,6 +210,7 @@ func (views *MaterializedViews) Create(ctx context.Context, definition Materiali
 			Result: cloneQueryResult(result),
 		},
 		pointLookups: pointLookups,
+		readGate:     &materializedViewReadGate{},
 		storedRows:   storedRows,
 		storedBytes:  storedBytes,
 	}
@@ -321,22 +330,87 @@ func (views *MaterializedViews) PointLookup(name, field string, value interface{
 		views.mu.RUnlock()
 		return nil, false, nil
 	}
+	if view.readGate == nil {
+		views.mu.RUnlock()
+		return nil, false, fmt.Errorf("materialized view %q reader gate is missing", name)
+	}
+	view.readGate.mu.RLock()
+	views.mu.RUnlock()
+	defer view.readGate.mu.RUnlock()
 	postings, available := view.pointLookups[field]
 	if !available {
-		views.mu.RUnlock()
 		return nil, false, nil
 	}
 	indexes := postings[key]
 	rows := make([]Row, 0, len(indexes))
 	for _, index := range indexes {
 		if index < 0 || index >= len(view.snapshot.Result.Rows) {
-			views.mu.RUnlock()
 			return nil, false, fmt.Errorf("materialized view %q point lookup index is inconsistent", name)
 		}
 		rows = append(rows, cloneResultCacheRow(view.snapshot.Result.Rows[index]))
 	}
-	views.mu.RUnlock()
 	return rows, true, nil
+}
+
+// DropPointLookupFields removes selected point postings without dropping the
+// materialized rows. Existing readers drain on the view's generation gate
+// before the removal is published; future readers observe the remaining index
+// fields and fall back to the snapshot arrangement when a field is absent.
+// Passing no fields removes all point postings. Repeating a removal is safe.
+func (views *MaterializedViews) DropPointLookupFields(name string, fields ...string) error {
+	if views == nil {
+		return fmt.Errorf("materialized views are nil")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("materialized view name is required")
+	}
+	remove := make(map[string]struct{}, len(fields))
+	for _, field := range fields {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			return fmt.Errorf("materialized view point lookup field is required")
+		}
+		remove[field] = struct{}{}
+	}
+
+	views.mu.Lock()
+	defer views.mu.Unlock()
+	view, exists := views.views[name]
+	if !exists {
+		return fmt.Errorf("materialized view %q does not exist", name)
+	}
+	if view.readGate == nil {
+		return fmt.Errorf("materialized view %q reader gate is missing", name)
+	}
+	view.readGate.mu.Lock()
+	defer view.readGate.mu.Unlock()
+	if len(remove) == 0 {
+		view.definition.PointLookupFields = nil
+		view.pointLookups = nil
+		views.views[name] = view
+		return nil
+	}
+
+	remainingFields := make([]string, 0, len(view.definition.PointLookupFields))
+	remainingLookups := make(map[string]map[string][]int, len(view.pointLookups))
+	for _, field := range view.definition.PointLookupFields {
+		if _, drop := remove[field]; drop {
+			continue
+		}
+		remainingFields = append(remainingFields, field)
+		if postings, indexed := view.pointLookups[field]; indexed {
+			remainingLookups[field] = postings
+		}
+	}
+	if len(remainingFields) == 0 {
+		remainingFields = nil
+		remainingLookups = nil
+	}
+	view.definition.PointLookupFields = remainingFields
+	view.pointLookups = remainingLookups
+	views.views[name] = view
+	return nil
 }
 
 // Drop removes one named materialized view and its retained storage accounting.
@@ -753,10 +827,23 @@ func (views *MaterializedViews) lookupPoint(query *sqlQuery, resolver SourceReso
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	views.mu.RUnlock()
 	for _, name := range names {
-		view := views.views[name]
+		views.mu.RLock()
+		view, exists := views.views[name]
+		if !exists {
+			views.mu.RUnlock()
+			continue
+		}
+		if view.readGate == nil {
+			views.mu.RUnlock()
+			return QueryResult{}, false, fmt.Errorf("materialized view %q reader gate is missing", name)
+		}
+		view.readGate.mu.RLock()
+		views.mu.RUnlock()
 		outputField, compatible := materializedPointLookupOutputField(view.parsedQuery, query, predicateField)
 		if !compatible || !materializedViewFresh(view, versions) {
+			view.readGate.mu.RUnlock()
 			continue
 		}
 
@@ -772,7 +859,7 @@ func (views *MaterializedViews) lookupPoint(query *sqlQuery, resolver SourceReso
 					var err error
 					selected, err = materializedPointLookupRows(rows, indexes, name)
 					if err != nil {
-						views.mu.RUnlock()
+						view.readGate.mu.RUnlock()
 						return QueryResult{}, false, err
 					}
 					usePoint = true
@@ -786,15 +873,14 @@ func (views *MaterializedViews) lookupPoint(query *sqlQuery, resolver SourceReso
 			var err error
 			selected, err = materializedArrangementScanRows(rows, outputField, predicateValue, query.where.collation)
 			if err != nil {
-				views.mu.RUnlock()
+				view.readGate.mu.RUnlock()
 				return QueryResult{}, false, err
 			}
 		}
 		result := materializedLookupResult(view.snapshot.Result, selected, node, name+"."+outputField)
-		views.mu.RUnlock()
+		view.readGate.mu.RUnlock()
 		return result, true, nil
 	}
-	views.mu.RUnlock()
 	return QueryResult{}, false, nil
 }
 

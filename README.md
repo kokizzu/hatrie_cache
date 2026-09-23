@@ -5262,3 +5262,13 @@ still match. Stale, canceled, or invalid builds do not publish partial state.
 The default synchronous `Create` and refresh paths are unchanged. See
 [M219_BACKGROUND_INDEX_BUILD.md](M219_BACKGROUND_INDEX_BUILD.md) and
 [BENCHMARK.md](BENCHMARK.md#m219-background-index-creation).
+
+## Safe Point-Index Removal
+
+Use `MaterializedViews.DropPointLookupFields` to remove selected point postings
+without dropping the materialized rows. Readers already using that view finish
+on their immutable generation before removal publishes, while future readers
+see the remaining indexes or the normal arrangement-scan fallback. The
+operation is idempotent for already absent fields. See
+[M220_SAFE_INDEX_REMOVAL.md](M220_SAFE_INDEX_REMOVAL.md) and
+[BENCHMARK.md](BENCHMARK.md#m220-safe-materialized-index-removal).

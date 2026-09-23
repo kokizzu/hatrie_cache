@@ -27275,6 +27275,30 @@ m219-race:
 m219-vet:
 	bash scripts/m219-vet.sh
 
+m220-test:
+	bash scripts/m220-test.sh
+
+m220-benchmark:
+	bash scripts/m220-benchmark.sh
+
+m220-format:
+	bash scripts/m220-format.sh
+
+m220-race:
+	bash scripts/m220-race.sh
+
+m220-vet:
+	bash scripts/m220-vet.sh
+
+m220-stage:
+	bash scripts/m220-stage.sh
+
+m220-commit:
+	bash scripts/m220-commit.sh
+
+m220-push:
+	bash scripts/m220-push.sh
+
 m219-stage:
 	bash scripts/m219-stage.sh
 

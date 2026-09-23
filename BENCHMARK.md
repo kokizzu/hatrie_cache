@@ -38141,3 +38141,38 @@ BenchmarkM219MaterializedViewPointBuild/background_total_build-32        2451   
 The queue frontier and atomic stale-build behavior are verified by the focused
 tests. See [M219_BACKGROUND_INDEX_BUILD.md](M219_BACKGROUND_INDEX_BUILD.md) for
 the API, lifecycle, and operational tradeoffs.
+
+<a id="m220-safe-materialized-index-removal"></a>
+## M220: Safe Materialized Index Removal
+
+This compares the point-lookup path before and after per-view reader gates and
+selective posting removal. The workload uses a 4,096-row materialized view with
+one `region` point index. The removal API itself is correctness-oriented; it
+keeps rows and storage accounting while dropping only the selected postings.
+
+| Workload | Before ns/op | After ns/op | Before B/op | After B/op | Before allocs/op | After allocs/op | Result |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Single point lookup | 17,972 | 17,421 | 22,032 | 22,032 | 130 | 130 | 1.03x faster |
+| Parallel point lookup | 6,487 | 6,317 | 22,032 | 22,032 | 130 | 130 | 1.03x faster |
+
+The measured CPU improvement is modest, with no per-query allocation or byte
+regression. The retained-memory benefit is lifetime-based: after readers drain,
+the removed posting map is no longer reachable from the registry and can be
+reclaimed. `B/op` is transient allocation and does not quantify that retained
+heap change.
+
+Raw results from `make m220-benchmark`:
+
+```text
+Before:
+BenchmarkM220MaterializedViewIndexLifecycle/point_lookup-32             62053  17972 ns/op  22032 B/op  130 allocs/op
+BenchmarkM220MaterializedViewIndexLifecycle/point_lookup_parallel-32   161161   6487 ns/op  22032 B/op  130 allocs/op
+
+After samples:
+point_lookup ns/op: 16883 18585 16243 17421 18506
+point_lookup_parallel ns/op: 6317 6858 6243 5883 7947
+B/op: 22032 on every sample; allocs/op: 130 on every sample
+```
+
+See [M220_SAFE_INDEX_REMOVAL.md](M220_SAFE_INDEX_REMOVAL.md) for API behavior,
+reader-drain semantics, and the test commands.
