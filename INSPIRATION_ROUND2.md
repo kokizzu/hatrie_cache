@@ -155,7 +155,7 @@ operator control remain the preferred deployment model.
 - [x] T211 Configurable WAL synchronization modes with durability reporting; see [T211_CONFIGURABLE_WAL_SYNC.md](T211_CONFIGURABLE_WAL_SYNC.md).
 - [x] T212 WAL retention and rotation policies tied to replica acknowledgments; see [T212_WAL_REPLICA_RETENTION.md](T212_WAL_REPLICA_RETENTION.md) and [BENCHMARK.md](BENCHMARK.md#t212-wal-replica-acknowledgement-retention).
 - [x] T213 Scheduled snapshots with checkpoint manifests and atomic publication; see [T213_SCHEDULED_SNAPSHOTS.md](T213_SCHEDULED_SNAPSHOTS.md) and [BENCHMARK.md](BENCHMARK.md#t213-scheduled-snapshot-checkpoints).
-- [ ] T214 Streaming snapshots for replicas without a shared filesystem.
+- [x] T214 Streaming snapshots for replicas without a shared filesystem; see [T214_SNAPSHOT_STREAMING.md](T214_SNAPSHOT_STREAMING.md) and [BENCHMARK.md](BENCHMARK.md#t214-streaming-snapshots).
 - [ ] T215 Per-space memtx versus on-disk storage policy.
 - [ ] T216 Vinyl-style run compaction scheduling and space accounting.
 - [ ] T217 In-memory columnar storage for analytical spaces.

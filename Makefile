@@ -25897,6 +25897,50 @@ race-t213:
 vet-t213:
 	bash ./scripts/vet-t213.sh
 
+.PHONY: format-t214
+format-t214:
+	bash ./scripts/format-t214.sh
+
+.PHONY: benchmark-t214
+benchmark-t214:
+	bash ./scripts/benchmark-t214.sh
+
+.PHONY: test-t214-package
+test-t214-package:
+	bash ./scripts/test-t214-package.sh
+
+.PHONY: race-t214
+race-t214:
+	bash ./scripts/race-t214.sh
+
+.PHONY: vet-t214
+vet-t214:
+	bash ./scripts/vet-t214.sh
+
+.PHONY: test-t214
+test-t214:
+	bash ./scripts/test-t214.sh
+
+.PHONY: benchmark-t214-before
+benchmark-t214-before:
+	bash ./scripts/benchmark-t214-before.sh
+
+.PHONY: verify-t214-scope
+verify-t214-scope:
+	bash ./scripts/verify-t214-scope.sh
+
+.PHONY: stage-t214
+stage-t214:
+	bash ./scripts/stage-t214.sh
+
+.PHONY: commit-t214
+commit-t214:
+	bash ./scripts/commit-t214.sh
+
+.PHONY: push-t214
+push-t214:
+	bash ./scripts/push-t214.sh
+
 .PHONY: verify-t213-scope
 verify-t213-scope:
 	bash ./scripts/verify-t213-scope.sh

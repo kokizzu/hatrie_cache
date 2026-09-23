@@ -36764,3 +36764,46 @@ ok  hatrie_cache/hat/hatCache  9.657s
 Reproduce with `make benchmark-t213-before` and `make benchmark-t213`; run
 correctness with `make test-t213`, then run
 `make cleanup-hatrie-tmp-after-test` and `make audit-hatrie-tmp`.
+
+## T214: Streaming Snapshots
+
+T214 adds direct snapshot write/read APIs over `io.Writer` and `io.Reader`.
+The benchmark compares the existing filesystem save plus load path with a
+source-to-target `io.Pipe` stream and staged load. The stream avoids a shared
+snapshot file while retaining the existing snapshot validation and atomic
+restore behavior.
+
+### Summary
+
+| Mode | Median time | Bytes/op | Allocs/op | Relative time | Relative bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Filesystem round trip | 2.226 ms | 127,987 | 53 | 1.00x | 1.00x |
+| Stream round trip | 0.141 ms | 122,747 | 39 | 0.063x; 15.8x faster | 0.959x; 4.1% lower |
+
+The filesystem rows have cold-storage outliers, so the medians are the useful
+comparison. This measures the transfer path, not an SLA: network latency,
+bandwidth, receiver disk policy, and snapshot size will change the result.
+The stream has no resume protocol and does not replace transport security or
+replica fencing.
+
+### Raw T214 Output
+
+```text
+Before, make benchmark-t214-before:
+BenchmarkT214SnapshotTransferBaseline-32  2201454 ns/op  127842 B/op 53 allocs/op
+BenchmarkT214SnapshotTransferBaseline-32  4535487 ns/op  127840 B/op 53 allocs/op
+BenchmarkT214SnapshotTransferBaseline-32  2331751 ns/op  127827 B/op 53 allocs/op
+
+After, make benchmark-t214:
+BenchmarkT214SnapshotTransferModes/FilesystemRoundTrip-32  1781247977 ns/op  150296 B/op 435 allocs/op
+BenchmarkT214SnapshotTransferModes/FilesystemRoundTrip-32   282345043 ns/op  129592 B/op 110 allocs/op
+BenchmarkT214SnapshotTransferModes/FilesystemRoundTrip-32     2226485 ns/op  127987 B/op 53 allocs/op
+BenchmarkT214SnapshotTransferModes/StreamRoundTrip-32           136576 ns/op  122750 B/op 39 allocs/op
+BenchmarkT214SnapshotTransferModes/StreamRoundTrip-32           148657 ns/op  122752 B/op 39 allocs/op
+BenchmarkT214SnapshotTransferModes/StreamRoundTrip-32           140834 ns/op  122747 B/op 39 allocs/op
+PASS
+ok  hatrie_cache/hat/hatCache  21.238s
+```
+
+Reproduce with `make benchmark-t214-before` and `make benchmark-t214`; run
+correctness with `make test-t214`, then run the cleanup and audit targets.

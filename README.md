@@ -5046,3 +5046,12 @@ journal only after publication. It is disabled unless
 [T213_SCHEDULED_SNAPSHOTS.md](T213_SCHEDULED_SNAPSHOTS.md) and the raw
 measurements in
 [BENCHMARK.md](BENCHMARK.md#t213-scheduled-snapshot-checkpoints).
+
+## Streaming Snapshots
+
+T214 adds `WriteSnapshotTo` and `LoadSnapshotFrom` APIs for sending a snapshot
+over a pipe or network connection when replicas do not share a filesystem.
+The receiver stages and validates the complete stream before cutover, and the
+existing file-based snapshot APIs remain unchanged. See
+[T214_SNAPSHOT_STREAMING.md](T214_SNAPSHOT_STREAMING.md) and the measurements
+in [BENCHMARK.md](BENCHMARK.md#t214-streaming-snapshots).

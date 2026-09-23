@@ -30,6 +30,8 @@ var (
 	errDeleteKeysNotInPageFull    = errors.New("hatriecache: delete missing keys page full")
 	errSnapshotChangedDuringLoad  = errors.New("hatriecache: snapshot changed during load")
 	errSnapshotDuplicateActiveKey = errors.New("hatriecache: snapshot contains duplicate active key")
+	ErrNilSnapshotWriter          = errors.New("hatriecache: snapshot writer is nil")
+	ErrNilSnapshotReader          = errors.New("hatriecache: snapshot reader is nil")
 )
 
 type SnapshotFormat = hatSnapshot.Format
@@ -290,6 +292,29 @@ func (ht *HatTrie) SaveSnapshotWithJournalSequenceAndFormat(path string, journal
 	})
 }
 
+// WriteSnapshotTo streams a snapshot to a caller-owned writer without
+// creating a snapshot file. The writer is not closed by this method.
+func (ht *HatTrie) WriteSnapshotTo(writer io.Writer) error {
+	return ht.WriteSnapshotToWithJournalSequenceAndFormat(writer, 0, DefaultSnapshotFormat)
+}
+
+// WriteSnapshotToWithJournalSequenceAndFormat streams a snapshot with an
+// explicit journal checkpoint and format. It is suitable for a pipe or
+// network connection when the receiver has no shared filesystem.
+func (ht *HatTrie) WriteSnapshotToWithJournalSequenceAndFormat(writer io.Writer, journalSequence uint64, format SnapshotFormat) error {
+	if ht == nil {
+		return ErrNilHatTrie
+	}
+	if writer == nil {
+		return ErrNilSnapshotWriter
+	}
+	format, err := ParseSnapshotFormat(string(format))
+	if err != nil {
+		return err
+	}
+	return ht.writeSnapshot(writer, journalSequence, format)
+}
+
 func (ht *HatTrie) LoadSnapshot(path string) error {
 	_, err := ht.LoadSnapshotWithMetadata(path)
 	return err
@@ -297,6 +322,26 @@ func (ht *HatTrie) LoadSnapshot(path string) error {
 
 func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, error) {
 	return ht.loadSnapshotStaged(path)
+}
+
+// LoadSnapshotFrom loads a snapshot from a caller-owned reader without
+// requiring a local snapshot file. The reader is not closed by this method.
+func (ht *HatTrie) LoadSnapshotFrom(reader io.Reader) error {
+	_, err := ht.LoadSnapshotFromWithMetadata(reader)
+	return err
+}
+
+// LoadSnapshotFromWithMetadata stages and atomically adopts a snapshot read
+// from a pipe or network connection. Invalid or truncated streams leave the
+// live trie unchanged.
+func (ht *HatTrie) LoadSnapshotFromWithMetadata(reader io.Reader) (SnapshotMetadata, error) {
+	if ht == nil {
+		return SnapshotMetadata{}, ErrNilHatTrie
+	}
+	if reader == nil {
+		return SnapshotMetadata{}, ErrNilSnapshotReader
+	}
+	return ht.loadSnapshotStagedReader(reader)
 }
 
 func (ht *HatTrie) loadSnapshotLegacy(path string) (SnapshotMetadata, error) {

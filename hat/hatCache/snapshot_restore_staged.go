@@ -2,6 +2,7 @@ package hatCache
 
 import (
 	"errors"
+	"io"
 	"os"
 	"time"
 
@@ -12,14 +13,23 @@ func (ht *HatTrie) loadSnapshotStaged(path string) (SnapshotMetadata, error) {
 	if ht == nil {
 		return SnapshotMetadata{}, ErrNilHatTrie
 	}
-	ht.snapshotCaptureMu.Lock()
-	defer ht.snapshotCaptureMu.Unlock()
-
 	file, err := os.Open(path)
 	if err != nil {
 		return SnapshotMetadata{}, err
 	}
 	defer file.Close()
+	return ht.loadSnapshotStagedReader(file)
+}
+
+func (ht *HatTrie) loadSnapshotStagedReader(reader io.Reader) (SnapshotMetadata, error) {
+	if ht == nil {
+		return SnapshotMetadata{}, ErrNilHatTrie
+	}
+	if reader == nil {
+		return SnapshotMetadata{}, ErrNilSnapshotReader
+	}
+	ht.snapshotCaptureMu.Lock()
+	defer ht.snapshotCaptureMu.Unlock()
 
 	stage, err := newSnapshotRestoreStage(ht)
 	if err != nil {
@@ -38,7 +48,7 @@ func (ht *HatTrie) loadSnapshotStaged(path string) (SnapshotMetadata, error) {
 	}
 
 	now := ht.currentTime()
-	metadata, err := scanSnapshotIntoRestoreStage(file, stage, now)
+	metadata, err := scanSnapshotIntoRestoreStage(reader, stage, now)
 	if err != nil {
 		return SnapshotMetadata{}, err
 	}
@@ -116,12 +126,12 @@ func newSnapshotRestoreTrie(target *HatTrie) (*HatTrie, error) {
 	return stage, nil
 }
 
-func scanSnapshotIntoRestoreStage(file *os.File, stage *HatTrie, now time.Time) (snapshotFileMetadata, error) {
+func scanSnapshotIntoRestoreStage(reader io.Reader, stage *HatTrie, now time.Time) (snapshotFileMetadata, error) {
 	set := stage.localPartitionSet()
 	if set == nil {
 		stage.mu.Lock()
 		defer stage.mu.Unlock()
-		return scanSnapshotFileReader(file, func(entry snapshotEntry) error {
+		return scanSnapshotFileReader(reader, func(entry snapshotEntry) error {
 			operation, active, err := validateSnapshotLoadEntry(entry, now, true)
 			if err != nil || !active {
 				return err
@@ -142,7 +152,7 @@ func scanSnapshotIntoRestoreStage(file *os.File, stage *HatTrie, now time.Time) 
 		_, err := child.applySnapshotOperationAtLocked(operation, now)
 		return err
 	})
-	metadata, scanErr := scanSnapshotFileReader(file, func(entry snapshotEntry) error {
+	metadata, scanErr := scanSnapshotFileReader(reader, func(entry snapshotEntry) error {
 		operation, active, err := validateSnapshotLoadEntry(entry, now, true)
 		if err != nil || !active {
 			return err
