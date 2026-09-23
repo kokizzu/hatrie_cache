@@ -237,6 +237,7 @@ security guidance before exposing it on a network.
 - Opt-in before-replace validation and conflict hooks: [T229_BEFORE_REPLACE.md](T229_BEFORE_REPLACE.md)
 - Opt-in on-replace changefeed hooks with old/new images: [T230_ON_REPLACE_CHANGEFEED.md](T230_ON_REPLACE_CHANGEFEED.md)
 - Opt-in after-replace audit hooks with per-space transaction IDs: [T231_AFTER_REPLACE_AUDIT.md](T231_AFTER_REPLACE_AUDIT.md)
+- Opt-in atomic Space transactions with nested rollback boundaries: [T232_SPACE_TRANSACTIONS.md](T232_SPACE_TRANSACTIONS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#t232-atomic-space-transactions)
 - Tarantool-inspired adaptive per-tuple compression: [TT045_TUPLE_COMPRESSION.md](TT045_TUPLE_COMPRESSION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#tt-045-tuple-level-compression)
 - Snapshot-consistent ordered index cursors: [ORDERED_SNAPSHOT_CURSOR.md](ORDERED_SNAPSHOT_CURSOR.md)
 - Opt-in per-space memory quotas: [SPACE_MEMORY_QUOTA.md](SPACE_MEMORY_QUOTA.md)
@@ -4350,6 +4351,16 @@ It is disabled by default, cannot reject an already accepted write, and runs
 after `OnReplace` when both hooks are configured. Use `BeforeReplace` for
 rejection policy. See [T231_AFTER_REPLACE_AUDIT.md](T231_AFTER_REPLACE_AUDIT.md)
 and [BENCHMARK.md](BENCHMARK.md#t231-after-replace-audit-hooks).
+
+## Atomic Space Transactions
+
+`Space.BeginTransaction` stages copied writes for memtx and Vinyl spaces. Root
+commits validate the complete final mutation set before changing storage, and
+nested scopes can commit into a parent or roll back independently. The feature
+is opt-in; ordinary `Put`, `Get`, and `Delete` calls retain their existing
+default path. See [T232_SPACE_TRANSACTIONS.md](T232_SPACE_TRANSACTIONS.md) and
+the measured CPU and memory tradeoff in
+[BENCHMARK.md](BENCHMARK.md#t232-atomic-space-transactions).
 
 ## SQL Logical Predicate Short-Circuiting
 

@@ -138,6 +138,10 @@ func (table *LSMTable) Put(key string, value []byte) error {
 	}
 	table.mu.Lock()
 	defer table.mu.Unlock()
+	return table.putLocked(key, value)
+}
+
+func (table *LSMTable) putLocked(key string, value []byte) error {
 	if table.memtable == nil {
 		table.memtable = make(map[string]lsmTableRecord)
 	}
@@ -165,6 +169,10 @@ func (table *LSMTable) Delete(key string) error {
 	}
 	table.mu.Lock()
 	defer table.mu.Unlock()
+	return table.deleteLocked(key)
+}
+
+func (table *LSMTable) deleteLocked(key string) error {
 	if table.memtable == nil {
 		table.memtable = make(map[string]lsmTableRecord)
 	}
@@ -189,6 +197,10 @@ func (table *LSMTable) Get(key string) ([]byte, bool) {
 	}
 	table.mu.RLock()
 	defer table.mu.RUnlock()
+	return table.getLocked(key)
+}
+
+func (table *LSMTable) getLocked(key string) ([]byte, bool) {
 	if record, ok := table.memtable[key]; ok {
 		if record.deleted {
 			return nil, false

@@ -173,7 +173,7 @@ operator control remain the preferred deployment model.
 - [x] T229 Before-replace triggers for validation and conflict policy; `SpaceOptions.BeforeReplace` validates copied old/new values for memtx and Vinyl while preserving the default fast path. See [T229_BEFORE_REPLACE.md](T229_BEFORE_REPLACE.md) and [BENCHMARK.md](BENCHMARK.md#t229-before-replace-triggers).
 - [x] T230 On-replace changefeed hooks with old and new tuple images; `SpaceOptions.OnReplace` emits copied mutation images after successful memtx/Vinyl writes and can publish into `hatReplication.SpaceChangefeed`, while remaining disabled by default. See [T230_ON_REPLACE_CHANGEFEED.md](T230_ON_REPLACE_CHANGEFEED.md) and [BENCHMARK.md](BENCHMARK.md#t230-on-replace-changefeed-hooks).
 - [x] T231 After-replace audit hooks with transaction identity; `SpaceOptions.AfterReplace` emits copied successful mutation images with monotonic per-space IDs while keeping the default path off. See [T231_AFTER_REPLACE_AUDIT.md](T231_AFTER_REPLACE_AUDIT.md) and [BENCHMARK.md](BENCHMARK.md#t231-after-replace-audit-hooks).
-- [ ] T232 Atomic transaction scopes with nested rollback boundaries.
+- [x] T232 Atomic transaction scopes with nested rollback boundaries; `Space.BeginTransaction` stages copied writes, supports nested merge/rollback boundaries, validates before mutation, and applies atomic memtx/Vinyl batches while retaining the default path. See [T232_SPACE_TRANSACTIONS.md](T232_SPACE_TRANSACTIONS.md) and [BENCHMARK.md](BENCHMARK.md#t232-atomic-space-transactions).
 - [ ] T233 MVCC transactions that permit cooperative yields.
 - [ ] T234 Early conflict detection for competing transactional writes.
 - [ ] T235 Cooperative fiber workers for nonblocking application tasks.

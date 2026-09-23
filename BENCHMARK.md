@@ -37463,3 +37463,62 @@ BenchmarkT231SpaceAfterReplace  11146887 106.7 ns/op 24 B/op  3 allocs/op
 BenchmarkT231SpaceAfterReplace  11207346 106.7 ns/op 24 B/op  3 allocs/op
 BenchmarkT231SpaceAfterReplace  11317712 103.9 ns/op 24 B/op  3 allocs/op
 ```
+
+<a id="t232-atomic-space-transactions"></a>
+## T232 Atomic Space Transactions
+
+This benchmark measures the unchanged default `Space.Put` path and an
+eight-key sequential-write control before and after T232, then compares them
+with the new one-key and eight-key transaction paths. Transactions are opt-in;
+their extra staging and copied mutation metadata are the cost of atomic batch
+visibility and nested rollback boundaries.
+
+| Workload | Before T232 | After T232 | Relative CPU | Relative memory |
+| --- | ---: | ---: | ---: | ---: |
+| One ordinary `Space.Put` | 47.25 ns/op, 8 B/op, 1 alloc/op | 47.08 ns/op, 8 B/op, 1 alloc/op | 1.00x | 1.00x |
+| Eight ordinary sequential puts | 417.1 ns/op, 64 B/op, 8 allocs/op | 406.6 ns/op, 64 B/op, 8 allocs/op | 0.97x | 1.00x |
+| One-key transaction | not available | 545.0 ns/op, 736 B/op, 7 allocs/op | 11.53x vs one put | 92.00x vs one put |
+| Eight-key transaction | not available | 2,458 ns/op, 2,896 B/op, 36 allocs/op | 5.89x vs eight puts | 45.25x vs eight puts |
+
+The default-path differences are within normal run-to-run noise. The explicit
+transaction path is materially slower and larger, so callers should use it
+when atomic multi-key visibility or nested rollback is required rather than as
+a replacement for a single ordinary write.
+
+### Raw T232 Output
+
+```text
+Before, make benchmark-t232-before:
+BenchmarkT232SpacePutBaseline-32            24843915  47.39 ns/op   8 B/op  1 allocs/op
+BenchmarkT232SpacePutBaseline-32            26552014  47.05 ns/op   8 B/op  1 allocs/op
+BenchmarkT232SpacePutBaseline-32            26817489  46.32 ns/op   8 B/op  1 allocs/op
+BenchmarkT232SpacePutBaseline-32            25305820  47.25 ns/op   8 B/op  1 allocs/op
+BenchmarkT232SpacePutBaseline-32            24341313  47.84 ns/op   8 B/op  1 allocs/op
+BenchmarkT232SequentialBatchBaseline-32     2850096 417.1 ns/op  64 B/op  8 allocs/op
+BenchmarkT232SequentialBatchBaseline-32     2881417 399.5 ns/op  64 B/op  8 allocs/op
+BenchmarkT232SequentialBatchBaseline-32     3010238 424.7 ns/op  64 B/op  8 allocs/op
+BenchmarkT232SequentialBatchBaseline-32     3015601 425.6 ns/op  64 B/op  8 allocs/op
+BenchmarkT232SequentialBatchBaseline-32     2770264 414.5 ns/op  64 B/op  8 allocs/op
+
+After, make benchmark-t232:
+BenchmarkT232SpacePutBaseline-32            25037659  47.52 ns/op     8 B/op  1 allocs/op
+BenchmarkT232SpacePutBaseline-32            26047956  46.75 ns/op     8 B/op  1 allocs/op
+BenchmarkT232SpacePutBaseline-32            23369410  47.04 ns/op     8 B/op  1 allocs/op
+BenchmarkT232SpacePutBaseline-32            26720824  47.08 ns/op     8 B/op  1 allocs/op
+BenchmarkT232SpacePutBaseline-32            28278007  49.51 ns/op     8 B/op  1 allocs/op
+BenchmarkT232SequentialBatchBaseline-32     2810211  406.6 ns/op    64 B/op  8 allocs/op
+BenchmarkT232SequentialBatchBaseline-32     2927337  421.9 ns/op    64 B/op  8 allocs/op
+BenchmarkT232SequentialBatchBaseline-32     3088609  401.6 ns/op    64 B/op  8 allocs/op
+BenchmarkT232SequentialBatchBaseline-32     2633832  404.6 ns/op    64 B/op  8 allocs/op
+BenchmarkT232SequentialBatchBaseline-32     2762337  423.0 ns/op    64 B/op  8 allocs/op
+BenchmarkT232SpaceTransaction-32             2121204  541.8 ns/op   736 B/op  7 allocs/op
+BenchmarkT232SpaceTransaction-32             2209981  545.0 ns/op   736 B/op  7 allocs/op
+BenchmarkT232SpaceTransaction-32             2193385  549.0 ns/op   736 B/op  7 allocs/op
+BenchmarkT232SpaceTransaction-32             2236368  556.1 ns/op   736 B/op  7 allocs/op
+BenchmarkT232SpaceTransaction-32             2325452  527.8 ns/op   736 B/op  7 allocs/op
+BenchmarkT232TransactionalBatch-32            539709 2379 ns/op   2896 B/op 36 allocs/op
+BenchmarkT232TransactionalBatch-32            492825 2484 ns/op   2896 B/op 36 allocs/op
+BenchmarkT232TransactionalBatch-32            417927 2424 ns/op   2896 B/op 36 allocs/op
+BenchmarkT232TransactionalBatch-32            435266 2509 ns/op   2896 B/op 36 allocs/op
+BenchmarkT232TransactionalBatch-32            534766 2458 ns/op   2896 B/op 36 allocs/op
+```

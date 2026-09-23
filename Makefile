@@ -26661,3 +26661,46 @@ commit-t228:
 .PHONY: push-t228
 push-t228:
 	bash scripts/push-t228.sh
+.PHONY: benchmark-t232-before
+benchmark-t232-before:
+	bash scripts/benchmark-t232-before.sh
+
+.PHONY: test-t232
+test-t232:
+	bash scripts/test-t232.sh
+
+.PHONY: format-t232
+format-t232:
+	bash scripts/format-t232.sh
+
+.PHONY: benchmark-t232
+benchmark-t232:
+	bash scripts/benchmark-t232.sh
+
+.PHONY: race-t232
+race-t232:
+	bash scripts/race-t232.sh
+
+.PHONY: vet-t232
+vet-t232:
+	bash scripts/vet-t232.sh
+
+.PHONY: test-t232-package
+test-t232-package:
+	bash scripts/test-t232-package.sh
+
+.PHONY: verify-t232
+verify-t232:
+	bash scripts/verify-t232.sh
+
+.PHONY: stage-t232
+stage-t232:
+	bash scripts/stage-t232.sh
+
+.PHONY: commit-t232
+commit-t232:
+	bash scripts/commit-t232.sh
+
+.PHONY: push-t232
+push-t232:
+	bash scripts/push-t232.sh
