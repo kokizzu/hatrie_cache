@@ -5229,3 +5229,14 @@ only selected changes, and can report rank-only movement with
 replacement after arbitrary deletes retains all active candidates. See
 [M216_INCREMENTAL_TOP_K.md](M216_INCREMENTAL_TOP_K.md) and
 [BENCHMARK.md](BENCHMARK.md#m216-incremental-top-k).
+
+## Materialized-View Point Lookups
+
+Set `MaterializedViewDefinition.PointLookupFields` to maintain complete-row
+postings for selected output columns, then call
+`MaterializedViews.PointLookup` for a fast exact lookup. The index is opt-in;
+the default keeps the existing snapshot behavior. Refresh publication swaps
+the rows and postings atomically, and a failed refresh leaves both unchanged.
+See [M217_MATERIALIZED_POINT_LOOKUPS.md](M217_MATERIALIZED_POINT_LOOKUPS.md)
+and [BENCHMARK.md](BENCHMARK.md#m217-materialized-view-point-lookups) for
+the read win and refresh tradeoff.

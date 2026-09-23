@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,9 +19,10 @@ var ErrMaterializedViewBudgetExceeded = errors.New("materialized view storage bu
 // invalidate its materialized result. Dependencies are explicit so callers can
 // refresh only views affected by a source update.
 type MaterializedViewDefinition struct {
-	Name         string
-	Query        string
-	Dependencies []string
+	Name              string
+	Query             string
+	Dependencies      []string
+	PointLookupFields []string
 }
 
 // MaterializedViewStatus describes one immutable materialized-view snapshot.
@@ -77,6 +79,7 @@ type materializedView struct {
 	snapshot       MaterializedView
 	sourceVersions map[string]string
 	collation      SQLCollation
+	pointLookups   map[string]map[string][]int
 	storedRows     int
 	storedBytes    int64
 }
@@ -146,6 +149,10 @@ func (views *MaterializedViews) Create(ctx context.Context, definition Materiali
 	if err != nil {
 		return MaterializedViewStatus{}, err
 	}
+	pointLookups, err := buildMaterializedViewPointLookups(definition, result)
+	if err != nil {
+		return MaterializedViewStatus{}, err
+	}
 
 	views.mu.Lock()
 	defer views.mu.Unlock()
@@ -177,8 +184,9 @@ func (views *MaterializedViews) Create(ctx context.Context, definition Materiali
 			Status: status,
 			Result: cloneQueryResult(result),
 		},
-		storedRows:  storedRows,
-		storedBytes: storedBytes,
+		pointLookups: pointLookups,
+		storedRows:   storedRows,
+		storedBytes:  storedBytes,
 	}
 	views.rows += storedRows
 	views.bytes += storedBytes
@@ -200,6 +208,50 @@ func (views *MaterializedViews) Get(name string) (MaterializedView, bool) {
 		return MaterializedView{}, false
 	}
 	return cloneMaterializedView(view.snapshot), true
+}
+
+// PointLookup returns complete rows from an opt-in maintained point index.
+// available is false when the view or field has no configured point index, so
+// callers can safely fall back to a normal snapshot or source scan.
+func (views *MaterializedViews) PointLookup(name, field string, value interface{}) ([]Row, bool, error) {
+	if views == nil {
+		return nil, false, fmt.Errorf("materialized views are nil")
+	}
+	name = strings.TrimSpace(name)
+	field = strings.TrimSpace(field)
+	if name == "" {
+		return nil, false, fmt.Errorf("materialized view name is required")
+	}
+	if field == "" {
+		return nil, false, fmt.Errorf("materialized view point lookup field is required")
+	}
+	key, supported := materializedViewPointLookupKey(value)
+	if !supported {
+		return nil, false, nil
+	}
+
+	views.mu.RLock()
+	view, exists := views.views[name]
+	if !exists {
+		views.mu.RUnlock()
+		return nil, false, nil
+	}
+	postings, available := view.pointLookups[field]
+	if !available {
+		views.mu.RUnlock()
+		return nil, false, nil
+	}
+	indexes := postings[key]
+	rows := make([]Row, 0, len(indexes))
+	for _, index := range indexes {
+		if index < 0 || index >= len(view.snapshot.Result.Rows) {
+			views.mu.RUnlock()
+			return nil, false, fmt.Errorf("materialized view %q point lookup index is inconsistent", name)
+		}
+		rows = append(rows, cloneResultCacheRow(view.snapshot.Result.Rows[index]))
+	}
+	views.mu.RUnlock()
+	return rows, true, nil
 }
 
 // Drop removes one named materialized view and its retained storage accounting.
@@ -289,12 +341,17 @@ func (views *MaterializedViews) RefreshChangedWithMetadata(ctx context.Context, 
 	versions := make(map[string]map[string]string, len(candidates))
 	resultRows := make(map[string]int, len(candidates))
 	resultBytes := make(map[string]int64, len(candidates))
+	pointLookups := make(map[string]map[string]map[string][]int, len(candidates))
 	for _, candidate := range candidates {
 		result, sourceVersions, err := executeMaterializedViewQuery(ctx, candidate.definition.Query, candidate.definition.Dependencies, resolver, options)
 		if err != nil {
 			return nil, fmt.Errorf("refresh materialized view %q: %w", candidate.definition.Name, err)
 		}
 		results[candidate.definition.Name] = cloneQueryResult(result)
+		pointLookups[candidate.definition.Name], err = buildMaterializedViewPointLookups(candidate.definition, result)
+		if err != nil {
+			return nil, fmt.Errorf("refresh materialized view %q point lookup: %w", candidate.definition.Name, err)
+		}
 		versions[candidate.definition.Name] = sourceVersions
 		resultRows[candidate.definition.Name] = len(result.Rows)
 		resultBytes[candidate.definition.Name] = views.storageBytes(result)
@@ -322,6 +379,7 @@ func (views *MaterializedViews) RefreshChangedWithMetadata(ctx context.Context, 
 			continue
 		}
 		current.snapshot.Result = results[candidate.definition.Name]
+		current.pointLookups = pointLookups[candidate.definition.Name]
 		current.sourceVersions = versions[candidate.definition.Name]
 		current.collation = normalizedMaterializedViewCollation(options.Collation)
 		current.snapshot.Status.Revision++
@@ -358,6 +416,120 @@ func materializedViewSourceVersions(resolver SourceResolver, dependencies []stri
 		result[dependency] = version
 	}
 	return result
+}
+
+func sameMaterializedViewPointLookupFields(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func buildMaterializedViewPointLookups(definition MaterializedViewDefinition, result QueryResult) (map[string]map[string][]int, error) {
+	if len(definition.PointLookupFields) == 0 {
+		return nil, nil
+	}
+	columns := make(map[string]struct{}, len(result.Columns))
+	for _, column := range result.Columns {
+		columns[column] = struct{}{}
+	}
+	lookups := make(map[string]map[string][]int, len(definition.PointLookupFields))
+	for _, field := range definition.PointLookupFields {
+		if _, exists := columns[field]; !exists {
+			return nil, fmt.Errorf("point lookup field %q is not a materialized view output column", field)
+		}
+		postings := make(map[string][]int)
+		for rowIndex, row := range result.Rows {
+			value, exists := row[field]
+			if !exists {
+				continue
+			}
+			key, supported := materializedViewPointLookupKey(value)
+			if !supported {
+				return nil, fmt.Errorf("point lookup field %q contains unsupported value type %T", field, value)
+			}
+			postings[key] = append(postings[key], rowIndex)
+		}
+		lookups[field] = postings
+	}
+	return lookups, nil
+}
+
+func materializedViewPointLookupKey(value interface{}) (string, bool) {
+	var buffer [32]byte
+	key := buffer[:0]
+	switch value := value.(type) {
+	case nil:
+		return "n", true
+	case bool:
+		if value {
+			return "b:1", true
+		}
+		return "b:0", true
+	case string:
+		return "s:" + value, true
+	case []byte:
+		key = append(key, 'y', ':')
+		key = append(key, value...)
+		return string(key), true
+	case int:
+		key = append(key, 'i', ':')
+		key = strconv.AppendInt(key, int64(value), 10)
+		return string(key), true
+	case int8:
+		key = append(key, 'i', ':')
+		key = strconv.AppendInt(key, int64(value), 10)
+		return string(key), true
+	case int16:
+		key = append(key, 'i', ':')
+		key = strconv.AppendInt(key, int64(value), 10)
+		return string(key), true
+	case int32:
+		key = append(key, 'i', ':')
+		key = strconv.AppendInt(key, int64(value), 10)
+		return string(key), true
+	case int64:
+		key = append(key, 'i', ':')
+		key = strconv.AppendInt(key, value, 10)
+		return string(key), true
+	case uint:
+		key = append(key, 'u', ':')
+		key = strconv.AppendUint(key, uint64(value), 10)
+		return string(key), true
+	case uint8:
+		key = append(key, 'u', ':')
+		key = strconv.AppendUint(key, uint64(value), 10)
+		return string(key), true
+	case uint16:
+		key = append(key, 'u', ':')
+		key = strconv.AppendUint(key, uint64(value), 10)
+		return string(key), true
+	case uint32:
+		key = append(key, 'u', ':')
+		key = strconv.AppendUint(key, uint64(value), 10)
+		return string(key), true
+	case uint64:
+		key = append(key, 'u', ':')
+		key = strconv.AppendUint(key, value, 10)
+		return string(key), true
+	case float32:
+		key = append(key, 'f', ':')
+		key = strconv.AppendFloat(key, float64(value), 'g', -1, 32)
+		return string(key), true
+	case float64:
+		key = append(key, 'f', ':')
+		key = strconv.AppendFloat(key, value, 'g', -1, 64)
+		return string(key), true
+	case time.Time:
+		return "t:" + value.UTC().Format(time.RFC3339Nano), true
+	default:
+		return "", false
+	}
 }
 
 func executeMaterializedViewQuery(ctx context.Context, query string, dependencies []string, resolver SourceResolver, options QueryOptions) (QueryResult, map[string]string, error) {
@@ -452,6 +624,20 @@ func normalizeMaterializedViewDefinition(definition MaterializedViewDefinition) 
 		dependencies = append(dependencies, dependency)
 	}
 	definition.Dependencies = dependencies
+	pointLookupFields := make([]string, 0, len(definition.PointLookupFields))
+	seenPointLookupFields := make(map[string]struct{}, len(definition.PointLookupFields))
+	for _, field := range definition.PointLookupFields {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			return MaterializedViewDefinition{}, fmt.Errorf("materialized view %q point lookup field is required", definition.Name)
+		}
+		if _, exists := seenPointLookupFields[field]; exists {
+			continue
+		}
+		seenPointLookupFields[field] = struct{}{}
+		pointLookupFields = append(pointLookupFields, field)
+	}
+	definition.PointLookupFields = pointLookupFields
 	return definition, nil
 }
 
@@ -465,6 +651,9 @@ func materializedViewDependsOn(definition MaterializedViewDefinition, changed ma
 }
 
 func sameMaterializedViewDefinition(left, right MaterializedViewDefinition) bool {
+	if !sameMaterializedViewPointLookupFields(left.PointLookupFields, right.PointLookupFields) {
+		return false
+	}
 	if left.Name != right.Name || left.Query != right.Query || len(left.Dependencies) != len(right.Dependencies) {
 		return false
 	}

@@ -38052,3 +38052,30 @@ paths report seven allocations per update. Exact deletes and replacement
 promotion require retaining every active candidate, so only the selected
 output is bounded by `K`. See [M216_INCREMENTAL_TOP_K.md](M216_INCREMENTAL_TOP_K.md)
 for API semantics and the state-size limitation.
+
+## M217: Materialized-View Point Lookups
+
+The opt-in `MaterializedViewDefinition.PointLookupFields` index stores row
+ordinals for selected output columns while the maintained snapshot retains the
+complete rows. This compares the public `PointLookup` path with `Get` followed
+by a full snapshot scan on 20,000 rows, plus the cost of rebuilding the index
+during a complete refresh.
+
+Workload: five `-benchmem` samples on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+### Point Reads
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative CPU | Relative bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `Get` plus full snapshot scan | 7,228,928 | 6,883,942 | 40,004 | 1.00x | 1.00x |
+| `PointLookup` | 53,099 | 69,008 | 402 | 0.0073x (`136.1x` faster) | 0.0100x (`99.8x` lower) |
+
+### Refresh Cost
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative CPU | Relative bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Refresh without point postings | 19,094,342 | 20,657,412 | 120,023 | 1.00x | 1.00x |
+| Refresh with `region` postings | 24,844,656 | 21,397,197 | 140,938 | 1.301x (`30.1%` higher) | 1.036x (`3.6%` higher) |
+
+Raw samples and correctness semantics are in
+[M217_MATERIALIZED_POINT_LOOKUPS.md](M217_MATERIALIZED_POINT_LOOKUPS.md).

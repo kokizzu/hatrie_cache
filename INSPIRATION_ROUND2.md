@@ -103,7 +103,7 @@ operator control remain the preferred deployment model.
 - [x] M214 Arrangement reuse across indexes and compatible query plans; the opt-in `TypedTableSortedArrangements` registry shares exact or longer-prefix sorted state with reference-counted leases. See [M214_SORTED_ARRANGEMENT_REUSE.md](M214_SORTED_ARRANGEMENT_REUSE.md) and [BENCHMARK.md](BENCHMARK.md#m214-sorted-arrangement-reuse).
 - [x] M215 Delta-join maintenance for high-churn join inputs; opt-in `ApplyLeftDeltas`/`ApplyRightDeltas` emits only affected signed pair changes while preserving the existing full-state APIs. See [M215_DELTA_JOIN_MAINTENANCE.md](M215_DELTA_JOIN_MAINTENANCE.md) and [BENCHMARK.md](BENCHMARK.md#m215-delta-join-maintenance).
 - [x] M216 Incremental Top-K maintenance is verified through the existing C213 `IncrementalTopK` maintainer. Selected output is bounded by `K`; exact replacement retains all active candidates. See [M216_INCREMENTAL_TOP_K.md](M216_INCREMENTAL_TOP_K.md) and [BENCHMARK.md](BENCHMARK.md#m216-incremental-top-k).
-- [ ] M217 Indexes that store complete maintained view results for point lookups.
+- [x] M217 Opt-in maintained materialized-view point postings return complete rows for exact lookups, with atomic refresh replacement. See [M217_MATERIALIZED_POINT_LOOKUPS.md](M217_MATERIALIZED_POINT_LOOKUPS.md) and [BENCHMARK.md](BENCHMARK.md#m217-materialized-view-point-lookups).
 - [ ] M218 Planner selection of point lookup versus arrangement scan.
 - [ ] M219 Background index creation with observable build frontier.
 - [ ] M220 Safe index removal after dependent readers drain.
