@@ -119,9 +119,10 @@ type materializedView struct {
 }
 
 type materializedViewHydration struct {
-	queue  *SQLIndexRebuildQueue
-	taskID string
-	fields []string
+	queue      *SQLIndexRebuildQueue
+	replicaSet *SQLIndexRebuildReplicaSet
+	taskID     string
+	fields     []string
 }
 
 // materializedViewReadGate drains readers of one immutable view generation
@@ -311,29 +312,13 @@ func (views *MaterializedViews) EnqueuePointLookupBuild(queue *SQLIndexRebuildQu
 		Name:     request.ViewName,
 		Priority: request.Priority,
 		Run: func(ctx context.Context, progress SQLIndexRebuildProgressFunc) error {
-			lookups, buildErr := buildMaterializedViewPointLookupsWithProgress(ctx, definition, result, progress)
-			if buildErr != nil {
-				return buildErr
-			}
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			views.mu.Lock()
-			defer views.mu.Unlock()
-			hydration, hydrationExists := views.hydration[request.ViewName]
-			if !hydrationExists || hydration.taskID != request.ID {
-				return fmt.Errorf("materialized view %q point lookup build is no longer current", request.ViewName)
-			}
-			current, exists := views.views[request.ViewName]
-			if !exists || current.snapshot.Status.Revision != revision || !sameMaterializedViewPointLookupFields(current.definition.PointLookupFields, originalFields) {
-				return fmt.Errorf("materialized view %q changed during point lookup build", request.ViewName)
-			}
-			current.definition.PointLookupFields = append([]string(nil), definition.PointLookupFields...)
-			current.pointLookups = lookups
-			hydration.fields = nil
-			views.hydration[request.ViewName] = hydration
-			views.views[request.ViewName] = current
-			return nil
+			return views.runMaterializedViewPointLookupBuild(ctx, progress, materializedPointLookupBuild{
+				viewName:       request.ViewName,
+				definition:     definition,
+				originalFields: originalFields,
+				revision:       revision,
+				result:         result,
+			}, request.ID)
 		},
 	})
 	if err != nil {
@@ -348,6 +333,122 @@ func (views *MaterializedViews) EnqueuePointLookupBuild(queue *SQLIndexRebuildQu
 		return SQLIndexRebuildStatus{}, err
 	}
 	return status, nil
+}
+
+// EnqueueReplicatedPointLookupBuild fans one revision-fenced point-index
+// build to every queue in replicas. Each worker may execute the idempotent
+// publication, so the resulting index converges even when one worker fails.
+func (views *MaterializedViews) EnqueueReplicatedPointLookupBuild(replicas *SQLIndexRebuildReplicaSet, request MaterializedViewPointLookupBuildRequest) (SQLIndexRebuildReplicaStatus, error) {
+	if views == nil {
+		return SQLIndexRebuildReplicaStatus{}, fmt.Errorf("materialized views are nil")
+	}
+	if replicas == nil {
+		return SQLIndexRebuildReplicaStatus{}, ErrSQLIndexRebuildReplicaSetInvalid
+	}
+	request.ID = strings.TrimSpace(request.ID)
+	request.ViewName = strings.TrimSpace(request.ViewName)
+	if request.ID == "" || request.ViewName == "" {
+		return SQLIndexRebuildReplicaStatus{}, ErrSQLIndexRebuildRequestInvalid
+	}
+
+	views.mu.RLock()
+	view, exists := views.views[request.ViewName]
+	if !exists {
+		views.mu.RUnlock()
+		return SQLIndexRebuildReplicaStatus{}, fmt.Errorf("materialized view %q does not exist", request.ViewName)
+	}
+	definition := view.definition
+	originalFields := append([]string(nil), definition.PointLookupFields...)
+	if len(request.Fields) > 0 {
+		definition.PointLookupFields = append([]string(nil), request.Fields...)
+	}
+	definition, err := normalizeMaterializedViewDefinition(definition)
+	if err != nil {
+		views.mu.RUnlock()
+		return SQLIndexRebuildReplicaStatus{}, err
+	}
+	if len(definition.PointLookupFields) == 0 {
+		views.mu.RUnlock()
+		return SQLIndexRebuildReplicaStatus{}, fmt.Errorf("materialized view %q point lookup fields are required", request.ViewName)
+	}
+	build := materializedPointLookupBuild{
+		viewName:       request.ViewName,
+		definition:     definition,
+		originalFields: originalFields,
+		revision:       view.snapshot.Status.Revision,
+		result:         view.snapshot.Result,
+	}
+	views.mu.RUnlock()
+
+	views.mu.Lock()
+	current, currentExists := views.views[request.ViewName]
+	if !currentExists || current.snapshot.Status.Revision != build.revision ||
+		!sameMaterializedViewPointLookupFields(current.definition.PointLookupFields, build.originalFields) {
+		views.mu.Unlock()
+		return SQLIndexRebuildReplicaStatus{}, fmt.Errorf("materialized view %q changed during point lookup build", request.ViewName)
+	}
+	previousHydration, hadPreviousHydration := views.hydration[request.ViewName]
+	views.hydration[request.ViewName] = materializedViewHydration{
+		replicaSet: replicas,
+		taskID:     request.ID,
+		fields:     append([]string(nil), build.definition.PointLookupFields...),
+	}
+	status, err := replicas.Enqueue(SQLIndexRebuildRequest{
+		ID:       request.ID,
+		Name:     request.ViewName,
+		Priority: request.Priority,
+		Run: func(ctx context.Context, progress SQLIndexRebuildProgressFunc) error {
+			return views.runMaterializedViewPointLookupBuild(ctx, progress, build, request.ID)
+		},
+	})
+	if err != nil {
+		if hadPreviousHydration {
+			views.hydration[request.ViewName] = previousHydration
+		} else {
+			delete(views.hydration, request.ViewName)
+		}
+	}
+	views.mu.Unlock()
+	if err != nil {
+		return SQLIndexRebuildReplicaStatus{}, err
+	}
+	return status, nil
+}
+
+type materializedPointLookupBuild struct {
+	viewName       string
+	definition     MaterializedViewDefinition
+	originalFields []string
+	revision       uint64
+	result         QueryResult
+}
+
+func (views *MaterializedViews) runMaterializedViewPointLookupBuild(ctx context.Context, progress SQLIndexRebuildProgressFunc, build materializedPointLookupBuild, operationID string) error {
+	lookups, err := buildMaterializedViewPointLookupsWithProgress(ctx, build.definition, build.result, progress)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	views.mu.Lock()
+	defer views.mu.Unlock()
+	hydration, hydrationExists := views.hydration[build.viewName]
+	if !hydrationExists || hydration.taskID != operationID {
+		return fmt.Errorf("materialized view %q point lookup build is no longer current", build.viewName)
+	}
+	current, exists := views.views[build.viewName]
+	if !exists || current.snapshot.Status.Revision != build.revision ||
+		(!sameMaterializedViewPointLookupFields(current.definition.PointLookupFields, build.originalFields) &&
+			!sameMaterializedViewPointLookupFields(current.definition.PointLookupFields, build.definition.PointLookupFields)) {
+		return fmt.Errorf("materialized view %q changed during point lookup build", build.viewName)
+	}
+	current.definition.PointLookupFields = append([]string(nil), build.definition.PointLookupFields...)
+	current.pointLookups = lookups
+	hydration.fields = nil
+	views.hydration[build.viewName] = hydration
+	views.views[build.viewName] = current
+	return nil
 }
 
 // Get returns an independent copy of the named materialized-view snapshot.
@@ -391,9 +492,29 @@ func (views *MaterializedViews) HydrationStatus(name string) (MaterializedViewHy
 	hydration := views.hydration[name]
 	views.mu.RUnlock()
 
-	queue := hydration.queue
 	taskID := hydration.taskID
-	if queue == nil || taskID == "" {
+	if taskID == "" {
+		return status, true
+	}
+	if hydration.replicaSet != nil {
+		replicated, exists := hydration.replicaSet.Status(taskID)
+		if !exists {
+			return status, true
+		}
+		switch replicated.State {
+		case SQLIndexRebuildQueued, SQLIndexRebuildRunning:
+			status.State = MaterializedViewHydrationHydrating
+			status.Fields = append([]string(nil), hydration.fields...)
+			status.TaskID = taskID
+		case SQLIndexRebuildSucceeded:
+			if state == MaterializedViewHydrationReady {
+				status.TaskID = taskID
+			}
+		}
+		return status, true
+	}
+	queue := hydration.queue
+	if queue == nil {
 		return status, true
 	}
 	task, exists := queue.Status(taskID)

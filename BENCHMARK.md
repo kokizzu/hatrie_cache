@@ -38177,6 +38177,32 @@ B/op: 22032 on every sample; allocs/op: 130 on every sample
 See [M220_SAFE_INDEX_REMOVAL.md](M220_SAFE_INDEX_REMOVAL.md) for API behavior,
 reader-drain semantics, and the test commands.
 
+<a id="m222-replicated-index-workers"></a>
+## M222: Replicated Index Rebuild Workers
+
+M222 adds an opt-in quorum coordinator around bounded index rebuild queues. The
+measurement below isolates the coordinator's enqueue/status path with an empty
+callback; it does not claim that duplicate rebuild work is faster. The direct
+path is a single queue and the replicated path fans out to two queues.
+
+Raw results from `make m222-benchmark` on the test host:
+
+```text
+BenchmarkM222SingleQueueRebuildStatus-32: 16.57, 16.06, 16.38, 17.10, 16.21 ns/op  0 B/op  0 allocs/op
+BenchmarkM222ReplicaSetRebuildStatus-32: 621.8, 622.6, 645.9, 658.3, 677.1 ns/op  1088 B/op  3 allocs/op
+```
+
+| Path | Median ns/op | B/op | allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Direct single queue | 16.38 | 0 | 0 | 1.00x |
+| Two-replica coordinator | 645.9 | 1,088 | 3 | 0.025x, about 39.4x slower |
+
+This is an explicit availability tradeoff: accepted replicas repeat the
+callback and retain per-replica task state. The feature is disabled unless the
+caller constructs a replica set. See
+[M222_REPLICATED_INDEX_WORKERS.md](M222_REPLICATED_INDEX_WORKERS.md) for quorum,
+cancellation, and idempotency requirements.
+
 <a id="m223-materialized-view-hydration-states"></a>
 ## M223: Materialized View Hydration States
 

@@ -5279,3 +5279,11 @@ acceptance through publication, and stale, failed, canceled, or removed builds
 cannot leave a view stuck in that state. See
 [M223_MATERIALIZED_VIEW_HYDRATION.md](M223_MATERIALIZED_VIEW_HYDRATION.md) and
 [BENCHMARK.md](BENCHMARK.md#m223-materialized-view-hydration-states).
+
+Maintained point-index builds can also be replicated across multiple bounded
+queues with `NewSQLIndexRebuildReplicaSet` and
+`MaterializedViews.EnqueueReplicatedPointLookupBuild`. This is opt-in, uses a
+configurable success quorum, and keeps per-replica status visible; existing
+single-queue builds remain the default. See
+[M222_REPLICATED_INDEX_WORKERS.md](M222_REPLICATED_INDEX_WORKERS.md) and
+[BENCHMARK.md](BENCHMARK.md#m222-replicated-index-workers).
