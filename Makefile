@@ -25653,3 +25653,41 @@ vet-mz038:
 .PHONY: deliver-mz038
 deliver-mz038:
 	bash scripts/deliver-mz038.sh
+.PHONY: test-t047-participant
+test-t047-participant:
+	bash scripts/test-t047-participant.sh
+.PHONY: format-t047-participant
+format-t047-participant:
+	bash scripts/format-t047-participant.sh
+.PHONY: benchmark-t047-participant
+benchmark-t047-participant:
+	bash scripts/benchmark-t047-participant.sh
+.PHONY: race-t047-participant
+race-t047-participant:
+	bash scripts/race-t047-participant.sh
+
+.PHONY: vet-t047-participant
+vet-t047-participant:
+	bash scripts/vet-t047-participant.sh
+.PHONY: test-t047-package
+
+test-t047-package:
+	bash scripts/test-t047-package.sh
+.PHONY: verify-t047-participant-docs
+
+verify-t047-participant-docs:
+	bash scripts/verify-t047-participant-docs.sh
+.PHONY: stage-t047-participant
+
+stage-t047-participant:
+	bash scripts/stage-t047-participant.sh
+
+.PHONY: commit-t047-participant
+
+commit-t047-participant:
+	bash scripts/commit-t047-participant.sh
+
+.PHONY: push-t047-participant
+
+push-t047-participant:
+	bash scripts/push-t047-participant.sh

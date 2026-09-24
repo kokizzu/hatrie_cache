@@ -37,6 +37,13 @@ if errors.Is(err, hatReplication.ErrClusterWriteCommitOutcomeUnknown) {
 - The existing asynchronous replication and one-phase quorum APIs are
   unchanged. This coordinator has no default or automatic wiring.
 
+The importable `ClusterWriteCommitParticipant` provides a bounded,
+idempotent participant ledger for callers that need local durable phase state.
+It is transport-neutral and must be wired into the callbacks by the caller;
+the API does not persist application data or enable the coordinator by itself.
+See [T047_PARTICIPANT_STATE.md](T047_PARTICIPANT_STATE.md) for the snapshot
+format, bounds, recovery procedure, and benchmark.
+
 Prepare, commit, and abort callbacks must tolerate retries for the same
 transaction ID. A commit-phase error is not proof that the participant did not
 commit; query participant status before retrying.

@@ -35770,6 +35770,63 @@ uses 1.8x the allocations in this local control-plane benchmark. It remains
 opt-in because the additional prepare barrier and explicit unknown-outcome
 handling are the feature; ordinary writes retain the existing path.
 
+## T047 Durable Participant State
+
+Commands:
+
+```text
+make benchmark-t047-cluster-write-commit
+make benchmark-t047-participant
+```
+
+The coordinator samples below were rerun after adding the participant ledger.
+The coordinator implementation and its default call path are unchanged. The
+participant samples use 1,024 committed records and measure only explicit
+snapshot encode/restore work.
+
+Machine: AMD Ryzen 9 5950X, Linux amd64.
+
+Raw coordinator output (`-benchmem`, three samples):
+
+```text
+BenchmarkTU047ClusterWriteCommit-32       383396  3157 ns/op  1248 B/op  18 allocs/op
+BenchmarkTU047ClusterWriteCommit-32       445071  2997 ns/op  1248 B/op  18 allocs/op
+BenchmarkTU047ClusterWriteCommit-32       396867  2898 ns/op  1248 B/op  18 allocs/op
+BenchmarkTU047ExistingWriteQuorum-32      834823  1416 ns/op   544 B/op  10 allocs/op
+BenchmarkTU047ExistingWriteQuorum-32      820507  1458 ns/op   544 B/op  10 allocs/op
+BenchmarkTU047ExistingWriteQuorum-32      726405  1495 ns/op   544 B/op  10 allocs/op
+```
+
+Raw participant output (`-benchmem`, five samples, 1,024 records):
+
+```text
+BenchmarkClusterWriteCommitParticipant/marshal-32  229085 ns/op  147610 B/op    5 allocs/op
+BenchmarkClusterWriteCommitParticipant/marshal-32  235173 ns/op  147608 B/op    5 allocs/op
+BenchmarkClusterWriteCommitParticipant/marshal-32  236049 ns/op  147608 B/op    5 allocs/op
+BenchmarkClusterWriteCommitParticipant/marshal-32  222566 ns/op  147608 B/op    5 allocs/op
+BenchmarkClusterWriteCommitParticipant/marshal-32  216361 ns/op  147608 B/op    5 allocs/op
+BenchmarkClusterWriteCommitParticipant/restore-32  100088 ns/op  204929 B/op 1030 allocs/op
+BenchmarkClusterWriteCommitParticipant/restore-32   96822 ns/op  204929 B/op 1030 allocs/op
+BenchmarkClusterWriteCommitParticipant/restore-32   97524 ns/op  204929 B/op 1030 allocs/op
+BenchmarkClusterWriteCommitParticipant/restore-32   95749 ns/op  204929 B/op 1030 allocs/op
+BenchmarkClusterWriteCommitParticipant/restore-32   96654 ns/op  204929 B/op 1030 allocs/op
+```
+
+| Operation | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | ---: |
+| Existing one-phase quorum | 1,458 | 544 | 10 | 1.00x |
+| Two-phase coordinator | 2,997 | 1,248 | 18 | 2.06x CPU, 2.29x bytes, 1.80x allocs |
+| Participant snapshot marshal | 229,085 | 147,608 | 5 | explicit recovery work only |
+| Participant snapshot restore | 96,822 | 204,929 | 1,030 | explicit recovery work only |
+
+The coordinator result remains within normal local benchmark variation versus
+the earlier three-sample baseline; there is no measured regression in its
+bytes or allocations. The participant snapshot is about 44 KiB for this
+fixture, while its transient restore allocations are about 205 KiB. That cost
+is bounded and paid only when the caller snapshots or restores reconciliation
+state. The default write path does not construct this state machine. See
+[T047_PARTICIPANT_STATE.md](T047_PARTICIPANT_STATE.md).
+
 <a id="c154e-durable-rolling-schema-checkpoint"></a>
 ## C154e Durable Rolling-Schema Checkpoint
 

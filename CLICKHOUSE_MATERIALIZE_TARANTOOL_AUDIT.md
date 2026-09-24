@@ -216,6 +216,7 @@ records a separate implementation boundary.
 - [ ] T042 Recovery-time parallel replay. A bounded single-key parallel replay
 - [ ] T047 Synchronous replication with an explicit quorum. The public single-command path is now opt-in through `MonitoringOptions.WriteQuorum` / `CacheGRPCOptions.WriteQuorum`; atomic `BATCH` quorum semantics are implemented, while end-to-end transport wiring, durable participant state, and reconciliation remain open.
 - [x] T047e Transport-neutral two-phase cluster write commit with a prepare barrier and explicit indeterminate commit outcome; see [T047_CLUSTER_WRITE_COMMIT.md](T047_CLUSTER_WRITE_COMMIT.md).
+- [x] T047f Bounded durable participant phase state for two-phase writes. `ClusterWriteCommitParticipant` provides idempotent prepare/commit/abort transitions, deterministic bounded `HCP1` snapshots, strict restore validation, and atomic replacement; transport wiring, application-data durability, and reconciliation policy remain caller-owned. See [T047_PARTICIPANT_STATE.md](T047_PARTICIPANT_STATE.md).
 - [ ] T103 Native FFI extension boundary.
 - [ ] T150 Language-neutral client SDK coverage.
 
