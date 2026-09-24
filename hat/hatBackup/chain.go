@@ -175,13 +175,21 @@ func PlanBackupRetention(manifests []BundleManifest, latestID string, retain int
 	allObjectKeys := make(map[string]struct{})
 	for _, input := range manifests {
 		for _, file := range input.Files {
-			allHashes[file.SHA256] = struct{}{}
-			allObjectKeys[backupObjectIdentity(input, file)] = struct{}{}
+			for _, hash := range backupObjectHashes(file) {
+				allHashes[hash] = struct{}{}
+			}
+			for _, objectKey := range backupObjectIdentities(input, file) {
+				allObjectKeys[objectKey] = struct{}{}
+			}
 		}
 		if _, exists := keep[input.BackupID]; exists {
 			for _, file := range input.Files {
-				keepHashes[file.SHA256] = struct{}{}
-				keepObjectKeys[backupObjectIdentity(input, file)] = struct{}{}
+				for _, hash := range backupObjectHashes(file) {
+					keepHashes[hash] = struct{}{}
+				}
+				for _, objectKey := range backupObjectIdentities(input, file) {
+					keepObjectKeys[objectKey] = struct{}{}
+				}
 			}
 		}
 	}
@@ -221,6 +229,34 @@ func backupObjectIdentity(manifest BundleManifest, file BundleFile) string {
 	return file.SHA256
 }
 
+func backupObjectHashes(file BundleFile) []string {
+	if len(file.Chunks) == 0 {
+		return []string{file.SHA256}
+	}
+	hashes := make([]string, 0, len(file.Chunks))
+	for _, chunk := range file.Chunks {
+		hashes = append(hashes, chunk.SHA256)
+	}
+	return hashes
+}
+
+func backupObjectIdentities(manifest BundleManifest, file BundleFile) []string {
+	if len(file.Chunks) == 0 {
+		return []string{backupObjectIdentity(manifest, file)}
+	}
+	keyID := ""
+	if manifest.Encryption != nil {
+		keyID = manifest.Encryption.KeyID
+	}
+	identities := make([]string, 0, len(file.Chunks))
+	for _, chunk := range file.Chunks {
+		if objectKey, err := contentObjectRelative(chunk.SHA256, keyID); err == nil {
+			identities = append(identities, objectKey)
+		}
+	}
+	return identities
+}
+
 func validateBackupChainManifest(manifest BundleManifest) error {
 	if manifest.Version != BundleVersion {
 		return fmt.Errorf("hatriecache: backup %q has unsupported manifest version %d", manifest.BackupID, manifest.Version)
@@ -254,9 +290,13 @@ func validateBackupChainManifest(manifest BundleManifest) error {
 			return fmt.Errorf("hatriecache: backup %q contains storage metadata with surrounding whitespace", manifest.BackupID)
 		}
 	}
+	layout, err := restoreObjectStoreLayout(manifest)
+	if err != nil {
+		return fmt.Errorf("hatriecache: backup %q has invalid object layout: %w", manifest.BackupID, err)
+	}
 	paths := make(map[string]struct{}, len(manifest.Files))
 	for _, file := range manifest.Files {
-		if err := validateBackupChainFile(file); err != nil {
+		if err := validateBackupChainFile(file, layout == ObjectStoreLayoutContentAddressed); err != nil {
 			return fmt.Errorf("hatriecache: backup %q: %w", manifest.BackupID, err)
 		}
 		if _, exists := paths[file.Path]; exists {
@@ -267,7 +307,7 @@ func validateBackupChainManifest(manifest BundleManifest) error {
 	return nil
 }
 
-func validateBackupChainFile(file BundleFile) error {
+func validateBackupChainFile(file BundleFile, contentAddressed bool) error {
 	clean := pathpkg.Clean(file.Path)
 	if file.Path == "" || clean != file.Path || pathpkg.IsAbs(file.Path) || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.Contains(file.Path, "\\") {
 		return fmt.Errorf("backup file path %q is unsafe", file.Path)
@@ -281,12 +321,23 @@ func validateBackupChainFile(file BundleFile) error {
 	if _, err := hex.DecodeString(file.SHA256); err != nil {
 		return fmt.Errorf("backup file %q has an invalid SHA-256", file.Path)
 	}
+	if len(file.Chunks) > 0 {
+		if !contentAddressed {
+			return fmt.Errorf("backup file %q uses chunks without content-addressed layout", file.Path)
+		}
+		if err := validateBundleFileChunks(file); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
 func cloneBackupManifest(input BundleManifest) BundleManifest {
 	output := input
 	output.Files = append([]BundleFile(nil), input.Files...)
+	for index := range output.Files {
+		output.Files[index].Chunks = append([]BundleChunk(nil), input.Files[index].Chunks...)
+	}
 	output.NewObjectHashes = append([]string(nil), input.NewObjectHashes...)
 	output.ReusedObjectHashes = append([]string(nil), input.ReusedObjectHashes...)
 	output.Partition = ClonePartitionMetadata(input.Partition)

@@ -57,6 +57,9 @@ type ObjectStoreTargetOptions struct {
 	EncryptionKeys        []ObjectStoreEncryptionKey
 	ActiveEncryptionKeyID string
 	Layout                ObjectStoreLayout
+	// ChunkSize enables fixed-size content-addressed chunks for incremental
+	// backups. Zero preserves the historical whole-file object layout.
+	ChunkSize int
 	// ManifestCatalog optionally records successfully published manifests for
 	// durable incremental-chain planning. A nil catalog preserves the legacy
 	// object-store-only behavior.

@@ -1038,3 +1038,15 @@ B/op for a fresh attach, versus 1.937 ms and 42,072 B/op for full restore of
 the same 64 KiB payload. Reusing the attachment measured 33.474 us and 529
 B/op. `ReadFile` is intentionally more memory hungry because it buffers the
 result.
+
+### C241: Incremental backup chunk deduplication
+
+Adopted an opt-in fixed-size content-addressed chunk layout for incremental
+Pebble object-store backups. Manifests retain logical file checksums while
+listing ordered chunk checksums, so restore, verification, read-only attachment,
+retention, and garbage collection remain integrity-checked and chunk-aware.
+`ChunkSize: 0` preserves the existing whole-file default. In the matched 1 MiB
+one-region-update benchmark, 64 KiB chunks measured 1.62x lower CPU time,
+9.98x lower allocation bytes, and 16x lower new-object payload, with 1.84x
+more allocations. See [C241_INCREMENTAL_CHUNK_DEDUP.md](C241_INCREMENTAL_CHUNK_DEDUP.md)
+and [BENCHMARK.md](BENCHMARK.md#c241-incremental-backup-chunk-deduplication).

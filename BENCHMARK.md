@@ -35646,3 +35646,38 @@ reads and verifies the object without restoring it.
 Raw samples are in `C240_READ_ONLY_BACKUP_ATTACHMENT.md`. The benchmark is
 local and excludes network latency; `ReadFile` intentionally buffers the
 payload, while streaming `Open` is the low-memory production path.
+
+<a id="c241-incremental-backup-chunk-deduplication"></a>
+## C241 Incremental Backup Chunk Deduplication
+
+This benchmark compares the existing whole-file content-addressed incremental
+backup with opt-in 64 KiB fixed-size chunks. The fixture is a 1 MiB file with
+16 distinct chunks and one changed byte in the middle chunk. Setup and the base
+backup are outside the timed region. The object store is in memory, so payload
+bytes represent the logical new-object write volume and do not include network
+latency. Five samples ran with `make benchmark-c241` on Linux/amd64, AMD Ryzen
+9 5950X.
+
+```text
+BenchmarkC241WholeFileIncremental-32
+2,305,938 2,351,275 2,243,899 2,299,133 2,654,285 ns/op
+3,347,984 3,345,449 3,351,493 3,350,846 3,346,743 B/op
+124 122 126 125 126 allocs/op
+1,048,576 payload-bytes/op, 1 new-objects/op, 0 reused-objects/op
+BenchmarkC241ChunkedIncremental-32
+1,360,565 1,391,502 1,422,393 1,501,633 1,548,300 ns/op
+333,899 334,136 335,404 336,278 340,002 B/op
+230 230 230 232 233 allocs/op
+65,536 payload-bytes/op, 1 new-objects/op, 15 reused-objects/op
+```
+
+| Mode | Median ns/op | Median B/op | Median allocs/op | New objects/op | Reused objects/op | Payload bytes/op | Relative result |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Whole-file, `ChunkSize: 0` | 2,305,938 | 3,347,984 | 125 | 1 | 0 | 1,048,576 | 1.00x |
+| 64 KiB chunks | 1,422,393 | 335,404 | 230 | 1 | 15 | 65,536 | 1.62x faster, 9.98x lower B/op, 16x lower payload |
+
+Chunking improved this local sparse-update workload, but used 1.84x more
+allocations and introduces per-chunk metadata and object-store existence/write
+operations. Fixed boundaries can also rewrite many chunks after an insertion.
+The default remains whole-file addressing (`ChunkSize: 0`) to avoid imposing
+those costs on workloads without sparse large-file changes.

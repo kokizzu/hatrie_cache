@@ -22,6 +22,7 @@ const (
 	objectStoreManifestName            = "manifest.json"
 	objectStoreContentPrefix           = "objects"
 	DefaultObjectStoreManifestMaxBytes = 8 << 20
+	MaxObjectStoreChunkSize            = 64 << 20
 	maxObjectStoreManifestFiles        = 1_000_000
 )
 
@@ -37,9 +38,10 @@ const (
 )
 
 var (
-	ErrObjectStoreNil             = errors.New("hatriecache: object store is nil")
-	ErrObjectStorePrefixInvalid   = errors.New("hatriecache: object store prefix is invalid")
-	ErrObjectStoreManifestInvalid = errors.New("hatriecache: object store manifest is invalid")
+	ErrObjectStoreNil              = errors.New("hatriecache: object store is nil")
+	ErrObjectStorePrefixInvalid    = errors.New("hatriecache: object store prefix is invalid")
+	ErrObjectStoreManifestInvalid  = errors.New("hatriecache: object store manifest is invalid")
+	ErrObjectStoreChunkSizeInvalid = errors.New("hatriecache: object store chunk size is invalid")
 )
 
 // ObjectStore is the minimal streaming API required by an object-store backup
@@ -65,6 +67,7 @@ type ObjectStoreTarget struct {
 	prefix          string
 	encryption      *objectStoreEncryptionConfig
 	layout          ObjectStoreLayout
+	chunkSize       int
 	manifestCatalog *BackupManifestCatalog
 }
 
@@ -92,13 +95,25 @@ func NewObjectStoreTargetWithOptions(store ObjectStore, prefix string, options O
 	if err != nil {
 		return nil, err
 	}
+	chunkSize, err := normalizeObjectStoreChunkSize(options.ChunkSize)
+	if err != nil {
+		return nil, err
+	}
 	return &ObjectStoreTarget{
 		store:           store,
 		prefix:          normalized,
 		encryption:      encryption,
 		layout:          layout,
+		chunkSize:       chunkSize,
 		manifestCatalog: options.ManifestCatalog,
 	}, nil
+}
+
+func normalizeObjectStoreChunkSize(value int) (int, error) {
+	if value < 0 || value > MaxObjectStoreChunkSize {
+		return 0, fmt.Errorf("%w: %d, want 0..%d", ErrObjectStoreChunkSizeInvalid, value, MaxObjectStoreChunkSize)
+	}
+	return value, nil
 }
 
 func normalizeObjectStoreLayout(value ObjectStoreLayout) (ObjectStoreLayout, error) {
@@ -249,21 +264,22 @@ func (target *ObjectStoreTarget) Backup(ctx context.Context, source string, mani
 		if err := checkObjectStoreContext(ctx); err != nil {
 			return BundleManifest{}, err
 		}
-		result, err := target.uploadFile(ctx, root, relative, layout, encryptionKeyID, seenObjects)
+		var result objectStoreFileResult
+		if target.chunkSize > 0 && layout == ObjectStoreLayoutContentAddressed && manifest.Mode == ModePebbleIncremental {
+			result, err = target.uploadChunkedFile(ctx, root, relative, layout, encryptionKeyID, seenObjects)
+		} else {
+			result, err = target.uploadFile(ctx, root, relative, layout, encryptionKeyID, seenObjects)
+		}
 		if err != nil {
 			return BundleManifest{}, err
 		}
 		manifest.Files = append(manifest.Files, result.file)
-		if result.newObject {
-			manifest.NewObjects++
-			manifest.NewObjectBytes += result.file.Size
-			manifest.NewObjectHashes = append(manifest.NewObjectHashes, result.file.SHA256)
-		}
-		if result.reusedObject {
-			manifest.ReusedObjects++
-			manifest.ReusedObjectBytes += result.file.Size
-			manifest.ReusedObjectHashes = append(manifest.ReusedObjectHashes, result.file.SHA256)
-		}
+		manifest.NewObjects += result.newObjects
+		manifest.ReusedObjects += result.reusedObjects
+		manifest.NewObjectBytes += result.newObjectBytes
+		manifest.ReusedObjectBytes += result.reusedObjectBytes
+		manifest.NewObjectHashes = append(manifest.NewObjectHashes, result.newObjectHashes...)
+		manifest.ReusedObjectHashes = append(manifest.ReusedObjectHashes, result.reusedObjectHashes...)
 	}
 	if err := validateObjectStoreManifest(manifest); err != nil {
 		return BundleManifest{}, err
@@ -323,6 +339,12 @@ func (target *ObjectStoreTarget) Restore(ctx context.Context, destination string
 		if err != nil {
 			return BundleManifest{}, err
 		}
+		if len(file.Chunks) > 0 {
+			if err := target.restoreChunkedFile(ctx, restore.staging, file, manifest, layout); err != nil {
+				return BundleManifest{}, err
+			}
+			continue
+		}
 		objectKey, objectRelative, keyErr := target.fileObjectKey(layout, file, manifest)
 		if keyErr != nil {
 			return BundleManifest{}, keyErr
@@ -373,6 +395,12 @@ func (target *ObjectStoreTarget) Verify(ctx context.Context) (BundleManifest, er
 	for _, file := range manifest.Files {
 		if err := checkObjectStoreContext(ctx); err != nil {
 			return BundleManifest{}, err
+		}
+		if len(file.Chunks) > 0 {
+			if err := target.verifyChunkedFile(ctx, file, manifest, layout); err != nil {
+				return BundleManifest{}, err
+			}
+			continue
 		}
 		objectKey, objectRelative, keyErr := target.fileObjectKey(layout, file, manifest)
 		if keyErr != nil {
@@ -466,9 +494,13 @@ func (target *ObjectStoreTarget) objectKey(relative string) string {
 }
 
 type objectStoreFileResult struct {
-	file         BundleFile
-	newObject    bool
-	reusedObject bool
+	file               BundleFile
+	newObjects         int
+	reusedObjects      int
+	newObjectBytes     int64
+	reusedObjectBytes  int64
+	newObjectHashes    []string
+	reusedObjectHashes []string
 }
 
 func (target *ObjectStoreTarget) uploadFile(ctx context.Context, root, relative string, layout ObjectStoreLayout, encryptionKeyID string, seenObjects map[string]struct{}) (objectStoreFileResult, error) {
@@ -478,7 +510,12 @@ func (target *ObjectStoreTarget) uploadFile(ctx context.Context, root, relative 
 		if err != nil {
 			return objectStoreFileResult{}, err
 		}
-		return objectStoreFileResult{file: file}, nil
+		return objectStoreFileResult{
+			file:            file,
+			newObjects:      1,
+			newObjectBytes:  file.Size,
+			newObjectHashes: []string{file.SHA256},
+		}, nil
 	}
 
 	file, err := hashObjectStoreFile(ctx, filePath, relative)
@@ -504,14 +541,24 @@ func (target *ObjectStoreTarget) uploadFile(ctx context.Context, root, relative 
 		}
 		if exists {
 			seenObjects[hash] = struct{}{}
-			return objectStoreFileResult{file: file, reusedObject: true}, nil
+			return objectStoreFileResult{
+				file:               file,
+				reusedObjects:      1,
+				reusedObjectBytes:  file.Size,
+				reusedObjectHashes: []string{hash},
+			}, nil
 		}
 	}
 	if _, err := target.uploadFileAtKey(ctx, filePath, relative, objectRelative, &file); err != nil {
 		return objectStoreFileResult{}, err
 	}
 	seenObjects[hash] = struct{}{}
-	return objectStoreFileResult{file: file, newObject: true}, nil
+	return objectStoreFileResult{
+		file:            file,
+		newObjects:      1,
+		newObjectBytes:  file.Size,
+		newObjectHashes: []string{hash},
+	}, nil
 }
 
 func hashObjectStoreFile(ctx context.Context, filePath, relative string) (BundleFile, error) {
@@ -714,7 +761,8 @@ func validateObjectStoreManifest(manifest BundleManifest) error {
 	if err := validateObjectStoreEncryptionMetadata(manifest.Encryption); err != nil {
 		return err
 	}
-	if _, err := restoreObjectStoreLayout(manifest); err != nil {
+	layout, err := restoreObjectStoreLayout(manifest)
+	if err != nil {
 		return err
 	}
 	if len(manifest.Files) > maxObjectStoreManifestFiles {
@@ -738,6 +786,14 @@ func validateObjectStoreManifest(manifest BundleManifest) error {
 		digest, err := hex.DecodeString(file.SHA256)
 		if err != nil || len(digest) != sha256.Size {
 			return fmt.Errorf("%w: invalid SHA256 for %q", ErrObjectStoreManifestInvalid, file.Path)
+		}
+		if len(file.Chunks) > 0 {
+			if layout != ObjectStoreLayoutContentAddressed {
+				return fmt.Errorf("%w: chunked file %q requires content-addressed layout", ErrObjectStoreManifestInvalid, file.Path)
+			}
+			if err := validateBundleFileChunks(file); err != nil {
+				return fmt.Errorf("%w: %v", ErrObjectStoreManifestInvalid, err)
+			}
 		}
 	}
 	return nil

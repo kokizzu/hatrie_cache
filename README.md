@@ -4942,3 +4942,14 @@ and emits deterministic copy, replace, or quarantine actions without performing
 network or destructive storage operations. Use
 [CH019_REPLICA_PART_CHECKS.md](CH019_REPLICA_PART_CHECKS.md) for the API,
 safety bounds, and measured comparison in [BENCHMARK.md](BENCHMARK.md#ch-019-replica-part-consistency-planning).
+
+## Incremental Backup Chunk Deduplication
+
+Object-store incremental backups can opt into fixed-size content-addressed
+chunks with `ObjectStoreTargetOptions.ChunkSize`. The default `0` keeps the
+existing whole-file format; see [C241_INCREMENTAL_CHUNK_DEDUP.md](C241_INCREMENTAL_CHUNK_DEDUP.md)
+for configuration, integrity behavior, and measured CPU, memory, and payload
+tradeoffs.
+
+Run `make test-c241`, `make test-c241-package`, `make race-c241`,
+`make vet-c241`, and `make benchmark-c241` for focused verification.

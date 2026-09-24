@@ -24911,3 +24911,42 @@ commit-c240:
 .PHONY: push-c240
 push-c240:
 	@bash scripts/push-c240.sh
+.PHONY: test-c241
+test-c241:
+	@bash scripts/test-c241.sh
+
+.PHONY: format-c241
+format-c241:
+	@bash scripts/format-c241.sh
+
+.PHONY: benchmark-c241
+benchmark-c241:
+	@bash scripts/benchmark-c241.sh
+
+.PHONY: test-c241-package
+test-c241-package:
+	@bash scripts/test-c241-package.sh
+
+.PHONY: race-c241
+race-c241:
+	@bash scripts/race-c241.sh
+
+.PHONY: vet-c241
+vet-c241:
+	@bash scripts/vet-c241.sh
+
+.PHONY: verify-c241-docs
+verify-c241-docs:
+	@bash scripts/verify-c241-docs.sh
+
+.PHONY: status-c241
+status-c241:
+	@bash scripts/status-c241.sh
+
+.PHONY: commit-c241
+commit-c241:
+	@bash scripts/commit-c241.sh
+
+.PHONY: push-c241
+push-c241:
+	@bash scripts/push-c241.sh

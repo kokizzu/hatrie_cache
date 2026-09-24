@@ -209,12 +209,13 @@ func validateGarbageCollectionRetention(retention BackupRetentionPlan) (BackupCh
 			continue
 		}
 		for _, file := range manifest.Files {
-			relative := backupObjectIdentity(manifest, file)
-			canonical, err := normalizeContentObjectRelative(relative)
-			if err != nil {
-				return BackupChainPlan{}, nil, nil, errors.Join(ErrObjectStoreGarbageCollectionUnsafe, err)
+			for _, relative := range backupObjectIdentities(manifest, file) {
+				canonical, err := normalizeContentObjectRelative(relative)
+				if err != nil {
+					return BackupChainPlan{}, nil, nil, errors.Join(ErrObjectStoreGarbageCollectionUnsafe, err)
+				}
+				keepRelative[canonical] = struct{}{}
 			}
-			keepRelative[canonical] = struct{}{}
 		}
 	}
 	return chain, keepIDs, keepRelative, nil

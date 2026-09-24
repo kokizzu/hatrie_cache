@@ -32,11 +32,20 @@ type PartitionMetadata struct {
 	KeyPrefixes         []string `json:"key_prefixes,omitempty"`
 }
 
-// BundleFile records an archived payload's name, size, and checksum.
-type BundleFile struct {
-	Path   string `json:"path"`
+// BundleChunk records one sequential content-addressed chunk of a bundle file.
+// Chunks are optional; an empty list keeps the historical one-object file
+// representation.
+type BundleChunk struct {
 	Size   int64  `json:"size"`
 	SHA256 string `json:"sha256"`
+}
+
+// BundleFile records an archived payload's name, size, and checksum.
+type BundleFile struct {
+	Path   string        `json:"path"`
+	Size   int64         `json:"size"`
+	SHA256 string        `json:"sha256"`
+	Chunks []BundleChunk `json:"chunks,omitempty"`
 }
 
 // BundleConsistency binds immutable backup parts to the exact journal

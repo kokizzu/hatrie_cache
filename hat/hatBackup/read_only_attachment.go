@@ -67,7 +67,7 @@ func (attachment *ReadOnlyBackupAttachment) Manifest() BundleManifest {
 		return BundleManifest{}
 	}
 	manifest := attachment.manifest
-	manifest.Files = append([]BundleFile(nil), attachment.manifest.Files...)
+	manifest.Files = cloneBundleFiles(attachment.manifest.Files)
 	return manifest
 }
 
@@ -76,7 +76,15 @@ func (attachment *ReadOnlyBackupAttachment) Files() []BundleFile {
 	if attachment == nil {
 		return nil
 	}
-	return append([]BundleFile(nil), attachment.manifest.Files...)
+	return cloneBundleFiles(attachment.manifest.Files)
+}
+
+func cloneBundleFiles(files []BundleFile) []BundleFile {
+	cloned := append([]BundleFile(nil), files...)
+	for index := range cloned {
+		cloned[index].Chunks = append([]BundleChunk(nil), files[index].Chunks...)
+	}
+	return cloned
 }
 
 // Open opens one manifest-listed backup file as a checksum-verifying stream.
@@ -95,6 +103,9 @@ func (attachment *ReadOnlyBackupAttachment) Open(ctx context.Context, name strin
 	file, ok := attachment.files[name]
 	if !ok {
 		return nil, fmt.Errorf("%w: %q", ErrReadOnlyBackupAttachmentFileNotFound, name)
+	}
+	if len(file.Chunks) > 0 {
+		return attachment.openChunked(ctx, file)
 	}
 	objectKey, objectRelative, err := attachment.target.fileObjectKey(attachment.layout, file, attachment.manifest)
 	if err != nil {

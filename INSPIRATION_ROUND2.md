@@ -74,7 +74,7 @@ operator control remain the preferred deployment model.
 - [x] C238 Mutation queue progress with rows remaining and elapsed estimates is implemented as derived, read-time fields on `hatSql.MutationSnapshot`; the opt-in controller hot path and defaults remain unchanged. See [C238_MUTATION_PROGRESS.md](C238_MUTATION_PROGRESS.md).
 - [x] C239 Part-merge backlog, amplification, and age metrics. See [C239_COMPACTION_METRICS.md](C239_COMPACTION_METRICS.md).
 - [x] C240 Read-only backup database attachment for querying backup parts in place. See [C240_READ_ONLY_BACKUP_ATTACHMENT.md](C240_READ_ONLY_BACKUP_ATTACHMENT.md).
-- [ ] C241 Incremental backup chunk deduplication across snapshots.
+- [x] C241 Incremental backup chunk deduplication across snapshots; see [C241_INCREMENTAL_CHUNK_DEDUP.md](C241_INCREMENTAL_CHUNK_DEDUP.md) and the paired measurements in [BENCHMARK.md](BENCHMARK.md#c241-incremental-backup-chunk-deduplication).
 - [x] C242 Parallel restore of independent parts with bounded concurrency. See [C242_PARALLEL_RESTORE.md](C242_PARALLEL_RESTORE.md) and [BENCHMARK.md](BENCHMARK.md#c242-bounded-parallel-restore).
 - [x] C243 Remote-part read-through caching with immutable checksum keys is implemented by `hatStorage.RemotePartCache`. See [C243_REMOTE_PART_CACHE.md](C243_REMOTE_PART_CACHE.md), [REMOTE_PART_CACHE.md](REMOTE_PART_CACHE.md), and [BENCHMARK.md](BENCHMARK.md#c243-remote-part-read-through-cache).
 - [x] C244 Local cache reuse validated by part and column checksums is implemented by the opt-in `hatMerkle.PartManifest`. See [C244_LOCAL_CACHE_REUSE.md](C244_LOCAL_CACHE_REUSE.md) and [BENCHMARK.md](BENCHMARK.md#c244-local-cache-reuse-validation).
