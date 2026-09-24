@@ -36785,3 +36785,29 @@ BenchmarkTT024TextIndexBuild-32   100  33393692 ns/op  26255546 B/op 260258 allo
 BenchmarkTT024TextIndexBuild-32   100  32566476 ns/op  26255541 B/op 260258 allocs/op
 BenchmarkTT024TextIndexBuild-32   100  32911228 ns/op  26255594 B/op 260258 allocs/op
 ```
+<a id="tt-021-materializedsource-spatial-index"></a>
+## TT-021 MaterializedSource Spatial Index
+
+Command: `make benchmark-tt021-materialized-spatial-index`.
+
+The fixture contains 20,000 rows and the timed query returns roughly 20 points
+from a small latitude/longitude box. Five samples ran on Linux/amd64 with an
+AMD Ryzen 9 5950X. `B/op` is cumulative timed allocation; it is not retained
+index size.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Full SQL source scan | 22,467,284 | 19,718,314 | 120,068 | Baseline |
+| Warm materialized R-tree | 34,366 | 27,672 | 153 | 653.8x faster, 712.4x lower B/op, 784.8x fewer allocs |
+| R-tree build | 43,363,374 | 5,496,445 | 5,959 | One-time build cost |
+| Existing-row upsert without index | 2,772 | 2,180 | 20 | Write baseline |
+| Existing-row upsert with index | 3,060 | 2,179 | 20 | 1.10x CPU, no allocation increase |
+
+The build row reports cumulative construction allocation, not retained index
+size. The maintained write path costs about 10% CPU in the one-row upsert
+fixture, with no additional allocations. The query path is timed after the
+one-time build; broad predicates can return enough candidates to reduce its
+advantage.
+
+Raw samples and scope are in
+[TT021_MATERIALIZED_SPATIAL_INDEX.md](TT021_MATERIALIZED_SPATIAL_INDEX.md).

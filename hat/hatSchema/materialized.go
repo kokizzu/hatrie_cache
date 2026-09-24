@@ -196,6 +196,7 @@ type MaterializedSource struct {
 	coveringIndexes   map[string]*materializedCoveringIndex
 	functionalIndexes map[string]*materializedFunctionalIndex
 	textIndexes       map[string]*materializedTextIndex
+	spatialIndexes    map[string]*materializedSpatialIndex
 	indexStatsCache   map[string]hatSql.JSONIndexStats
 	generation        uint64
 }
@@ -215,6 +216,7 @@ func NewMaterializedSource(columns []DerivedColumn) *MaterializedSource {
 		uniqueFields:      map[string]struct{}{},
 		coveringIndexes:   map[string]*materializedCoveringIndex{},
 		functionalIndexes: map[string]*materializedFunctionalIndex{},
+		spatialIndexes:    map[string]*materializedSpatialIndex{},
 	}
 }
 
@@ -338,6 +340,7 @@ func (source *MaterializedSource) Upsert(row Row, options MaterializedUpsertOpti
 		replaceMaterializedIndexPosition(index.positions, oldFunctionalKeys[name], functionalKeys[name], position)
 	}
 	source.replaceTextIndexesLocked(existing, merged, position)
+	source.replaceSpatialIndexesLocked(existing, merged, position)
 	source.rows[position] = cloneRow(merged)
 	source.generation++
 	source.indexStatsCache = nil
@@ -418,6 +421,7 @@ func (source *MaterializedSource) insertMaterializedLocked(materialized Row) (Ro
 		index.positions[key] = append(index.positions[key], position)
 	}
 	source.addTextIndexesForInsertLocked(materialized, position)
+	source.addSpatialIndexesForInsertLocked(materialized, position)
 	source.generation++
 	source.indexStatsCache = nil
 	return cloneRow(materialized), nil

@@ -1073,12 +1073,14 @@ integration remain unchanged; callers own byte charging and invalidation. See
 ## TT-021: Packed R-tree Spatial Index
 
 Tarantool-style RTREE support is adopted as the opt-in immutable
-`hatDataStructure.PackedRTree[T]`. It bulk-builds spatially coherent leaves,
-uses compact integer node ranges, validates finite inclusive boxes, copies
-caller input, and provides allocation-free `QueryInto` and `Visit` paths.
-Mutable updates, SQL planner integration, persistence, and replication remain
-deferred. See [TT021_PACKED_RTREE.md](TT021_PACKED_RTREE.md) and
-[BENCHMARK.md](BENCHMARK.md#tt-021-packed-r-tree-spatial-index).
+`hatDataStructure.PackedRTree[T]`; `MutablePackedRTree[T]` adds a packed base
+plus mutable delta with explicit compaction. `MaterializedSource.BuildSpatialIndex`
+now wires the maintained point index into SQL `GEO_WITHIN_BOX` and
+`GEO_WITHIN_RADIUS` candidate scans, while SQL rechecks the original predicate.
+Persistent index storage and replication remain deferred. See
+[TT021_PACKED_RTREE.md](TT021_PACKED_RTREE.md),
+[TT021_MATERIALIZED_SPATIAL_INDEX.md](TT021_MATERIALIZED_SPATIAL_INDEX.md), and
+[BENCHMARK.md](BENCHMARK.md#tt-021-materializedsource-spatial-index).
 
 ## C237: Projection Selection Explain
 

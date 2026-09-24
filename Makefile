@@ -26125,3 +26125,34 @@ commit-tt024-text-index:
 .PHONY: push-tt024-text-index
 push-tt024-text-index:
 	bash scripts/push-tt024-text-index.sh
+.PHONY: test-tt021-materialized-spatial-index
+test-tt021-materialized-spatial-index:
+	bash scripts/test-tt021-materialized-spatial-index.sh
+.PHONY: format-tt021-materialized-spatial-index
+format-tt021-materialized-spatial-index:
+	bash scripts/format-tt021-materialized-spatial-index.sh
+.PHONY: benchmark-tt021-materialized-spatial-index
+benchmark-tt021-materialized-spatial-index:
+	bash scripts/benchmark-tt021-materialized-spatial-index.sh
+.PHONY: race-tt021-materialized-spatial-index
+race-tt021-materialized-spatial-index:
+	bash scripts/race-tt021-materialized-spatial-index.sh
+
+.PHONY: vet-tt021-materialized-spatial-index
+vet-tt021-materialized-spatial-index:
+	bash scripts/vet-tt021-materialized-spatial-index.sh
+.PHONY: status-tt021-materialized-spatial-index
+status-tt021-materialized-spatial-index:
+	bash scripts/status-tt021-materialized-spatial-index.sh
+
+.PHONY: stage-tt021-materialized-spatial-index
+stage-tt021-materialized-spatial-index:
+	bash scripts/stage-tt021-materialized-spatial-index.sh
+
+.PHONY: commit-tt021-materialized-spatial-index
+commit-tt021-materialized-spatial-index:
+	bash scripts/commit-tt021-materialized-spatial-index.sh
+
+.PHONY: push-tt021-materialized-spatial-index
+push-tt021-materialized-spatial-index:
+	bash scripts/push-tt021-materialized-spatial-index.sh
