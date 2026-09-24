@@ -36844,3 +36844,33 @@ BenchmarkMZ038SortedArrangementRowsRange-32           275835  4336 ns/op  4480 B
 BenchmarkMZ038SortedArrangementRowsRange-32           272412  4457 ns/op  4480 B/op  33 allocs/op
 BenchmarkMZ038SortedArrangementRowsRange-32           245883  4262 ns/op  4480 B/op  33 allocs/op
 ```
+<a id="rejected-t042-parallel-replay"></a>
+## Rejected T-042 Parallel Recovery Replay
+
+An opt-in dependency-aware replay prototype grouped simple keyed mutations
+into per-key lanes and ran distinct lanes with four workers. It was rolled
+back because the measured workload regressed both latency and memory. The
+existing serial replay path remains unchanged.
+
+Machine: Linux amd64, AMD Ryzen 9 5950X, 4,096 independent `SETINT` journal
+entries, five samples per case.
+
+| Case | Median ns/op | Median B/op | Median allocs/op | Result |
+| --- | ---: | ---: | ---: | --- |
+| Existing serial `Replay` | 9,372,364 | 3,165,059 | 49,203 | baseline |
+| Rejected four-worker prototype | 18,975,618 | 9,604,229 | 53,372 | 2.02x slower, 3.03x more bytes, 1.08x more allocations |
+
+Raw output:
+
+```text
+BenchmarkT042ParallelReplayIndependentKeys/serial-32        130  8812869 ns/op   3165055 B/op  49202 allocs/op
+BenchmarkT042ParallelReplayIndependentKeys/serial-32        127  9721262 ns/op   3165059 B/op  49203 allocs/op
+BenchmarkT042ParallelReplayIndependentKeys/serial-32        123  9095630 ns/op   3165052 B/op  49203 allocs/op
+BenchmarkT042ParallelReplayIndependentKeys/serial-32        135  9372364 ns/op   3165078 B/op  49203 allocs/op
+BenchmarkT042ParallelReplayIndependentKeys/serial-32        134  9373397 ns/op   3165073 B/op  49203 allocs/op
+BenchmarkT042ParallelReplayIndependentKeys/parallel-4-32     61 19440864 ns/op   9604050 B/op  53371 allocs/op
+BenchmarkT042ParallelReplayIndependentKeys/parallel-4-32     70 18975618 ns/op   9604449 B/op  53372 allocs/op
+BenchmarkT042ParallelReplayIndependentKeys/parallel-4-32     64 19476133 ns/op   9604208 B/op  53372 allocs/op
+BenchmarkT042ParallelReplayIndependentKeys/parallel-4-32     60 18868589 ns/op   9603970 B/op  53371 allocs/op
+BenchmarkT042ParallelReplayIndependentKeys/parallel-4-32     64 18479997 ns/op   9604229 B/op  53371 allocs/op
+```

@@ -26194,3 +26194,14 @@ race-mz038-sorted-arrangement-range:
 .PHONY: vet-mz038-sorted-arrangement-range
 vet-mz038-sorted-arrangement-range:
 	@bash scripts/vet-mz038-sorted-arrangement-range.sh
+.PHONY: stage-t042-parallel-replay-rejection
+stage-t042-parallel-replay-rejection:
+	@bash scripts/stage-t042-parallel-replay-rejection.sh
+
+.PHONY: commit-t042-parallel-replay-rejection
+commit-t042-parallel-replay-rejection:
+	@bash scripts/commit-t042-parallel-replay-rejection.sh
+
+.PHONY: push-t042-parallel-replay-rejection
+push-t042-parallel-replay-rejection:
+	@bash scripts/push-t042-parallel-replay-rejection.sh
