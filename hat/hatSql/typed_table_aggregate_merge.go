@@ -67,6 +67,7 @@ func (aggregate *TypedTableAggregate) MergePartials(partials ...*TypedTableAggre
 	aggregate.groupCount = groupCount
 	aggregate.groupKeysReady = false
 	aggregate.compactGroupOrder = nil
+	aggregate.pendingGroupOrder = nil
 	return nil
 }
 

@@ -26887,6 +26887,20 @@ Raw samples and interpretation are recorded in
 single-update result is the only clear optimization win in this comparison;
 the control changes are reported for reproducibility and are not presented as
 additional improvements.
+## MZ-028: Adaptive arrangement compaction
+
+Workload: 2,048 existing typed-table aggregate groups are read once, then one
+new group is applied and the ordered result is read again. Five-run median on
+the same benchmark command before and after incremental order insertion:
+
+| Fixture | Before ns/op | After ns/op | Improvement | Before B/op | After B/op | Before allocs/op | After allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2,048 existing groups, one new group per read | 1,577,791 | 883,679 | 1.79x faster | 1,449,067 | 1,319,110 | 12,787 | 8,798 |
+
+The optimization only handles one pending addition. Two or more pending
+additions, deletions, and partial merges use the existing full-sort path, which
+keeps batched update behavior from turning into repeated O(n) insertion work.
+
 ## MZ-028: Temporal interval arrangement
 
 Workload: one-key valid-time rows with half-open intervals. The first two rows

@@ -436,6 +436,17 @@ shows a 2.89x CPU improvement versus the pre-change materialized path, with
 | ClickHouse | Background prioritized skip-index rebuild queue | Adopted as an importable opt-in maintenance primitive | `hatSql.SQLIndexRebuildQueue` bounds pending work, prioritizes rebuild callbacks, preserves FIFO ties, propagates cancellation, reports monotone progress, and retains bounded terminal history. It has no default workers and no automatic schema mutation; enqueue cost is a measured 405.0 ns/op, 280 B/op, and 3 allocs/op versus a 1.677 ns/op direct callback control. See [CHU12_BACKGROUND_INDEX_REBUILD_QUEUE.md](CHU12_BACKGROUND_INDEX_REBUILD_QUEUE.md) and [BENCHMARK.md](BENCHMARK.md#ch-u12-background-index-rebuild-queue). |
 | ClickHouse | Per-index skip-index EXPLAIN diagnostics | Adopted as a diagnostic-only optional resolver contract | `EXPLAIN ANALYZE` reports the selected JSON-path skip index kind/path, bitmap payload bytes, candidate/skipped rows and segments, and exact residual predicate work. Ordinary query results and EXPLAIN plans without diagnostics retain their existing behavior; the nine-sample paired benchmark shows identical ordinary-query median memory/allocations and only `+1,274 B/op` and `+28 allocs/op` on the measured EXPLAIN path. See [CHU49_SKIP_INDEX_EXPLAIN.md](CHU49_SKIP_INDEX_EXPLAIN.md) and [BENCHMARK.md](BENCHMARK.md#ch-u49-skip-index-explain-diagnostics). |
 
+### Materialize MZ-028: Adaptive Arrangement Compaction
+
+Adopted as a bounded maintenance optimization for typed-table aggregates.
+After an ordered result has been materialized, one new group is inserted into
+the existing ordered references instead of sorting every group again; batched
+additions, deletions, and partial merges retain the full-sort fallback. The
+single-addition benchmark is 1.79x faster, uses 1.10x less allocated memory,
+and performs 1.45x fewer allocations. See
+[MZ028_ADAPTIVE_ARRANGEMENT.md](MZ028_ADAPTIVE_ARRANGEMENT.md) and
+[BENCHMARK.md](BENCHMARK.md#mz-028-adaptive-arrangement-compaction).
+
 ### Materialize MZ-028: Temporal Interval Arrangement
 
 Implemented as the importable `hatSql.SQLTemporalIntervalArrangement`. It

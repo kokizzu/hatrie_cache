@@ -1879,6 +1879,7 @@ type TypedTableAggregate struct {
 	distinctField          int
 	groups                 map[uint64]typedTableAggregateGroupBucket
 	compactGroupOrder      []typedTableAggregateGroupReference
+	pendingGroupOrder      []typedTableAggregateGroupReference
 	groupCount             int
 	checkpoint             uint64
 	compactionCount        uint64
@@ -2083,8 +2084,6 @@ func (aggregate *TypedTableAggregate) applyRow(values []TypedTableValue, delta i
 		}
 	}
 	if delta > 0 && groupIndex < 0 {
-		aggregate.groupKeysReady = false
-		aggregate.compactGroupOrder = nil
 		if aggregate.dictionaryEncodeGroups {
 			group = aggregate.newGroup(values)
 		} else {
@@ -2125,12 +2124,16 @@ func (aggregate *TypedTableAggregate) applyRow(values []TypedTableValue, delta i
 	}
 	if groupIndex < 0 {
 		aggregate.groupCount++
+		var reference typedTableAggregateGroupReference
 		if !bucketExists {
 			aggregate.groups[hash] = typedTableAggregateGroupBucket{group: group}
 		} else {
+			reference.collision = len(bucket.collisions) + 1
 			bucket.collisions = append(bucket.collisions, group)
 			aggregate.groups[hash] = bucket
 		}
+		reference.hash = hash
+		aggregate.noteGroupAdded(reference)
 	} else if groupIndex == 0 {
 		bucket.group = group
 		aggregate.groups[hash] = bucket
@@ -2144,6 +2147,7 @@ func (aggregate *TypedTableAggregate) applyRow(values []TypedTableValue, delta i
 func (aggregate *TypedTableAggregate) deleteGroup(hash uint64, bucket typedTableAggregateGroupBucket, groupIndex int) {
 	aggregate.groupKeysReady = false
 	aggregate.compactGroupOrder = nil
+	aggregate.pendingGroupOrder = nil
 	aggregate.groupCount--
 	if groupIndex == 0 {
 		if len(bucket.collisions) == 0 {

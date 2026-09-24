@@ -15,10 +15,10 @@ case "${1:-}" in
     go test ./hat/hatSql -count=1
     ;;
   benchmark)
-    go test ./hat/hatSql -run '^$' -bench '^BenchmarkTypedTableAggregateDictionaryEncoding/legacy/rows_existing_state$' -benchmem -count=5
+    go test ./hat/hatSql -run '^$' -bench '^(BenchmarkTypedTableAggregateDictionaryEncoding/legacy/rows_existing_state|BenchmarkMZ028GroupOrderSingleInsert)$' -benchmem -count=5 -benchtime=200ms
     ;;
   format)
-    gofmt -w hat/hatSql/mz028_adaptive_arrangement_test.go hat/hatSql/typed_table.go
+    gofmt -w hat/hatSql/mz028_adaptive_arrangement_test.go hat/hatSql/typed_table.go hat/hatSql/typed_table_aggregate_dictionary.go hat/hatSql/typed_table_aggregate_merge.go
     ;;
   *)
     printf '%s\n' 'usage: scripts/mz028-adaptive-arrangement.sh {test|race|aggregate|package|benchmark|format}' >&2

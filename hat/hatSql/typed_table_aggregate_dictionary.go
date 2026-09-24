@@ -210,6 +210,18 @@ func (aggregate *TypedTableAggregate) storedGroupKey(group typedTableAggregateGr
 }
 
 func (aggregate *TypedTableAggregate) compactOrderedGroups() []typedTableAggregateGroup {
+	if len(aggregate.pendingGroupOrder) > 0 && aggregate.compactGroupOrder != nil {
+		if len(aggregate.pendingGroupOrder) == 1 && aggregate.insertGroupOrder(aggregate.pendingGroupOrder[0]) {
+			aggregate.pendingGroupOrder = nil
+			aggregate.groupKeysReady = true
+		} else {
+			// Keep the existing full-sort behavior for batched additions. It
+			// avoids turning several inserts into repeated O(n) shifts.
+			aggregate.compactGroupOrder = nil
+			aggregate.pendingGroupOrder = nil
+			aggregate.groupKeysReady = false
+		}
+	}
 	if aggregate.groupKeysReady {
 		groups := make([]typedTableAggregateGroup, 0, len(aggregate.compactGroupOrder))
 		for _, reference := range aggregate.compactGroupOrder {
@@ -272,6 +284,50 @@ func (aggregate *TypedTableAggregate) compactOrderedGroups() []typedTableAggrega
 	}
 	aggregate.groupKeysReady = true
 	return groups
+}
+
+func (aggregate *TypedTableAggregate) noteGroupAdded(reference typedTableAggregateGroupReference) {
+	if aggregate.compactGroupOrder == nil {
+		aggregate.groupKeysReady = false
+		aggregate.pendingGroupOrder = nil
+		return
+	}
+	aggregate.pendingGroupOrder = append(aggregate.pendingGroupOrder, reference)
+	aggregate.groupKeysReady = false
+}
+
+func (aggregate *TypedTableAggregate) insertGroupOrder(reference typedTableAggregateGroupReference) bool {
+	group, found := aggregate.groupForReference(reference)
+	if !found || group.count <= 0 {
+		return false
+	}
+	key := aggregate.storedGroupKey(group)
+	index := sort.Search(len(aggregate.compactGroupOrder), func(index int) bool {
+		existing, exists := aggregate.groupForReference(aggregate.compactGroupOrder[index])
+		if !exists {
+			return false
+		}
+		return aggregate.storedGroupKey(existing) >= key
+	})
+	aggregate.compactGroupOrder = append(aggregate.compactGroupOrder, typedTableAggregateGroupReference{})
+	copy(aggregate.compactGroupOrder[index+1:], aggregate.compactGroupOrder[index:])
+	aggregate.compactGroupOrder[index] = reference
+	return true
+}
+
+func (aggregate *TypedTableAggregate) groupForReference(reference typedTableAggregateGroupReference) (typedTableAggregateGroup, bool) {
+	bucket, found := aggregate.groups[reference.hash]
+	if !found {
+		return typedTableAggregateGroup{}, false
+	}
+	if reference.collision == 0 {
+		return bucket.group, true
+	}
+	index := reference.collision - 1
+	if index < 0 || index >= len(bucket.collisions) {
+		return typedTableAggregateGroup{}, false
+	}
+	return bucket.collisions[index], true
 }
 
 func (aggregate *TypedTableAggregate) groupValuesEqual(group typedTableAggregateGroup, values []TypedTableValue) bool {
