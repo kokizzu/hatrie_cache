@@ -49,6 +49,7 @@ type QuerySubscription struct {
 	updates             chan QuerySubscriptionSnapshot
 	differentialUpdates chan QuerySubscriptionDeltaBatch
 	durableSink         func(QuerySubscriptionSnapshot)
+	checkpoint          *querySubscriptionCheckpointState
 	closed              bool
 }
 

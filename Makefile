@@ -25047,3 +25047,39 @@ commit-chu14:
 .PHONY: push-chu14
 push-chu14:
 	bash ./scripts/push-chu14.sh
+.PHONY: test-mu034
+test-mu034:
+	bash ./scripts/test-mu034.sh
+
+.PHONY: test-mu034-package
+test-mu034-package:
+	bash ./scripts/test-mu034-package.sh
+
+.PHONY: test-mu034-repo
+test-mu034-repo:
+	bash ./scripts/test-mu034-repo.sh
+
+.PHONY: format-mu034
+format-mu034:
+	bash ./scripts/format-mu034.sh
+
+.PHONY: benchmark-mu034
+benchmark-mu034:
+	bash ./scripts/benchmark-mu034.sh
+
+.PHONY: race-mu034
+race-mu034:
+	bash ./scripts/race-mu034.sh
+
+.PHONY: vet-mu034
+vet-mu034:
+	bash ./scripts/vet-mu034.sh
+
+
+.PHONY: commit-mu034
+commit-mu034:
+	bash ./scripts/commit-mu034.sh
+
+.PHONY: push-mu034
+push-mu034:
+	bash ./scripts/push-mu034.sh

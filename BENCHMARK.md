@@ -35738,3 +35738,33 @@ allocations and introduces per-chunk metadata and object-store existence/write
 operations. Fixed boundaries can also rewrite many chunks after an insertion.
 The default remains whole-file addressing (`ChunkSize: 0`) to avoid imposing
 those costs on workloads without sparse large-file changes.
+
+<a id="m-u34-historical-subscription-checkpoints"></a>
+## M-U34 Historical Subscription Checkpoints
+
+Five `-benchtime=200ms` samples on Linux/amd64 with an AMD Ryzen 9 5950X.
+The legacy row measures the existing snapshot-and-close lifecycle. The
+checkpoint row measures the explicit consumer acknowledgement and atomic
+checkpoint close lifecycle.
+
+```text
+BenchmarkMU034HistoricalSubscriptionCheckpoint/legacy_snapshot_close-32
+11924 10300 10389 10271 10399 ns/op
+8136 8136 8136 8136 8136 B/op
+47 47 47 47 47 allocs/op
+BenchmarkMU034HistoricalSubscriptionCheckpoint/acknowledge_close_with_checkpoint-32
+12283 12035 12550 12929 12301 ns/op
+9256 9256 9256 9256 9256 B/op
+67 67 67 67 67 allocs/op
+```
+
+| Path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Existing `Snapshot` + `Close` | 10,389 | 8,136 | 47 | 1.00x |
+| `Acknowledge` + `CloseWithCheckpoint` | 12,301 | 9,256 | 67 | 1.18x slower, 1.14x B/op |
+
+The checkpoint path is deliberately opt-in: it prevents restart gaps and
+duplicate frontier delivery by checkpointing only consumer-applied state. It
+does not replace the zero-checkpoint lifecycle, and ordinary subscriptions do
+not allocate the lazy checkpoint state. Full semantics are in
+[M034_HISTORICAL_SUBSCRIPTION_CHECKPOINTS.md](M034_HISTORICAL_SUBSCRIPTION_CHECKPOINTS.md).

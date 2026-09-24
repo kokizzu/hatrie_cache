@@ -70,6 +70,24 @@ func (subscription *QueryDifferentialSubscription) Close() {
 	subscription.subscription.Close()
 }
 
+// Acknowledge records a differential batch after the consumer has applied it.
+// The batch must identify the latest revision currently held by the producer.
+func (subscription *QueryDifferentialSubscription) Acknowledge(batch QuerySubscriptionDeltaBatch) error {
+	if subscription == nil || subscription.subscription == nil {
+		return ErrQuerySubscriptionCheckpointInvalid
+	}
+	return subscription.subscription.acknowledgeDifferential(batch)
+}
+
+// CloseWithCheckpoint atomically captures the latest acknowledged differential
+// state and closes the subscription.
+func (subscription *QueryDifferentialSubscription) CloseWithCheckpoint() (QuerySubscriptionCheckpoint, error) {
+	if subscription == nil || subscription.subscription == nil {
+		return QuerySubscriptionCheckpoint{}, ErrQuerySubscriptionCheckpointInvalid
+	}
+	return subscription.subscription.CloseWithCheckpoint()
+}
+
 func querySubscriptionInitialDelta(snapshot QuerySubscriptionSnapshot) QuerySubscriptionDeltaBatch {
 	return querySubscriptionInitialDeltaWithOrder(snapshot, false)
 }
