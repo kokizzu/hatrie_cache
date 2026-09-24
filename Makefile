@@ -26451,3 +26451,30 @@ commit-tt013-range-cache:
 .PHONY: push-tt013-range-cache
 push-tt013-range-cache:
 	@bash scripts/push-tt013-range-cache.sh
+.PHONY: test-mz006-antichain
+test-mz006-antichain:
+	@bash scripts/test-mz006-antichain.sh
+.PHONY: benchmark-mz006-antichain-baseline
+benchmark-mz006-antichain-baseline:
+	@bash scripts/benchmark-mz006-antichain-baseline.sh
+.PHONY: benchmark-mz006-antichain
+benchmark-mz006-antichain:
+	@bash scripts/benchmark-mz006-antichain.sh
+.PHONY: format-mz006-antichain
+format-mz006-antichain:
+	@bash scripts/format-mz006-antichain.sh
+
+.PHONY: verify-mz006-antichain
+verify-mz006-antichain:
+	@bash scripts/verify-mz006-antichain.sh
+.PHONY: stage-mz006-antichain
+stage-mz006-antichain:
+	@bash scripts/stage-mz006-antichain.sh
+
+.PHONY: commit-mz006-antichain
+commit-mz006-antichain:
+	@bash scripts/commit-mz006-antichain.sh
+
+.PHONY: push-mz006-antichain
+push-mz006-antichain:
+	@bash scripts/push-mz006-antichain.sh
