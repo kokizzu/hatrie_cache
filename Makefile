@@ -26231,3 +26231,10 @@ commit-mz038-sorted-arrangement-cursor:
 .PHONY: push-mz038-sorted-arrangement-cursor
 push-mz038-sorted-arrangement-cursor:
 	@bash scripts/push-mz038-sorted-arrangement-cursor.sh
+.PHONY: format-tt024-text-persistence
+format-tt024-text-persistence:
+	@bash scripts/format-tt024-text-persistence.sh
+
+.PHONY: stage-tt024-text-persistence
+stage-tt024-text-persistence:
+	@bash scripts/stage-tt024-text-persistence.sh

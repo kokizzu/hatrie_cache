@@ -103,6 +103,68 @@ func TestTT024TextIndexPreservesRepeatedTokenPositions(t *testing.T) {
 	}
 }
 
+func TestTT024TextIndexBinaryPersistenceRoundTripAndValidation(t *testing.T) {
+	rows := []Row{
+		{"id": int64(1), "body": "alpha beta gamma"},
+		{"id": int64(2), "body": "alpha unrelated beta gamma"},
+		{"id": int64(3), "body": "beta alpha beta gamma"},
+	}
+	source := NewMaterializedSource([]DerivedColumn{{Name: "id"}, {Name: "body"}})
+	for _, row := range rows {
+		if _, err := source.Insert(row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := source.BuildTextIndex("body"); err != nil {
+		t.Fatal(err)
+	}
+	wire, err := source.MarshalTextIndex("body")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(wire) == 0 {
+		t.Fatal("text index persistence frame is empty")
+	}
+	t.Logf("text index persistence frame bytes = %d", len(wire))
+
+	restored := NewMaterializedSource([]DerivedColumn{{Name: "id"}, {Name: "body"}})
+	for _, row := range rows {
+		if _, err := restored.Insert(row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := restored.RestoreTextIndex("body", wire); err != nil {
+		t.Fatal(err)
+	}
+	if !restored.HasTextIndex("body") {
+		t.Fatal("restored text index is not active")
+	}
+	assertTT024IDs(t, sqlRows(restored.LookupText("body", "alpha beta", 0)), []int64{1, 3})
+	if _, err := restored.Insert(Row{"id": int64(4), "body": "alpha beta"}); err != nil {
+		t.Fatal(err)
+	}
+	assertTT024IDs(t, sqlRows(restored.LookupText("body", "alpha beta", 0)), []int64{1, 3, 4})
+
+	corrupted := append([]byte(nil), wire...)
+	corrupted[len(corrupted)-1] ^= 1
+	if err := restored.RestoreTextIndex("body", corrupted); err == nil {
+		t.Fatal("corrupted text index frame restored without error")
+	}
+
+	drifted := NewMaterializedSource([]DerivedColumn{{Name: "id"}, {Name: "body"}})
+	for _, row := range rows {
+		if _, err := drifted.Insert(row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := drifted.Insert(Row{"id": int64(4), "body": "new document"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := drifted.RestoreTextIndex("body", wire); err == nil {
+		t.Fatal("text index for a different source snapshot restored without error")
+	}
+}
+
 func assertTT024IDs(t *testing.T, rows []hatSql.Row, want []int64) {
 	t.Helper()
 	if len(rows) != len(want) {

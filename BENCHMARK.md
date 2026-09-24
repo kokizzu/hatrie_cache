@@ -36905,3 +36905,54 @@ BenchmarkMZ038SortedArrangementRangePaginationCursor-32         7924  126269 ns/
 BenchmarkMZ038SortedArrangementRangePaginationCursor-32         8912  127743 ns/op  139840 B/op  1031 allocs/op
 BenchmarkMZ038SortedArrangementRangePaginationCursor-32         9384  122703 ns/op  139840 B/op  1031 allocs/op
 ```
+
+<a id="tt-024-text-index-persistence"></a>
+## TT-024 Positional Text Index Persistence
+
+`make benchmark-tt024-text-index` ran five samples per case on Linux/amd64
+with an AMD Ryzen 9 5950X and a 20,000-row fixture. The snapshot benchmark
+uses the deterministic CRC-protected `HTI1` binary frame.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Full phrase scan | 28,656,751 | 23,558,182 | 180,068 | baseline query |
+| Warm positional-index phrase query | 35,530 | 30,896 | 210 | 807x faster than full scan |
+| Rebuild positional index | 36,451,034 | 26,255,541 | 260,258 | rebuild baseline |
+| Marshal `HTI1` snapshot | 12,842,693 | 3,535,000 | 40,004 | 2.84x lower timed CPU than rebuild |
+| Restore `HTI1` snapshot | 10,863,660 | 6,879,870 | 160,055 | 3.36x faster, 3.82x lower B/op, 1.63x fewer allocs than rebuild |
+
+The snapshot path does not include loading source rows. It trades a bounded
+SHA-256 validation pass and snapshot bytes for avoiding tokenization and index
+construction. The focused three-row round-trip test produced a 110-byte frame;
+the 20,000-row benchmark frame was 392,482 bytes, with median marshal
+throughput of 32.41 MB/s and restore throughput of 37.20 MB/s.
+
+Raw output:
+
+```text
+BenchmarkTT024PhraseScan-32          100 31070370 ns/op 23558605 B/op 180069 allocs/op
+BenchmarkTT024PhraseScan-32          100 28656751 ns/op 23558074 B/op 180068 allocs/op
+BenchmarkTT024PhraseScan-32          100 28502870 ns/op 23558186 B/op 180068 allocs/op
+BenchmarkTT024PhraseScan-32          100 27240013 ns/op 23558182 B/op 180068 allocs/op
+BenchmarkTT024PhraseScan-32          100 29628410 ns/op 23558081 B/op 180068 allocs/op
+BenchmarkTT024PhraseIndexed-32       100 35530 ns/op 30896 B/op 210 allocs/op
+BenchmarkTT024PhraseIndexed-32       100 30934 ns/op 30896 B/op 210 allocs/op
+BenchmarkTT024PhraseIndexed-32       100 31151 ns/op 30896 B/op 210 allocs/op
+BenchmarkTT024PhraseIndexed-32       100 50667 ns/op 30896 B/op 210 allocs/op
+BenchmarkTT024PhraseIndexed-32       100 43519 ns/op 30896 B/op 210 allocs/op
+BenchmarkTT024TextIndexBuild-32      100 36451034 ns/op 26255594 B/op 260258 allocs/op
+BenchmarkTT024TextIndexBuild-32      100 37162293 ns/op 26255541 B/op 260258 allocs/op
+BenchmarkTT024TextIndexBuild-32      100 34967351 ns/op 26255537 B/op 260258 allocs/op
+BenchmarkTT024TextIndexBuild-32      100 35022388 ns/op 26255540 B/op 260258 allocs/op
+BenchmarkTT024TextIndexBuild-32      100 38525929 ns/op 26255547 B/op 260258 allocs/op
+BenchmarkTT024TextIndexMarshal-32    100 12842693 ns/op 30.56 MB/s 392482 wire-bytes 3535016 B/op 40004 allocs/op
+BenchmarkTT024TextIndexMarshal-32    100 12111168 ns/op 32.41 MB/s 392482 wire-bytes 3535061 B/op 40004 allocs/op
+BenchmarkTT024TextIndexMarshal-32    100 13258331 ns/op 29.60 MB/s 392482 wire-bytes 3534998 B/op 40004 allocs/op
+BenchmarkTT024TextIndexMarshal-32    100 12960438 ns/op 30.28 MB/s 392482 wire-bytes 3534995 B/op 40004 allocs/op
+BenchmarkTT024TextIndexMarshal-32    100 12240374 ns/op 32.06 MB/s 392482 wire-bytes 3535000 B/op 40004 allocs/op
+BenchmarkTT024TextIndexRestore-32    100 10863660 ns/op 36.13 MB/s 392482 wire-bytes 6879826 B/op 160055 allocs/op
+BenchmarkTT024TextIndexRestore-32    100 11217525 ns/op 34.99 MB/s 392482 wire-bytes 6879827 B/op 160055 allocs/op
+BenchmarkTT024TextIndexRestore-32    100 11916073 ns/op 32.94 MB/s 392482 wire-bytes 6879888 B/op 160055 allocs/op
+BenchmarkTT024TextIndexRestore-32    100 10515084 ns/op 37.33 MB/s 392482 wire-bytes 6879870 B/op 160055 allocs/op
+BenchmarkTT024TextIndexRestore-32    100 9478444 ns/op 41.41 MB/s 392482 wire-bytes 6879926 B/op 160055 allocs/op
+```

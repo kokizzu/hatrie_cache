@@ -29,6 +29,42 @@ func BenchmarkTT024TextIndexBuild(b *testing.B) {
 	}
 }
 
+func BenchmarkTT024TextIndexMarshal(b *testing.B) {
+	source, _ := benchmarkTT024TextSource(b, true)
+	wire, err := source.MarshalTextIndex("body")
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.SetBytes(int64(len(wire)))
+	b.ResetTimer()
+	for b.Loop() {
+		_, err := source.MarshalTextIndex("body")
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.ReportMetric(float64(len(wire)), "wire-bytes")
+}
+
+func BenchmarkTT024TextIndexRestore(b *testing.B) {
+	indexed, _ := benchmarkTT024TextSource(b, true)
+	wire, err := indexed.MarshalTextIndex("body")
+	if err != nil {
+		b.Fatal(err)
+	}
+	source, _ := benchmarkTT024TextSource(b, false)
+	b.SetBytes(int64(len(wire)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if err := source.RestoreTextIndex("body", wire); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.ReportMetric(float64(len(wire)), "wire-bytes")
+}
+
 func benchmarkTT024TextSource(b *testing.B, indexed bool) (*MaterializedSource, SQLResolverAdapter) {
 	b.Helper()
 	source := NewMaterializedSource([]DerivedColumn{{Name: "id"}, {Name: "body"}})
