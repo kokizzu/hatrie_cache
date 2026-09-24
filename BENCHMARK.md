@@ -30730,7 +30730,60 @@ unsupported incremental or checkpoint paths fail explicitly instead of
 silently selecting an incorrect fallback. Existing callers using `NewState`
 are unchanged. See
 [MU031_RETRACTABLE_AGGREGATES.md](MU031_RETRACTABLE_AGGREGATES.md) for the
-public contract and its rollback/panic limitations.
+public capability and transaction contracts.
+
+<a id="mu-031-transactional-aggregate-rollback"></a>
+## M-U31 Transactional Aggregate Rollback
+
+Commands `make benchmark-mu031-m043-baseline` and
+`make benchmark-mu031-m043` run five one-second samples on the same
+Linux/amd64 AMD Ryzen 9 5950X host. The direct path calls `Add` on the
+serializable test state. The transactional path creates one
+`SQLAggregateTransaction`, calls `Add` repeatedly, and commits it; transaction
+creation is measured separately. This isolates the opt-in correctness cost
+from the unchanged direct aggregate path.
+
+Final raw baseline output:
+
+```text
+BenchmarkMU031AggregateDirectAdd-32  1000000000  0.2691 ns/op  0 B/op  0 allocs/op
+BenchmarkMU031AggregateDirectAdd-32  1000000000  0.3047 ns/op  0 B/op  0 allocs/op
+BenchmarkMU031AggregateDirectAdd-32  1000000000  0.2580 ns/op  0 B/op  0 allocs/op
+BenchmarkMU031AggregateDirectAdd-32  1000000000  0.2642 ns/op  0 B/op  0 allocs/op
+BenchmarkMU031AggregateDirectAdd-32  1000000000  0.2608 ns/op  0 B/op  0 allocs/op
+```
+
+Final raw post-change output:
+
+```text
+BenchmarkMU031AggregateDirectAdd-32          1000000000  0.2498 ns/op  0 B/op  0 allocs/op
+BenchmarkMU031AggregateDirectAdd-32          1000000000  0.2432 ns/op  0 B/op  0 allocs/op
+BenchmarkMU031AggregateDirectAdd-32          1000000000  0.2586 ns/op  0 B/op  0 allocs/op
+BenchmarkMU031AggregateDirectAdd-32          1000000000  0.2571 ns/op  0 B/op  0 allocs/op
+BenchmarkMU031AggregateDirectAdd-32          1000000000  0.2375 ns/op  0 B/op  0 allocs/op
+BenchmarkMU031AggregateTransactionAdd-32     132776803     9.492 ns/op  0 B/op  0 allocs/op
+BenchmarkMU031AggregateTransactionAdd-32     138706647     8.422 ns/op  0 B/op  0 allocs/op
+BenchmarkMU031AggregateTransactionAdd-32     128919216     8.618 ns/op  0 B/op  0 allocs/op
+BenchmarkMU031AggregateTransactionAdd-32     145935930     8.511 ns/op  0 B/op  0 allocs/op
+BenchmarkMU031AggregateTransactionAdd-32     148397157     8.676 ns/op  0 B/op  0 allocs/op
+BenchmarkMU031AggregateTransactionCreate-32  10511173     121.3 ns/op  88 B/op  4 allocs/op
+BenchmarkMU031AggregateTransactionCreate-32  10638866     115.6 ns/op  88 B/op  4 allocs/op
+BenchmarkMU031AggregateTransactionCreate-32  11693790     108.9 ns/op  88 B/op  4 allocs/op
+BenchmarkMU031AggregateTransactionCreate-32  10986777     107.2 ns/op  88 B/op  4 allocs/op
+BenchmarkMU031AggregateTransactionCreate-32  11440856     100.6 ns/op  88 B/op  4 allocs/op
+```
+
+| Path | Baseline median | Post-change median | CPU ratio | Memory |
+| --- | ---: | ---: | ---: | ---: |
+| Direct `Add` | 0.2642 ns/op | 0.2498 ns/op | 0.95x | 0 B/op, 0 allocs |
+| Transactional `Add` | not applicable | 8.618 ns/op | 32.62x vs direct | 0 B/op, 0 allocs |
+| Transaction creation | not applicable | 108.9 ns/op | one-time | 88 B/op, 4 allocs |
+
+The direct-path difference is benchmark noise, not an optimization claim. The
+transactional loop adds about 8.35 ns/op over direct `Add`, while retaining the
+serialized snapshot for rollback. Snapshot memory scales with the aggregate's
+serialized state size. This is a correctness feature with explicit opt-in
+overhead, not a default performance improvement.
 
 <a id="mu-032-udf-capability-classification"></a>
 ## M-U32 UDF Capability Classification

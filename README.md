@@ -4963,3 +4963,14 @@ Run `make test-c241`, `make test-c241-package`, `make race-c241`,
 `make vet-c241`, and `make benchmark-c241` for focused verification.
 - Opt-in bounded source schema admission, compatibility validation, and retained-version rollback: use `hatSchema.SourceSchemaRegistry`; see [M040_SOURCE_SCHEMA_REGISTRY.md](M040_SOURCE_SCHEMA_REGISTRY.md) and [BENCHMARK.md#m-u40-source-schema-registry](BENCHMARK.md#m-u40-source-schema-registry).
 - Opt-in arrangement-only recovery across aggregate and join catalogs: use `hatSql.CaptureTypedTableArrangementRecovery` and `RestoreTypedTableArrangementRecovery`; see [M041_ARRANGEMENT_RECOVERY_BUNDLE.md](M041_ARRANGEMENT_RECOVERY_BUNDLE.md) and [BENCHMARK.md#m-u05-arrangement-recovery-bundle](BENCHMARK.md#m-u05-arrangement-recovery-bundle).
+
+## Transactional user-defined aggregates
+
+`hatSql.NewSQLAggregateTransaction` is an opt-in rollback boundary for
+serializable user-defined aggregate states. It protects `Add`, `Retract`, and
+`Merge` from callback errors or panics by restoring the transaction's initial
+binary snapshot; `Commit` keeps the state and `Rollback` closes it. Existing
+aggregate execution remains unchanged, and automatic planner wiring is not
+enabled. The snapshot memory and callback cost are measured in
+[MU031_RETRACTABLE_AGGREGATES.md](MU031_RETRACTABLE_AGGREGATES.md) and
+[BENCHMARK.md](BENCHMARK.md#mu-031-transactional-aggregate-rollback).

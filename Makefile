@@ -25278,3 +25278,37 @@ commit-tu05-m042:
 
 push-tu05-m042:
 	bash ./scripts/push-tu05-m042.sh
+format-mu031-m043:
+	bash ./scripts/format-mu031-m043.sh
+
+test-mu031-m043:
+	bash ./scripts/test-mu031-m043.sh
+
+benchmark-mu031-m043-baseline:
+	bash ./scripts/benchmark-mu031-m043-baseline.sh
+
+benchmark-mu031-m043:
+	bash ./scripts/benchmark-mu031-m043.sh
+.PHONY: test-mu031-package-m043
+test-mu031-package-m043:
+	bash ./scripts/test-mu031-package-m043.sh
+
+.PHONY: race-mu031-m043
+race-mu031-m043:
+	bash ./scripts/race-mu031-m043.sh
+
+.PHONY: vet-mu031-m043
+vet-mu031-m043:
+	bash ./scripts/vet-mu031-m043.sh
+
+.PHONY: test-all-mu031-m043
+test-all-mu031-m043:
+	bash ./scripts/test-all-mu031-m043.sh
+
+.PHONY: commit-mu031-m043
+commit-mu031-m043:
+	bash ./scripts/commit-mu031-m043.sh
+
+.PHONY: push-mu031-m043
+push-mu031-m043:
+	bash ./scripts/push-mu031-m043.sh
