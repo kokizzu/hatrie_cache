@@ -36874,3 +36874,34 @@ BenchmarkT042ParallelReplayIndependentKeys/parallel-4-32     64 19476133 ns/op  
 BenchmarkT042ParallelReplayIndependentKeys/parallel-4-32     60 18868589 ns/op   9603970 B/op  53371 allocs/op
 BenchmarkT042ParallelReplayIndependentKeys/parallel-4-32     64 18479997 ns/op   9604229 B/op  53371 allocs/op
 ```
+<a id="mz-038-sorted-arrangement-range-cursor"></a>
+## MZ-038 Sorted Arrangement Range Cursor
+
+This compares paginating a 999-row value range in 32-row pages. The baseline
+calls `RowsRange` for every page and repeats both boundary searches. The cursor
+searches once, then walks the stable ordered vector. Linux amd64, AMD Ryzen 9
+5950X, five samples per case.
+
+| Case | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Repeated `RowsRange` pages | 153,740 | 139,841 | 1,031 | baseline |
+| `RowsRange` cursor pages | 126,269 | 139,840 | 1,031 | 1.22x faster; 17.9% lower time |
+
+The cursor keeps the same allocation count and effectively identical bytes
+while removing repeated searches. It is opt-in and rejects source mutations
+between pages with `ErrTypedTableSortedArrangementCursorChanged`.
+
+Raw output:
+
+```text
+BenchmarkMZ038SortedArrangementRangePaginationBaseline-32       7045  159701 ns/op  139841 B/op  1031 allocs/op
+BenchmarkMZ038SortedArrangementRangePaginationBaseline-32       6913  154998 ns/op  139840 B/op  1031 allocs/op
+BenchmarkMZ038SortedArrangementRangePaginationBaseline-32       7614  153740 ns/op  139841 B/op  1031 allocs/op
+BenchmarkMZ038SortedArrangementRangePaginationBaseline-32       7840  153102 ns/op  139841 B/op  1031 allocs/op
+BenchmarkMZ038SortedArrangementRangePaginationBaseline-32       6834  152313 ns/op  139840 B/op  1031 allocs/op
+BenchmarkMZ038SortedArrangementRangePaginationCursor-32         9189  120642 ns/op  139840 B/op  1031 allocs/op
+BenchmarkMZ038SortedArrangementRangePaginationCursor-32         9651  130938 ns/op  139840 B/op  1031 allocs/op
+BenchmarkMZ038SortedArrangementRangePaginationCursor-32         7924  126269 ns/op  139840 B/op  1031 allocs/op
+BenchmarkMZ038SortedArrangementRangePaginationCursor-32         8912  127743 ns/op  139840 B/op  1031 allocs/op
+BenchmarkMZ038SortedArrangementRangePaginationCursor-32         9384  122703 ns/op  139840 B/op  1031 allocs/op
+```

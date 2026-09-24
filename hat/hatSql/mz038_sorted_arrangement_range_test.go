@@ -175,6 +175,75 @@ func TestMZ038SortedArrangementRangeSupportsCompositeAndValidatesBounds(t *testi
 	}
 }
 
+func TestMZ038SortedArrangementRangeCursorPagesAndRejectsMutation(t *testing.T) {
+	table, err := hatSql.NewTypedTable(hatSql.TypedTableSchema{
+		Name: "mz038_cursor",
+		Columns: []hatSql.TypedTableColumn{
+			{Name: "team", Kind: hatSql.TypedTableString},
+			{Name: "score", Kind: hatSql.TypedTableInt64},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, score := range []int64{1, 2, 3, 4, 5} {
+		if _, err := table.Upsert(string(rune('a'+index)), []hatSql.TypedTableValue{
+			hatSql.TypedString("team"),
+			hatSql.TypedInt64(score),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	arrangement, err := hatSql.NewTypedTableSortedArrangement(table, hatSql.TypedTableSortedArrangementDefinition{Field: "score"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cursor, err := arrangement.NewRowsRangeCursor(
+		&hatSql.TypedTableSortedArrangementBound{Values: []hatSql.TypedTableValue{hatSql.TypedInt64(2)}, Inclusive: true},
+		&hatSql.TypedTableSortedArrangementBound{Values: []hatSql.TypedTableValue{hatSql.TypedInt64(5)}, Inclusive: false},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, done, err := cursor.NextPage(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done || !reflect.DeepEqual(mz038RangeKeys(page), []string{"b", "c"}) {
+		t.Fatalf("first cursor page = %v, done=%v; want [b c], false", mz038RangeKeys(page), done)
+	}
+	page[0].Values[1] = hatSql.TypedInt64(99)
+	page, done, err = cursor.NextPage(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !done || !reflect.DeepEqual(mz038RangeKeys(page), []string{"d"}) {
+		t.Fatalf("last cursor page = %v, done=%v; want [d], true", mz038RangeKeys(page), done)
+	}
+	page, done, err = cursor.NextPage(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !done || len(page) != 0 {
+		t.Fatalf("exhausted cursor page = %v, done=%v; want empty, true", page, done)
+	}
+
+	mutatingCursor, err := arrangement.NewRowsRangeCursor(nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change, err := table.Upsert("z", []hatSql.TypedTableValue{hatSql.TypedString("team"), hatSql.TypedInt64(6)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := arrangement.Apply([]hatSql.TypedTableChange{change}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := mutatingCursor.NextPage(1); !errors.Is(err, hatSql.ErrTypedTableSortedArrangementCursorChanged) {
+		t.Fatalf("cursor after arrangement mutation error = %v, want cursor changed", err)
+	}
+}
+
 func mz038RangeKeys(rows []hatSql.TypedTableMergeJoinInput) []string {
 	keys := make([]string, len(rows))
 	for index, row := range rows {

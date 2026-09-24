@@ -58,6 +58,78 @@ func BenchmarkMZ038SortedArrangementRowsRange(b *testing.B) {
 	}
 }
 
+func BenchmarkMZ038SortedArrangementRangePaginationBaseline(b *testing.B) {
+	arrangement := mz038RangeBenchmarkArrangement(b)
+	pages := mz038RangePaginationPages()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		total := 0
+		for _, page := range pages {
+			rows, err := arrangement.RowsRange(page.lower, page.upper, 32)
+			if err != nil {
+				b.Fatal(err)
+			}
+			total += len(rows)
+		}
+		if total != 999 {
+			b.Fatalf("range pagination rows = %d, want 999", total)
+		}
+	}
+}
+
+func BenchmarkMZ038SortedArrangementRangePaginationCursor(b *testing.B) {
+	arrangement := mz038RangeBenchmarkArrangement(b)
+	lower := &hatSql.TypedTableSortedArrangementBound{
+		Values:    []hatSql.TypedTableValue{hatSql.TypedInt64(9000)},
+		Inclusive: true,
+	}
+	upper := &hatSql.TypedTableSortedArrangementBound{
+		Values:    []hatSql.TypedTableValue{hatSql.TypedInt64(9999)},
+		Inclusive: false,
+	}
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		cursor, err := arrangement.NewRowsRangeCursor(lower, upper)
+		if err != nil {
+			b.Fatal(err)
+		}
+		total := 0
+		for {
+			rows, done, err := cursor.NextPage(32)
+			if err != nil {
+				b.Fatal(err)
+			}
+			total += len(rows)
+			if done {
+				break
+			}
+		}
+		if total != 999 {
+			b.Fatalf("cursor pagination rows = %d, want 999", total)
+		}
+	}
+}
+
+type mz038RangePaginationPage struct {
+	lower *hatSql.TypedTableSortedArrangementBound
+	upper *hatSql.TypedTableSortedArrangementBound
+}
+
+func mz038RangePaginationPages() []mz038RangePaginationPage {
+	pages := make([]mz038RangePaginationPage, 0, 32)
+	for start := int64(9000); start < 9999; start += 32 {
+		end := start + 32
+		if end > 9999 {
+			end = 9999
+		}
+		pages = append(pages, mz038RangePaginationPage{
+			lower: &hatSql.TypedTableSortedArrangementBound{Values: []hatSql.TypedTableValue{hatSql.TypedInt64(start)}, Inclusive: true},
+			upper: &hatSql.TypedTableSortedArrangementBound{Values: []hatSql.TypedTableValue{hatSql.TypedInt64(end)}, Inclusive: false},
+		})
+	}
+	return pages
+}
+
 func mz038RangeBenchmarkArrangement(b *testing.B) *hatSql.TypedTableSortedArrangement {
 	b.Helper()
 	table, err := hatSql.NewTypedTable(hatSql.TypedTableSchema{

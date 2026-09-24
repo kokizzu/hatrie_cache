@@ -9,6 +9,9 @@ import (
 var (
 	// ErrTypedTableSortedArrangementBound reports a malformed range bound.
 	ErrTypedTableSortedArrangementBound = errors.New("typed table sorted arrangement bound is invalid")
+	// ErrTypedTableSortedArrangementCursorChanged reports that a range cursor's
+	// arrangement changed after the cursor was created.
+	ErrTypedTableSortedArrangementCursorChanged = errors.New("typed table sorted arrangement cursor source changed")
 )
 
 // TypedTableSortedArrangementBound describes one inclusive or exclusive edge
@@ -19,6 +22,16 @@ var (
 type TypedTableSortedArrangementBound struct {
 	Values    []TypedTableValue
 	Inclusive bool
+}
+
+// TypedTableSortedArrangementRangeCursor iterates one consistent range
+// snapshot. The cursor is not safe for concurrent use by multiple callers.
+// Applying a new source change invalidates it instead of returning mixed rows.
+type TypedTableSortedArrangementRangeCursor struct {
+	arrangement *TypedTableSortedArrangement
+	checkpoint  uint64
+	position    int
+	end         int
 }
 
 // RowsRange returns an independent snapshot of rows between lower and upper.
@@ -40,6 +53,75 @@ func (arrangement *TypedTableSortedArrangement) RowsRange(lower, upper *TypedTab
 	if limit <= 0 || len(arrangement.order) == 0 {
 		return []TypedTableMergeJoinInput{}, nil
 	}
+	start, end := arrangement.rangeBoundsLocked(lower, upper)
+	if start >= end {
+		return []TypedTableMergeJoinInput{}, nil
+	}
+	if limit < end-start {
+		end = start + limit
+	}
+	return arrangement.rowsPageLocked(start, end-start), nil
+}
+
+// NewRowsRangeCursor creates a reusable cursor over one bounded range. The
+// cursor retains only ordered-vector indexes; row values are cloned as each
+// page is returned. A nil bound leaves that side unbounded.
+func (arrangement *TypedTableSortedArrangement) NewRowsRangeCursor(lower, upper *TypedTableSortedArrangementBound) (TypedTableSortedArrangementRangeCursor, error) {
+	if arrangement == nil {
+		return TypedTableSortedArrangementRangeCursor{}, ErrTypedTableSortedArrangementNil
+	}
+	arrangement.mu.RLock()
+	defer arrangement.mu.RUnlock()
+	if err := arrangement.validateRangeBound(lower); err != nil {
+		return TypedTableSortedArrangementRangeCursor{}, err
+	}
+	if err := arrangement.validateRangeBound(upper); err != nil {
+		return TypedTableSortedArrangementRangeCursor{}, err
+	}
+	start, end := arrangement.rangeBoundsLocked(lower, upper)
+	return TypedTableSortedArrangementRangeCursor{
+		arrangement: arrangement,
+		checkpoint:  arrangement.checkpoint,
+		position:    start,
+		end:         end,
+	}, nil
+}
+
+// NextPage returns the next bounded page and whether the cursor is exhausted.
+// Non-positive limits return an empty page without advancing the cursor.
+func (cursor *TypedTableSortedArrangementRangeCursor) NextPage(limit int) ([]TypedTableMergeJoinInput, bool, error) {
+	if cursor == nil || cursor.arrangement == nil {
+		return nil, true, ErrTypedTableSortedArrangementNil
+	}
+	arrangement := cursor.arrangement
+	arrangement.mu.RLock()
+	defer arrangement.mu.RUnlock()
+	if arrangement.checkpoint != cursor.checkpoint {
+		return nil, false, fmt.Errorf("%w: cursor=%d arrangement=%d", ErrTypedTableSortedArrangementCursorChanged, cursor.checkpoint, arrangement.checkpoint)
+	}
+	if cursor.position >= cursor.end {
+		return []TypedTableMergeJoinInput{}, true, nil
+	}
+	if limit <= 0 {
+		return []TypedTableMergeJoinInput{}, false, nil
+	}
+	end := cursor.position + limit
+	if end > cursor.end {
+		end = cursor.end
+	}
+	rows := make([]TypedTableMergeJoinInput, end-cursor.position)
+	for index, key := range arrangement.order[cursor.position:end] {
+		row, found := arrangement.entries[key]
+		if !found {
+			return nil, false, fmt.Errorf("%w: key %q is missing", ErrTypedTableSortedArrangementCursorChanged, key)
+		}
+		rows[index] = TypedTableMergeJoinInput{Key: row.Key, Values: cloneTypedTableValues(row.Values)}
+	}
+	cursor.position = end
+	return rows, end == cursor.end, nil
+}
+
+func (arrangement *TypedTableSortedArrangement) rangeBoundsLocked(lower, upper *TypedTableSortedArrangementBound) (int, int) {
 	start := 0
 	if lower != nil {
 		start = sort.Search(len(arrangement.order), func(index int) bool {
@@ -60,13 +142,7 @@ func (arrangement *TypedTableSortedArrangement) RowsRange(lower, upper *TypedTab
 			return comparison >= 0
 		})
 	}
-	if start >= end {
-		return []TypedTableMergeJoinInput{}, nil
-	}
-	if limit < end-start {
-		end = start + limit
-	}
-	return arrangement.rowsPageLocked(start, end-start), nil
+	return start, end
 }
 
 func (arrangement *TypedTableSortedArrangement) validateRangeBound(bound *TypedTableSortedArrangementBound) error {

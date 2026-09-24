@@ -26205,3 +26205,29 @@ commit-t042-parallel-replay-rejection:
 .PHONY: push-t042-parallel-replay-rejection
 push-t042-parallel-replay-rejection:
 	@bash scripts/push-t042-parallel-replay-rejection.sh
+.PHONY: test-mz038-sorted-arrangement-cursor
+test-mz038-sorted-arrangement-cursor:
+	@bash scripts/test-mz038-sorted-arrangement-cursor.sh
+.PHONY: format-mz038-sorted-arrangement-cursor
+format-mz038-sorted-arrangement-cursor:
+	@bash scripts/format-mz038-sorted-arrangement-cursor.sh
+.PHONY: benchmark-mz038-sorted-arrangement-cursor
+benchmark-mz038-sorted-arrangement-cursor:
+	@bash scripts/benchmark-mz038-sorted-arrangement-cursor.sh
+.PHONY: verify-mz038-sorted-arrangement-cursor
+verify-mz038-sorted-arrangement-cursor:
+	@bash scripts/verify-mz038-sorted-arrangement-cursor.sh
+.PHONY: test-mz038-sorted-arrangement-package
+test-mz038-sorted-arrangement-package:
+	@bash scripts/test-mz038-sorted-arrangement-package.sh
+.PHONY: stage-mz038-sorted-arrangement-cursor
+stage-mz038-sorted-arrangement-cursor:
+	@bash scripts/stage-mz038-sorted-arrangement-cursor.sh
+
+.PHONY: commit-mz038-sorted-arrangement-cursor
+commit-mz038-sorted-arrangement-cursor:
+	@bash scripts/commit-mz038-sorted-arrangement-cursor.sh
+
+.PHONY: push-mz038-sorted-arrangement-cursor
+push-mz038-sorted-arrangement-cursor:
+	@bash scripts/push-mz038-sorted-arrangement-cursor.sh
