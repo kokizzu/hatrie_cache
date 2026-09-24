@@ -442,10 +442,12 @@ shows a 2.89x CPU improvement versus the pre-change materialized path, with
 
 Adopted as a bounded maintenance optimization for typed-table aggregates.
 After an ordered result has been materialized, one new group is inserted into
-the existing ordered references instead of sorting every group again; batched
-additions, deletions, and partial merges retain the full-sort fallback. The
-single-addition benchmark is 1.79x faster, uses 1.10x less allocated memory,
-and performs 1.45x fewer allocations. See
+the existing ordered references instead of sorting every group again; valid
+batched additions are delta-sorted and linearly merged, while deletions and
+partial merges retain the full-sort fallback. The single-addition benchmark
+is 1.79x faster, uses 1.10x less allocated memory, and performs 1.45x fewer
+allocations. The 4,096-group/128-addition merge benchmark is 1.34x faster,
+0.11% lower in measured B/op, and uses one additional allocation. See
 [MZ028_ADAPTIVE_ARRANGEMENT.md](MZ028_ADAPTIVE_ARRANGEMENT.md) and
 [BENCHMARK.md](BENCHMARK.md#mz-028-adaptive-arrangement-compaction).
 

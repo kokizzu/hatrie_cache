@@ -209,9 +209,20 @@ func (aggregate *TypedTableAggregate) storedGroupKey(group typedTableAggregateGr
 	return builder.String()
 }
 
+type typedTableAggregateOrderedGroup struct {
+	reference typedTableAggregateGroupReference
+	key       string
+}
+
 func (aggregate *TypedTableAggregate) compactOrderedGroups() []typedTableAggregateGroup {
 	if len(aggregate.pendingGroupOrder) > 0 && aggregate.compactGroupOrder != nil {
+		merged := false
 		if len(aggregate.pendingGroupOrder) == 1 && aggregate.insertGroupOrder(aggregate.pendingGroupOrder[0]) {
+			merged = true
+		} else if len(aggregate.pendingGroupOrder) > 1 && aggregate.mergeGroupOrder() {
+			merged = true
+		}
+		if merged {
 			aggregate.pendingGroupOrder = nil
 			aggregate.groupKeysReady = true
 		} else {
@@ -284,6 +295,56 @@ func (aggregate *TypedTableAggregate) compactOrderedGroups() []typedTableAggrega
 	}
 	aggregate.groupKeysReady = true
 	return groups
+}
+
+func (aggregate *TypedTableAggregate) mergeGroupOrder() bool {
+	if aggregate == nil || len(aggregate.compactGroupOrder) == 0 || len(aggregate.pendingGroupOrder) == 0 {
+		return false
+	}
+	existing := make([]typedTableAggregateOrderedGroup, len(aggregate.compactGroupOrder))
+	for index, reference := range aggregate.compactGroupOrder {
+		group, found := aggregate.groupForReference(reference)
+		if !found || group.count <= 0 {
+			return false
+		}
+		existing[index] = typedTableAggregateOrderedGroup{
+			reference: reference,
+			key:       aggregate.storedGroupKey(group),
+		}
+	}
+	pending := make([]typedTableAggregateOrderedGroup, len(aggregate.pendingGroupOrder))
+	for index, reference := range aggregate.pendingGroupOrder {
+		group, found := aggregate.groupForReference(reference)
+		if !found || group.count <= 0 {
+			return false
+		}
+		pending[index] = typedTableAggregateOrderedGroup{
+			reference: reference,
+			key:       aggregate.storedGroupKey(group),
+		}
+	}
+	sort.SliceStable(pending, func(left, right int) bool {
+		return pending[left].key < pending[right].key
+	})
+	merged := make([]typedTableAggregateGroupReference, 0, len(existing)+len(pending))
+	existingIndex, pendingIndex := 0, 0
+	for existingIndex < len(existing) && pendingIndex < len(pending) {
+		if pending[pendingIndex].key < existing[existingIndex].key {
+			merged = append(merged, pending[pendingIndex].reference)
+			pendingIndex++
+			continue
+		}
+		merged = append(merged, existing[existingIndex].reference)
+		existingIndex++
+	}
+	for ; existingIndex < len(existing); existingIndex++ {
+		merged = append(merged, existing[existingIndex].reference)
+	}
+	for ; pendingIndex < len(pending); pendingIndex++ {
+		merged = append(merged, pending[pendingIndex].reference)
+	}
+	aggregate.compactGroupOrder = merged
+	return true
 }
 
 func (aggregate *TypedTableAggregate) noteGroupAdded(reference typedTableAggregateGroupReference) {

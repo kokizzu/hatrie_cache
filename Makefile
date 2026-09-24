@@ -25567,6 +25567,39 @@ deliver-m049:
 
 inspect-open-ideas:
 	bash scripts/inspect-open-ideas.sh
+
+test-mz028-batched-merge:
+	bash scripts/test-mz028-batched-merge.sh
+
+benchmark-mz028-batched-merge:
+	bash scripts/benchmark-mz028-batched-merge.sh
+
+test-mz028-adaptive-arrangement:
+	bash scripts/test-mz028-adaptive-arrangement.sh
+
+format-mz028-adaptive-arrangement:
+	bash scripts/format-mz028-adaptive-arrangement.sh
+
+test-mz028-package:
+	bash scripts/test-mz028-package.sh
+
+race-mz028-adaptive-arrangement:
+	bash scripts/race-mz028-adaptive-arrangement.sh
+
+vet-mz028-adaptive-arrangement:
+	bash scripts/vet-mz028-adaptive-arrangement.sh
+
+review-mz028-adaptive-arrangement:
+	bash scripts/review-mz028-adaptive-arrangement.sh
+
+stage-mz028-adaptive-arrangement:
+	bash scripts/stage-mz028-adaptive-arrangement.sh
+
+commit-mz028-adaptive-arrangement:
+	bash scripts/commit-mz028-adaptive-arrangement.sh
+
+push-mz028-adaptive-arrangement:
+	bash scripts/push-mz028-adaptive-arrangement.sh
 .PHONY: test-c213-topk
 
 test-c213-topk:

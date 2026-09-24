@@ -6,4 +6,4 @@ if git diff --cached --quiet; then
   exit 1
 fi
 
-git commit -m 'hatSql: cache legacy aggregate order'
+git commit -m "perf: merge batched typed aggregate group order"

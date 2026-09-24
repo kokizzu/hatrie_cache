@@ -27014,9 +27014,25 @@ the same benchmark command before and after incremental order insertion:
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | 2,048 existing groups, one new group per read | 1,577,791 | 883,679 | 1.79x faster | 1,449,067 | 1,319,110 | 12,787 | 8,798 |
 
-The optimization only handles one pending addition. Two or more pending
-additions, deletions, and partial merges use the existing full-sort path, which
-keeps batched update behavior from turning into repeated O(n) insertion work.
+The single-addition path uses binary-search insertion. Valid batches of new
+groups now sort only the pending delta and linearly merge it with the existing
+ordered references. Deletions and partial merges retain the full-sort fallback
+because they invalidate existing references.
+
+The batched merge workload uses 4,096 existing groups, applies 128 new groups,
+and then reads the ordered result. Five `-benchmem` samples were collected
+before and after the change with `make benchmark-mz028-batched-merge`:
+
+| Fixture | Before ns/op | After ns/op | Improvement | Before B/op | After B/op | Before allocs/op | After allocs/op | Tradeoff |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 4,096 existing groups, 128 new groups | 3,257,711 | 2,433,796 | 1.34x faster | 2,903,142 | 2,899,811 | 25,613 | 25,614 | 0.11% lower B/op; one additional allocation |
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+before: 3339949 3272701 3257711 3156323 3211068; 2903246 2903156 2903141 2903142 2903140; 25613 25613 25613 25613 25613
+after:  2426723 2432099 2433796 2440319 2434429; 2899820 2899821 2899808 2899809 2899811; 25614 25614 25614 25614 25614
+```
 
 ## MZ-028: Temporal interval arrangement
 

@@ -181,8 +181,42 @@ func TestMZ028BatchedNewGroupsKeepFullCompactionFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	aggregate.Rows()
+	if aggregate.compactionCount != 1 {
+		t.Fatalf("batched additions compaction count = %d, want 1", aggregate.compactionCount)
+	}
+}
+
+func TestMZ028DeletionKeepsFullCompactionFallback(t *testing.T) {
+	table, err := NewTypedTable(TypedTableSchema{
+		Name: "events_delete",
+		Columns: []TypedTableColumn{
+			{Name: "team", Kind: TypedTableString},
+			{Name: "points", Kind: TypedTableInt64},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err := NewTypedTableAggregate(table, TypedTableAggregateDefinition{GroupBy: []string{"team"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := aggregate.Apply([]TypedTableChange{
+		{Sequence: 1, After: []TypedTableValue{TypedString("a"), TypedInt64(1)}},
+		{Sequence: 2, After: []TypedTableValue{TypedString("b"), TypedInt64(2)}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	aggregate.Rows()
+	if err := aggregate.Apply([]TypedTableChange{{
+		Sequence: 3,
+		Before:   []TypedTableValue{TypedString("a"), TypedInt64(1)},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	aggregate.Rows()
 	if aggregate.compactionCount != 2 {
-		t.Fatalf("batched additions compaction count = %d, want 2", aggregate.compactionCount)
+		t.Fatalf("deletion compaction count = %d, want 2", aggregate.compactionCount)
 	}
 }
 
