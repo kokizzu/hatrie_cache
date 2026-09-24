@@ -167,3 +167,99 @@ func TestCH031TypedJSONSubcolumnFallsBackWhenUnavailable(t *testing.T) {
 		t.Fatalf("fallback rows = %#v, want %#v", result.Rows, want)
 	}
 }
+
+func TestM046TypedJSONSubcolumnTopNUsesOrderedPath(t *testing.T) {
+	column, err := hatSql.NewColumnarJSONSubcolumn([]hatSql.ColumnarJSONSubcolumnValue{
+		{Present: true, Value: int64(1)},
+		{Present: true, Value: int64(5)},
+		{Present: true, Value: int64(3)},
+		{Present: true, Value: int64(4)},
+		{Present: true, Value: int64(2)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := &ch031TypedJSONResolver{available: true, batch: hatSql.ColumnarBatch{
+		JSONSubcolumns: map[hatSql.ColumnarJSONSubcolumnKey]hatSql.ColumnarJSONSubcolumn{
+			{Field: "doc", Path: "$.user.id"}: column,
+		},
+		Rows: 5,
+	}}
+	result, err := hatSql.ExecuteSQLQueryParameters(context.Background(),
+		"SELECT JSON_VALUE(items.doc, '$.user.id') AS id FROM CACHE('items') AS items ORDER BY JSON_VALUE(items.doc, '$.user.id') DESC LIMIT 3",
+		resolver, nil, hatSql.SQLQueryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []hatSql.SQLRow{{"id": int64(5)}, {"id": int64(4)}, {"id": int64(3)}}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("ordered rows = %#v, want %#v", result.Rows, want)
+	}
+	if len(resolver.requests) != 1 || resolver.requests[0].Field != "doc" || resolver.requests[0].Path != "$.user.id" {
+		t.Fatalf("ordered requested paths = %#v", resolver.requests)
+	}
+}
+
+func TestM046TypedJSONSubcolumnTopNMatchesLegacyForNullsTiesAndOffset(t *testing.T) {
+	values := []hatSql.ColumnarJSONSubcolumnValue{
+		{Present: true, Value: nil},
+		{Present: false},
+		{Present: true, Value: int64(2)},
+		{Present: true, Value: int64(2)},
+		{Present: true, Value: int64(1)},
+	}
+	column, err := hatSql.NewColumnarJSONSubcolumn(values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := []hatSql.Row{
+		{"doc": `{"user":{"id":null}}`},
+		{"doc": `{"user":{}}`},
+		{"doc": `{"user":{"id":2}}`},
+		{"doc": `{"user":{"id":2}}`},
+		{"doc": `{"user":{"id":1}}`},
+	}
+	newResolver := func(available bool) *ch031TypedJSONResolver {
+		return &ch031TypedJSONResolver{
+			rows:      rows,
+			available: available,
+			batch: hatSql.ColumnarBatch{
+				JSONSubcolumns: map[hatSql.ColumnarJSONSubcolumnKey]hatSql.ColumnarJSONSubcolumn{
+					{Field: "doc", Path: "$.user.id"}: column,
+				},
+				Rows: len(rows),
+			},
+		}
+	}
+	query := "SELECT JSON_VALUE(items.doc, '$.user.id') AS id FROM CACHE('items') AS items ORDER BY JSON_VALUE(items.doc, '$.user.id') ASC LIMIT 3 OFFSET 1"
+	legacy, err := hatSql.ExecuteSQLQueryParameters(context.Background(), query, newResolver(false), nil, hatSql.SQLQueryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := hatSql.ExecuteSQLQueryParameters(context.Background(), query, newResolver(true), nil, hatSql.SQLQueryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(candidate.Rows, []hatSql.SQLRow{{"id": nil}, {"id": int64(1)}, {"id": int64(2)}}) {
+		t.Fatalf("ordered page = %#v", candidate.Rows)
+	}
+	if !reflect.DeepEqual(legacy.Rows, []hatSql.SQLRow{{"id": nil}, {"id": float64(1)}, {"id": float64(2)}}) {
+		t.Fatalf("legacy ordered page = %#v", legacy.Rows)
+	}
+}
+
+func TestM046TypedJSONSubcolumnTopNFallsBackWhenOrderedColumnUnavailable(t *testing.T) {
+	resolver := &ch031TypedJSONResolver{rows: []hatSql.Row{
+		{"doc": `{"user":{"id":3}}`},
+		{"doc": `{"user":{"id":1}}`},
+	}}
+	result, err := hatSql.ExecuteSQLQueryParameters(context.Background(),
+		"SELECT JSON_VALUE(doc, '$.user.id') AS id FROM CACHE('items') ORDER BY JSON_VALUE(doc, '$.user.id') ASC LIMIT 1",
+		resolver, nil, hatSql.SQLQueryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(result.Rows, []hatSql.SQLRow{{"id": float64(1)}}) {
+		t.Fatalf("fallback ordered rows = %#v", result.Rows)
+	}
+}

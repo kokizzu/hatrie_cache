@@ -106,3 +106,11 @@ BenchmarkCH031JSONSubcolumnMaterialize-32    	      84	   2872596 ns/op	 2589692
 BenchmarkCH031JSONSubcolumnMaterialize-32    	     100	   2854735 ns/op	 2589690 B/op	   40955 allocs/op
 BenchmarkCH031JSONSubcolumnMaterialize-32    	     100	   2851632 ns/op	 2589693 B/op	   40955 allocs/op
 ```
+
+## M046 Ordered Top-N
+
+M046 extends the same typed scalar path to bounded `ORDER BY
+JSON_VALUE(...) LIMIT/OFFSET` queries. It keeps the existing row-source
+fallback for unsupported query shapes or unavailable subcolumns. The measured
+result is documented, including raw samples and the legacy control, in
+[M046_JSON_SUBCOLUMN_TOPN.md](M046_JSON_SUBCOLUMN_TOPN.md).

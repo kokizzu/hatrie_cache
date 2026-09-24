@@ -28122,6 +28122,37 @@ BenchmarkCH031JSONSubcolumnMaterialize-32    	     100	   2854735 ns/op	 2589690
 BenchmarkCH031JSONSubcolumnMaterialize-32    	     100	   2851632 ns/op	 2589693 B/op	   40955 allocs/op
 ```
 
+<a id="m046-typed-json-subcolumn-topn"></a>
+## M046 Typed JSON Subcolumn Top-N
+
+This measures bounded `ORDER BY JSON_VALUE(...) LIMIT/OFFSET` using an
+available typed JSON subcolumn against the same query forced through the legacy
+row-source JSON evaluator. The benchmark uses 4,096 rows and a top-32 result.
+
+| Variant | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Pre-change candidate, row JSON fallback | 122,176,960 | 83,861,720 | 1,170,700 | 1.00x |
+| After-build legacy fallback control | 120,658,857 | 83,862,092 | 1,171,711 | 1.00x control |
+| M046 typed JSON Top-N | 1,714,788 | 57,728 | 4,075 | 70.4x faster, 1,454x lower heap, 288x fewer allocations |
+
+Raw output from `make benchmark-m046-json-topn`:
+
+```text
+BenchmarkM046JSONSubcolumnTopN/legacy-32         9  117805624 ns/op  83867588 B/op  1171722 allocs/op
+BenchmarkM046JSONSubcolumnTopN/legacy-32         9  117952388 ns/op  83862080 B/op  1171711 allocs/op
+BenchmarkM046JSONSubcolumnTopN/legacy-32         9  122803411 ns/op  83862108 B/op  1171711 allocs/op
+BenchmarkM046JSONSubcolumnTopN/legacy-32         9  120658857 ns/op  83862029 B/op  1171710 allocs/op
+BenchmarkM046JSONSubcolumnTopN/legacy-32         9  123515940 ns/op  83862092 B/op  1171711 allocs/op
+BenchmarkM046JSONSubcolumnTopN/candidate-32    685  1739031 ns/op    57729 B/op     4075 allocs/op
+BenchmarkM046JSONSubcolumnTopN/candidate-32    674  1673764 ns/op    57728 B/op     4075 allocs/op
+BenchmarkM046JSONSubcolumnTopN/candidate-32    650  1726758 ns/op    57728 B/op     4075 allocs/op
+BenchmarkM046JSONSubcolumnTopN/candidate-32    720  1714788 ns/op    57728 B/op     4075 allocs/op
+BenchmarkM046JSONSubcolumnTopN/candidate-32    700  1705018 ns/op    57728 B/op     4075 allocs/op
+```
+
+See [M046_JSON_SUBCOLUMN_TOPN.md](M046_JSON_SUBCOLUMN_TOPN.md) for scope,
+fallback rules, correctness tests, and interpretation of the measurements.
+
 <a id="ch-031-automatic-typed-json-subcolumn-promotion"></a>
 ## CH-031 Automatic Typed JSON Subcolumn Promotion
 

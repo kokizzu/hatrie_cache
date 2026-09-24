@@ -25378,3 +25378,33 @@ commit-m045:
 .PHONY: push-m045
 push-m045:
 	bash ./scripts/deliver-m045.sh push
+.PHONY: verify-m046-docs
+verify-m046-docs:
+	bash ./scripts/verify-m046-docs.sh
+
+.PHONY: deliver-m046
+deliver-m046:
+	bash ./scripts/deliver-m046.sh
+.PHONY: test-m046-json-topn
+test-m046-json-topn:
+	bash ./scripts/test-m046-json-topn.sh
+
+.PHONY: benchmark-m046-json-topn
+benchmark-m046-json-topn:
+	bash ./scripts/benchmark-m046-json-topn.sh
+
+.PHONY: test-m046-json-regression
+test-m046-json-regression:
+	bash ./scripts/test-m046-json-regression.sh
+
+.PHONY: race-m046-json-topn
+race-m046-json-topn:
+	bash ./scripts/race-m046-json-topn.sh
+
+.PHONY: vet-m046-json-topn
+vet-m046-json-topn:
+	bash ./scripts/vet-m046-json-topn.sh
+
+.PHONY: test-m046-package
+test-m046-package:
+	bash ./scripts/test-m046-package.sh

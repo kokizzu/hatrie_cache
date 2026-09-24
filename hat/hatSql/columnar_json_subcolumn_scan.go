@@ -1,7 +1,9 @@
 package hatSql
 
 import (
+	"container/heap"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -69,7 +71,10 @@ func sqlColumnarJSONSubcolumnExprSupported(expr sqlExpr, alias string, add func(
 }
 
 func sqlColumnarJSONSubcolumnScanPlan(q *sqlQuery, outer *sqlExecRow) (fields []string, paths []ColumnarJSONSubcolumnRequest, ok bool) {
-	if q == nil || outer != nil || q.from == nil || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.unions) != 0 || len(q.groupBy) != 0 || len(q.groupingSets) != 0 || q.having.kind != "" || q.distinct || len(q.orderBy) != 0 || q.sample != nil || q.prewhere.kind != "" || sqlQueryHasAggregate(q) || sqlQueryHasWindow(q) || sqlQueryHasSubqueryExpression(q) || len(q.selects) == 0 {
+	if q == nil || outer != nil || q.from == nil || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.unions) != 0 || len(q.groupBy) != 0 || len(q.groupingSets) != 0 || q.having.kind != "" || q.distinct || len(q.orderBy) > 1 || q.sample != nil || q.prewhere.kind != "" || sqlQueryHasAggregate(q) || sqlQueryHasWindow(q) || sqlQueryHasSubqueryExpression(q) || len(q.selects) == 0 {
+		return nil, nil, false
+	}
+	if len(q.orderBy) == 1 && (q.limit < 0 || q.limitBy != nil || sqlQueryHasWithFill(q)) {
 		return nil, nil, false
 	}
 	seenFields := make(map[string]struct{})
@@ -92,6 +97,13 @@ func sqlColumnarJSONSubcolumnScanPlan(q *sqlQuery, outer *sqlExecRow) (fields []
 	if q.where.kind != "" && !sqlColumnarJSONSubcolumnExprSupported(q.where, q.from.alias, addPath) {
 		return nil, nil, false
 	}
+	if len(q.orderBy) == 1 {
+		path, pathOK := sqlColumnarJSONSubcolumnPath(q.orderBy[0].expr, q.from.alias)
+		if !pathOK {
+			return nil, nil, false
+		}
+		addPath(path)
+	}
 	for _, item := range q.selects {
 		switch item.expr.kind {
 		case "field":
@@ -113,6 +125,16 @@ func sqlColumnarJSONSubcolumnScanPlan(q *sqlQuery, outer *sqlExecRow) (fields []
 		return nil, nil, false
 	}
 	return fields, paths, true
+}
+
+func sqlColumnarJSONSubcolumnTopNPath(q *sqlQuery) (ColumnarJSONSubcolumnRequest, bool) {
+	if q == nil || len(q.orderBy) != 1 || q.limit < 0 || q.limitBy != nil || sqlQueryHasWithFill(q) {
+		return ColumnarJSONSubcolumnRequest{}, false
+	}
+	if q.orderBy[0].expr.kind != "func" || q.orderBy[0].expr.name != "JSON_VALUE" {
+		return ColumnarJSONSubcolumnRequest{}, false
+	}
+	return sqlColumnarJSONSubcolumnPath(q.orderBy[0].expr, q.from.alias)
 }
 
 func executeSQLColumnarJSONSubcolumnScan(q *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics, outer *sqlExecRow) (SQLQueryResult, bool, error) {
@@ -149,6 +171,10 @@ func executeSQLColumnarJSONSubcolumnScan(q *sqlQuery, resolver SQLSourceResolver
 		if err := column.Validate(batch.Rows); err != nil {
 			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar JSON subcolumn source %q path %s%s: %w", q.from.key, path.Field, path.Path, err)
 		}
+	}
+	if _, ordered := sqlColumnarJSONSubcolumnTopNPath(q); ordered {
+		functions, _ := resolver.(SQLFunctionResolver)
+		return executeSQLColumnarJSONSubcolumnTopN(q, batch, functions, control, metrics, started)
 	}
 	if metrics != nil {
 		pathNames := make([]string, len(paths))
@@ -193,6 +219,81 @@ func executeSQLColumnarJSONSubcolumnScan(q *sqlQuery, resolver SQLSourceResolver
 			output[result.Columns[index]] = value
 		}
 		result.Rows = append(result.Rows, output)
+	}
+	return result, true, nil
+}
+
+func executeSQLColumnarJSONSubcolumnTopN(q *sqlQuery, batch ColumnarBatch, functions SQLFunctionResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics, started time.Time) (SQLQueryResult, bool, error) {
+	if control == nil {
+		return SQLQueryResult{}, false, nil
+	}
+	orderPath, ok := sqlColumnarJSONSubcolumnTopNPath(q)
+	if !ok {
+		return SQLQueryResult{}, false, nil
+	}
+	capacity := sqlTopNStreamCapacity(q, control.maxRows)
+	if capacity == 0 {
+		return SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}, true, nil
+	}
+	candidates := sqlTopNStreamHeap{items: make([]sqlTopNStreamItem, 0, capacity), order: q.orderBy}
+	heap.Init(&candidates)
+	for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
+		if err := control.check(); err != nil {
+			return SQLQueryResult{}, true, err
+		}
+		row := newSQLColumnarSourceExecRow(q.from.alias, &batch, rowIndex)
+		if q.where.kind != "" {
+			condition, err := evalSQLStreamExpr(q.where, row, functions)
+			if err != nil {
+				return SQLQueryResult{}, true, err
+			}
+			if !sqlTruthy(condition) {
+				continue
+			}
+		}
+		value, present, supported := sqlColumnarJSONSubcolumnValue(q.orderBy[0].expr, row)
+		if !supported || orderPath.Field == "" || orderPath.Path == "" {
+			return SQLQueryResult{}, false, nil
+		}
+		if !present {
+			value = nil
+		}
+		candidate := sqlTopNStreamItem{ordinal: rowIndex, key: value}
+		if candidates.Len() < capacity {
+			heap.Push(&candidates, candidate)
+			continue
+		}
+		if sqlTopNStreamBefore(candidate, candidates.items[0], q.orderBy) {
+			candidates.items[0] = candidate
+			heap.Fix(&candidates, 0)
+		}
+	}
+	sort.SliceStable(candidates.items, func(left, right int) bool {
+		return sqlTopNStreamBefore(candidates.items[left], candidates.items[right], q.orderBy)
+	})
+	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: make([]SQLRow, 0, q.limit)}
+	start := q.offset
+	if start > len(candidates.items) {
+		start = len(candidates.items)
+	}
+	end := start + q.limit
+	if end > len(candidates.items) {
+		end = len(candidates.items)
+	}
+	for _, candidate := range candidates.items[start:end] {
+		row := newSQLColumnarSourceExecRow(q.from.alias, &batch, candidate.ordinal)
+		output := make(SQLRow, len(q.selects))
+		for index, item := range q.selects {
+			value, err := evalSQLStreamExpr(item.expr, row, functions)
+			if err != nil {
+				return SQLQueryResult{}, true, err
+			}
+			output[result.Columns[index]] = value
+		}
+		result.Rows = append(result.Rows, output)
+	}
+	if metrics != nil {
+		metrics.record("COLUMNAR JSON SUBCOLUMN TOP-N", sqlExplainOrders(q.orderBy), batch.Rows, len(result.Rows), started)
 	}
 	return result, true, nil
 }
