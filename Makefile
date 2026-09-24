@@ -24981,3 +24981,42 @@ commit-c235:
 .PHONY: push-c235
 push-c235:
 	@bash scripts/push-c235.sh
+.PHONY: test-c237
+test-c237:
+	@bash scripts/run-c237.sh test
+
+.PHONY: benchmark-c237
+benchmark-c237:
+	@bash scripts/run-c237.sh benchmark
+
+.PHONY: format-c237
+format-c237:
+	@bash scripts/run-c237.sh format
+
+.PHONY: test-c237-package
+test-c237-package:
+	@bash scripts/run-c237.sh test-package
+
+.PHONY: race-c237
+race-c237:
+	@bash scripts/run-c237.sh race
+
+.PHONY: vet-c237
+vet-c237:
+	@bash scripts/run-c237.sh vet
+
+.PHONY: docs-c237
+docs-c237:
+	@bash scripts/run-c237.sh docs
+
+.PHONY: status-c237
+status-c237:
+	@bash scripts/run-c237.sh status
+
+.PHONY: commit-c237
+commit-c237:
+	@bash scripts/run-c237.sh commit
+
+.PHONY: push-c237
+push-c237:
+	@bash scripts/run-c237.sh push

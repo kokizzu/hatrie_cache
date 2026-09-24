@@ -1023,6 +1023,16 @@ caller input, and provides allocation-free `QueryInto` and `Visit` paths.
 Mutable updates, SQL planner integration, persistence, and replication remain
 deferred. See [TT021_PACKED_RTREE.md](TT021_PACKED_RTREE.md) and
 [BENCHMARK.md](BENCHMARK.md#tt-021-packed-r-tree-spatial-index).
+
+## C237: Projection Selection Explain
+
+ClickHouse-style projection diagnostics are adopted for the existing
+source-version-guarded materialized projection catalog. Explain output now
+lists every registered candidate, the selected or rejected decision, and a
+logical row-payload I/O estimate. The feature is explain-only and opt-in through
+`QueryOptions.ProjectionCatalog`; ordinary query execution remains unchanged.
+See [C237_PROJECTION_EXPLAIN.md](C237_PROJECTION_EXPLAIN.md) and the paired
+measurements in [BENCHMARK.md](BENCHMARK.md#c237-projection-selection-explain).
 ## C239: Part-Merge Backlog And Amplification Metrics
 
 The compaction scheduler now exposes pending and running estimated bytes in `CompactionSchedulerStats`, including priority-queue tasks. `CompactionArrangementDiagnostics` records successful input/output byte totals and computes write amplification from successful work only. Estimates are caller supplied, counters saturate on overflow, and maintenance remains caller-driven with no background worker.

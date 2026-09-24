@@ -35,6 +35,7 @@ type ExplainStep struct {
 	Node                 string                   `json:"node"`
 	Detail               string                   `json:"detail"`
 	Alternatives         []ExplainAlternative     `json:"alternatives,omitempty"`
+	Projections          []ExplainProjection      `json:"projections,omitempty"`
 	Notices              []ExplainNotice          `json:"notices,omitempty"`
 	Index                *SQLIndexDiagnostics     `json:"index,omitempty"`
 	Pruning              *ExplainPruning          `json:"pruning,omitempty"`
@@ -75,6 +76,18 @@ type ExplainAlternative struct {
 	EstimatedCost  int    `json:"estimated_cost"`
 	Selected       bool   `json:"selected"`
 	RejectedReason string `json:"rejected_reason,omitempty"`
+}
+
+// ExplainProjection describes one materialized projection considered by
+// EXPLAIN. EstimatedIOBytes is a logical row-payload read estimate, not a
+// promise about filesystem or cache-device traffic.
+type ExplainProjection struct {
+	Name             string `json:"name"`
+	Selected         bool   `json:"selected"`
+	RejectedReason   string `json:"rejected_reason,omitempty"`
+	EstimatedRows    int    `json:"estimated_rows"`
+	EstimatedBytes   int    `json:"estimated_bytes"`
+	EstimatedIOBytes int    `json:"estimated_io_bytes"`
 }
 
 // ExplainNotice is a stable, machine-readable optimizer diagnostic attached

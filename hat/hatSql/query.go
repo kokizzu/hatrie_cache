@@ -128,6 +128,7 @@ type SQLRow = Row
 type SQLQueryResult = QueryResult
 type SQLExplainStep = ExplainStep
 type SQLExplainAlternative = ExplainAlternative
+type SQLExplainProjection = ExplainProjection
 type SQLExplainNotice = ExplainNotice
 type SQLQueryStats = QueryStats
 type SQLSourceResolver = SourceResolver
@@ -881,7 +882,7 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		query.indexHint = options.IndexHint
 	}
 	if query.explain {
-		result, err = explainSQLQuery(query, resolver, control)
+		result, err = explainSQLQuery(source, query, resolver, control)
 		operatorSteps = result.Plan
 		result.QueryID = observation.id
 		return result, err
@@ -13139,7 +13140,7 @@ func sqlCTEOutputRows(cte sqlCTE, result SQLQueryResult) ([]SQLRow, error) {
 	return rows, nil
 }
 
-func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) (SQLQueryResult, error) {
+func explainSQLQuery(source string, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) (SQLQueryResult, error) {
 	if query.pipeline {
 		return explainSQLPipelineQuery(query, resolver)
 	}
@@ -13150,15 +13151,22 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 	}
 	if !query.analyze {
 		steps = sqlExplainStepsWithResolver(query, resolver)
+		projectionOptions := control.options
+		projectionOptions.IndexHint = query.indexHint
+		steps = sqlAddProjectionExplainStep(steps, source, resolver, projectionOptions)
 		if query.explainCost {
 			steps = CostSQLExplainSteps(steps, SQLExplainCostOptions{})
 		}
 	}
 	hasArrangementMetadata := sqlExplainHasArrangementMetadata(steps)
 	hasExplainCost := sqlExplainHasCost(steps)
+	hasProjectionMetadata := sqlExplainHasProjectionMetadata(steps)
 	columns := []string{"node", "detail", "estimated_rows"}
 	if hasExplainCost {
 		columns = append(columns, "estimated_cost", "estimated_memory_bytes")
+	}
+	if hasProjectionMetadata {
+		columns = append(columns, "projections")
 	}
 	if hasArrangementMetadata {
 		columns = append(columns, "arrangements")
@@ -13178,6 +13186,9 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		}
 		if step.EstimatedMemoryBytes != nil {
 			row["estimated_memory_bytes"] = *step.EstimatedMemoryBytes
+		}
+		if len(step.Projections) > 0 {
+			row["projections"] = cloneExplainProjections(step.Projections)
 		}
 		if hasArrangementMetadata && len(step.Arrangements) > 0 {
 			row["arrangements"] = cloneSQLArrangementMetadata(step.Arrangements)
@@ -13283,6 +13294,68 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		"elapsed_ns":   result.Stats.ElapsedNanos,
 	})
 	return result, nil
+}
+
+func sqlAddProjectionExplainStep(steps []SQLExplainStep, source string, resolver SQLSourceResolver, options SQLQueryOptions) []SQLExplainStep {
+	if options.ProjectionCatalog == nil {
+		return steps
+	}
+	projections := options.ProjectionCatalog.explainProjections(sqlExplainProjectionQuery(source), resolver, options)
+	if len(projections) == 0 {
+		return steps
+	}
+	step := SQLExplainStep{
+		Node:        "PROJECTION",
+		Detail:      "materialized projection selection",
+		Projections: projections,
+	}
+	return append([]SQLExplainStep{step}, steps...)
+}
+
+func sqlExplainHasProjectionMetadata(steps []SQLExplainStep) bool {
+	for _, step := range steps {
+		if len(step.Projections) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func sqlExplainProjectionQuery(source string) string {
+	query := strings.TrimSpace(source)
+	var consumed bool
+	query, consumed = consumeSQLExplainKeyword(query, "EXPLAIN")
+	if !consumed {
+		return query
+	}
+	for {
+		consumed = false
+		for _, keyword := range []string{"PIPELINE", "COST", "ESTIMATE", "ANALYZE"} {
+			var next string
+			next, consumed = consumeSQLExplainKeyword(query, keyword)
+			if consumed {
+				query = next
+				break
+			}
+		}
+		if !consumed {
+			return query
+		}
+	}
+}
+
+func consumeSQLExplainKeyword(source, keyword string) (string, bool) {
+	if len(source) < len(keyword) || !strings.EqualFold(source[:len(keyword)], keyword) {
+		return source, false
+	}
+	if len(source) > len(keyword) && !sqlExplainSpace(source[len(keyword)]) {
+		return source, false
+	}
+	return strings.TrimSpace(source[len(keyword):]), true
+}
+
+func sqlExplainSpace(value byte) bool {
+	return value == ' ' || value == '\t' || value == '\n' || value == '\r'
 }
 
 func sqlExplainSteps(query *sqlQuery) []SQLExplainStep {

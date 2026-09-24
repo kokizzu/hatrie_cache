@@ -14194,6 +14194,27 @@ HAT-trie memory is the benchmark test process RSS, so it includes the Go runtime
 
 <!-- END GENERATED COMMAND BENCHMARK COMPARISON -->
 
+## C237: Projection Selection Explain
+
+Command:
+
+```text
+make benchmark-c237
+```
+
+The benchmark executes `EXPLAIN FROM CACHE('events') SELECT name` with one
+two-row materialized projection catalog. Five runs were measured on an AMD
+Ryzen 9 5950X:
+
+| State | ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Before projection diagnostics | 7,151 median | 8,600 | 31 |
+| After projection diagnostics | 9,897 median | 11,138 | 49 |
+| Change | 1.38x CPU | 1.30x bytes | 1.58x allocations |
+
+The cost is paid only when a projection catalog is supplied to `EXPLAIN`.
+Normal execution and explain without a catalog retain the previous path.
+
 ## Replication Batching Benchmark
 
 Run:

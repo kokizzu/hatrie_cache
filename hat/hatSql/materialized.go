@@ -426,6 +426,68 @@ func (views *MaterializedViews) lookupExact(query string, resolver SourceResolve
 	return QueryResult{}, false
 }
 
+func (views *MaterializedViews) explainProjections(query string, resolver SourceResolver, options QueryOptions) []ExplainProjection {
+	if views == nil || strings.TrimSpace(query) == "" {
+		return nil
+	}
+	query = strings.TrimSpace(query)
+	requestedCollation := normalizedMaterializedViewCollation(options.Collation)
+	versions, versioned := resolver.(SourceVersionResolver)
+	views.mu.RLock()
+	names := make([]string, 0, len(views.views))
+	for name := range views.views {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	projections := make([]ExplainProjection, 0, len(names))
+	selected := false
+	for _, name := range names {
+		view := views.views[name]
+		candidate := ExplainProjection{
+			Name:           name,
+			EstimatedRows:  len(view.snapshot.Result.Rows),
+			EstimatedBytes: sqlRowsBytes(view.snapshot.Result.Rows),
+		}
+		candidate.EstimatedIOBytes = candidate.EstimatedBytes
+		switch {
+		case options.IndexHint.Mode != "":
+			candidate.RejectedReason = "index_hint_active"
+		case view.definition.Query != query:
+			candidate.RejectedReason = "query_not_exact"
+		case view.collation != requestedCollation:
+			candidate.RejectedReason = "collation_mismatch"
+		case !versioned || len(view.sourceVersions) != len(view.definition.Dependencies):
+			candidate.RejectedReason = "source_version_unavailable"
+		default:
+			fresh := true
+			for _, dependency := range view.definition.Dependencies {
+				version, available, err := versions.SQLSourceVersion("CACHE", dependency)
+				if err != nil || !available || version == "" {
+					candidate.RejectedReason = "source_version_unavailable"
+					fresh = false
+					break
+				}
+				if version != view.sourceVersions[dependency] {
+					candidate.RejectedReason = "source_version_changed"
+					fresh = false
+					break
+				}
+			}
+			if fresh {
+				if selected {
+					candidate.RejectedReason = "not_selected"
+				} else {
+					candidate.Selected = true
+					selected = true
+				}
+			}
+		}
+		projections = append(projections, candidate)
+	}
+	views.mu.RUnlock()
+	return projections
+}
+
 func normalizeMaterializedViewDefinition(definition MaterializedViewDefinition) (MaterializedViewDefinition, error) {
 	definition.Name = strings.TrimSpace(definition.Name)
 	definition.Query = strings.TrimSpace(definition.Query)
@@ -522,6 +584,7 @@ func cloneMaterializedExplainSteps(steps []ExplainStep) []ExplainStep {
 	for index, step := range steps {
 		cloned[index] = step
 		cloned[index].Arrangements = cloneSQLArrangementMetadata(step.Arrangements)
+		cloned[index].Projections = cloneExplainProjections(step.Projections)
 		cloned[index].EstimatedRows = cloneMaterializedInt(step.EstimatedRows)
 		cloned[index].ActualInputRows = cloneMaterializedInt(step.ActualInputRows)
 		cloned[index].ActualOutputRows = cloneMaterializedInt(step.ActualOutputRows)
@@ -532,6 +595,10 @@ func cloneMaterializedExplainSteps(steps []ExplainStep) []ExplainStep {
 		cloned[index].ElapsedNanos = cloneMaterializedInt64(step.ElapsedNanos)
 	}
 	return cloned
+}
+
+func cloneExplainProjections(projections []ExplainProjection) []ExplainProjection {
+	return append([]ExplainProjection(nil), projections...)
 }
 
 func cloneMaterializedInt(value *int) *int {

@@ -531,6 +531,7 @@ func cloneResultCacheValue(value interface{}) interface{} {
 func cloneResultCachePlanStep(step ExplainStep) ExplainStep {
 	clone := step
 	clone.Arrangements = cloneSQLArrangementMetadata(step.Arrangements)
+	clone.Projections = cloneExplainProjections(step.Projections)
 	clone.Lineage = make([]ColumnLineage, len(step.Lineage))
 	for index, lineage := range step.Lineage {
 		clone.Lineage[index] = ColumnLineage{Output: lineage.Output, SourceFields: append([]string(nil), lineage.SourceFields...)}
