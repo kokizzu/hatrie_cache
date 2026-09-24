@@ -9,8 +9,11 @@ import (
 )
 
 const (
-	persistentDeleteBitmapMagic   = "HTDB1"
-	persistentDeleteBitmapVersion = byte(1)
+	persistentDeleteBitmapMagic          = "HTDB1"
+	persistentDeleteBitmapVersion        = byte(2)
+	persistentDeleteBitmapLegacyVersion  = byte(1)
+	persistentDeleteBitmapEncodingDense  = byte(0)
+	persistentDeleteBitmapEncodingSparse = byte(1)
 
 	// MaxPersistentDeleteBitmapBytes bounds both the encoded snapshot and the
 	// words admitted by DecodePersistentDeleteBitmap before allocation.
@@ -121,8 +124,9 @@ func (bitmap *PersistentDeleteBitmap) Undelete(row uint64) (bool, error) {
 	return true, nil
 }
 
-// MarshalBinary returns a deterministic HTDB1 snapshot. The payload uses one
-// bit per row and ends with a CRC32C checksum. The returned bytes do not alias
+// MarshalBinary returns a deterministic HTDB1 snapshot. Version 2 chooses
+// between dense words and delta-coded deleted row ordinals based on encoded
+// size; version 1 snapshots remain readable. The returned bytes do not alias
 // the bitmap.
 func (bitmap *PersistentDeleteBitmap) MarshalBinary() ([]byte, error) {
 	if bitmap == nil {
@@ -139,17 +143,38 @@ func (bitmap *PersistentDeleteBitmap) MarshalBinary() ([]byte, error) {
 	if wordCount > uint64((MaxPersistentDeleteBitmapBytes-len(persistentDeleteBitmapMagic)-1-4)/8) {
 		return nil, ErrPersistentDeleteBitmapInvalid
 	}
-	capacity := len(persistentDeleteBitmapMagic) + 1 + 3*binary.MaxVarintLen64 + int(wordCount)*8 + 4
+	denseBytes := persistentDeleteBitmapUvarintSize(wordCount) + int(wordCount)*8
+	sparseBytes := denseBytes
+	// Every sparse row needs at least one byte. Avoid scanning all set bits
+	// when the lower bound already cannot beat the dense representation.
+	if bitmap.deleted < uint64(denseBytes) {
+		sparseBytes = persistentDeleteBitmapSparseBytes(bitmap.words)
+	}
+	encoding := persistentDeleteBitmapEncodingDense
+	if sparseBytes < denseBytes {
+		encoding = persistentDeleteBitmapEncodingSparse
+	}
+	payloadBytes := denseBytes
+	if encoding == persistentDeleteBitmapEncodingSparse {
+		payloadBytes = sparseBytes
+	}
+	headerBytes := len(persistentDeleteBitmapMagic) + 1 + persistentDeleteBitmapUvarintSize(bitmap.rows) + persistentDeleteBitmapUvarintSize(bitmap.deleted) + 1
+	capacity := headerBytes + payloadBytes + 4
 	encoded := make([]byte, 0, capacity)
 	encoded = append(encoded, persistentDeleteBitmapMagic...)
 	encoded = append(encoded, persistentDeleteBitmapVersion)
 	encoded = persistentDeleteBitmapAppendUvarint(encoded, bitmap.rows)
 	encoded = persistentDeleteBitmapAppendUvarint(encoded, bitmap.deleted)
-	encoded = persistentDeleteBitmapAppendUvarint(encoded, wordCount)
-	var wordBytes [8]byte
-	for _, word := range bitmap.words {
-		binary.LittleEndian.PutUint64(wordBytes[:], word)
-		encoded = append(encoded, wordBytes[:]...)
+	encoded = append(encoded, encoding)
+	if encoding == persistentDeleteBitmapEncodingSparse {
+		encoded = persistentDeleteBitmapAppendSparse(encoded, bitmap.words)
+	} else {
+		encoded = persistentDeleteBitmapAppendUvarint(encoded, wordCount)
+		var wordBytes [8]byte
+		for _, word := range bitmap.words {
+			binary.LittleEndian.PutUint64(wordBytes[:], word)
+			encoded = append(encoded, wordBytes[:]...)
+		}
 	}
 	return persistentDeleteBitmapAppendChecksum(encoded), nil
 }
@@ -187,7 +212,11 @@ func DecodePersistentDeleteBitmap(encoded []byte) (*PersistentDeleteBitmap, erro
 		return nil, ErrPersistentDeleteBitmapInvalid
 	}
 	position += len(persistentDeleteBitmapMagic)
-	if position >= len(payload) || payload[position] != persistentDeleteBitmapVersion {
+	if position >= len(payload) {
+		return nil, ErrPersistentDeleteBitmapInvalid
+	}
+	version := payload[position]
+	if version != persistentDeleteBitmapLegacyVersion && version != persistentDeleteBitmapVersion {
 		return nil, ErrPersistentDeleteBitmapInvalid
 	}
 	position++
@@ -199,6 +228,25 @@ func DecodePersistentDeleteBitmap(encoded []byte) (*PersistentDeleteBitmap, erro
 	if !ok {
 		return nil, ErrPersistentDeleteBitmapInvalid
 	}
+	if version == persistentDeleteBitmapLegacyVersion {
+		return persistentDeleteBitmapDecodeDense(payload, position, rows, deleted)
+	}
+	if position >= len(payload) {
+		return nil, ErrPersistentDeleteBitmapInvalid
+	}
+	encoding := payload[position]
+	position++
+	switch encoding {
+	case persistentDeleteBitmapEncodingDense:
+		return persistentDeleteBitmapDecodeDense(payload, position, rows, deleted)
+	case persistentDeleteBitmapEncodingSparse:
+		return persistentDeleteBitmapDecodeSparse(payload, position, rows, deleted)
+	default:
+		return nil, ErrPersistentDeleteBitmapInvalid
+	}
+}
+
+func persistentDeleteBitmapDecodeDense(payload []byte, position int, rows, deleted uint64) (*PersistentDeleteBitmap, error) {
 	wordCount, ok := persistentDeleteBitmapReadUvarint(payload, &position)
 	if !ok {
 		return nil, ErrPersistentDeleteBitmapInvalid
@@ -218,6 +266,42 @@ func DecodePersistentDeleteBitmap(encoded []byte) (*PersistentDeleteBitmap, erro
 	actualDeleted, valid := persistentDeleteBitmapCount(words, rows)
 	if !valid || actualDeleted != deleted || position != len(payload) {
 		return nil, ErrPersistentDeleteBitmapInvalid
+	}
+	return &PersistentDeleteBitmap{rows: rows, deleted: deleted, words: words}, nil
+}
+
+func persistentDeleteBitmapDecodeSparse(payload []byte, position int, rows, deleted uint64) (*PersistentDeleteBitmap, error) {
+	wordCount, err := persistentDeleteBitmapWordCount(rows)
+	if err != nil || deleted > rows {
+		return nil, ErrPersistentDeleteBitmapInvalid
+	}
+	start := position
+	previous := uint64(0)
+	for index := uint64(0); index < deleted; index++ {
+		delta, ok := persistentDeleteBitmapReadUvarint(payload, &position)
+		if !ok || delta > ^uint64(0)-previous {
+			return nil, ErrPersistentDeleteBitmapInvalid
+		}
+		row := previous + delta
+		if row >= rows || (index > 0 && delta == 0) {
+			return nil, ErrPersistentDeleteBitmapInvalid
+		}
+		previous = row
+	}
+	if position != len(payload) {
+		return nil, ErrPersistentDeleteBitmapInvalid
+	}
+	words := make([]uint64, int(wordCount))
+	position = start
+	previous = 0
+	for index := uint64(0); index < deleted; index++ {
+		delta, ok := persistentDeleteBitmapReadUvarint(payload, &position)
+		if !ok {
+			return nil, ErrPersistentDeleteBitmapInvalid
+		}
+		row := previous + delta
+		words[row/64] |= uint64(1) << uint(row%64)
+		previous = row
 	}
 	return &PersistentDeleteBitmap{rows: rows, deleted: deleted, words: words}, nil
 }
@@ -259,6 +343,40 @@ func persistentDeleteBitmapAppendUvarint(encoded []byte, value uint64) []byte {
 	var buffer [binary.MaxVarintLen64]byte
 	length := binary.PutUvarint(buffer[:], value)
 	return append(encoded, buffer[:length]...)
+}
+
+func persistentDeleteBitmapUvarintSize(value uint64) int {
+	var buffer [binary.MaxVarintLen64]byte
+	return binary.PutUvarint(buffer[:], value)
+}
+
+func persistentDeleteBitmapSparseBytes(words []uint64) int {
+	bytes := 0
+	previous := uint64(0)
+	for wordIndex, word := range words {
+		for word != 0 {
+			bit := uint(bits.TrailingZeros64(word))
+			row := uint64(wordIndex)*64 + uint64(bit)
+			bytes += persistentDeleteBitmapUvarintSize(row - previous)
+			previous = row
+			word &^= uint64(1) << bit
+		}
+	}
+	return bytes
+}
+
+func persistentDeleteBitmapAppendSparse(encoded []byte, words []uint64) []byte {
+	previous := uint64(0)
+	for wordIndex, word := range words {
+		for word != 0 {
+			bit := uint(bits.TrailingZeros64(word))
+			row := uint64(wordIndex)*64 + uint64(bit)
+			encoded = persistentDeleteBitmapAppendUvarint(encoded, row-previous)
+			previous = row
+			word &^= uint64(1) << bit
+		}
+	}
+	return encoded
 }
 
 func persistentDeleteBitmapReadUvarint(encoded []byte, position *int) (uint64, bool) {

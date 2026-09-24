@@ -149,7 +149,9 @@ func TestPersistentDeleteBitmapPackedSize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MarshalBinary: %v", err)
 	}
-	if len(encoded) != 12_522 {
-		t.Fatalf("encoded length = %d, want 12522", len(encoded))
+	// Version 2 adds one encoding tag while retaining the same dense payload
+	// for this high-cardinality fixture.
+	if len(encoded) != 12_523 {
+		t.Fatalf("encoded length = %d, want 12523", len(encoded))
 	}
 }

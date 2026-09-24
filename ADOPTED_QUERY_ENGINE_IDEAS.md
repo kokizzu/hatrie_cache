@@ -646,6 +646,19 @@ read, and compaction paths are unchanged. Full immutable stored-part manifests
 and automatic cross-process part hydration remain open. See
 [CH005_DELETE_BITMAP_SNAPSHOT.md](CH005_DELETE_BITMAP_SNAPSHOT.md) and
 [BENCHMARK.md](BENCHMARK.md#ch-005-delete-bitmap-state-snapshots).
+
+## CH-005: Adaptive Delete Bitmap Encoding
+
+The persistent delete bitmap now writes a versioned adaptive snapshot. Sparse
+deleted-row deltas are selected when smaller, while dense version 2 remains the
+fallback for high delete density and version 1 dense snapshots remain readable.
+The in-memory bitmap and default delete/read/compaction behavior are unchanged.
+On a 1,048,576-row fixture with four deletes, the round trip improved from
+114,148 to 47,658 ns/op and from 270,385 to 131,152 B/op; the snapshot fell
+from 131,089 to 19 bytes. The dense format pays one tag byte. See
+[CH005_ADAPTIVE_DELETE_BITMAP.md](CH005_ADAPTIVE_DELETE_BITMAP.md) and
+[BENCHMARK.md](BENCHMARK.md#ch-005-adaptive-delete-bitmap-encoding).
+
 ## CH-006: Durable Mutation Dependency Queue
 
 CH-006 is partially adopted through the importable

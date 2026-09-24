@@ -26010,3 +26010,42 @@ commit-ch042-columnar-dictionary-group:
 
 push-ch042-columnar-dictionary-group:
 	bash scripts/push-ch042-columnar-dictionary-group.sh
+.PHONY: test-ch005-adaptive-delete-bitmap
+test-ch005-adaptive-delete-bitmap:
+	bash scripts/test-ch005-adaptive-delete-bitmap.sh
+
+.PHONY: benchmark-ch005-adaptive-delete-bitmap
+benchmark-ch005-adaptive-delete-bitmap:
+	bash scripts/benchmark-ch005-adaptive-delete-bitmap.sh
+
+.PHONY: format-ch005-adaptive-delete-bitmap
+format-ch005-adaptive-delete-bitmap:
+	bash scripts/format-ch005-adaptive-delete-bitmap.sh
+
+.PHONY: race-ch005-adaptive-delete-bitmap
+race-ch005-adaptive-delete-bitmap:
+	bash scripts/race-ch005-adaptive-delete-bitmap.sh
+
+.PHONY: vet-ch005-adaptive-delete-bitmap
+vet-ch005-adaptive-delete-bitmap:
+	bash scripts/vet-ch005-adaptive-delete-bitmap.sh
+
+.PHONY: benchmark-ch005-delete-bitmap-package
+benchmark-ch005-delete-bitmap-package:
+	bash scripts/benchmark-ch005-delete-bitmap-package.sh
+
+.PHONY: review-ch005-adaptive-delete-bitmap
+review-ch005-adaptive-delete-bitmap:
+	bash scripts/review-ch005-adaptive-delete-bitmap.sh
+
+.PHONY: stage-ch005-adaptive-delete-bitmap
+stage-ch005-adaptive-delete-bitmap:
+	bash scripts/stage-ch005-adaptive-delete-bitmap.sh
+
+.PHONY: commit-ch005-adaptive-delete-bitmap
+commit-ch005-adaptive-delete-bitmap:
+	bash scripts/commit-ch005-adaptive-delete-bitmap.sh
+
+.PHONY: push-ch005-adaptive-delete-bitmap
+push-ch005-adaptive-delete-bitmap:
+	bash scripts/push-ch005-adaptive-delete-bitmap.sh

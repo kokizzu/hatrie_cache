@@ -31354,6 +31354,48 @@ BenchmarkCH005PatchState/Restore-32 43483 28255 ns/op 520 B/op 2 allocs/op
 No default delete or compaction setting changed. The final implementation
 keeps the large restore win while leaving the existing in-memory bitmap path
 untouched.
+<a id="ch-005-adaptive-delete-bitmap-encoding"></a>
+
+## CH-005 Adaptive Delete Bitmap Encoding
+
+Command:
+
+```text
+make benchmark-ch005-adaptive-delete-bitmap
+```
+
+Fixture: 1,048,576 physical rows and four logical deletes. The benchmark
+performs `MarshalBinary` followed by `DecodePersistentDeleteBitmap`; medians
+are from five samples on the same Linux/amd64 host.
+
+| Metric | Before | After | Improvement |
+| --- | ---: | ---: | ---: |
+| Marshal + decode CPU | 114,148 ns/op | 47,658 ns/op | 2.40x faster |
+| Go heap per round trip | 270,385 B/op | 131,152 B/op | 2.06x lower |
+| Allocations | 3 | 3 | unchanged |
+| Snapshot bytes | 131,089 | 19 | 6,899x lower |
+
+Raw samples:
+
+```text
+before: 120212 115065 114148 114000 110957; 270386 270385 270385 270387 270387; 3 3 3 3 3
+after:   48488  47658  47320  42349  49538; 131152 131152 131152 131152 131152; 3 3 3 3 3
+```
+
+Version 2 selects delta-coded sparse row ordinals only when smaller and falls
+back to dense words otherwise. Version 1 dense snapshots remain readable. A
+100,000-row dense control with every third row deleted measured median
+`6,388 ns/op` encode and `4,502 ns/op` decode after the change; its dense
+snapshot grew by one encoding-tag byte (`12,522` to `12,523` bytes).
+
+Correctness, legacy decoding, race, and bounds checks are covered by:
+
+```text
+make test-ch005-adaptive-delete-bitmap
+make test-ch005-package
+make race-ch005-adaptive-delete-bitmap
+make vet-ch005-adaptive-delete-bitmap
+```
 <a id="ch-006-durable-mutation-dependency-queue"></a>
 
 ## CH-006: Durable Mutation Dependency Queue
