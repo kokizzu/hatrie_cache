@@ -26651,6 +26651,35 @@ per update are equal in this fixture. Its ordered index also retains one node
 per active logical key. It is an explicit imported operator rather than a
 default SQL plan rule.
 
+<a id="mz-037-incremental-top-k-selection-scratch"></a>
+## MZ-037 Incremental Top-K Selection Scratch
+
+Command: `make benchmark-c213-topk`
+
+This follow-up keeps the existing exact weighted Top-K treap and reuses two
+internal selection buffers during `Apply`. Returned transition rows remain
+detached from those buffers. The workload has 10,000 active rows, `K=20`, and
+repeated delete-plus-insert replacement of one row. The full rebuild control
+sorts all rows for every update. CPU: AMD Ryzen 9 5950X 16-Core Processor,
+Linux amd64.
+
+| Path | Before median | After median | Improvement |
+| --- | ---: | ---: | ---: |
+| Incremental CPU | 2,575 ns/op | 2,033 ns/op | 1.27x faster |
+| Incremental transient heap | 1,222 B/op | 579 B/op | 2.11x lower |
+| Incremental allocations | 7 allocs/op | 5 allocs/op | 1.40x fewer |
+
+Raw samples:
+
+```text
+Before: 2712, 2470, 2575, 2591, 2507 ns/op; 1221, 1223, 1223, 1221, 1222 B/op; 7 allocs/op
+After:  2052, 2098, 1819, 1954, 2033 ns/op; 579, 581, 579, 579, 579 B/op; 5 allocs/op
+```
+
+Each scratch buffer is capped at 4,096 selection entries, so two full buffers
+retain approximately 128 KiB of metadata on a 64-bit process. A focused test
+verifies that larger `K` values do not retain larger buffers.
+
 <a id="mz-031-ranked-top-k-change-diffs"></a>
 ## MZ-031 Ranked Top-K Change Diffs
 

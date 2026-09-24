@@ -2,6 +2,7 @@ package hatSql
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"math/rand"
 	"reflect"
@@ -144,6 +145,59 @@ func TestC213IncrementalTopKValidatesDefinitionAndNilReceiver(t *testing.T) {
 	}
 	if got := topK.Snapshot(); got != nil {
 		t.Fatalf("nil Snapshot() = %#v, want nil", got)
+	}
+}
+
+func TestC213IncrementalTopKReturnedChangesRemainOwnedAfterNextApply(t *testing.T) {
+	topK, err := NewIncrementalTopK(IncrementalTopKDefinition{
+		K:          1,
+		OrderKey:   c213TopKOrderKey,
+		Descending: true,
+	})
+	if err != nil {
+		t.Fatalf("NewIncrementalTopK() error = %v", err)
+	}
+	first, err := topK.Apply([]DifferentialRow{{Key: "first", Time: 1, Diff: 1, Row: Row{"score": int64(10)}}})
+	if err != nil {
+		t.Fatalf("first Apply() error = %v", err)
+	}
+	second, err := topK.Apply([]DifferentialRow{{Key: "second", Time: 2, Diff: 1, Row: Row{"score": int64(20)}}})
+	if err != nil {
+		t.Fatalf("second Apply() error = %v", err)
+	}
+	if got, want := c213TopKChangeMap(first), map[string]int64{"first": 1}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("first changes after second Apply() = %#v, want %#v", got, want)
+	}
+	if got, want := c213TopKChangeMap(second), map[string]int64{"first": -1, "second": 1}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("second changes = %#v, want %#v", got, want)
+	}
+}
+
+func TestC213IncrementalTopKScratchRetentionIsBounded(t *testing.T) {
+	topK, err := NewIncrementalTopK(IncrementalTopKDefinition{
+		K:          incrementalTopKSelectionScratchLimit + 1,
+		OrderKey:   c213TopKOrderKey,
+		Descending: true,
+	})
+	if err != nil {
+		t.Fatalf("NewIncrementalTopK() error = %v", err)
+	}
+	updates := make([]DifferentialRow, incrementalTopKSelectionScratchLimit+1)
+	for index := range updates {
+		updates[index] = DifferentialRow{
+			Key:  fmt.Sprintf("row-%d", index),
+			Diff: 1,
+			Row:  Row{"score": int64(index)},
+		}
+	}
+	if _, err := topK.Apply(updates); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if got := cap(topK.scratch[0]); got != 0 {
+		t.Fatalf("before scratch capacity = %d, want 0 above retention limit", got)
+	}
+	if got := cap(topK.scratch[1]); got != 0 {
+		t.Fatalf("after scratch capacity = %d, want 0 above retention limit", got)
 	}
 }
 

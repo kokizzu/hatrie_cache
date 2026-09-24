@@ -16,6 +16,8 @@ var (
 	ErrIncrementalTopKRowConflict          = errors.New("incremental top-k row conflicts with existing key")
 )
 
+const incrementalTopKSelectionScratchLimit = 4096
+
 // IncrementalTopKDefinition configures an exact weighted Top-K maintainer.
 // DifferentialRow.Key is the stable row identity. Positive updates add row
 // multiplicity and negative updates retract it. Descending selects larger SQL
@@ -37,6 +39,7 @@ type IncrementalTopK struct {
 	root       *incrementalTopKNode
 	entries    map[string]*incrementalTopKNode
 	priority   uint64
+	scratch    [2][]incrementalTopKSelection
 }
 
 type incrementalTopKNode struct {
@@ -196,7 +199,7 @@ func (topK *IncrementalTopK) apply(updates []DifferentialRow) ([]incrementalTopK
 		return nil, nil, nil
 	}
 
-	before := topK.selectedRows()
+	before := topK.selectedRowsInto(&topK.scratch[0])
 	for _, preparedUpdate := range prepared {
 		update := preparedUpdate.update
 		if update.Diff > 0 {
@@ -229,7 +232,7 @@ func (topK *IncrementalTopK) apply(updates []DifferentialRow) ([]incrementalTopK
 		}
 	}
 
-	after := topK.selectedRows()
+	after := topK.selectedRowsInto(&topK.scratch[1])
 	return before, after, nil
 }
 
@@ -282,6 +285,10 @@ func (topK *IncrementalTopK) AllRows() []DifferentialRow {
 }
 
 func (topK *IncrementalTopK) selectedRows() []incrementalTopKSelection {
+	return topK.selectedRowsInto(nil)
+}
+
+func (topK *IncrementalTopK) selectedRowsInto(scratch *[]incrementalTopKSelection) []incrementalTopKSelection {
 	if topK.k == 0 || topK.root == nil {
 		return nil
 	}
@@ -289,8 +296,20 @@ func (topK *IncrementalTopK) selectedRows() []incrementalTopKSelection {
 	if capacity > topK.k {
 		capacity = topK.k
 	}
-	result := make([]incrementalTopKSelection, 0, capacity)
+	var result []incrementalTopKSelection
+	if scratch != nil && capacity <= incrementalTopKSelectionScratchLimit {
+		result = (*scratch)[:0]
+		if cap(result) < capacity {
+			result = make([]incrementalTopKSelection, 0, capacity)
+		}
+		*scratch = result
+	} else {
+		result = make([]incrementalTopKSelection, 0, capacity)
+	}
 	incrementalTopKAppendSelected(topK.root, uint64(topK.k), &result)
+	if scratch != nil && capacity <= incrementalTopKSelectionScratchLimit {
+		*scratch = result
+	}
 	return result
 }
 

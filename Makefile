@@ -25522,3 +25522,36 @@ diffcheck-m049:
 .PHONY: deliver-m049
 deliver-m049:
 	bash scripts/deliver-m049.sh
+.PHONY: inspect-open-ideas
+
+inspect-open-ideas:
+	bash scripts/inspect-open-ideas.sh
+.PHONY: test-c213-topk
+
+test-c213-topk:
+	bash scripts/test-c213-topk.sh
+.PHONY: benchmark-c213-topk
+
+benchmark-c213-topk:
+	bash scripts/benchmark-c213-topk.sh
+
+.PHONY: test-mz037-package race-c213-topk vet-mz037-package
+
+test-mz037-package:
+	bash scripts/test-mz037-package.sh
+
+race-c213-topk:
+	bash scripts/race-c213-topk.sh
+
+vet-mz037-package:
+	bash scripts/vet-mz037-package.sh
+
+.PHONY: verify-mz037-topk
+
+verify-mz037-topk:
+	bash scripts/verify-mz037-topk.sh
+
+.PHONY: deliver-mz037-topk
+
+deliver-mz037-topk:
+	bash scripts/deliver-mz037-topk.sh
