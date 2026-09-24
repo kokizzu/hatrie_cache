@@ -26400,3 +26400,26 @@ commit-tt033-tenant-quota:
 .PHONY: push-tt033-tenant-quota
 push-tt033-tenant-quota:
 	@bash scripts/push-tt033-tenant-quota.sh
+.PHONY: test-tt029-before-trigger
+test-tt029-before-trigger:
+	@bash scripts/test-tt029-before-trigger.sh
+.PHONY: benchmark-tt029-before-trigger
+benchmark-tt029-before-trigger:
+	@bash scripts/benchmark-tt029-before-trigger.sh
+.PHONY: format-tt029-before-trigger
+format-tt029-before-trigger:
+	@bash scripts/format-tt029-before-trigger.sh
+.PHONY: verify-tt029-before-trigger
+verify-tt029-before-trigger:
+	@bash scripts/verify-tt029-before-trigger.sh
+.PHONY: stage-tt029-before-trigger
+stage-tt029-before-trigger:
+	@bash scripts/stage-tt029-before-trigger.sh
+
+.PHONY: commit-tt029-before-trigger
+commit-tt029-before-trigger:
+	@bash scripts/commit-tt029-before-trigger.sh
+
+.PHONY: push-tt029-before-trigger
+push-tt029-before-trigger:
+	@bash scripts/push-tt029-before-trigger.sh

@@ -27,6 +27,13 @@ func TestParseSQLTriggerDefinition(t *testing.T) {
 				Name: "audit_delete", Timing: "AFTER", Operation: "DELETE", Source: "people",
 			},
 		},
+		{
+			name:   "before timing",
+			source: "CREATE TRIGGER normalize BEFORE UPDATE ON people FOR EACH ROW",
+			want: SQLTriggerDefinition{
+				Name: "normalize", Timing: "BEFORE", Operation: "UPDATE", Source: "people",
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -47,7 +54,6 @@ func TestParseSQLTriggerDefinitionRejectsUnsupportedOrMalformedStatements(t *tes
 		source string
 		want   error
 	}{
-		{name: "before timing", source: "CREATE TRIGGER audit BEFORE INSERT ON people FOR EACH ROW", want: ErrSQLTriggerUnsupportedTiming},
 		{name: "unsupported operation", source: "CREATE TRIGGER audit AFTER SELECT ON people FOR EACH ROW", want: ErrSQLTriggerUnsupportedOperation},
 		{name: "missing row clause", source: "CREATE TRIGGER audit AFTER INSERT ON people", want: ErrSQLTriggerDefinitionInvalid},
 		{name: "trailing statement", source: "CREATE TRIGGER audit AFTER INSERT ON people FOR EACH ROW; SELECT 1", want: ErrSQLTriggerDefinitionInvalid},
@@ -60,6 +66,33 @@ func TestParseSQLTriggerDefinitionRejectsUnsupportedOrMalformedStatements(t *tes
 				t.Fatalf("ParseSQLTriggerDefinition() error = %v, want %v", err, test.want)
 			}
 		})
+	}
+}
+
+func TestRegisterSQLBeforeTriggerUsesParsedDefinition(t *testing.T) {
+	registry := NewSQLTriggerRegistry()
+	if err := registry.RegisterSQLBeforeTrigger("CREATE TRIGGER normalize BEFORE UPDATE ON people FOR EACH ROW", func(_ context.Context, event SQLTriggerEvent) (SQLTriggerEvent, error) {
+		event.After["normalized"] = true
+		return event, nil
+	}); err != nil {
+		t.Fatalf("RegisterSQLBeforeTrigger() error = %v", err)
+	}
+	transaction, err := registry.BeginSQLTriggerTransaction(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := transaction.Add(SQLTriggerEvent{Source: "people", Operation: "UPDATE", Key: "ada", After: Row{"id": int64(1)}}); err != nil {
+		t.Fatal(err)
+	}
+	var applied []SQLTriggerEvent
+	if err := transaction.Commit(func(_ context.Context, events []SQLTriggerEvent) (SQLTriggerAction, error) {
+		applied = events
+		return SQLTriggerAction{}, nil
+	}); err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+	if len(applied) != 1 || !reflect.DeepEqual(applied[0].After["normalized"], true) {
+		t.Fatalf("primary events = %#v, want transformed event", applied)
 	}
 }
 

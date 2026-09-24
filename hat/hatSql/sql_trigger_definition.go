@@ -16,9 +16,9 @@ var (
 	ErrSQLTriggerUnsupportedOperation = errors.New("SQL trigger operation is unsupported")
 )
 
-// SQLTriggerDefinition is the supported row-level CREATE TRIGGER shape. The
-// transaction coordinator commits external trigger actions after the primary
-// mutation, so only AFTER timing is accepted.
+// SQLTriggerDefinition is the supported row-level CREATE TRIGGER shape. AFTER
+// definitions prepare external actions for the transaction coordinator;
+// BEFORE definitions validate or transform the primary row event.
 type SQLTriggerDefinition struct {
 	Name      string
 	Timing    string
@@ -30,7 +30,7 @@ type SQLTriggerDefinition struct {
 // ParseSQLTriggerDefinition parses a strict row-level CREATE TRIGGER
 // statement:
 //
-//	CREATE TRIGGER name AFTER INSERT|UPDATE|DELETE|REPLACE ON source FOR EACH ROW
+//	CREATE TRIGGER name BEFORE|AFTER INSERT|UPDATE|DELETE|REPLACE ON source FOR EACH ROW
 //
 // Identifiers are currently unquoted. A trailing semicolon is optional, but
 // additional statements are rejected.
@@ -50,11 +50,16 @@ func ParseSQLTriggerDefinition(source string) (SQLTriggerDefinition, error) {
 	if err != nil {
 		return SQLTriggerDefinition{}, sqlTriggerDefinitionError(err)
 	}
-	if parser.keyword("BEFORE") {
-		return SQLTriggerDefinition{}, fmt.Errorf("%w: BEFORE triggers are not supported", ErrSQLTriggerUnsupportedTiming)
-	}
-	if err := parser.expectKeyword("AFTER"); err != nil {
-		return SQLTriggerDefinition{}, sqlTriggerDefinitionError(err)
+	var timing string
+	switch {
+	case parser.keyword("BEFORE"):
+		timing = "BEFORE"
+		parser.next()
+	case parser.keyword("AFTER"):
+		timing = "AFTER"
+		parser.next()
+	default:
+		return SQLTriggerDefinition{}, sqlTriggerDefinitionError(parser.expected(parser.current(), "BEFORE or AFTER", []string{"BEFORE", "AFTER"}))
 	}
 	operation, err := parser.expectIdentifier("a trigger operation", []string{"INSERT", "UPDATE", "DELETE", "REPLACE"})
 	if err != nil {
@@ -90,7 +95,7 @@ func ParseSQLTriggerDefinition(source string) (SQLTriggerDefinition, error) {
 	}
 	return SQLTriggerDefinition{
 		Name:      name.text,
-		Timing:    "AFTER",
+		Timing:    timing,
 		Operation: operationName,
 		Source:    table.text,
 	}, nil
@@ -103,7 +108,7 @@ func sqlTriggerDefinitionError(err error) error {
 	return fmt.Errorf("%w: %v", ErrSQLTriggerDefinitionInvalid, err)
 }
 
-// RegisterDefinition adds a parsed trigger definition to registry with the
+// RegisterDefinition adds an AFTER trigger definition to registry with the
 // caller-supplied preparation callback. It keeps trigger side effects behind
 // the existing SQLTriggerTransaction atomicity boundary.
 func (registry *SQLTriggerRegistry) RegisterDefinition(definition SQLTriggerDefinition, prepare SQLTriggerPrepareFunc) error {
@@ -122,6 +127,25 @@ func (registry *SQLTriggerRegistry) RegisterDefinition(definition SQLTriggerDefi
 	})
 }
 
+// RegisterBeforeDefinition adds a BEFORE trigger definition to registry with
+// the caller-supplied pure row transformation callback. The callback runs
+// before the primary mutation and cannot change event metadata.
+func (registry *SQLTriggerRegistry) RegisterBeforeDefinition(definition SQLTriggerDefinition, before SQLTriggerBeforeFunc) error {
+	if registry == nil {
+		return ErrSQLTriggerRegistryNil
+	}
+	if !strings.EqualFold(strings.TrimSpace(definition.Timing), "BEFORE") {
+		return ErrSQLTriggerUnsupportedTiming
+	}
+	return registry.Register(SQLTrigger{
+		Name:      definition.Name,
+		Source:    definition.Source,
+		Operation: definition.Operation,
+		Order:     definition.Order,
+		Before:    before,
+	})
+}
+
 // RegisterSQLTrigger parses and registers one supported CREATE TRIGGER
 // statement. Trigger execution remains explicit through
 // BeginSQLTriggerTransaction, matching the existing caller-owned mutation
@@ -132,4 +156,15 @@ func (registry *SQLTriggerRegistry) RegisterSQLTrigger(source string, prepare SQ
 		return err
 	}
 	return registry.RegisterDefinition(definition, prepare)
+}
+
+// RegisterSQLBeforeTrigger parses and registers one BEFORE CREATE TRIGGER
+// statement. Its callback can reject or transform the cloned row event before
+// the caller's primary mutation callback runs.
+func (registry *SQLTriggerRegistry) RegisterSQLBeforeTrigger(source string, before SQLTriggerBeforeFunc) error {
+	definition, err := ParseSQLTriggerDefinition(source)
+	if err != nil {
+		return err
+	}
+	return registry.RegisterBeforeDefinition(definition, before)
 }

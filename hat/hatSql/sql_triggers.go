@@ -47,6 +47,11 @@ type SQLTriggerAction struct {
 // publish externally visible state before returning its action.
 type SQLTriggerPrepareFunc func(context.Context, SQLTriggerEvent) (SQLTriggerAction, error)
 
+// SQLTriggerBeforeFunc validates or transforms one cloned row event before
+// the primary mutation. It must not publish externally visible state. The
+// source, operation, and key metadata must be returned unchanged.
+type SQLTriggerBeforeFunc func(context.Context, SQLTriggerEvent) (SQLTriggerEvent, error)
+
 // SQLTriggerApplyFunc prepares the primary storage mutation for a transaction.
 // The returned action participates in the same commit and rollback sequence as
 // trigger actions.
@@ -60,15 +65,17 @@ type SQLTrigger struct {
 	Source    string
 	Operation string
 	Order     int
+	Before    SQLTriggerBeforeFunc
 	Prepare   SQLTriggerPrepareFunc
 }
 
 // SQLTriggerRegistry stores immutable trigger definitions and is safe for
 // concurrent registration and transaction creation.
 type SQLTriggerRegistry struct {
-	mu       sync.RWMutex
-	triggers []SQLTrigger
-	names    map[string]struct{}
+	mu        sync.RWMutex
+	triggers  []SQLTrigger
+	names     map[string]struct{}
+	hasBefore bool
 }
 
 // NewSQLTriggerRegistry creates an empty trigger registry.
@@ -84,7 +91,7 @@ func (registry *SQLTriggerRegistry) Register(trigger SQLTrigger) error {
 	trigger.Name = strings.TrimSpace(trigger.Name)
 	trigger.Source = strings.TrimSpace(trigger.Source)
 	trigger.Operation = strings.ToUpper(strings.TrimSpace(trigger.Operation))
-	if trigger.Name == "" || trigger.Prepare == nil {
+	if trigger.Name == "" || (trigger.Before == nil && trigger.Prepare == nil) {
 		return ErrSQLTriggerInvalid
 	}
 
@@ -97,6 +104,9 @@ func (registry *SQLTriggerRegistry) Register(trigger SQLTrigger) error {
 		return ErrSQLTriggerDuplicate
 	}
 	registry.names[trigger.Name] = struct{}{}
+	if trigger.Before != nil {
+		registry.hasBefore = true
+	}
 	registry.triggers = append(registry.triggers, trigger)
 	sort.Slice(registry.triggers, func(left, right int) bool {
 		if registry.triggers[left].Order != registry.triggers[right].Order {
@@ -124,9 +134,19 @@ func (registry *SQLTriggerRegistry) Unregister(name string) bool {
 	delete(registry.names, name)
 	for index, trigger := range registry.triggers {
 		if trigger.Name == name {
+			removedBefore := trigger.Before != nil
 			copy(registry.triggers[index:], registry.triggers[index+1:])
 			registry.triggers[len(registry.triggers)-1] = SQLTrigger{}
 			registry.triggers = registry.triggers[:len(registry.triggers)-1]
+			if removedBefore {
+				registry.hasBefore = false
+				for _, remaining := range registry.triggers {
+					if remaining.Before != nil {
+						registry.hasBefore = true
+						break
+					}
+				}
+			}
 			break
 		}
 	}
@@ -151,12 +171,13 @@ func BeginSQLTriggerTransaction(registry *SQLTriggerRegistry, ctx context.Contex
 	return registry.BeginSQLTriggerTransaction(ctx)
 }
 
-func (registry *SQLTriggerRegistry) snapshot() []SQLTrigger {
+func (registry *SQLTriggerRegistry) snapshot() ([]SQLTrigger, bool) {
 	registry.mu.RLock()
 	triggers := make([]SQLTrigger, len(registry.triggers))
 	copy(triggers, registry.triggers)
+	hasBefore := registry.hasBefore
 	registry.mu.RUnlock()
-	return triggers
+	return triggers, hasBefore
 }
 
 // SQLTriggerTransaction stages events and commits them through the registry's
@@ -224,13 +245,34 @@ func (transaction *SQLTriggerTransaction) Commit(apply SQLTriggerApplyFunc) erro
 	transaction.mu.Unlock()
 
 	prepared := make([]SQLTriggerAction, 0, len(events))
-	triggers := transaction.registry.snapshot()
+	triggers, hasBefore := transaction.registry.snapshot()
 	if err := transaction.ctx.Err(); err != nil {
 		return transaction.finishFailure(err, prepared)
 	}
+	if hasBefore {
+		for eventIndex := range events {
+			for _, trigger := range triggers {
+				if trigger.Before == nil || !sqlTriggerMatches(trigger, events[eventIndex]) {
+					continue
+				}
+				if err := transaction.ctx.Err(); err != nil {
+					return transaction.finishFailure(err, prepared)
+				}
+				original := events[eventIndex]
+				transformed, err := trigger.Before(transaction.ctx, cloneSQLTriggerEvent(original))
+				if err != nil {
+					return transaction.finishFailure(fmt.Errorf("SQL trigger %q before: %w", trigger.Name, err), prepared)
+				}
+				if transformed.Source != original.Source || transformed.Operation != original.Operation || transformed.Key != original.Key {
+					return transaction.finishFailure(fmt.Errorf("SQL trigger %q before changed event metadata: %w", trigger.Name, ErrSQLTriggerInvalid), prepared)
+				}
+				events[eventIndex] = cloneSQLTriggerEvent(transformed)
+			}
+		}
+	}
 	for _, event := range events {
 		for _, trigger := range triggers {
-			if !sqlTriggerMatches(trigger, event) {
+			if trigger.Prepare == nil || !sqlTriggerMatches(trigger, event) {
 				continue
 			}
 			if err := transaction.ctx.Err(); err != nil {
