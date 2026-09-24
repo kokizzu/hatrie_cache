@@ -36362,3 +36362,20 @@ round trip. It adds no allocations and does not change the default legacy
 path. The isolated encoder costs about 2.92 ns more in this fixture; the
 end-to-end timing is scheduling-noise limited. Full API and compatibility
 details are in [TR043C_COMPACT_PEER_RESPONSE_SCHEMA.md](TR043C_COMPACT_PEER_RESPONSE_SCHEMA.md).
+## Rejected T042 parallel recovery replay
+
+Measured on 2026-09-24 from clean `origin/master` (`0a676789`) on an AMD Ryzen 9 5950X, replaying the same 10,000 independent `SETSTR` journal entries. The proposed bounded parallel replay used eight workers and `MinEntries=1`.
+
+| Variant | Raw ns/op samples | Median ns/op | B/op | Allocs/op | Decision |
+| --- | --- | ---: | ---: | ---: | --- |
+| Existing sequential replay | 5,244,454; 5,135,516; 5,235,766; 4,903,587; 5,437,102 | 5,235,766 | 2,648,106 | 50,018 | Baseline |
+| T042 parallel replay | 27,129,950; 26,455,064; 25,207,834; 24,143,971; 24,844,295 | 25,207,834 | 17,880,665 | 60,139 | Rejected |
+
+The parallel path was 4.81x slower, used 6.75x more allocated bytes, and made 1.20x as many allocations. The trie serializes writes behind its global write lock, so partitioning journal entries by key added grouping, worker, and synchronization overhead without enabling useful concurrent mutation. The implementation and tests were removed; this result is retained to prevent repeating the experiment.
+
+Commands:
+
+```text
+make benchmark-t042-baseline
+make benchmark-t042-parallel-replay
+```
