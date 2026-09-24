@@ -25145,3 +25145,20 @@ commit-mu036:
 .PHONY: push-mu036
 push-mu036:
 	bash scripts/push-mu036.sh
+test-m038:
+	@bash scripts/test-m038.sh
+format-m038:
+	@bash scripts/format-m038.sh
+test-m038-package:
+	@bash scripts/test-m038-package.sh
+
+race-m038:
+	@bash scripts/race-m038.sh
+
+vet-m038:
+	@bash scripts/vet-m038.sh
+benchmark-m038:
+	@bash scripts/benchmark-m038.sh
+
+commit-m038:
+	@bash scripts/commit-m038.sh

@@ -789,6 +789,10 @@ and [BENCHMARK.md](BENCHMARK.md#m033-batched-logical-timestamp-oracle).
 
 Adopted as opt-in `hatStorage.CompactionDiagnostics`: bounded arrangement registration, allocation-free post-registration recording, deterministic detached snapshots, and fixed-depth history retain logical/physical bytes and caller-defined compaction debt without adding default-path overhead. The storage engine still owns the meaning of debt and the wiring point. See [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md) and [BENCHMARK.md](BENCHMARK.md#m-u37-per-arrangement-compaction-diagnostics).
 
+## Materialize M-U38: Persisted Immutable Part Catalog
+
+Adopted as opt-in `hatMerkle.PartCatalog` checkpoints: deterministic active and quarantined lifecycle metadata, whole-part and per-column SHA-256 checksums, bounded CRC32C decoding, and atomic `0600` save/load with file and directory sync. The catalog retains metadata only; verification of part bytes, remote reachability, and deletion remain caller-owned. See [M038_PERSISTED_IMMUTABLE_PARTS.md](M038_PERSISTED_IMMUTABLE_PARTS.md) and [BENCHMARK.md](BENCHMARK.md#mu38-persisted-immutable-part-catalog).
+
 ## Materialize M-U41: Webhook Event Idempotency
 
 Adopted as opt-in `hatSql.WebhookEventDeduplicator`: bounded source/event-ID admission, payload-fingerprint conflict detection, expiry, deterministic CRC-protected HWE1 snapshots, and atomic restore. The caller owns application, durable storage, acknowledgement, and HTTP/webhook wiring; existing defaults remain unchanged. See [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md) and [BENCHMARK.md](BENCHMARK.md#m-u41-webhook-event-idempotency).

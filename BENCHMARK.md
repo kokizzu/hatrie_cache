@@ -35849,3 +35849,52 @@ This is a correctness and operational admission feature, not a query-speed
 optimization. The additional CPU is bounded control-plane work and is opt-in;
 the existing arrangement paths remain unchanged. Full semantics are in
 [M036_ARRANGEMENT_HYDRATION_ADMISSION.md](M036_ARRANGEMENT_HYDRATION_ADMISSION.md).
+
+<a id="mu38-persisted-immutable-part-catalog"></a>
+## M-U38 Persisted Immutable Part Catalog
+
+Five `-benchtime=100ms` samples on Linux/amd64 with an AMD Ryzen 9 5950X. The
+fixture has 256 catalog entries, 64 quarantined entries, and a 53,572-byte
+checkpoint. `Snapshot` is the existing in-memory baseline; the other rows are
+the opt-in checkpoint path.
+
+```text
+BenchmarkMU38PartCatalogSnapshot-32
+75193 78748 82065 72928 72174 ns/op
+64496 64496 64496 64496 64496 B/op
+264 264 264 264 264 allocs/op
+BenchmarkMU38PartCatalogMarshalBinary-32
+177292 181361 180500 183691 195042 ns/op
+296561 296560 296561 296560 296561 B/op
+269 269 269 269 269 allocs/op
+53572 checkpoint-bytes
+BenchmarkMU38PartCatalogRestoreBinary-32
+96671 85993 93117 96493 82009 ns/op
+94545 94545 94544 94544 94549 B/op
+1291 1291 1291 1291 1291 allocs/op
+53572 checkpoint-bytes
+BenchmarkMU38PartCatalogLoad-32
+153528 158997 148063 150095 142596 ns/op
+224657 224657 224657 224658 224658 B/op
+1311 1311 1311 1311 1311 allocs/op
+53572 checkpoint-bytes
+BenchmarkMU38PartCatalogSave-32
+3076374 1967373 3460550 3037358 2898059 ns/op
+297512 297496 297512 297513 297513 B/op
+283 283 283 283 283 allocs/op
+53572 checkpoint-bytes
+```
+
+| Operation | Median | Memory | Comparison |
+| --- | ---: | ---: | --- |
+| Existing `Snapshot` | 75.2 us | 64,496 B/op, 264 allocs/op | Baseline |
+| `MarshalBinary` | 181.4 us | 296,560 B/op, 269 allocs/op | 2.42x slower, 4.60x memory vs snapshot |
+| `RestorePartCatalog` | 93.1 us | 94,544 B/op, 1,291 allocs/op | 1.24x snapshot time, no filesystem I/O |
+| `LoadPartCatalog` | 150.1 us | 224,657 B/op, 1,311 allocs/op | 1.99x snapshot time, read plus restore |
+| `Save` | 3.04 ms | 297,512 B/op, 283 allocs/op | 40.4x snapshot time, durable sync included |
+
+The durable save cost is the intentional tradeoff for crash-safe replacement;
+it is not paid by attach, detach, lookup, or part-byte reads. Use
+`MarshalBinary` for memory-only transport and `Save` only at the desired
+checkpoint cadence. Full semantics and bounds are in
+[M038_PERSISTED_IMMUTABLE_PARTS.md](M038_PERSISTED_IMMUTABLE_PARTS.md).
