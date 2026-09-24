@@ -17318,35 +17318,39 @@ sources through `PartitionedOrderedSourceResolver`. See
 
 ## SQL Runtime Join Bloom Filter
 
-Command: `make benchmark-sql-runtime-join-filter`.
+Command: `make benchmark-chu14-runtime-filter`.
 
 This benchmark compares the established materialized hash join with the
 opt-in streaming runtime-filter path. Each sub-benchmark runs five samples with
-`-benchmem`: a selective 100,000-row probe side against 512 right rows, a
-balanced 1,024-row join where every key matches, and a 100,000-row hot-key join
-against one right row.
+`-benchmem`: a selective 100,000-row probe side against 512 right rows, the
+same shape with `WHERE l.id < 512`, a balanced 1,024-row join where every key
+matches, and a 100,000-row hot-key join against one right row.
 
 Raw output from Linux on an AMD Ryzen 9 5950X:
 
 ```text
-selective baseline:       30.942 ms, 29.877 ms, 29.633 ms, 30.780 ms, 30.079 ms; 48,130,114 B/op; 305,685 allocs/op
-selective runtime_filter: 10.373 ms, 10.131 ms, 11.116 ms, 10.839 ms,  9.699 ms;  3,435,487 B/op; 107,239 allocs/op
-balanced baseline:         1.467 ms,  1.488 ms,  1.505 ms,  1.594 ms,  1.477 ms;  2,289,646 B/op;  14,392 allocs/op
-balanced runtime_filter:   1.640 ms,  1.632 ms,  1.604 ms,  1.678 ms,  1.578 ms;  2,105,087 B/op;  15,441 allocs/op
-hot_key baseline:        120.723 ms, 116.845 ms, 115.143 ms, 120.044 ms, 116.542 ms; 194,770,444 B/op; 1,000,072 allocs/op
-hot_key runtime_filter:   80.930 ms,  84.724 ms,  86.046 ms,  87.793 ms,  88.012 ms; 124,503,616 B/op; 1,100,072 allocs/op
+selective baseline: 47,768,298 46,564,645 46,972,551 47,189,418 47,835,523 ns/op; 48,935,421 B/op median; 305,697 allocs/op median
+selective runtime:  14,682,139 16,522,488 15,710,116 14,293,858 15,062,228 ns/op;  3,466,351 B/op median; 107,242 allocs/op median
+where baseline:     46,145,346 50,733,988 45,328,464 40,923,158 36,687,583 ns/op; 46,549,114 B/op median; 206,214 allocs/op median
+where runtime:      13,876,842 15,611,952 14,812,438 15,446,477 15,165,238 ns/op;  3,467,791 B/op median; 107,248 allocs/op median
+balanced baseline:   2,018,922  2,111,327  1,943,557  1,969,763  1,915,222 ns/op;  2,463,928 B/op median;  14,395 allocs/op median
+balanced runtime:    2,105,316  2,164,111  1,904,635  2,001,869  1,948,430 ns/op;  2,151,536 B/op median;  15,441 allocs/op median
+hot baseline:      217,520,055 164,081,702 172,596,261 148,750,424 160,248,168 ns/op; 195,936,772 B/op median; 1,000,109 allocs/op median
+hot runtime:       100,302,460 113,756,122 111,875,952 111,827,586 113,286,250 ns/op; 124,506,108 B/op median; 1,100,094 allocs/op median
 ```
 
 | Workload | Baseline median | Runtime-filter median | Relative time | Baseline heap | Runtime-filter heap | Relative heap | Baseline allocs | Runtime-filter allocs | Relative allocations |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Selective, 100k left / 512 right | 30.079 ms | 10.373 ms | 2.90x faster | 48.130 MB | 3.435 MB | 14.01x lower | 305,685 | 107,239 | 2.85x fewer |
-| Balanced, 1k left / 1k right | 1.488 ms | 1.632 ms | 1.10x slower | 2.290 MB | 2.105 MB | 1.09x lower | 14,392 | 15,441 | 1.07x more |
-| Hot key, 100k left / 1 right | 116.845 ms | 86.046 ms | 1.36x faster | 194.770 MB | 124.504 MB | 1.56x lower | 1,000,072 | 1,100,072 | 1.10x more |
+| Selective, 100k left / 512 right | 47.189 ms | 15.062 ms | 3.13x faster | 48.935 MB | 3.466 MB | 14.11x lower | 305,697 | 107,242 | 2.85x fewer |
+| Selective `WHERE`, 100k left / 512 right | 45.328 ms | 15.165 ms | 2.99x faster | 46.549 MB | 3.468 MB | 13.42x lower | 206,214 | 107,248 | 1.92x fewer |
+| Balanced, 1k left / 1k right | 1.970 ms | 2.002 ms | 1.02x slower | 2.464 MB | 2.152 MB | 1.15x lower | 14,395 | 15,441 | 1.07x more |
+| Hot key, 100k left / 1 right | 164.082 ms | 111.876 ms | 1.47x faster | 195.937 MB | 124.506 MB | 1.57x lower | 1,000,109 | 1,100,094 | 1.10x more |
 
 The feature is disabled by default and only applies to direct streamable inner
-equality joins without an available equality index. It is a selective-path
-optimization, not a universal replacement: balanced matching joins pay the
-filter setup and callback cost. See
+equality joins without an available equality index. Built-in `WHERE` predicates
+are evaluated after exact candidate matching; custom-function predicates still
+fall back. It is a selective-path optimization, not a universal replacement:
+balanced matching joins pay the filter setup and callback cost. See
 [SQL_RUNTIME_JOIN_FILTER.md](SQL_RUNTIME_JOIN_FILTER.md) for the API, fallback
 rules, and correctness guarantees.
 

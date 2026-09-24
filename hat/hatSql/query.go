@@ -5100,10 +5100,11 @@ const sqlRuntimeJoinFilterFalsePositiveRate = 0.01
 
 // sqlRuntimeJoinFilterStreamable limits the runtime-filter path to a direct
 // inner equality join whose result can be produced while each source row is
-// still in the resolver's streaming callback. The established materialized
-// executor remains authoritative for every other query shape.
+// still in the resolver's streaming callback. Built-in WHERE predicates are
+// evaluated after an exact join candidate is found; the established
+// materialized executor remains authoritative for every other query shape.
 func sqlRuntimeJoinFilterStreamable(query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) (bool, error) {
-	if query == nil || resolver == nil || control == nil || !control.options.RuntimeJoinBloomFilter || control.options.MaxJoinBytes > 0 || control.options.Workers > 0 || query.from == nil || query.sample != nil || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 1 || query.where.kind != "" || query.having.kind != "" || query.distinct || len(query.groupBy) != 0 || len(query.orderBy) != 0 || query.offset != 0 || query.limit >= 0 || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || sqlQueryHasSubqueryExpression(query) || query.indexHint.Mode != "" {
+	if query == nil || resolver == nil || control == nil || !control.options.RuntimeJoinBloomFilter || control.options.MaxJoinBytes > 0 || control.options.Workers > 0 || query.from == nil || query.sample != nil || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 1 || query.having.kind != "" || query.distinct || len(query.groupBy) != 0 || len(query.orderBy) != 0 || query.offset != 0 || query.limit >= 0 || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || sqlQueryHasSubqueryExpression(query) || sqlExprHasCustomFunction(query.where, nil) || query.indexHint.Mode != "" {
 		return false, nil
 	}
 	join := query.joins[0]
@@ -5145,7 +5146,8 @@ func sqlRuntimeJoinFilterStreamable(query *sqlQuery, resolver SQLSourceResolver,
 // executeSQLRuntimeJoinFilter builds the smaller right-side hash table from a
 // stream, then streams the left side through a bounded Bloom filter. A Bloom
 // miss is only a work skip; all rows that pass it still use the exact hash
-// bucket, so false positives cannot change SQL results. Non-eligible queries
+// bucket, so false positives cannot change SQL results. Built-in WHERE
+// predicates run only after candidate rows are merged. Non-eligible queries
 // return handled=false and use the established executor unchanged.
 func executeSQLRuntimeJoinFilter(query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics) (SQLQueryResult, bool, error) {
 	streamable, err := sqlRuntimeJoinFilterStreamable(query, resolver, control)
@@ -5241,6 +5243,15 @@ func executeSQLRuntimeJoinFilter(query *sqlQuery, resolver SQLSourceResolver, co
 			combined := mergeSQLRows(left, candidate)
 			projected := SQLRow{}
 			evaluationGroup[0] = combined
+			if query.where.kind != "" {
+				whereValue := evalSQLExpr(query.where, evaluationGroup, combined)
+				if err := sqlExpressionError(whereValue); err != nil {
+					return err
+				}
+				if !sqlTruthy(whereValue) {
+					continue
+				}
+			}
 			for index, selectItem := range query.selects {
 				value := evalSQLExpr(selectItem.expr, evaluationGroup, combined)
 				if err := sqlExpressionError(value); err != nil {

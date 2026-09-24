@@ -171,6 +171,43 @@ func TestRuntimeJoinBloomFilterPreservesDuplicateKeysAndNullSemantics(t *testing
 	}
 }
 
+func TestRuntimeJoinBloomFilterPreservesWhereSemantics(t *testing.T) {
+	resolver := &runtimeJoinFilterResolver{sources: map[string][]hatSql.SQLRow{
+		"left": {
+			{"id": 1, "k": "same"},
+			{"id": 2, "k": "same"},
+			{"id": 3, "k": "other"},
+			{"id": 4, "k": "missing"},
+		},
+		"right": {
+			{"id": 11, "k": "same", "enabled": true},
+			{"id": 12, "k": "other", "enabled": false},
+		},
+	}}
+	query := "FROM CACHE('left') AS l JOIN CACHE('right') AS r ON l.k = r.k SELECT l.id, r.id AS right_id WHERE l.id >= 2 AND r.enabled = true"
+	baseline, err := hatSql.ExecuteSQLQuery(query, resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filtered, err := hatSql.ExecuteSQLQueryContext(context.Background(), query, resolver, hatSql.QueryOptions{RuntimeJoinBloomFilter: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprintf("%#v", filtered.Rows) != fmt.Sprintf("%#v", baseline.Rows) {
+		t.Fatalf("filtered WHERE rows = %#v, baseline = %#v", filtered.Rows, baseline.Rows)
+	}
+	if len(filtered.Rows) != 1 || filtered.Rows[0]["id"] != 2 || filtered.Rows[0]["right_id"] != 11 {
+		t.Fatalf("filtered WHERE rows = %#v, want one matching row", filtered.Rows)
+	}
+	filteredPlan, err := hatSql.ExecuteSQLQueryContext(context.Background(), "EXPLAIN ANALYZE "+query, resolver, hatSql.QueryOptions{RuntimeJoinBloomFilter: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasRuntimeJoinFilterStep(filteredPlan.Plan) {
+		t.Fatalf("filtered WHERE plan = %#v, want runtime join filter", filteredPlan.Plan)
+	}
+}
+
 func TestRuntimeJoinBloomFilterFallsBackWithoutStreamingResolver(t *testing.T) {
 	resolver := &nonStreamingRuntimeJoinFilterResolver{sources: map[string][]hatSql.SQLRow{
 		"left":  {{"id": 1, "k": "found"}, {"id": 2, "k": "missing"}},

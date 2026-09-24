@@ -10,13 +10,15 @@ import (
 
 func BenchmarkSQLRuntimeJoinFilter(b *testing.B) {
 	cases := []struct {
-		name       string
-		leftRows   int
-		rightRows  int
-		hotKey     bool
-		resultRows int
+		name        string
+		leftRows    int
+		rightRows   int
+		hotKey      bool
+		resultRows  int
+		whereClause string
 	}{
 		{name: "selective_100k_left_512_right", leftRows: 100000, rightRows: 512, resultRows: 512},
+		{name: "where_selective_100k_left_512_right", leftRows: 100000, rightRows: 512, resultRows: 512, whereClause: " WHERE l.id < 512"},
 		{name: "balanced_1k_left_1k_right", leftRows: 1024, rightRows: 1024, resultRows: 1024},
 		{name: "hot_key_100k_left_1_right", leftRows: 100000, rightRows: 1, hotKey: true, resultRows: 100000},
 	}
@@ -32,15 +34,16 @@ func BenchmarkSQLRuntimeJoinFilter(b *testing.B) {
 }
 
 func benchmarkSQLRuntimeJoinFilter(b *testing.B, benchmark struct {
-	name       string
-	leftRows   int
-	rightRows  int
-	hotKey     bool
-	resultRows int
+	name        string
+	leftRows    int
+	rightRows   int
+	hotKey      bool
+	resultRows  int
+	whereClause string
 }, options hatSql.QueryOptions) {
 	b.Helper()
 	resolver := newRuntimeJoinFilterBenchmarkResolver(benchmark.leftRows, benchmark.rightRows, benchmark.hotKey)
-	query := "FROM CACHE('left') AS l JOIN CACHE('right') AS r ON l.k = r.k SELECT l.id, r.id AS right_id"
+	query := "FROM CACHE('left') AS l JOIN CACHE('right') AS r ON l.k = r.k SELECT l.id, r.id AS right_id" + benchmark.whereClause
 	b.ReportAllocs()
 	for b.Loop() {
 		result, err := hatSql.ExecuteSQLQueryContext(context.Background(), query, resolver, options)
