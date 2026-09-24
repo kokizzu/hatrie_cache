@@ -24,6 +24,7 @@ const (
 	sqlColumnarBlockFrameData                = 1
 	sqlColumnarBlockEncodingRaw         byte = 0
 	sqlColumnarBlockEncodingFlate       byte = 1
+	sqlColumnarBlockEncodingDictionary  byte = 2
 )
 
 var sqlColumnarBlockStreamMagic = [4]byte{'H', 'C', 'B', '1'}
@@ -48,13 +49,15 @@ type SQLColumnarBlockStreamProgress struct {
 // SQLColumnarBlockStreamCompression controls the per-column payload encoding.
 // None is the default and emits the version 1 wire format for compatibility
 // with existing producers. Auto keeps Flate output only when it is smaller
-// than the raw payload. Flate always emits compressed payloads.
+// than the raw payload. Dictionary keeps a string dictionary only when it
+// makes that column smaller; Flate always emits compressed payloads.
 type SQLColumnarBlockStreamCompression uint8
 
 const (
 	SQLColumnarBlockStreamCompressionNone SQLColumnarBlockStreamCompression = iota
 	SQLColumnarBlockStreamCompressionAuto
 	SQLColumnarBlockStreamCompressionFlate
+	SQLColumnarBlockStreamCompressionDictionary
 )
 
 // SQLColumnarBlockStreamOptions configures a columnar block writer. A zero
@@ -235,7 +238,7 @@ func (writer *SQLColumnarBlockStreamWriter) Flush() error {
 			return fmt.Errorf("SQL columnar block payload exceeds %d bytes", sqlColumnarBlockStreamMaxBytes)
 		}
 	}
-	if err := writeSQLColumnarBlockFrame(writer.writer, writer.progress, writer.rowsInBlock, writer.buffers, writer.version, writer.options); err != nil {
+	if err := writeSQLColumnarBlockFrame(writer.writer, writer.progress, writer.rowsInBlock, writer.columns, writer.buffers, writer.version, writer.options); err != nil {
 		return err
 	}
 	writer.progress.Blocks++
@@ -506,7 +509,7 @@ func (reader *SQLColumnarBlockStreamReader) readBlock(selected []bool) bool {
 			if err != nil {
 				return reader.fail(fmt.Errorf("read SQL columnar block column %q encoding: %w", column.Name, err))
 			}
-			if encoding != sqlColumnarBlockEncodingRaw && encoding != sqlColumnarBlockEncodingFlate {
+			if encoding != sqlColumnarBlockEncodingRaw && encoding != sqlColumnarBlockEncodingFlate && encoding != sqlColumnarBlockEncodingDictionary {
 				return reader.fail(fmt.Errorf("SQL columnar block column %q has unsupported encoding %d", column.Name, encoding))
 			}
 		}
@@ -533,7 +536,7 @@ func (reader *SQLColumnarBlockStreamReader) readBlock(selected []bool) bool {
 			return reader.fail(fmt.Errorf("read SQL columnar block column %q: %w", column.Name, err))
 		}
 		blockBytes += payloadLength
-		decoded, err := decodeSQLColumnarBlockPayload(payload, encoding, sqlColumnarBlockStreamMaxBytes-decodedBlockBytes)
+		decoded, err := decodeSQLColumnarBlockPayload(payload, encoding, sqlColumnarBlockStreamMaxBytes-decodedBlockBytes, column, int(rowCount))
 		if err != nil {
 			return reader.fail(fmt.Errorf("decode SQL columnar block column %q: %w", column.Name, err))
 		}
@@ -609,7 +612,7 @@ func decodeSQLColumnarBlockColumn(rows []Row, column SQLRowBinaryColumn, payload
 	return nil
 }
 
-func writeSQLColumnarBlockFrame(writer io.Writer, progress SQLColumnarBlockStreamProgress, rows int, columns [][]byte, version int, options SQLColumnarBlockStreamOptions) error {
+func writeSQLColumnarBlockFrame(writer io.Writer, progress SQLColumnarBlockStreamProgress, rows int, schema []SQLRowBinaryColumn, columns [][]byte, version int, options SQLColumnarBlockStreamOptions) error {
 	if err := writeSQLColumnarBlockByte(writer, sqlColumnarBlockFrameData); err != nil {
 		return err
 	}
@@ -634,7 +637,7 @@ func writeSQLColumnarBlockFrame(writer io.Writer, progress SQLColumnarBlockStrea
 		payload := column
 		if version >= sqlColumnarBlockStreamVersion {
 			var err error
-			encoding, payload, err = encodeSQLColumnarBlockPayload(column, options)
+			encoding, payload, err = encodeSQLColumnarBlockPayload(column, schema[index], rows, options)
 			if err != nil {
 				return fmt.Errorf("encode SQL columnar block column %d: %w", index, err)
 			}
@@ -668,14 +671,28 @@ func normalizeSQLColumnarBlockStreamOptions(options SQLColumnarBlockStreamOption
 			return options, fmt.Errorf("SQL columnar block stream compression level %d is outside %d..%d", options.CompressionLevel, flate.HuffmanOnly, flate.BestCompression)
 		}
 	case SQLColumnarBlockStreamCompressionNone:
+	case SQLColumnarBlockStreamCompressionDictionary:
 	default:
 		return options, fmt.Errorf("SQL columnar block stream compression mode %d is unsupported", options.Compression)
 	}
 	return options, nil
 }
 
-func encodeSQLColumnarBlockPayload(raw []byte, options SQLColumnarBlockStreamOptions) (byte, []byte, error) {
+func encodeSQLColumnarBlockPayload(raw []byte, column SQLRowBinaryColumn, rows int, options SQLColumnarBlockStreamOptions) (byte, []byte, error) {
 	if options.Compression == SQLColumnarBlockStreamCompressionNone {
+		return sqlColumnarBlockEncodingRaw, raw, nil
+	}
+	if options.Compression == SQLColumnarBlockStreamCompressionDictionary {
+		if column.Type != SQLRowBinaryString {
+			return sqlColumnarBlockEncodingRaw, raw, nil
+		}
+		dictionary, err := encodeSQLColumnarBlockDictionaryPayload(raw, column, rows)
+		if err != nil {
+			return 0, nil, err
+		}
+		if len(dictionary) < len(raw) {
+			return sqlColumnarBlockEncodingDictionary, dictionary, nil
+		}
 		return sqlColumnarBlockEncodingRaw, raw, nil
 	}
 	var compressed bytes.Buffer
@@ -696,7 +713,7 @@ func encodeSQLColumnarBlockPayload(raw []byte, options SQLColumnarBlockStreamOpt
 	return sqlColumnarBlockEncodingFlate, compressed.Bytes(), nil
 }
 
-func decodeSQLColumnarBlockPayload(payload []byte, encoding byte, maxBytes uint64) ([]byte, error) {
+func decodeSQLColumnarBlockPayload(payload []byte, encoding byte, maxBytes uint64, column SQLRowBinaryColumn, rows int) ([]byte, error) {
 	switch encoding {
 	case sqlColumnarBlockEncodingRaw:
 		if uint64(len(payload)) > maxBytes {
@@ -717,9 +734,188 @@ func decodeSQLColumnarBlockPayload(payload []byte, encoding byte, maxBytes uint6
 			return nil, fmt.Errorf("decompressed payload exceeds %d bytes", maxBytes)
 		}
 		return decoded, nil
+	case sqlColumnarBlockEncodingDictionary:
+		return decodeSQLColumnarBlockDictionaryPayload(payload, column, rows, maxBytes)
 	default:
 		return nil, fmt.Errorf("unsupported payload encoding %d", encoding)
 	}
+}
+
+func encodeSQLColumnarBlockDictionaryPayload(raw []byte, column SQLRowBinaryColumn, rows int) ([]byte, error) {
+	if column.Type != SQLRowBinaryString {
+		return nil, fmt.Errorf("dictionary encoding does not support column %q type %d", column.Name, column.Type)
+	}
+	if rows < 0 || rows > sqlColumnarBlockStreamMaxRows {
+		return nil, fmt.Errorf("dictionary row count %d is outside 0..%d", rows, sqlColumnarBlockStreamMaxRows)
+	}
+	const nullDictionaryID = ^uint64(0)
+	ids := make([]uint64, 0, rows)
+	entries := make([][]byte, 0, rows)
+	entryIDs := make(map[string]uint64, rows)
+	offset := 0
+	for rowIndex := 0; rowIndex < rows; rowIndex++ {
+		if column.Nullable {
+			if offset >= len(raw) {
+				return nil, fmt.Errorf("dictionary column %q row %d is missing its NULL marker", column.Name, rowIndex)
+			}
+			marker := raw[offset]
+			offset++
+			switch marker {
+			case 1:
+				ids = append(ids, nullDictionaryID)
+				continue
+			case 0:
+			default:
+				return nil, fmt.Errorf("dictionary column %q row %d has invalid NULL marker %d", column.Name, rowIndex, marker)
+			}
+		}
+		valueLength, err := readSQLColumnarBlockPayloadUvarint(raw, &offset, fmt.Sprintf("column %q row %d string length", column.Name, rowIndex))
+
+		if err != nil {
+			return nil, err
+		}
+		if valueLength > uint64(len(raw)-offset) {
+			return nil, fmt.Errorf("dictionary column %q row %d string length %d exceeds remaining payload", column.Name, rowIndex, valueLength)
+		}
+		value := raw[offset : offset+int(valueLength)]
+		offset += int(valueLength)
+		key := string(value)
+		id, ok := entryIDs[key]
+		if !ok {
+			id = uint64(len(entries))
+			entryIDs[key] = id
+			entries = append(entries, value)
+		}
+		ids = append(ids, id)
+	}
+	if offset != len(raw) {
+		return nil, fmt.Errorf("dictionary column %q has %d trailing bytes", column.Name, len(raw)-offset)
+	}
+
+	dictionary := make([]byte, 0, len(raw))
+	dictionary = appendSQLColumnarBlockUvarint(dictionary, uint64(len(entries)))
+	for _, entry := range entries {
+		dictionary = appendSQLColumnarBlockUvarint(dictionary, uint64(len(entry)))
+		dictionary = append(dictionary, entry...)
+	}
+	for _, id := range ids {
+		if column.Nullable {
+			if id == nullDictionaryID {
+				dictionary = append(dictionary, 1)
+				continue
+			}
+			dictionary = append(dictionary, 0)
+		}
+		dictionary = appendSQLColumnarBlockUvarint(dictionary, id)
+	}
+	if len(dictionary) > sqlColumnarBlockStreamMaxBytes {
+		return nil, fmt.Errorf("dictionary column %q payload exceeds %d bytes", column.Name, sqlColumnarBlockStreamMaxBytes)
+	}
+	return dictionary, nil
+}
+
+func decodeSQLColumnarBlockDictionaryPayload(payload []byte, column SQLRowBinaryColumn, rows int, maxBytes uint64) ([]byte, error) {
+	if column.Type != SQLRowBinaryString {
+		return nil, fmt.Errorf("dictionary encoding does not support column %q type %d", column.Name, column.Type)
+	}
+	if rows < 0 || rows > sqlColumnarBlockStreamMaxRows {
+		return nil, fmt.Errorf("dictionary row count %d is outside 0..%d", rows, sqlColumnarBlockStreamMaxRows)
+	}
+	offset := 0
+	dictionaryCount, err := readSQLColumnarBlockPayloadUvarint(payload, &offset, fmt.Sprintf("column %q dictionary count", column.Name))
+	if err != nil {
+		return nil, err
+	}
+	if dictionaryCount > uint64(rows) || dictionaryCount > uint64(sqlColumnarBlockStreamMaxRows) {
+		return nil, fmt.Errorf("dictionary column %q has %d entries for %d rows", column.Name, dictionaryCount, rows)
+	}
+	entries := make([][]byte, int(dictionaryCount))
+	var dictionaryBytes uint64
+	for index := range entries {
+		entryLength, err := readSQLColumnarBlockPayloadUvarint(payload, &offset, fmt.Sprintf("column %q dictionary entry %d length", column.Name, index))
+		if err != nil {
+			return nil, err
+		}
+		if entryLength > uint64(len(payload)-offset) {
+			return nil, fmt.Errorf("dictionary column %q entry %d length %d exceeds remaining payload", column.Name, index, entryLength)
+		}
+		if entryLength > maxBytes-dictionaryBytes {
+			return nil, fmt.Errorf("dictionary column %q entries exceed %d decoded bytes", column.Name, maxBytes)
+		}
+		entries[index] = payload[offset : offset+int(entryLength)]
+		offset += int(entryLength)
+		dictionaryBytes += entryLength
+	}
+
+	decoded := make([]byte, 0, len(payload))
+	for rowIndex := 0; rowIndex < rows; rowIndex++ {
+		marker := byte(0)
+		if column.Nullable {
+			if offset >= len(payload) {
+				return nil, fmt.Errorf("dictionary column %q row %d is missing its NULL marker", column.Name, rowIndex)
+			}
+			marker = payload[offset]
+			offset++
+			switch marker {
+			case 1:
+				if uint64(len(decoded)) >= maxBytes {
+					return nil, fmt.Errorf("dictionary column %q exceeds %d decoded bytes", column.Name, maxBytes)
+				}
+				decoded = append(decoded, 1)
+				continue
+			case 0:
+			default:
+				return nil, fmt.Errorf("dictionary column %q row %d has invalid NULL marker %d", column.Name, rowIndex, marker)
+			}
+		}
+		id, err := readSQLColumnarBlockPayloadUvarint(payload, &offset, fmt.Sprintf("column %q row %d dictionary ID", column.Name, rowIndex))
+		if err != nil {
+			return nil, err
+		}
+		if id >= uint64(len(entries)) {
+			return nil, fmt.Errorf("dictionary column %q row %d references ID %d of %d", column.Name, rowIndex, id, len(entries))
+		}
+		entry := entries[id]
+		var encodedLength [binary.MaxVarintLen64]byte
+		lengthBytes := binary.PutUvarint(encodedLength[:], uint64(len(entry)))
+		needed := uint64(lengthBytes) + uint64(len(entry))
+		if column.Nullable {
+			needed++
+		}
+		if needed > maxBytes || uint64(len(decoded)) > maxBytes-needed {
+			return nil, fmt.Errorf("dictionary column %q exceeds %d decoded bytes", column.Name, maxBytes)
+		}
+		if column.Nullable {
+			decoded = append(decoded, marker)
+		}
+		decoded = append(decoded, encodedLength[:lengthBytes]...)
+		decoded = append(decoded, entry...)
+	}
+	if offset != len(payload) {
+		return nil, fmt.Errorf("dictionary column %q has %d trailing bytes", column.Name, len(payload)-offset)
+	}
+	return decoded, nil
+}
+
+func readSQLColumnarBlockPayloadUvarint(payload []byte, offset *int, label string) (uint64, error) {
+	if *offset >= len(payload) {
+		return 0, fmt.Errorf("read SQL columnar block %s: truncated uvarint", label)
+	}
+	value, size := binary.Uvarint(payload[*offset:])
+	if size == 0 {
+		return 0, fmt.Errorf("read SQL columnar block %s: truncated uvarint", label)
+	}
+	if size < 0 {
+		return 0, fmt.Errorf("read SQL columnar block %s: uvarint overflows uint64", label)
+	}
+	*offset += size
+	return value, nil
+}
+
+func appendSQLColumnarBlockUvarint(destination []byte, value uint64) []byte {
+	var encoded [binary.MaxVarintLen64]byte
+	length := binary.PutUvarint(encoded[:], value)
+	return append(destination, encoded[:length]...)
 }
 
 func readSQLColumnarBlockStreamHeader(reader *bufio.Reader) ([]SQLRowBinaryColumn, int, int, error) {

@@ -24712,8 +24712,6 @@ benchmark-mz026-before:
 	bash scripts/benchmark-mz026-before.sh
 
 
-test-ch046-package:
-	bash scripts/test-ch046-package.sh
 
 race-ch046-compression:
 	bash scripts/race-ch046-compression.sh
@@ -25767,3 +25765,42 @@ push-mz010-statement:
 .PHONY: benchmark-mz010-statement
 benchmark-mz010-statement:
 	bash ./scripts/benchmark-mz010-statement.sh
+.PHONY: inspect-catalog-mz010
+	bash ./scripts/inspect-catalog-mz010.sh
+benchmark-ch046-dictionary-before:
+	bash scripts/benchmark-ch046-dictionary-before.sh
+
+test-ch046-dictionary:
+	bash scripts/test-ch046-dictionary.sh
+
+format-ch046-dictionary:
+	bash scripts/format-ch046-dictionary.sh
+
+
+
+benchmark-ch046-dictionary-after:
+	bash scripts/benchmark-ch046-dictionary-after.sh
+
+test-ch046-package:
+	bash scripts/test-ch046-package.sh
+
+race-ch046-dictionary:
+	bash scripts/race-ch046-dictionary.sh
+
+vet-ch046-dictionary:
+	bash scripts/vet-ch046-dictionary.sh
+
+test-ch046-all:
+	bash scripts/test-ch046-all.sh
+
+test-ch046-cache:
+	bash scripts/test-ch046-cache.sh
+
+stage-ch046-dictionary:
+	bash scripts/stage-ch046-dictionary.sh
+
+commit-ch046-dictionary:
+	bash scripts/commit-ch046-dictionary.sh
+
+push-ch046-dictionary:
+	bash scripts/push-ch046-dictionary.sh

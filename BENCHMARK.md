@@ -36033,6 +36033,26 @@ limits, raw samples, and interpretation.
 | Current default raw v1 | 415,888 | 351,660 | 196 | 119,217 | 1.11x faster | 1.00x |
 | Explicit Auto / BestSpeed | 11,496,941 | 58,011,656 | 1,228 | 9,025 | 24.9x slower | 13.2x smaller |
 | Explicit Flate / HuffmanOnly | 7,688,601 | 35,688,752 | 1,133 | 46,225 | 16.7x slower | 2.58x smaller |
+
+### CH046 Dictionary Encoding
+
+Command: `make benchmark-ch046-dictionary-after`. Five samples use 4,096 rows,
+two repeated string columns, and one int64 column on the same AMD Ryzen 9 5950X.
+The high-cardinality case uses unique strings and verifies the per-column raw
+fallback.
+
+| Path | Encode ns/op | Encode B/op | Encode allocs/op | Decode ns/op | Decode B/op | Decode allocs/op | Wire bytes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Raw v1 | 437,838 | 351,689 | 196 | 1,575,664 | 1,795,912 | 28,483 | 119,217 |
+| Dictionary, repeated strings | 3,280,949 | 1,604,200 | 25,018 | 3,730,281 | 2,639,217 | 51,113 | 41,809 |
+| Dictionary, high cardinality | 3,408,332 | 2,090,987 | 30,912 | not measured | not measured | not measured | 125,034 |
+
+Dictionary encoding is **2.85x smaller on the wire** for repeated strings, but
+costs roughly **7x encode CPU**, **4.6x encode memory**, **2.3x decode CPU**, and
+**1.5x decode memory**. It is therefore opt-in for bandwidth-constrained
+transfers; raw v1 remains the default. High-cardinality strings fall back to
+raw payloads but still pay version-2 framing, making that case about 1.05x larger
+and roughly 7x slower than raw.
 ## CH-G45 `EXPLAIN ESTIMATE`
 
 The parser alias is measured against the existing `EXPLAIN COST` path on

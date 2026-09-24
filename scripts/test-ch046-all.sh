@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-GOTOOLCHAIN=auto go test ./hat/hatSql
+GOTOOLCHAIN=auto go test ./...

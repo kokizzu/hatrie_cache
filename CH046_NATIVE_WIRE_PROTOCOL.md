@@ -67,6 +67,7 @@ cumulative blocks
 cumulative rows
 column count
 repeat for each schema column:
+  encoding byte (version 2 only: raw, Flate, or dictionary)
   column payload length
   column payload
 end frame (0)
@@ -81,6 +82,22 @@ bytes, unknown frames, and inconsistent progress are rejected.
 The default block size is 1,024 rows. The format is deliberately opt-in: a
 full decode/encode path has a small framing and buffering cost, while a
 projected decode can skip wide unrequested columns.
+
+### Dictionary Encoding
+
+`SQLColumnarBlockStreamCompressionDictionary` is an explicit version-2 mode
+for repeated `String` columns. Each eligible column stores a bounded dictionary
+of unique strings followed by one dictionary ID per row; nullable columns keep
+their existing NULL markers. A dictionary is emitted only when it is smaller
+than the raw column payload. Integer, bytes, date, JSON, and other physical
+types remain raw.
+
+When a dictionary column is materialized, the reader bounds its entries by the
+block row count and the existing 64 MiB decoded-block limit. Invalid entry
+lengths, IDs, NULL markers, truncated payloads, and trailing bytes are
+rejected. Projected-away columns remain length-bounded without materializing
+their values. The zero-value writer options still emit the legacy raw v1
+format, and dictionary mode is never selected implicitly.
 
 ## Benchmark
 
@@ -112,5 +129,6 @@ Projection fixture: the same rows plus a 256-byte payload column; only the
 The columnar stream is therefore not a universal replacement for RowBinary.
 Its measured win is selective decode of wide results. Full-stream encoding is
 slower and has more allocations, so the server does not make it the default.
-The wire size is nearly identical for this uncompressed first version; future
-compression or dictionary work must earn adoption with a separate benchmark.
+Dictionary mode can reduce repeated-string wire bytes substantially, but its
+CPU and allocation cost makes it a deliberate bandwidth-for-CPU tradeoff; see
+`CH046_WIRE_DICTIONARY.md` for the measured boundary.
