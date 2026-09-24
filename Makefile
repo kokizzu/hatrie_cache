@@ -26371,3 +26371,32 @@ commit-mz002-snapshot-frontier:
 .PHONY: push-mz002-snapshot-frontier
 push-mz002-snapshot-frontier:
 	@bash scripts/push-mz002-snapshot-frontier.sh
+
+.PHONY: benchmark-tt033-tenant-quota
+benchmark-tt033-tenant-quota:
+	@bash scripts/benchmark-tt033-tenant-quota.sh
+
+.PHONY: format-tt033-tenant-quota
+format-tt033-tenant-quota:
+	@bash scripts/format-tt033-tenant-quota.sh
+
+.PHONY: test-tt033-tenant-quota
+test-tt033-tenant-quota:
+	@bash scripts/test-tt033-tenant-quota.sh
+.PHONY: verify-tt033-tenant-quota
+verify-tt033-tenant-quota:
+	@bash scripts/verify-tt033-tenant-quota.sh
+.PHONY: show-hatrie-audit-plan
+show-hatrie-audit-plan:
+	@bash scripts/show-hatrie-audit-plan.sh
+.PHONY: stage-tt033-tenant-quota
+stage-tt033-tenant-quota:
+	@bash scripts/stage-tt033-tenant-quota.sh
+
+.PHONY: commit-tt033-tenant-quota
+commit-tt033-tenant-quota:
+	@bash scripts/commit-tt033-tenant-quota.sh
+
+.PHONY: push-tt033-tenant-quota
+push-tt033-tenant-quota:
+	@bash scripts/push-tt033-tenant-quota.sh

@@ -94,6 +94,9 @@ type Options struct {
 	// MaxFibers is the fixed number of slots and ready-queue entries. Zero uses
 	// DefaultMaxFibers.
 	MaxFibers int
+	// TenantQuotas optionally bounds named fibers spawned through
+	// SpawnForTenant. Unconfigured tenant names remain unlimited.
+	TenantQuotas map[string]TenantQuota
 }
 
 // RunStats reports work performed by one Run call.
@@ -104,6 +107,7 @@ type RunStats struct {
 	Failed    uint64
 	Cancelled uint64
 	Waited    uint64
+	Throttled uint64
 	Remaining int
 }
 
@@ -114,21 +118,25 @@ type fiberSlot struct {
 	status     Status
 	err        error
 	queued     bool
+	tenant     string
 }
 
 // Scheduler is a bounded round-robin cooperative scheduler. It does not start
 // goroutines; the caller chooses when and on which goroutine Run executes.
 type Scheduler struct {
-	slots      []fiberSlot
-	free       []uint32
-	freeCount  int
-	ready      []FiberID
-	readyHead  int
-	readyTail  int
-	readyCount int
-	locals     []fiberLocalStore
-	current    FiberID
-	closed     bool
+	slots         []fiberSlot
+	free          []uint32
+	freeCount     int
+	ready         []FiberID
+	readyHead     int
+	readyTail     int
+	readyCount    int
+	locals        []fiberLocalStore
+	current       FiberID
+	closed        bool
+	tenantQuotas  map[string]TenantQuota
+	tenantFibers  map[string]int
+	hasStepQuotas bool
 }
 
 // New creates a bounded scheduler with preallocated slot and queue storage.
@@ -140,11 +148,25 @@ func New(options Options) (*Scheduler, error) {
 	if maxFibers < 1 || maxFibers > MaxFibers {
 		return nil, ErrMaxFibersInvalid
 	}
+	tenantQuotas, hasStepQuotas, err := cloneTenantQuotas(options.TenantQuotas)
+	if err != nil {
+		return nil, err
+	}
 
 	scheduler := &Scheduler{
-		slots: make([]fiberSlot, maxFibers),
-		free:  make([]uint32, maxFibers),
-		ready: make([]FiberID, maxFibers),
+		slots:         make([]fiberSlot, maxFibers),
+		free:          make([]uint32, maxFibers),
+		ready:         make([]FiberID, maxFibers),
+		tenantQuotas:  tenantQuotas,
+		hasStepQuotas: hasStepQuotas,
+	}
+	for tenant, quota := range tenantQuotas {
+		if quota.MaxFibers > 0 {
+			if scheduler.tenantFibers == nil {
+				scheduler.tenantFibers = make(map[string]int)
+			}
+			scheduler.tenantFibers[tenant] = 0
+		}
 	}
 	for index := maxFibers - 1; index >= 0; index-- {
 		scheduler.free[scheduler.freeCount] = uint32(index)
@@ -181,6 +203,48 @@ func (scheduler *Scheduler) Spawn(function StepFunc) (FiberID, error) {
 	slot.status = StatusReady
 	slot.err = nil
 	slot.queued = false
+	slot.tenant = ""
+	scheduler.enqueue(slot)
+	return slot.identifier, nil
+}
+
+// SpawnForTenant adds a ready fiber attributed to tenant. A configured
+// MaxFibers quota rejects the spawn until that tenant's terminal fibers are
+// reaped. An unconfigured tenant is allowed without a quota.
+func (scheduler *Scheduler) SpawnForTenant(tenant string, function StepFunc) (FiberID, error) {
+	if scheduler == nil {
+		return 0, ErrSchedulerClosed
+	}
+	if function == nil {
+		return 0, ErrNilStep
+	}
+	if scheduler.closed {
+		return 0, ErrSchedulerClosed
+	}
+	if scheduler.freeCount == 0 {
+		return 0, ErrFiberCapacity
+	}
+	quota, quotaConfigured := scheduler.tenantQuotas[tenant]
+	if quotaConfigured && quota.MaxFibers > 0 && scheduler.tenantFibers[tenant] >= quota.MaxFibers {
+		return 0, ErrTenantQuotaExceeded
+	}
+
+	index := scheduler.free[scheduler.freeCount-1]
+	scheduler.freeCount--
+	slot := &scheduler.slots[index]
+	slot.generation++
+	if slot.generation == 0 {
+		slot.generation = 1
+	}
+	slot.identifier = makeFiberID(slot.generation, index)
+	slot.function = function
+	slot.status = StatusReady
+	slot.err = nil
+	slot.queued = false
+	slot.tenant = tenant
+	if quotaConfigured && quota.MaxFibers > 0 {
+		scheduler.tenantFibers[tenant]++
+	}
 	scheduler.enqueue(slot)
 	return slot.identifier, nil
 }
@@ -200,7 +264,94 @@ func (scheduler *Scheduler) Run(ctx context.Context, maxSteps int) (RunStats, er
 	if maxSteps < 0 {
 		return stats, ErrMaxStepsInvalid
 	}
+	if !scheduler.hasStepQuotas {
+		return scheduler.runWithoutStepQuotas(ctx, maxSteps)
+	}
 
+	var tenantSteps map[string]uint64
+	if scheduler.hasStepQuotas {
+		tenantSteps = make(map[string]uint64)
+	}
+	blockedByQuota := 0
+	for scheduler.readyCount > 0 && (maxSteps == 0 || stats.Steps < uint64(maxSteps)) {
+		if err := ctx.Err(); err != nil {
+			stats.Remaining = scheduler.readyCount
+			return stats, err
+		}
+		identifier := scheduler.dequeue()
+		slot, err := scheduler.lookup(identifier)
+		if err != nil {
+			continue
+		}
+		if slot.status == StatusCancelled {
+			stats.Cancelled++
+			blockedByQuota = 0
+			continue
+		}
+		if slot.status != StatusReady {
+			blockedByQuota = 0
+			continue
+		}
+		if scheduler.hasStepQuotas && scheduler.tenantStepQuotaExhausted(slot.tenant, tenantSteps) {
+			scheduler.enqueue(slot)
+			stats.Throttled++
+			blockedByQuota++
+			if blockedByQuota >= scheduler.readyCount {
+				break
+			}
+			continue
+		}
+		blockedByQuota = 0
+
+		slot.status = StatusRunning
+		scheduler.current = identifier
+		step, stepErr := slot.function(ctx)
+		scheduler.current = 0
+		stats.Steps++
+		recordTenantStep(scheduler, slot.tenant, tenantSteps)
+		switch {
+		case stepErr != nil:
+			slot.status = StatusFailed
+			slot.err = stepErr
+			slot.function = nil
+			scheduler.clearFiberLocals(fiberIndex(identifier))
+			stats.Failed++
+		case step == StepWait:
+			if slot.status != StatusWaiting {
+				slot.status = StatusFailed
+				slot.err = ErrFiberNotParked
+				slot.function = nil
+				scheduler.clearFiberLocals(fiberIndex(identifier))
+				stats.Failed++
+			} else {
+				stats.Waited++
+			}
+		case step == StepYield:
+			slot.status = StatusReady
+			scheduler.enqueue(slot)
+			stats.Yielded++
+		case step == StepDone:
+			slot.status = StatusDone
+			slot.function = nil
+			scheduler.clearFiberLocals(fiberIndex(identifier))
+			stats.Completed++
+		default:
+			slot.status = StatusFailed
+			slot.err = ErrInvalidStep
+			slot.function = nil
+			scheduler.clearFiberLocals(fiberIndex(identifier))
+			stats.Failed++
+		}
+	}
+	stats.Remaining = scheduler.readyCount
+	return stats, nil
+}
+
+// runWithoutStepQuotas keeps the ordinary scheduler path free of tenant
+// accounting and per-run map allocation. Fiber-count quotas are enforced at
+// admission and do not affect scheduling once a fiber is ready.
+func (scheduler *Scheduler) runWithoutStepQuotas(ctx context.Context, maxSteps int) (RunStats, error) {
+	var stats RunStats
 	for scheduler.readyCount > 0 && (maxSteps == 0 || stats.Steps < uint64(maxSteps)) {
 		if err := ctx.Err(); err != nil {
 			stats.Remaining = scheduler.readyCount
@@ -370,6 +521,11 @@ func (scheduler *Scheduler) Reap(identifier FiberID) error {
 	scheduler.clearFiberLocals(fiberIndex(identifier))
 	index := fiberIndex(identifier)
 	generation := slot.generation
+	if slot.tenant != "" {
+		if quota, ok := scheduler.tenantQuotas[slot.tenant]; ok && quota.MaxFibers > 0 {
+			scheduler.tenantFibers[slot.tenant]--
+		}
+	}
 	*slot = fiberSlot{generation: generation}
 	scheduler.free[scheduler.freeCount] = index
 	scheduler.freeCount++
