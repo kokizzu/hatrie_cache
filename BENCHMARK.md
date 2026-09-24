@@ -1,5 +1,23 @@
 # Benchmark
 
+## M052 Reusable Dataflow Plan View
+
+Command: `make benchmark-m052-plan-view`
+
+This benchmark compiles the same SQL query once, then repeats metadata
+inspection. The view path reads the memoized immutable plan; the comparison
+path calls `LowerDataflow()` and inspects the independent mutable copy.
+
+| Path | Samples (ns/op) | Heap | Allocations | Relative time |
+| --- | ---: | ---: | ---: | ---: |
+| `DataflowPlanView` | 14.72, 15.02, 15.07, 15.61, 16.20 | 0 B/op | 0 allocs/op | 1.00x |
+| `LowerDataflow` then inspect | 251.3, 251.7, 257.5, 258.9, 271.6 | 352 B/op | 5 allocs/op | 15.5x-18.5x |
+
+The new view is 15.5x-18.5x faster across the observed sample range, with 352 fewer bytes
+and 5 fewer allocations per inspection. Initialization is outside the timed
+loop; `LowerDataflow()` remains the correct comparison when a mutable copy is
+required.
+
 ## M064 Recursive Fixpoint Evaluation (Rejected)
 
 This opt-in Materialize-style recursive fixpoint scheduler was test-first

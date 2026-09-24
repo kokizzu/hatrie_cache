@@ -25691,3 +25691,42 @@ commit-t047-participant:
 
 push-t047-participant:
 	bash scripts/push-t047-participant.sh
+.PHONY: test-m052-plan-view
+
+test-m052-plan-view:
+	bash scripts/test-m052-plan-view.sh
+.PHONY: format-m052-plan-view
+
+format-m052-plan-view:
+	bash scripts/format-m052-plan-view.sh
+
+.PHONY: benchmark-m052-plan-view
+
+benchmark-m052-plan-view:
+	bash scripts/benchmark-m052-plan-view.sh
+.PHONY: test-m052-plan-view-package
+test-m052-plan-view-package:
+	bash ./scripts/test-m052-plan-view-package.sh
+
+.PHONY: race-m052-plan-view
+race-m052-plan-view:
+	bash ./scripts/race-m052-plan-view.sh
+
+.PHONY: vet-m052-plan-view
+vet-m052-plan-view:
+	bash ./scripts/vet-m052-plan-view.sh
+.PHONY: review-m052-plan-view
+review-m052-plan-view:
+	bash ./scripts/review-m052-plan-view.sh
+
+.PHONY: stage-m052-plan-view
+stage-m052-plan-view:
+	bash ./scripts/stage-m052-plan-view.sh
+
+.PHONY: commit-m052-plan-view
+commit-m052-plan-view:
+	bash ./scripts/commit-m052-plan-view.sh
+
+.PHONY: push-m052-plan-view
+push-m052-plan-view:
+	bash ./scripts/push-m052-plan-view.sh

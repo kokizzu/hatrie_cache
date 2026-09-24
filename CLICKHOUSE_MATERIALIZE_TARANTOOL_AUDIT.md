@@ -14,6 +14,14 @@ implementation ledger, not a claim that every idea is desirable here.
 Status uses the source catalog: `[x]` adopted or verified, `[ ]` open
 or intentionally deferred, and `[-]` rejected or rolled back.
 
+### M052c Reusable Dataflow Plan View
+
+- [x] M052c exposes an importable read-only view over a compiled SQL query's
+  memoized dataflow plan. It avoids mutable slice clones for metadata-only
+  inspection while preserving `LowerDataflow()` for callers that need an
+  independent mutable copy. See
+  [M052_REUSABLE_DATAFLOW_PLAN_VIEW.md](M052_REUSABLE_DATAFLOW_PLAN_VIEW.md).
+
 ## ClickHouse (50 ideas)
 - [x] C001 Column-oriented storage for analytical values - local columnar tables cover the compatible case.
 - [x] C002 Read only referenced columns - SQL projection pruning is present.
