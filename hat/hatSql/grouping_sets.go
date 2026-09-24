@@ -104,11 +104,11 @@ func sqlExpandGroupingSets(query *sqlQuery) error {
 	if len(query.unions) != 0 {
 		return fmt.Errorf("GROUPING SETS, ROLLUP, and CUBE cannot be combined with set operations")
 	}
-	template := cloneSQLQuery(query)
+	template := cloneSQLGroupingSetTemplate(query)
 	for index, groupingSet := range query.groupingSets {
 		branch := query
 		if index != 0 {
-			branch = cloneSQLQuery(template)
+			branch = cloneSQLGroupingSetBranch(template)
 		}
 		branch.groupBy = cloneSQLExprs(groupingSet)
 		branch.groupingSets = nil
@@ -122,6 +122,44 @@ func sqlExpandGroupingSets(query *sqlQuery) error {
 		}
 	}
 	return nil
+}
+
+// cloneSQLGroupingSetTemplate copies the mutable expression state needed to
+// build grouping branches while retaining the source and relational plan
+// objects shared by every branch.
+func cloneSQLGroupingSetTemplate(source *sqlQuery) *sqlQuery {
+	if source == nil {
+		return nil
+	}
+	query := cloneSQLGroupingSetBranch(source)
+	query.groupingSets = cloneSQLGroupingSets(source.groupingSets)
+	query.groupingDimensions = cloneSQLExprs(source.groupingDimensions)
+	return query
+}
+
+// cloneSQLGroupingSetBranch keeps the parsed source plan shared and clones
+// only fields rewritten for one grouping set. The shared fields are immutable
+// during grouping expansion and execution.
+func cloneSQLGroupingSetBranch(source *sqlQuery) *sqlQuery {
+	if source == nil {
+		return nil
+	}
+	query := *source
+	query.selects = make([]sqlSelectItem, len(source.selects))
+	for index, item := range source.selects {
+		query.selects[index] = item
+		query.selects[index].expr = cloneSQLExpr(item.expr)
+	}
+	query.groupBy = cloneSQLExprs(source.groupBy)
+	query.groupingSets = nil
+	query.groupingDimensions = nil
+	query.having = cloneSQLExpr(source.having)
+	query.orderBy = cloneSQLOrders(source.orderBy)
+	if source.limitBy != nil {
+		query.limitBy = &sqlLimitBy{limit: source.limitBy.limit, expressions: cloneSQLExprs(source.limitBy.expressions)}
+	}
+	query.unions = nil
+	return &query
 }
 
 func sqlRewriteGroupingIdentifiers(query *sqlQuery, groupingSet, dimensions []sqlExpr) error {

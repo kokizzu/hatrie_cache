@@ -22331,6 +22331,50 @@ Raw output after the change:
 4354967 ns/op 192827 B/op 20154 allocs/op
 ```
 
+## CH-041 grouping branch plan sharing
+
+The pre-change comparison used commit `4855231c`; the post-change samples used
+the current worktree. Ten samples were collected on an AMD Ryzen 9 5950X.
+
+| Workload | Before | After | Improvement |
+| --- | ---: | ---: | ---: |
+| One grouping branch construction | 23,162 ns/op, 30,128 B/op, 274 allocs/op | 2,566 ns/op, 4,512 B/op, 6 allocs/op | 9.03x faster, 6.68x less temporary memory, 45.67x fewer allocations |
+| 3-set `GROUPING SETS` query | 40,402 ns/op, 28,430 B/op, 242 allocs/op | 38,329 ns/op, 28,429 B/op, 242 allocs/op | 1.05x faster |
+| 16-set `CUBE` query | 900,465 ns/op, 395,735 B/op, 6,757 allocs/op | 854,742 ns/op, 395,720 B/op, 6,757 allocs/op | 1.05x faster |
+
+Raw 16-set `CUBE` samples, before:
+
+```text
+889051 ns/op 395737 B/op 6757 allocs/op
+943397 ns/op 395731 B/op 6757 allocs/op
+875087 ns/op 395720 B/op 6757 allocs/op
+907464 ns/op 395721 B/op 6757 allocs/op
+981556 ns/op 395744 B/op 6757 allocs/op
+921767 ns/op 395735 B/op 6757 allocs/op
+930504 ns/op 395730 B/op 6757 allocs/op
+890919 ns/op 395739 B/op 6757 allocs/op
+893465 ns/op 395748 B/op 6757 allocs/op
+848968 ns/op 395728 B/op 6757 allocs/op
+```
+
+Raw 16-set `CUBE` samples, after:
+
+```text
+865630 ns/op 395717 B/op 6757 allocs/op
+858928 ns/op 395724 B/op 6757 allocs/op
+848092 ns/op 395720 B/op 6757 allocs/op
+834456 ns/op 395708 B/op 6757 allocs/op
+871900 ns/op 395713 B/op 6757 allocs/op
+874978 ns/op 395722 B/op 6757 allocs/op
+823976 ns/op 395713 B/op 6757 allocs/op
+841886 ns/op 395718 B/op 6757 allocs/op
+854828 ns/op 395721 B/op 6757 allocs/op
+854656 ns/op 395726 B/op 6757 allocs/op
+```
+
+The full report and limitations are in
+[CH041_GROUPING_PLAN_SHARING.md](CH041_GROUPING_PLAN_SHARING.md).
+
 ## CH-041 grouping identifiers
 
 The workload uses three input rows and the same six-row `GROUPING SETS` result

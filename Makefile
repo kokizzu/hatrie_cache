@@ -25908,3 +25908,41 @@ commit-ch037-nested-array-join:
 .PHONY: push-ch037-nested-array-join
 push-ch037-nested-array-join:
 	bash scripts/push-ch037-nested-array-join.sh
+.PHONY: inspect-next14-rtree
+inspect-next14-rtree:
+	bash scripts/inspect-next14-rtree.sh
+.PHONY: test-ch041-grouping-plan
+test-ch041-grouping-plan:
+	bash scripts/test-ch041-grouping-plan.sh
+
+.PHONY: format-ch041-grouping-plan
+format-ch041-grouping-plan:
+	bash scripts/format-ch041-grouping-plan.sh
+
+.PHONY: benchmark-ch041-grouping-plan
+benchmark-ch041-grouping-plan:
+	bash scripts/benchmark-ch041-grouping-plan.sh
+
+.PHONY: benchmark-ch041-grouping-plan-comparison
+benchmark-ch041-grouping-plan-comparison:
+	bash scripts/benchmark-ch041-grouping-plan-comparison.sh
+
+.PHONY: race-ch041-grouping-plan
+race-ch041-grouping-plan:
+	bash scripts/race-ch041-grouping-plan.sh
+
+.PHONY: vet-ch041-grouping-plan
+vet-ch041-grouping-plan:
+	bash scripts/vet-ch041-grouping-plan.sh
+
+.PHONY: review-ch041-grouping-plan
+review-ch041-grouping-plan:
+	bash scripts/review-ch041-grouping-plan.sh
+
+.PHONY: commit-ch041-grouping-plan
+commit-ch041-grouping-plan:
+	bash scripts/commit-ch041-grouping-plan.sh
+
+.PHONY: push-ch041-grouping-plan
+push-ch041-grouping-plan:
+	bash scripts/push-ch041-grouping-plan.sh
