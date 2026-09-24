@@ -25408,3 +25408,38 @@ vet-m046-json-topn:
 .PHONY: test-m046-package
 test-m046-package:
 	bash ./scripts/test-m046-package.sh
+.PHONY: format-m047
+format-m047:
+	bash ./scripts/format-m047.sh
+
+.PHONY: test-m047
+test-m047:
+	bash ./scripts/test-m047.sh
+
+.PHONY: benchmark-m047
+benchmark-m047:
+	bash ./scripts/benchmark-m047.sh
+
+.PHONY: test-m047-package
+test-m047-package:
+	bash ./scripts/test-m047-package.sh
+
+.PHONY: race-m047
+race-m047:
+	bash ./scripts/race-m047.sh
+
+.PHONY: vet-m047
+vet-m047:
+	bash ./scripts/vet-m047.sh
+
+.PHONY: verify-m047-docs
+verify-m047-docs:
+	bash ./scripts/verify-m047-docs.sh
+
+.PHONY: verify-m047-diff
+verify-m047-diff:
+	bash ./scripts/verify-m047-diff.sh
+
+.PHONY: deliver-m047
+deliver-m047:
+	bash ./scripts/deliver-m047.sh

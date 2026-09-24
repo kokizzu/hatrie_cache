@@ -28153,6 +28153,34 @@ BenchmarkM046JSONSubcolumnTopN/candidate-32    700  1705018 ns/op    57728 B/op 
 See [M046_JSON_SUBCOLUMN_TOPN.md](M046_JSON_SUBCOLUMN_TOPN.md) for scope,
 fallback rules, correctness tests, and interpretation of the measurements.
 
+<a id="m047-typed-json-subcolumn-group-by"></a>
+## M047 Typed JSON `GROUP BY`
+
+This measures typed scalar `GROUP BY JSON_VALUE(...)` with `COUNT(*)` over
+10,000 rows and 128 groups. Three `-count=3` samples were collected on an AMD
+Ryzen 9 5950X Linux `amd64` host. The optimized path keeps compact group state
+instead of decoding every JSON document; unsupported grouped query shapes still
+use the existing executor.
+
+| Variant | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Legacy row JSON control | 19,464,939 | 19,194,917 | 172,147 | 1.00x |
+| Typed JSON grouped path | 786,329 | 70,020 | 439 | 24.8x faster, 274x lower measured bytes, 392x fewer allocations |
+
+Raw output from `make benchmark-m047`:
+
+```text
+BenchmarkM047TypedJSONSubcolumnGroupByCount/legacy-row-json-32         61  19464939 ns/op 19195038 B/op 172147 allocs/op
+BenchmarkM047TypedJSONSubcolumnGroupByCount/legacy-row-json-32         64  19448287 ns/op 19194917 B/op 172147 allocs/op
+BenchmarkM047TypedJSONSubcolumnGroupByCount/legacy-row-json-32         55  19488699 ns/op 19194721 B/op 172146 allocs/op
+BenchmarkM047TypedJSONSubcolumnGroupByCount/typed-subcolumn-32       1500    786329 ns/op    70020 B/op    439 allocs/op
+BenchmarkM047TypedJSONSubcolumnGroupByCount/typed-subcolumn-32       1588    788974 ns/op    70020 B/op    439 allocs/op
+BenchmarkM047TypedJSONSubcolumnGroupByCount/typed-subcolumn-32       1477    776238 ns/op    70019 B/op    439 allocs/op
+```
+
+See [M047_TYPED_JSON_GROUP.md](M047_TYPED_JSON_GROUP.md) for the supported
+shape, governance behavior, and correctness coverage.
+
 <a id="ch-031-automatic-typed-json-subcolumn-promotion"></a>
 ## CH-031 Automatic Typed JSON Subcolumn Promotion
 

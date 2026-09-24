@@ -127,6 +127,230 @@ func sqlColumnarJSONSubcolumnScanPlan(q *sqlQuery, outer *sqlExecRow) (fields []
 	return fields, paths, true
 }
 
+type sqlColumnarJSONSubcolumnGroupAggregatePlan struct {
+	fields      []string
+	paths       []ColumnarJSONSubcolumnRequest
+	group       sqlExpr
+	groupSelect []bool
+	countSelect []bool
+}
+
+func sqlColumnarJSONSubcolumnExprFields(expr sqlExpr, alias string, add func(string)) bool {
+	switch expr.kind {
+	case "literal":
+		return true
+	case "field":
+		if expr.qualifier != "" && expr.qualifier != alias {
+			return false
+		}
+		add(expr.name)
+		return true
+	case "func":
+		_, ok := sqlColumnarJSONSubcolumnPath(expr, alias)
+		return ok
+	case "binary":
+		if expr.left == nil || !sqlColumnarJSONSubcolumnExprFields(*expr.left, alias, add) {
+			return false
+		}
+		if expr.op == "IS NULL" || expr.op == "IS NOT NULL" {
+			return true
+		}
+		return expr.right != nil && sqlColumnarJSONSubcolumnExprFields(*expr.right, alias, add)
+	case "in":
+		if expr.left == nil || len(expr.args) == 0 || !sqlColumnarJSONSubcolumnExprFields(*expr.left, alias, add) {
+			return false
+		}
+		for _, argument := range expr.args {
+			if argument.kind != "literal" {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func sqlColumnarJSONSubcolumnSamePath(left, right sqlExpr, alias string) bool {
+	if left.kind != "func" || right.kind != "func" || left.name != "JSON_VALUE" || right.name != "JSON_VALUE" {
+		return false
+	}
+	leftPath, leftOK := sqlColumnarJSONSubcolumnPath(left, alias)
+	rightPath, rightOK := sqlColumnarJSONSubcolumnPath(right, alias)
+	return leftOK && rightOK && leftPath == rightPath
+}
+
+func sqlColumnarJSONSubcolumnCountStar(expr sqlExpr) bool {
+	return expr.kind == "func" && expr.name == "COUNT" && (len(expr.args) == 0 || len(expr.args) == 1 && expr.args[0].kind == "star")
+}
+
+func sqlColumnarJSONSubcolumnGroupAggregatePlanFor(q *sqlQuery, outer *sqlExecRow) (sqlColumnarJSONSubcolumnGroupAggregatePlan, bool) {
+	if q == nil || outer != nil || q.from == nil || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.unions) != 0 || len(q.groupBy) != 1 || len(q.groupingSets) != 0 || q.having.kind != "" || q.distinct || len(q.orderBy) != 0 || q.limitBy != nil || q.sample != nil || q.prewhere.kind != "" || sqlQueryHasWindow(q) || sqlQueryHasSubqueryExpression(q) || len(q.selects) == 0 {
+		return sqlColumnarJSONSubcolumnGroupAggregatePlan{}, false
+	}
+	if q.groupBy[0].name != "JSON_VALUE" {
+		return sqlColumnarJSONSubcolumnGroupAggregatePlan{}, false
+	}
+	groupPath, ok := sqlColumnarJSONSubcolumnPath(q.groupBy[0], q.from.alias)
+	if !ok {
+		return sqlColumnarJSONSubcolumnGroupAggregatePlan{}, false
+	}
+	plan := sqlColumnarJSONSubcolumnGroupAggregatePlan{
+		group:       q.groupBy[0],
+		groupSelect: make([]bool, len(q.selects)),
+		countSelect: make([]bool, len(q.selects)),
+	}
+	seenFields := make(map[string]struct{})
+	addField := func(field string) {
+		if _, found := seenFields[field]; found {
+			return
+		}
+		seenFields[field] = struct{}{}
+		plan.fields = append(plan.fields, field)
+	}
+	seenPaths := make(map[string]struct{})
+	addPath := func(path ColumnarJSONSubcolumnRequest) {
+		key := path.Field + "\x00" + path.Path
+		if _, found := seenPaths[key]; found {
+			return
+		}
+		seenPaths[key] = struct{}{}
+		plan.paths = append(plan.paths, path)
+	}
+	addPath(groupPath)
+	if q.where.kind != "" {
+		if !sqlColumnarJSONSubcolumnExprSupported(q.where, q.from.alias, addPath) || !sqlColumnarJSONSubcolumnExprFields(q.where, q.from.alias, addField) {
+			return sqlColumnarJSONSubcolumnGroupAggregatePlan{}, false
+		}
+	}
+	countFound := false
+	for index, item := range q.selects {
+		switch {
+		case sqlColumnarJSONSubcolumnSamePath(item.expr, q.groupBy[0], q.from.alias):
+			plan.groupSelect[index] = true
+		case sqlColumnarJSONSubcolumnCountStar(item.expr):
+			plan.countSelect[index] = true
+			countFound = true
+		default:
+			return sqlColumnarJSONSubcolumnGroupAggregatePlan{}, false
+		}
+	}
+	if !countFound {
+		return sqlColumnarJSONSubcolumnGroupAggregatePlan{}, false
+	}
+	return plan, true
+}
+
+type sqlColumnarJSONSubcolumnGroupAggregateState struct {
+	key   interface{}
+	count int64
+}
+
+func sqlColumnarJSONSubcolumnGroupScalar(value interface{}) (interface{}, bool) {
+	switch value.(type) {
+	case nil, int64, float64, string, bool:
+		return value, true
+	default:
+		return nil, false
+	}
+}
+
+func sqlColumnarJSONSubcolumnGroupMemoryBytes(groups []*sqlColumnarJSONSubcolumnGroupAggregateState) int {
+	bytes := len(groups) * 64
+	for _, group := range groups {
+		switch value := group.key.(type) {
+		case string:
+			bytes += len(value)
+		default:
+			_ = value
+			bytes += 8
+		}
+	}
+	return bytes
+}
+
+func executeSQLColumnarJSONSubcolumnGroupAggregate(q *sqlQuery, batch ColumnarBatch, plan sqlColumnarJSONSubcolumnGroupAggregatePlan, functions SQLFunctionResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics, started time.Time) (SQLQueryResult, bool, error) {
+	groups := make([]*sqlColumnarJSONSubcolumnGroupAggregateState, 0)
+	byKey := make(map[interface{}]*sqlColumnarJSONSubcolumnGroupAggregateState)
+	for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
+		if control != nil {
+			if err := control.check(); err != nil {
+				return SQLQueryResult{}, true, err
+			}
+		}
+		row := newSQLColumnarSourceExecRow(q.from.alias, &batch, rowIndex)
+		if q.where.kind != "" {
+			condition, err := evalSQLStreamExpr(q.where, row, functions)
+			if err != nil {
+				return SQLQueryResult{}, true, err
+			}
+			if !sqlTruthy(condition) {
+				continue
+			}
+		}
+		value, present, supported := sqlColumnarJSONSubcolumnValue(plan.group, row)
+		if !supported {
+			return SQLQueryResult{}, false, nil
+		}
+		if !present {
+			value = nil
+		}
+		key, keySupported := sqlColumnarJSONSubcolumnGroupScalar(value)
+		if !keySupported {
+			return SQLQueryResult{}, false, nil
+		}
+		group, found := byKey[key]
+		if !found {
+			if control != nil && control.options.MaxGroupKeys > 0 && len(groups) >= control.options.MaxGroupKeys {
+				return SQLQueryResult{}, true, fmt.Errorf("SQL group key limit exceeded: query produced %d groups, maximum %d", len(groups)+1, control.options.MaxGroupKeys)
+			}
+			group = &sqlColumnarJSONSubcolumnGroupAggregateState{key: key}
+			byKey[key] = group
+			groups = append(groups, group)
+		}
+		group.count++
+		if control != nil && control.options.MaxGroupRowsPerKey > 0 && group.count > int64(control.options.MaxGroupRowsPerKey) {
+			return SQLQueryResult{}, true, fmt.Errorf("SQL group row limit exceeded: group contains %d rows, maximum %d", group.count, control.options.MaxGroupRowsPerKey)
+		}
+	}
+	if control != nil && (control.options.MaxGroupBytes > 0 || control.operatorMemory != nil) {
+		groupBytes := sqlColumnarJSONSubcolumnGroupMemoryBytes(groups)
+		if err := control.observeOperatorMemory("GROUP BY", groupBytes); err != nil {
+			return SQLQueryResult{}, true, err
+		}
+		if control.options.MaxGroupBytes > 0 && groupBytes > control.options.MaxGroupBytes {
+			return SQLQueryResult{}, true, fmt.Errorf("SQL group memory budget exceeded: maximum %d bytes", control.options.MaxGroupBytes)
+		}
+	}
+	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: make([]SQLRow, 0, len(groups))}
+	for position, group := range groups {
+		if position < q.offset || q.limit >= 0 && len(result.Rows) >= q.limit {
+			continue
+		}
+		row := make(SQLRow, len(q.selects))
+		for index := range q.selects {
+			switch {
+			case plan.groupSelect[index]:
+				row[result.Columns[index]] = group.key
+			case plan.countSelect[index]:
+				row[result.Columns[index]] = group.count
+			}
+		}
+		result.Rows = append(result.Rows, row)
+	}
+	if control != nil && control.options.MaxResultBytes > 0 && sqlRowsBytes(result.Rows) > control.options.MaxResultBytes {
+		return SQLQueryResult{}, true, fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+	}
+	if metrics != nil {
+		pathNames := make([]string, len(plan.paths))
+		for index, path := range plan.paths {
+			pathNames[index] = path.Field + path.Path
+		}
+		metrics.record("COLUMNAR JSON SUBCOLUMN GROUP AGGREGATE", strings.Join(pathNames, ","), batch.Rows, len(result.Rows), started)
+	}
+	return result, true, nil
+}
+
 func sqlColumnarJSONSubcolumnTopNPath(q *sqlQuery) (ColumnarJSONSubcolumnRequest, bool) {
 	if q == nil || len(q.orderBy) != 1 || q.limit < 0 || q.limitBy != nil || sqlQueryHasWithFill(q) {
 		return ColumnarJSONSubcolumnRequest{}, false
@@ -142,9 +366,16 @@ func executeSQLColumnarJSONSubcolumnScan(q *sqlQuery, resolver SQLSourceResolver
 	if !ok {
 		return SQLQueryResult{}, false, nil
 	}
-	fields, paths, ok := sqlColumnarJSONSubcolumnScanPlan(q, outer)
-	if !ok {
-		return SQLQueryResult{}, false, nil
+	groupPlan, grouped := sqlColumnarJSONSubcolumnGroupAggregatePlanFor(q, outer)
+	var fields []string
+	var paths []ColumnarJSONSubcolumnRequest
+	if grouped {
+		fields, paths = groupPlan.fields, groupPlan.paths
+	} else {
+		fields, paths, ok = sqlColumnarJSONSubcolumnScanPlan(q, outer)
+		if !ok {
+			return SQLQueryResult{}, false, nil
+		}
 	}
 	started := time.Now()
 	batch, _, available, err := subcolumns.ResolveSQLColumnarJSONSubcolumns(q.from.kind, q.from.key, fields, paths)
@@ -171,6 +402,10 @@ func executeSQLColumnarJSONSubcolumnScan(q *sqlQuery, resolver SQLSourceResolver
 		if err := column.Validate(batch.Rows); err != nil {
 			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar JSON subcolumn source %q path %s%s: %w", q.from.key, path.Field, path.Path, err)
 		}
+	}
+	if grouped {
+		functions, _ := resolver.(SQLFunctionResolver)
+		return executeSQLColumnarJSONSubcolumnGroupAggregate(q, batch, groupPlan, functions, control, metrics, started)
 	}
 	if _, ordered := sqlColumnarJSONSubcolumnTopNPath(q); ordered {
 		functions, _ := resolver.(SQLFunctionResolver)

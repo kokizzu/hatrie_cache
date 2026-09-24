@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+for path in M047_TYPED_JSON_GROUP.md BENCHMARK.md PRODUCT_IDEA_GAPS.md ADOPTED_QUERY_ENGINE_IDEAS.md; do
+	test -f "$path"
+done
+rg -q 'M047 Typed JSON' BENCHMARK.md
+rg -q 'M047_TYPED_JSON_GROUP.md' BENCHMARK.md PRODUCT_IDEA_GAPS.md ADOPTED_QUERY_ENGINE_IDEAS.md
+rg -q '24\.8x faster' BENCHMARK.md M047_TYPED_JSON_GROUP.md ADOPTED_QUERY_ENGINE_IDEAS.md
