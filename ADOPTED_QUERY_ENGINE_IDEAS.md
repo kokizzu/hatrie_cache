@@ -1080,3 +1080,8 @@ the declaration in ordinary and pipeline EXPLAIN plans, while
 the engine never prunes rows or rewrites source data from metadata alone. See
 [M039_PARTITION_ORDER_DECLARATIONS.md](M039_PARTITION_ORDER_DECLARATIONS.md) and
 [BENCHMARK.md](BENCHMARK.md#m-u39-partition-and-order-declarations).
+## M-U40: Source Schema Registry Integration
+
+| Source | Adopted idea | Implementation | Evidence |
+| --- | --- | --- | --- |
+| Materialize | Versioned source schema admission with bounded rollback | Importable `hatSchema.SourceSchemaRegistry` retains bounded source/version/fingerprint metadata, supports exact/backward/forward/full caller-supplied compatibility, atomically activates candidates, and rolls back to retained versions. It is opt-in and stores no raw schema or row data. | [M040_SOURCE_SCHEMA_REGISTRY.md](M040_SOURCE_SCHEMA_REGISTRY.md), [BENCHMARK.md#m-u40-source-schema-registry](BENCHMARK.md#m-u40-source-schema-registry) |

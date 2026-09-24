@@ -35941,3 +35941,28 @@ The declaration does not prune or rewrite rows, so any source-side gain must be
 measured by the connector implementing `PartitionPruningSourceResolver`. Full
 semantics and fallback rules are in
 [M039_PARTITION_ORDER_DECLARATIONS.md](M039_PARTITION_ORDER_DECLARATIONS.md).
+## M-U40 Source Schema Registry
+
+Command:
+
+```text
+make benchmark-m040
+```
+
+Environment: Linux/amd64, AMD Ryzen 9 5950X 16-Core Processor, Go benchmark
+with `-benchmem -count=5`. The direct check is the pre-registry metadata
+equality baseline. Registry calls are opt-in control-plane operations.
+
+| Benchmark | Sample 1 ns/op | Sample 2 ns/op | Sample 3 ns/op | Sample 4 ns/op | Sample 5 ns/op | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Direct metadata equality | 3.732 | 3.653 | 3.699 | 3.643 | 3.772 | 3.699 | 0 | 0 |
+| Registry `Validate` | 70.32 | 64.20 | 67.71 | 66.49 | 65.83 | 66.49 | 0 | 0 |
+| Same-version `Activate` | 75.72 | 76.70 | 72.94 | 71.55 | 78.13 | 75.72 | 0 | 0 |
+| Lazy `NewSourceSchemaRegistry` | 84.00 | 83.25 | 76.76 | 66.75 | 67.87 | 76.76 | 160 | 2 |
+| Eager map allocation baseline | 7,651 | 6,030 | 6,899 | 6,526 | 7,585 | 6,899 | 54,608 | 5 |
+
+Relative to the direct equality baseline, registry validation is `18.0x` and
+same-version activation is `20.5x` slower, with no measured allocations. The
+lazy constructor uses `341x` fewer bytes than the isolated eager-map baseline.
+These are control-plane measurements; the registry is not automatically
+called from CDC row processing. The existing unguarded path remains unchanged.

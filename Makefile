@@ -25182,3 +25182,30 @@ vet-m039:
 
 commit-m039:
 	@bash scripts/commit-m039.sh
+.PHONY: format-m040
+format-m040:
+	bash scripts/format-m040.sh
+
+.PHONY: test-m040
+test-m040:
+	bash scripts/test-m040.sh
+
+.PHONY: benchmark-m040
+benchmark-m040:
+	bash scripts/benchmark-m040.sh
+
+.PHONY: race-m040
+race-m040:
+	bash scripts/race-m040.sh
+
+.PHONY: vet-m040
+vet-m040:
+	bash scripts/vet-m040.sh
+
+.PHONY: commit-m040
+commit-m040:
+	bash scripts/commit-m040.sh
+
+.PHONY: push-m040
+push-m040:
+	bash scripts/push-m040.sh

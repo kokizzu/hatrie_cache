@@ -4960,3 +4960,4 @@ tradeoffs.
 
 Run `make test-c241`, `make test-c241-package`, `make race-c241`,
 `make vet-c241`, and `make benchmark-c241` for focused verification.
+- Opt-in bounded source schema admission, compatibility validation, and retained-version rollback: use `hatSchema.SourceSchemaRegistry`; see [M040_SOURCE_SCHEMA_REGISTRY.md](M040_SOURCE_SCHEMA_REGISTRY.md) and [BENCHMARK.md#m-u40-source-schema-registry](BENCHMARK.md#m-u40-source-schema-registry).
