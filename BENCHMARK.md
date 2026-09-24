@@ -36546,3 +36546,37 @@ round trip. It adds no allocations and does not change the default legacy
 path. The isolated encoder costs about 2.92 ns more in this fixture; the
 end-to-end timing is scheduling-noise limited. Full API and compatibility
 details are in [TR043C_COMPACT_PEER_RESPONSE_SCHEMA.md](TR043C_COMPACT_PEER_RESPONSE_SCHEMA.md).
+<a id="mz-010-signed-subscription-wire-envelope"></a>
+## MZ-010 Signed SQL Subscription Wire Envelope
+
+This benchmark compares the same fixed subscription frame with and without
+the opt-in HMAC-SHA256 authentication suffix. The payload is 49 bytes, the
+unsigned frame is 88 bytes, and the authenticated frame is 120 bytes. Samples
+were collected on an AMD Ryzen 9 5950X, `linux/amd64`, with five samples.
+
+### Raw Samples
+
+| Benchmark | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| `UnsignedBaseline` | 48.67, 51.35, 52.74, 53.02, 52.77 | 96, 96, 96, 96, 96 | 1, 1, 1, 1, 1 |
+| `Seal` | 737.0, 703.8, 672.8, 693.7, 759.6 | 640, 640, 640, 640, 640 | 7, 7, 7, 7, 7 |
+| `Open` | 788.2, 761.7, 744.9, 718.4, 692.3 | 592, 592, 592, 592, 592 | 8, 8, 8, 8, 8 |
+
+### Median And Tradeoff
+
+| Comparison | Median ns/op | Median B/op | Median allocs/op | Result |
+| --- | ---: | ---: | ---: | --- |
+| Unsigned framing baseline | 52.74 | 96 | 1 | Baseline, 88 wire bytes |
+| HMAC-SHA256 seal | 703.8 | 640 | 7 | `13.34x` CPU and `6.67x` heap versus baseline |
+| HMAC-SHA256 open | 744.9 | 592 | 8 | `14.12x` CPU and `6.17x` heap versus baseline |
+
+Authentication adds 32 wire bytes and material CPU/allocation cost, so the
+envelope is deliberately opt-in for trust boundaries. Existing subscription
+and transport paths have no overhead unless callers explicitly seal and open
+the payload.
+
+The exact command used was:
+
+```sh
+make benchmark-mz010-subscription-envelope
+```

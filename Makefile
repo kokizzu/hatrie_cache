@@ -25845,3 +25845,34 @@ push-mz009-validity-index:
 
 format-mz009-validity-index:
 	bash scripts/format-mz009-validity-index.sh
+.PHONY: test-mz010-subscription-envelope
+test-mz010-subscription-envelope:
+	bash scripts/test-mz010-subscription-envelope.sh
+.PHONY: format-mz010-subscription-envelope
+format-mz010-subscription-envelope:
+	bash scripts/format-mz010-subscription-envelope.sh
+.PHONY: benchmark-mz010-subscription-envelope
+benchmark-mz010-subscription-envelope:
+	bash scripts/benchmark-mz010-subscription-envelope.sh
+.PHONY: race-mz010-subscription-envelope
+race-mz010-subscription-envelope:
+	bash scripts/race-mz010-subscription-envelope.sh
+
+.PHONY: vet-mz010-subscription-envelope
+vet-mz010-subscription-envelope:
+	bash scripts/vet-mz010-subscription-envelope.sh
+
+.PHONY: review-mz010-subscription-envelope
+review-mz010-subscription-envelope:
+	bash scripts/review-mz010-subscription-envelope.sh
+
+.PHONY: commit-mz010-subscription-envelope
+commit-mz010-subscription-envelope:
+	bash scripts/commit-mz010-subscription-envelope.sh
+
+.PHONY: push-mz010-subscription-envelope
+push-mz010-subscription-envelope:
+	bash scripts/push-mz010-subscription-envelope.sh
+.PHONY: test-mz010-subscription-envelope-package
+test-mz010-subscription-envelope-package:
+	bash scripts/test-mz010-subscription-envelope-package.sh

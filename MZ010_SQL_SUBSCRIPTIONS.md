@@ -82,6 +82,37 @@ mode. The returned `SQLSubscriptionStatement.Definition` can be passed to
 existing methods still perform query validation, dependency discovery, and
 source resolution.
 
+## Signed wire envelopes
+
+An external transport can opt into a bounded binary envelope when subscription
+payloads need integrity and origin authentication:
+
+```go
+wire, err := hatSql.SealSQLSubscriptionWireEnvelope(key, hatSql.SQLSubscriptionWireEnvelope{
+    Mode:           hatSql.SQLSubscriptionModeDifferential,
+    SubscriptionID: "people-live",
+    Sequence:       42,
+    Diff:           1,
+    Payload:        payload,
+})
+envelope, err := hatSql.OpenSQLSubscriptionWireEnvelope(key, wire)
+```
+
+The envelope uses a fixed header and HMAC-SHA256, verifies with a
+constant-time comparison, rejects empty or oversized keys, limits the
+subscription ID to 256 bytes and the payload to 16 MiB, and copies decoded
+payloads so they do not alias the input buffer. Snapshot envelopes require a
+zero differential weight. This API does not implicitly alter existing
+transports or provide key rotation; callers should manage key distribution and
+rotation outside the envelope.
+
+The measured five-sample medians on the repository benchmark are approximately
+52.7 ns/op and 96 B/op for unsigned framing, 703.8 ns/op and 640 B/op for
+sealing, and 744.9 ns/op and 592 B/op for opening. The authenticated frame adds
+32 bytes for the MAC and uses 7 allocations to seal or 8 to open versus one
+allocation for the unsigned baseline, so it is appropriate for integrity
+boundaries rather than a default hot path.
+
 ## Cost And Limits
 
 Automatic dependency discovery is opt-in and happens only when a subscription
@@ -92,6 +123,5 @@ AMD Ryzen 9 5950X benchmark, explicit dependencies had a median of about
 discovery had `8.78 us`, `8.1 KB`, and 32 allocations. Use explicit dependencies
 for hot churn of short-lived subscriptions or dynamic source graphs.
 
-This does not add cross-process transport or a signed network envelope. Those
-remain separate features so the current transport contracts are not changed
-implicitly.
+This does not add a cross-process transport, key rotation, or automatic
+integration with the current transport contracts; those remain caller-owned.
