@@ -11,6 +11,7 @@ git add -- \
 	hat/hatDataStructure/persistent_delete_bitmap_test.go \
 	hat/hatDataStructure/ch005_adaptive_delete_bitmap_test.go \
 	scripts/test-ch005-adaptive-delete-bitmap.sh \
+	scripts/test-ch005-data-structure.sh \
 	scripts/benchmark-ch005-adaptive-delete-bitmap.sh \
 	scripts/format-ch005-adaptive-delete-bitmap.sh \
 	scripts/race-ch005-adaptive-delete-bitmap.sh \

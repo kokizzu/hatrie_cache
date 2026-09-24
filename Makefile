@@ -26014,6 +26014,10 @@ push-ch042-columnar-dictionary-group:
 test-ch005-adaptive-delete-bitmap:
 	bash scripts/test-ch005-adaptive-delete-bitmap.sh
 
+.PHONY: test-ch005-data-structure
+test-ch005-data-structure:
+	bash scripts/test-ch005-data-structure.sh
+
 .PHONY: benchmark-ch005-adaptive-delete-bitmap
 benchmark-ch005-adaptive-delete-bitmap:
 	bash scripts/benchmark-ch005-adaptive-delete-bitmap.sh
