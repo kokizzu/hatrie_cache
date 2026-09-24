@@ -218,6 +218,9 @@ func sqlColumnarTwoLevelAggregatesSupported(projections []sqlOrderedGroupProject
 }
 
 func executeSQLColumnarSingleLevelGroupStates(q *sqlQuery, batch ColumnarBatch, projections []sqlOrderedGroupProjection, groupField string, match func(int) (bool, error), control *sqlExecutionControl) ([]sqlHashGroupAggregateState, int, error) {
+	if dictionary, ok := sqlColumnarDictionaryGroupField(batch, groupField, q.groupBy[0].collation); ok {
+		return executeSQLColumnarDictionaryGroupStates(q, batch, projections, groupField, dictionary, match, control)
+	}
 	states := make([]sqlHashGroupAggregateState, 0)
 	indexes := newSQLHashGroupAggregateIndexes()
 	selectionCapacity := sqlColumnarVectorGroupBlockRows
@@ -294,6 +297,9 @@ type sqlColumnarTwoLevelWorkerState struct {
 }
 
 func executeSQLColumnarTwoLevelGroupStates(q *sqlQuery, batch ColumnarBatch, projections []sqlOrderedGroupProjection, groupField string, match func(int) (bool, error), control *sqlExecutionControl, workers int) ([]sqlHashGroupAggregateState, int, error) {
+	if dictionary, ok := sqlColumnarDictionaryGroupField(batch, groupField, q.groupBy[0].collation); ok {
+		return executeSQLColumnarDictionaryTwoLevelGroupStates(q, batch, projections, groupField, dictionary, match, control, workers)
+	}
 	local := make([]sqlColumnarTwoLevelWorkerState, workers)
 	var wait sync.WaitGroup
 	wait.Add(workers)

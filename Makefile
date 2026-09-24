@@ -25946,3 +25946,34 @@ commit-ch041-grouping-plan:
 .PHONY: push-ch041-grouping-plan
 push-ch041-grouping-plan:
 	bash scripts/push-ch041-grouping-plan.sh
+# Temporary MZ-045 arrangement reuse inspection.
+.PHONY: inspect-next17-arrangement-reuse
+test-ch042-columnar-dictionary-group:
+	bash scripts/test-ch042-columnar-dictionary-group.sh
+
+benchmark-ch042-columnar-dictionary-group:
+	bash scripts/benchmark-ch042-columnar-dictionary-group.sh
+
+format-ch042-columnar-dictionary-group:
+	bash scripts/format-ch042-columnar-dictionary-group.sh
+
+test-ch042-columnar-dictionary-group-package:
+	bash scripts/test-ch042-columnar-dictionary-group-package.sh
+
+race-ch042-columnar-dictionary-group:
+	bash scripts/race-ch042-columnar-dictionary-group.sh
+
+vet-ch042-columnar-dictionary-group:
+	bash scripts/vet-ch042-columnar-dictionary-group.sh
+
+review-ch042-columnar-dictionary-group:
+	bash scripts/review-ch042-columnar-dictionary-group.sh
+
+stage-ch042-columnar-dictionary-group:
+	bash scripts/stage-ch042-columnar-dictionary-group.sh
+
+commit-ch042-columnar-dictionary-group:
+	bash scripts/commit-ch042-columnar-dictionary-group.sh
+
+push-ch042-columnar-dictionary-group:
+	bash scripts/push-ch042-columnar-dictionary-group.sh
