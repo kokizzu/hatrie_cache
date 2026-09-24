@@ -1,5 +1,7 @@
 # MZ-029 Spillable Arrangements
 
+Persisted reopen index details and recovery guidance: [MZ029_PERSISTED_INDEX.md](MZ029_PERSISTED_INDEX.md).
+
 `hatDataStructure.SpillableArrangement` is an opt-in local spill tier for
 large keyed byte payloads. It keeps the key and point-lookup metadata in RAM,
 retains recent value payloads up to a configured budget, and moves older

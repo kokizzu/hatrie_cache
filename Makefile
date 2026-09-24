@@ -26018,6 +26018,32 @@ test-ch005-adaptive-delete-bitmap:
 test-ch005-data-structure:
 	bash scripts/test-ch005-data-structure.sh
 
+.PHONY: inspect-mz029-spill
+
+.PHONY: test-mz029-persisted-index
+test-mz029-persisted-index:
+	bash scripts/test-mz029-persisted-index.sh
+
+review-mz029-persisted-index:
+	bash scripts/review-mz029-persisted-index.sh
+
+stage-mz029-persisted-index:
+	bash scripts/stage-mz029-persisted-index.sh
+
+commit-mz029-persisted-index:
+	bash scripts/commit-mz029-persisted-index.sh
+
+push-mz029-persisted-index:
+	bash scripts/push-mz029-persisted-index.sh
+
+.PHONY: benchmark-mz029-persisted-index
+benchmark-mz029-persisted-index:
+	bash scripts/benchmark-mz029-persisted-index.sh
+
+.PHONY: format-mz029-persisted-index
+format-mz029-persisted-index:
+	bash scripts/format-mz029-persisted-index.sh
+
 .PHONY: benchmark-ch005-adaptive-delete-bitmap
 benchmark-ch005-adaptive-delete-bitmap:
 	bash scripts/benchmark-ch005-adaptive-delete-bitmap.sh

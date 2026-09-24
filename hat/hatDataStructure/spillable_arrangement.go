@@ -86,6 +86,7 @@ type SpillableArrangement struct {
 	hotBytes       int64
 	diskBytes      int64
 	spillRecords   uint64
+	persistedIndex bool
 	coldEntries    int
 	generation     uint64
 	entries        map[string]*spillableArrangementEntry
@@ -193,9 +194,11 @@ func OpenSpillableArrangement(path string, options SpillableArrangementOptions) 
 		maxValueBytes: options.MaxValueBytes,
 		entries:       make(map[string]*spillableArrangementEntry),
 	}
-	if err := arrangement.recoverSegment(info.Size()); err != nil {
-		_ = file.Close()
-		return nil, err
+	if !arrangement.restorePersistedIndex(info.Size()) {
+		if err := arrangement.recoverSegment(info.Size()); err != nil {
+			_ = file.Close()
+			return nil, err
+		}
 	}
 	return arrangement, nil
 }
@@ -415,6 +418,7 @@ func (arrangement *SpillableArrangement) Flush() error {
 		return err
 	}
 	arrangement.maybeCompactQueueLocked()
+	_ = arrangement.persistIndexLocked()
 	return nil
 }
 
@@ -428,7 +432,11 @@ func (arrangement *SpillableArrangement) Sync() error {
 	if err := arrangement.ensureOpenLocked(); err != nil {
 		return err
 	}
-	return arrangement.file.Sync()
+	if err := arrangement.file.Sync(); err != nil {
+		return err
+	}
+	_ = arrangement.persistIndexLocked()
+	return nil
 }
 
 // Compact rewrites live cold values into a fresh segment and discards stale
@@ -485,6 +493,9 @@ func (arrangement *SpillableArrangement) Compact() error {
 	if err := temporary.Close(); err != nil {
 		return err
 	}
+	if err := invalidateSpillableArrangementIndex(arrangement.spillPath); err != nil {
+		return err
+	}
 	if err := arrangement.file.Close(); err != nil {
 		return err
 	}
@@ -505,6 +516,7 @@ func (arrangement *SpillableArrangement) Compact() error {
 	for _, entry := range cold {
 		entry.ref = pending[entry.key]
 	}
+	_ = arrangement.persistIndexLocked()
 	return nil
 }
 
@@ -567,6 +579,18 @@ func (arrangement *SpillableArrangement) SpillPath() string {
 	arrangement.mu.RLock()
 	defer arrangement.mu.RUnlock()
 	return arrangement.spillPath
+}
+
+// SpillIndexPath returns the advisory persisted index path. Backups that
+// retain the segment may include this file; OpenSpillableArrangement safely
+// rebuilds the index from records when it is absent or invalid.
+func (arrangement *SpillableArrangement) SpillIndexPath() string {
+	if arrangement == nil {
+		return ""
+	}
+	arrangement.mu.RLock()
+	defer arrangement.mu.RUnlock()
+	return spillableArrangementIndexPath(arrangement.spillPath)
 }
 
 // Close closes the spill segment. An arrangement created without Directory

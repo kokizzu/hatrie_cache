@@ -501,6 +501,12 @@ wiring remain caller-owned. See
 and [BENCHMARK.md#ch-045-global-in-global-join-broadcast-planning](BENCHMARK.md#ch-045-global-in-global-join-broadcast-planning).
 ### Materialize MZ-029: Spillable Arrangements
 
+Implemented as an opt-in bounded local spill tier with binary records, CRC
+validation, explicit compaction, and a persisted advisory reopen index. The
+sidecar is checksummed and bounded; invalid or missing indexes fall back to a
+segment scan. See [MZ029_PERSISTED_INDEX.md](MZ029_PERSISTED_INDEX.md) for
+backup, restore, and benchmark details.
+
 Implemented as the imported `hatDataStructure.SpillableArrangement` opt-in
 local tier. It bounds retained value payloads, keeps O(1) key metadata in RAM,
 uses CRC-protected binary records, enforces optional disk limits, supports

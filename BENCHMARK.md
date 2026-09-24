@@ -27165,6 +27165,20 @@ BenchmarkMZ01OpenDurableSegment-32    15225   78443 ns/op  75256 B/op  538 alloc
 ```
 
 <a id="mz-029-spillable-arrangement"></a>
+
+#### MZ-029 persisted reopen index
+
+The persisted sidecar avoids rescanning 4,096 spilled entries on reopen while
+retaining a scan fallback for missing or invalid indexes. Median of five
+`go test -benchmem` samples on AMD Ryzen 9 5950X, Linux amd64:
+
+| implementation | reopen | heap bytes/op | allocs/op | relative |
+| --- | ---: | ---: | ---: | ---: |
+| segment scan baseline | 1,122,162 ns | 822,813 B | 8,252 | 1.00x |
+| pooled persisted index | 545,588 ns | 582,426 B | 8,225 | 2.06x faster; 29.2% less heap |
+
+Raw samples and recovery/backup semantics are in
+[MZ029_PERSISTED_INDEX.md](MZ029_PERSISTED_INDEX.md).
 ## Materialize MZ-029 Spillable Arrangements
 
 Both paths copy a 256-byte value on every read. The workload loads 4,096 keys
