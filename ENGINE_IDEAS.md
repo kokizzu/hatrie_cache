@@ -84,7 +84,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | ID | Candidate not yet complete here | Current gap and likely value | Initial risk |
 | --- | --- | --- | --- |
 | MZ-001 | Durable persist shards | No durable collection shard abstraction that can hydrate without rereading the source. | High |
-| MZ-002 | Snapshot frontier gating | Source reads do not expose a public readiness frontier that blocks until a consistent snapshot. | Medium |
+| MZ-002 | Snapshot frontier gating | Partially adopted: opt-in `hatPipeline.SnapshotFrontierGate` validates a fixed set of named source frontiers and waits for every source to close through one target before returning an isolated deterministic snapshot; durable source-read integration remains caller-owned. | Medium |
 | MZ-003 | Hydration progress and resume | Historical state rebuild has no public byte/record progress or resumable checkpoint. | Medium |
 | MZ-004 | Logical compaction controls | Partially adopted: opt-in `hatPipeline.FrontierCompactionScheduler` and `FrontierRetentionRegistry.WaitUntilSafe` gate caller-owned history removal behind source frontiers and read holds; per-collection policy, durable jobs, and automatic prioritization remain open. | High |
 | MZ-005 | Since/upper frontier introspection | Partially adopted: `TypedTableChangeReadHold` exposes bounded `Since`/`Upper` frontiers for multi-call changefeed readers and protects compaction; frontiers for every maintained object remain deferred. | Medium |

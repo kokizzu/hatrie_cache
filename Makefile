@@ -26343,3 +26343,31 @@ commit-tt027-generated-columns:
 .PHONY: push-tt027-generated-columns
 push-tt027-generated-columns:
 	@bash scripts/push-tt027-generated-columns.sh
+
+.PHONY: benchmark-mz002-snapshot-frontier
+benchmark-mz002-snapshot-frontier:
+	@bash scripts/benchmark-mz002-snapshot-frontier.sh
+
+.PHONY: test-mz002-snapshot-frontier
+test-mz002-snapshot-frontier:
+	@bash scripts/test-mz002-snapshot-frontier.sh
+
+.PHONY: format-mz002-snapshot-frontier
+format-mz002-snapshot-frontier:
+	@bash scripts/format-mz002-snapshot-frontier.sh
+
+.PHONY: verify-mz002-snapshot-frontier
+verify-mz002-snapshot-frontier:
+	@bash scripts/verify-mz002-snapshot-frontier.sh
+
+.PHONY: stage-mz002-snapshot-frontier
+stage-mz002-snapshot-frontier:
+	@bash scripts/stage-mz002-snapshot-frontier.sh
+
+.PHONY: commit-mz002-snapshot-frontier
+commit-mz002-snapshot-frontier:
+	@bash scripts/commit-mz002-snapshot-frontier.sh
+
+.PHONY: push-mz002-snapshot-frontier
+push-mz002-snapshot-frontier:
+	@bash scripts/push-mz002-snapshot-frontier.sh
