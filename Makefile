@@ -26423,3 +26423,31 @@ commit-tt029-before-trigger:
 .PHONY: push-tt029-before-trigger
 push-tt029-before-trigger:
 	@bash scripts/push-tt029-before-trigger.sh
+.PHONY: test-tt013-range-cache
+test-tt013-range-cache:
+	@bash scripts/test-tt013-range-cache.sh
+
+.PHONY: benchmark-tt013-range-cache
+benchmark-tt013-range-cache:
+	@bash scripts/benchmark-tt013-range-cache.sh
+.PHONY: format-tt013-range-cache
+format-tt013-range-cache:
+	@bash scripts/format-tt013-range-cache.sh
+.PHONY: benchmark-tt013-range-cache-baseline
+benchmark-tt013-range-cache-baseline:
+	@bash scripts/benchmark-tt013-range-cache-baseline.sh
+
+.PHONY: verify-tt013-range-cache
+verify-tt013-range-cache:
+	@bash scripts/verify-tt013-range-cache.sh
+.PHONY: stage-tt013-range-cache
+stage-tt013-range-cache:
+	@bash scripts/stage-tt013-range-cache.sh
+
+.PHONY: commit-tt013-range-cache
+commit-tt013-range-cache:
+	@bash scripts/commit-tt013-range-cache.sh
+
+.PHONY: push-tt013-range-cache
+push-tt013-range-cache:
+	@bash scripts/push-tt013-range-cache.sh
