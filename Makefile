@@ -26156,3 +26156,41 @@ commit-tt021-materialized-spatial-index:
 .PHONY: push-tt021-materialized-spatial-index
 push-tt021-materialized-spatial-index:
 	bash scripts/push-tt021-materialized-spatial-index.sh
+.PHONY: test-mz038-sorted-arrangement-range
+test-mz038-sorted-arrangement-range:
+	@bash scripts/test-mz038-sorted-arrangement-range.sh
+
+.PHONY: test-package-mz038-sorted-arrangement-range
+test-package-mz038-sorted-arrangement-range:
+	@bash scripts/test-package-mz038-sorted-arrangement-range.sh
+
+.PHONY: stage-mz038-sorted-arrangement-range
+stage-mz038-sorted-arrangement-range:
+	@bash scripts/stage-mz038-sorted-arrangement-range.sh
+
+.PHONY: commit-mz038-sorted-arrangement-range
+commit-mz038-sorted-arrangement-range:
+	@bash scripts/commit-mz038-sorted-arrangement-range.sh
+
+.PHONY: push-mz038-sorted-arrangement-range
+push-mz038-sorted-arrangement-range:
+	@bash scripts/push-mz038-sorted-arrangement-range.sh
+
+.PHONY: status-mz038-sorted-arrangement-range
+status-mz038-sorted-arrangement-range:
+	@bash scripts/status-mz038-sorted-arrangement-range.sh
+.PHONY: benchmark-mz038-sorted-arrangement-range
+benchmark-mz038-sorted-arrangement-range:
+	@bash scripts/benchmark-mz038-sorted-arrangement-range.sh
+
+.PHONY: format-mz038-sorted-arrangement-range
+format-mz038-sorted-arrangement-range:
+	@bash scripts/format-mz038-sorted-arrangement-range.sh
+
+.PHONY: race-mz038-sorted-arrangement-range
+race-mz038-sorted-arrangement-range:
+	@bash scripts/race-mz038-sorted-arrangement-range.sh
+
+.PHONY: vet-mz038-sorted-arrangement-range
+vet-mz038-sorted-arrangement-range:
+	@bash scripts/vet-mz038-sorted-arrangement-range.sh

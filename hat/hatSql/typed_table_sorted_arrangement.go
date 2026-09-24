@@ -443,24 +443,8 @@ func (arrangement *TypedTableSortedArrangement) compareKeys(leftKey, rightKey st
 }
 
 func (arrangement *TypedTableSortedArrangement) compareRows(left, right TypedTableMergeJoinInput) int {
-	for _, orderField := range arrangement.orderFields {
-		leftValue, leftValid := typedTableSortedArrangementValue(left.Values, orderField.index)
-		rightValue, rightValid := typedTableSortedArrangementValue(right.Values, orderField.index)
-		if leftValid != rightValid {
-			if orderField.nullsFirst == leftValid {
-				return 1
-			}
-			return -1
-		}
-		if leftValid {
-			comparison := compareTypedTableMergeJoinValues(leftValue, rightValue)
-			if orderField.descending {
-				comparison = -comparison
-			}
-			if comparison != 0 {
-				return comparison
-			}
-		}
+	if comparison := arrangement.compareOrderedValues(left.Values, right.Values); comparison != 0 {
+		return comparison
 	}
 	if left.Key < right.Key {
 		return -1

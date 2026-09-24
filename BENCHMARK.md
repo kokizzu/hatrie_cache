@@ -36811,3 +36811,36 @@ advantage.
 
 Raw samples and scope are in
 [TT021_MATERIALIZED_SPATIAL_INDEX.md](TT021_MATERIALIZED_SPATIAL_INDEX.md).
+<a id="mz-038-sorted-arrangement-range-reads"></a>
+## MZ-038 Sorted Arrangement Range Reads
+
+`make benchmark-mz038-sorted-arrangement-range` ran five samples per case on
+Linux amd64 with an AMD Ryzen 9 5950X. Each case used a 10,000-row typed
+arrangement sorted by an `int64` field and returned a 32-row window for the
+range/page cases.
+
+| Case | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Full snapshot plus filter | 1,408,836 | 1,361,417 | 10,001 | baseline |
+| `RowsRange` | 4,336 | 4,480 | 33 | 325x faster than full scan |
+| Known-offset `RowsPage` | 3,130 | 4,480 | 33 | 1.39x faster than `RowsRange` |
+
+Raw output:
+
+```text
+BenchmarkMZ038SortedArrangementOffsetPageBaseline-32  353971  3130 ns/op  4480 B/op  33 allocs/op
+BenchmarkMZ038SortedArrangementOffsetPageBaseline-32  370363  3132 ns/op  4480 B/op  33 allocs/op
+BenchmarkMZ038SortedArrangementOffsetPageBaseline-32  367174  3162 ns/op  4480 B/op  33 allocs/op
+BenchmarkMZ038SortedArrangementOffsetPageBaseline-32  341822  3071 ns/op  4480 B/op  33 allocs/op
+BenchmarkMZ038SortedArrangementOffsetPageBaseline-32  390559  3123 ns/op  4480 B/op  33 allocs/op
+BenchmarkMZ038SortedArrangementFullScanBaseline-32    861  1397450 ns/op  1361417 B/op  10001 allocs/op
+BenchmarkMZ038SortedArrangementFullScanBaseline-32    744  1406383 ns/op  1361416 B/op  10001 allocs/op
+BenchmarkMZ038SortedArrangementFullScanBaseline-32    801  1408836 ns/op  1361418 B/op  10001 allocs/op
+BenchmarkMZ038SortedArrangementFullScanBaseline-32    876  1434020 ns/op  1361416 B/op  10001 allocs/op
+BenchmarkMZ038SortedArrangementFullScanBaseline-32    847  1423511 ns/op  1361417 B/op  10001 allocs/op
+BenchmarkMZ038SortedArrangementRowsRange-32           262138  4202 ns/op  4480 B/op  33 allocs/op
+BenchmarkMZ038SortedArrangementRowsRange-32           285153  4365 ns/op  4480 B/op  33 allocs/op
+BenchmarkMZ038SortedArrangementRowsRange-32           275835  4336 ns/op  4480 B/op  33 allocs/op
+BenchmarkMZ038SortedArrangementRowsRange-32           272412  4457 ns/op  4480 B/op  33 allocs/op
+BenchmarkMZ038SortedArrangementRowsRange-32           245883  4262 ns/op  4480 B/op  33 allocs/op
+```
