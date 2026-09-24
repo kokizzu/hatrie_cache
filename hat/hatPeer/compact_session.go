@@ -27,6 +27,12 @@ var (
 	// ErrCompactPeerInFlightLimit indicates that a peer sent too many requests
 	// while all handler slots were busy.
 	ErrCompactPeerInFlightLimit = errors.New("hatPeer: compact peer in-flight limit reached")
+	// ErrCompactPeerResponseSchemaUnsupported indicates that a peer sent a
+	// schema-bearing request to a session that did not opt in.
+	ErrCompactPeerResponseSchemaUnsupported = errors.New("hatPeer: compact peer response schemas are unsupported")
+	// ErrCompactPeerResponseSchemaMismatch indicates that a prepared call got a
+	// response with a different schema ID than its template requested.
+	ErrCompactPeerResponseSchemaMismatch = errors.New("hatPeer: compact peer response schema mismatch")
 )
 
 const (
@@ -59,6 +65,10 @@ type CompactPeerSessionOptions struct {
 	// caller context cancels. The remote session cancels the matching handler
 	// context. It is disabled by default to preserve existing wire behavior.
 	EnableRequestCancellation bool
+	// EnableResponseSchemas permits schema IDs on prepared calls. Direct
+	// sessions require this opt-in; negotiated listeners disable it unless the
+	// handshake selects CompactPeerFeatureResponseSchemas.
+	EnableResponseSchemas bool
 }
 
 // CompactPeerSessionOptionsForNegotiatedHandshake returns session options
@@ -69,6 +79,9 @@ func CompactPeerSessionOptionsForNegotiatedHandshake(options CompactPeerSessionO
 	if handshake.Features&CompactPeerFeaturePayloadCompression == 0 {
 		options.Protocol.CompressPayloadsAbove = 0
 	}
+	if handshake.Features&CompactPeerFeatureResponseSchemas == 0 {
+		options.EnableResponseSchemas = false
+	}
 	return options
 }
 
@@ -78,24 +91,25 @@ func CompactPeerSessionOptionsForNegotiatedHandshake(options CompactPeerSessionO
 // opt-in adapter; it does not open listeners, select authentication, or
 // replace the existing HTTP/gRPC/replication servers.
 type CompactPeerSession struct {
-	conn         net.Conn
-	protocol     CompactProtocol
-	multiplex    *CompactMultiplexer
-	handler      CompactPeerHandler
-	inflight     chan struct{}
-	context      context.Context
-	cancel       context.CancelFunc
-	lifecycle    *PeerLifecycleRegistry
-	peerID       string
-	done         chan struct{}
-	readDone     chan struct{}
-	closeOnce    sync.Once
-	writeMu      sync.Mutex
-	writeBuffer  []byte
-	stateMu      sync.Mutex
-	cancellation *compactPeerCancellationState
-	closed       bool
-	closeError   error
+	conn            net.Conn
+	protocol        CompactProtocol
+	multiplex       *CompactMultiplexer
+	handler         CompactPeerHandler
+	inflight        chan struct{}
+	context         context.Context
+	cancel          context.CancelFunc
+	lifecycle       *PeerLifecycleRegistry
+	peerID          string
+	done            chan struct{}
+	readDone        chan struct{}
+	closeOnce       sync.Once
+	writeMu         sync.Mutex
+	writeBuffer     []byte
+	stateMu         sync.Mutex
+	cancellation    *compactPeerCancellationState
+	responseSchemas bool
+	closed          bool
+	closeError      error
 }
 
 type compactPeerCancellationState struct {
@@ -136,18 +150,19 @@ func NewCompactPeerSession(conn net.Conn, options CompactPeerSessionOptions) (*C
 		cancellation = &compactPeerCancellationState{active: make(map[uint64]context.CancelFunc)}
 	}
 	session := &CompactPeerSession{
-		conn:         conn,
-		protocol:     protocol,
-		multiplex:    multiplexer,
-		handler:      options.Handler,
-		inflight:     make(chan struct{}, maxInFlight),
-		context:      ctx,
-		cancel:       cancel,
-		lifecycle:    options.Lifecycle,
-		peerID:       options.PeerID,
-		done:         make(chan struct{}),
-		readDone:     make(chan struct{}),
-		cancellation: cancellation,
+		conn:            conn,
+		protocol:        protocol,
+		multiplex:       multiplexer,
+		handler:         options.Handler,
+		inflight:        make(chan struct{}, maxInFlight),
+		context:         ctx,
+		cancel:          cancel,
+		lifecycle:       options.Lifecycle,
+		peerID:          options.PeerID,
+		done:            make(chan struct{}),
+		readDone:        make(chan struct{}),
+		cancellation:    cancellation,
+		responseSchemas: options.EnableResponseSchemas,
 	}
 	go session.readLoop()
 	go session.watchContext()
@@ -211,6 +226,10 @@ func (session *CompactPeerSession) CallTemplate(ctx context.Context, template Co
 	if err := session.Err(); err != nil {
 		return CompactFrame{}, err
 	}
+	expectedSchemaID := template.ResponseSchemaID()
+	if expectedSchemaID != 0 && !session.responseSchemas {
+		return CompactFrame{}, ErrCompactPeerResponseSchemaUnsupported
+	}
 	request, pending, err := session.multiplex.RequestTemplate(template, payload)
 	if err != nil {
 		return CompactFrame{}, err
@@ -235,6 +254,9 @@ func (session *CompactPeerSession) CallTemplate(ctx context.Context, template Co
 	}
 	if response.Kind == CompactError {
 		return CompactFrame{}, fmt.Errorf("%w: %s", ErrCompactPeerRemote, response.Payload)
+	}
+	if expectedSchemaID != 0 && response.ResponseSchemaID != expectedSchemaID {
+		return CompactFrame{}, fmt.Errorf("%w: want=%d got=%d", ErrCompactPeerResponseSchemaMismatch, expectedSchemaID, response.ResponseSchemaID)
 	}
 	return response, nil
 }
@@ -298,6 +320,10 @@ func (session *CompactPeerSession) readLoop() {
 }
 
 func (session *CompactPeerSession) dispatch(request CompactFrame) {
+	if request.ResponseSchemaID != 0 && !session.responseSchemas {
+		session.writeError(request, ErrCompactPeerResponseSchemaUnsupported)
+		return
+	}
 	if session.handler == nil {
 		session.writeError(request, ErrCompactPeerHandlerRequired)
 		return
@@ -332,6 +358,9 @@ func (session *CompactPeerSession) handle(ctx context.Context, request CompactFr
 		if len(response.Command) == 0 {
 			response.Command = request.Command
 		}
+	}
+	if request.ResponseSchemaID != 0 && response.ResponseSchemaID == 0 {
+		response.ResponseSchemaID = request.ResponseSchemaID
 	}
 	response.RequestID = request.RequestID
 	if err := session.write(response); err != nil {
@@ -388,10 +417,11 @@ func (session *CompactPeerSession) sendRequestCancellation(requestID uint64) {
 
 func (session *CompactPeerSession) writeError(request CompactFrame, err error) {
 	response := CompactFrame{
-		Kind:      CompactError,
-		RequestID: request.RequestID,
-		Command:   request.Command,
-		Payload:   compactPeerErrorPayload(session.protocol, err),
+		Kind:             CompactError,
+		RequestID:        request.RequestID,
+		ResponseSchemaID: request.ResponseSchemaID,
+		Command:          request.Command,
+		Payload:          compactPeerErrorPayload(session.protocol, err),
 	}
 	if writeErr := session.write(response); writeErr != nil {
 		session.fail(writeErr)

@@ -10,15 +10,30 @@ var ErrCompactRequestTemplateInvalid = errors.New("hatPeer: compact request temp
 // CompactRequestTemplate stores immutable command metadata for repeated
 // request encoding. The command bytes are copied at construction time.
 type CompactRequestTemplate struct {
-	command []byte
+	command          []byte
+	responseSchemaID uint64
 }
 
 // NewCompactRequestTemplate creates a reusable compact request template.
 func NewCompactRequestTemplate(command []byte) (CompactRequestTemplate, error) {
+	return NewCompactRequestTemplateWithResponseSchema(command, 0)
+}
+
+// NewCompactRequestTemplateWithResponseSchema creates a reusable compact
+// request template that expects the peer to echo schemaID in its response.
+// Schema metadata is sent only when schemaID is non-zero and the session has
+// response-schema support enabled.
+func NewCompactRequestTemplateWithResponseSchema(command []byte, schemaID uint64) (CompactRequestTemplate, error) {
 	if len(command) == 0 || len(command) > maxCompactProtocolCommandBytes {
 		return CompactRequestTemplate{}, ErrCompactRequestTemplateInvalid
 	}
-	return CompactRequestTemplate{command: append([]byte(nil), command...)}, nil
+	return CompactRequestTemplate{command: append([]byte(nil), command...), responseSchemaID: schemaID}, nil
+}
+
+// ResponseSchemaID returns the expected response schema ID, or zero when the
+// template uses the legacy untyped response path.
+func (template CompactRequestTemplate) ResponseSchemaID() uint64 {
+	return template.responseSchemaID
 }
 
 // Marshal encodes one request using a newly allocated output buffer.
@@ -30,15 +45,20 @@ func (template CompactRequestTemplate) Marshal(protocol CompactProtocol, request
 // allocation performed by CompactProtocol.Marshal for each frame.
 func (template CompactRequestTemplate) MarshalInto(protocol CompactProtocol, requestID uint64, payload, dst []byte) ([]byte, error) {
 	frame := CompactFrame{
-		Kind:      CompactRequest,
-		RequestID: requestID,
-		Command:   template.command,
-		Payload:   payload,
+		Kind:             CompactRequest,
+		RequestID:        requestID,
+		ResponseSchemaID: template.responseSchemaID,
+		Command:          template.command,
+		Payload:          payload,
 	}
 	if err := protocol.validateFrame(frame); err != nil {
 		return dst, err
 	}
-	bodyBytes := compactProtocolHeader + compactUvarintSize(frame.RequestID) + compactUvarintSize(uint64(len(frame.Command))) + len(frame.Command) + compactUvarintSize(uint64(len(frame.Payload))) + len(frame.Payload)
+	schemaBytes := 0
+	if frame.ResponseSchemaID != 0 {
+		schemaBytes = compactUvarintSize(frame.ResponseSchemaID)
+	}
+	bodyBytes := compactProtocolHeader + compactUvarintSize(frame.RequestID) + schemaBytes + compactUvarintSize(uint64(len(frame.Command))) + len(frame.Command) + compactUvarintSize(uint64(len(frame.Payload))) + len(frame.Payload)
 	if bodyBytes > protocol.maxFrameBytes {
 		return dst, ErrCompactProtocolFrameTooLarge
 	}
@@ -57,7 +77,14 @@ func (template CompactRequestTemplate) MarshalInto(protocol CompactProtocol, req
 }
 
 func binaryPutCompactRequest(encoded []byte, frame CompactFrame) {
-	bodyBytes := compactProtocolHeader + compactUvarintSize(frame.RequestID) + compactUvarintSize(uint64(len(frame.Command))) + len(frame.Command) + compactUvarintSize(uint64(len(frame.Payload))) + len(frame.Payload)
+	if frame.ResponseSchemaID != 0 {
+		frame.Flags |= CompactFrameFlagResponseSchema
+	}
+	schemaBytes := 0
+	if frame.ResponseSchemaID != 0 {
+		schemaBytes = compactUvarintSize(frame.ResponseSchemaID)
+	}
+	bodyBytes := compactProtocolHeader + compactUvarintSize(frame.RequestID) + schemaBytes + compactUvarintSize(uint64(len(frame.Command))) + len(frame.Command) + compactUvarintSize(uint64(len(frame.Payload))) + len(frame.Payload)
 	// The caller has already sized encoded for the prefix and complete body.
 	prefixBytes := compactUvarintSize(uint64(bodyBytes))
 	binary.PutUvarint(encoded, uint64(bodyBytes))
@@ -73,6 +100,9 @@ func binaryPutCompactRequest(encoded []byte, frame CompactFrame) {
 	encoded[offset] = frame.Flags
 	offset++
 	offset += binary.PutUvarint(encoded[offset:], frame.RequestID)
+	if frame.ResponseSchemaID != 0 {
+		offset += binary.PutUvarint(encoded[offset:], frame.ResponseSchemaID)
+	}
 	offset += binary.PutUvarint(encoded[offset:], uint64(len(frame.Command)))
 	offset += copy(encoded[offset:], frame.Command)
 	offset += binary.PutUvarint(encoded[offset:], uint64(len(frame.Payload)))
@@ -84,5 +114,10 @@ func (multiplexer *CompactMultiplexer) RequestTemplate(template CompactRequestTe
 	if len(template.command) == 0 || len(template.command) > maxCompactProtocolCommandBytes {
 		return CompactFrame{}, nil, ErrCompactRequestTemplateInvalid
 	}
-	return multiplexer.Request(template.command, payload)
+	request, pending, err := multiplexer.Request(template.command, payload)
+	if err != nil {
+		return CompactFrame{}, nil, err
+	}
+	request.ResponseSchemaID = template.responseSchemaID
+	return request, pending, nil
 }

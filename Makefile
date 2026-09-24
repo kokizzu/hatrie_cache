@@ -514,6 +514,49 @@ DOCKER_BUILD_ARGS ?=
 
 test: verify-go
 
+.PHONY: test-tr043c-response-schema
+test-tr043c-response-schema:
+	bash scripts/test-tr043c-response-schema.sh
+
+.PHONY: inspect-tr043c-response-schema
+inspect-tr043c-response-schema:
+	bash scripts/deliver-tr043c-response-schema.sh inspect
+
+.PHONY: stage-tr043c-response-schema
+stage-tr043c-response-schema:
+	bash scripts/deliver-tr043c-response-schema.sh stage
+
+.PHONY: commit-tr043c-response-schema
+commit-tr043c-response-schema:
+	bash scripts/deliver-tr043c-response-schema.sh commit
+
+.PHONY: push-tr043c-response-schema
+push-tr043c-response-schema:
+	bash scripts/deliver-tr043c-response-schema.sh push
+
+audit-tr043c-delivery:
+	bash scripts/audit-tr043c-delivery.sh
+
+.PHONY: format-tr043c-response-schema
+format-tr043c-response-schema:
+	bash scripts/format-tr043c-response-schema.sh
+
+.PHONY: benchmark-tr043c-response-schema
+benchmark-tr043c-response-schema:
+	bash scripts/benchmark-tr043c-response-schema.sh
+
+.PHONY: test-tr043c-response-schema-package
+test-tr043c-response-schema-package:
+	bash scripts/test-tr043c-response-schema-package.sh
+
+.PHONY: race-tr043c-response-schema
+race-tr043c-response-schema:
+	bash scripts/race-tr043c-response-schema.sh
+
+.PHONY: vet-tr043c-response-schema
+vet-tr043c-response-schema:
+	bash scripts/vet-tr043c-response-schema.sh
+
 .PHONY: test-t147
 test-t147:
 	bash ./scripts/test-t147.sh

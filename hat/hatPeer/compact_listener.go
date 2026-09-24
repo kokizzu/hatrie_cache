@@ -29,6 +29,9 @@ const (
 	// CompactPeerFeaturePayloadCompression permits compressed compact payloads
 	// after both peers advertise and negotiate the feature.
 	CompactPeerFeaturePayloadCompression uint32 = 1 << 31
+	// CompactPeerFeatureResponseSchemas permits schema IDs on prepared compact
+	// calls after both handshake endpoints advertise support.
+	CompactPeerFeatureResponseSchemas uint32 = 1 << 30
 
 	DefaultCompactPeerHandshakeTimeout       = 5 * time.Second
 	DefaultCompactPeerListenerMaxConnections = 256
@@ -131,6 +134,9 @@ func NewCompactPeerListener(listener net.Listener, options CompactPeerListenerOp
 	}
 	if options.Session.Protocol.CompressPayloadsAbove > 0 {
 		handshake.Features |= CompactPeerFeaturePayloadCompression
+	}
+	if options.Session.EnableResponseSchemas {
+		handshake.Features |= CompactPeerFeatureResponseSchemas
 	}
 	options.Handshake = handshake
 	parent := options.Session.Context

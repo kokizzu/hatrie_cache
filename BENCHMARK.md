@@ -36330,3 +36330,35 @@ BenchmarkSQLCompiledQueryCacheConcurrentMiss-32  23065  48738 ns/op  13856 B/op 
 The optimization affects only concurrent exact-key misses in the opt-in
 compiled-plan cache. It adds no flight allocation on completed hits and leaves
 `CompileSQLQuery` defaults, SQL semantics, and wire/storage formats unchanged.
+
+## TR-043c Compact Peer Response Schemas
+
+Command:
+
+```text
+make benchmark-tr043c-response-schema
+```
+
+Five samples were collected with `-benchmem` on Linux/amd64 and an AMD Ryzen
+9 5950X. The schema-enabled fixture uses schema ID `17`.
+
+```text
+Legacy frame marshal: 28.00, 27.69, 26.15, 29.12, 27.34 ns/op; 0 B/op; 0 allocs/op
+Schema frame marshal: 30.60, 30.61, 26.77, 30.62, 30.62 ns/op; 0 B/op; 0 allocs/op
+Legacy prepared call: 6019, 6370, 6568, 6148, 6404 ns/op; 448 B/op; 7 allocs/op
+Schema prepared call: 6445, 5906, 5995, 6026, 5819 ns/op; 448 B/op; 7 allocs/op
+```
+
+| Path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | ---: |
+| Legacy prepared frame marshal | 27.69 | 0 | 0 | 1.00x |
+| Schema ID 17 prepared frame marshal | 30.61 | 0 | 0 | 1.11x CPU |
+| Legacy end-to-end prepared call | 6,370 | 448 | 7 | baseline |
+| Schema ID 17 end-to-end prepared call | 5,995 | 448 | 7 | within `net.Pipe` variance |
+
+Schema ID `17` changes the measured frame from 29 to 30 bytes, adding one
+varint byte per request or response frame, and therefore two bytes per
+round trip. It adds no allocations and does not change the default legacy
+path. The isolated encoder costs about 2.92 ns more in this fixture; the
+end-to-end timing is scheduling-noise limited. Full API and compatibility
+details are in [TR043C_COMPACT_PEER_RESPONSE_SCHEMA.md](TR043C_COMPACT_PEER_RESPONSE_SCHEMA.md).
