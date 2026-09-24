@@ -211,7 +211,8 @@ type SQLQueryOptions struct {
 	// partial SQL join result is not semantically correct.
 	JoinOverflowPolicy SQLJoinOverflowPolicy
 	// SpillBloom enables compact per-partition Bloom filters for spill hash
-	// joins. It can skip partition pairs that cannot share a join key.
+	// joins. It skips disjoint partition pairs and, when the right side is
+	// larger, filters non-matching right rows before chunk hash construction.
 	SpillBloom bool
 	// RuntimeJoinBloomFilter enables a selective in-memory Bloom filter for
 	// equality joins with a much larger probe side. It is disabled by default;
@@ -4970,6 +4971,8 @@ func executeSQLSpillHashJoin(query *sqlQuery, resolver SQLSourceResolver, contro
 		return nil
 	}
 
+	spillFilterEnabled := control.options.SpillBloom && rightRows > leftRows
+	spillFilterProbes, spillFilterSkipped := 0, 0
 	columns := sqlColumns(query.selects)
 	for index := range leftParts {
 		if err := control.check(); err != nil {
@@ -5019,18 +5022,40 @@ func executeSQLSpillHashJoin(query *sqlQuery, resolver SQLSourceResolver, contro
 		}
 		rightChunk := make([]sqlSpillHashInput, 0)
 		rightBytes := 0
-		err := visitSQLSpillHashPartition(rightParts[index], control, func(entry sqlSpillHashInput) error {
-			entryBytes := sqlRowBytes(entry.Row) + 16
-			if len(rightChunk) > 0 && rightBytes+entryBytes > chunkLimit {
-				if err := processRightChunk(rightChunk); err != nil {
-					return err
+		var err error
+		if spillFilterEnabled {
+			err = visitSQLSpillHashPartition(rightParts[index], control, func(entry sqlSpillHashInput) error {
+				key, _ := sqlHashJoinKey(entry.Row[rightField])
+				spillFilterProbes++
+				if !leftParts[index].bloom.ContainsJSONString(key) {
+					spillFilterSkipped++
+					return nil
 				}
-				rightChunk, rightBytes = rightChunk[:0], 0
-			}
-			rightChunk = append(rightChunk, entry)
-			rightBytes += entryBytes
-			return nil
-		})
+				entryBytes := sqlRowBytes(entry.Row) + 16
+				if len(rightChunk) > 0 && rightBytes+entryBytes > chunkLimit {
+					if err := processRightChunk(rightChunk); err != nil {
+						return err
+					}
+					rightChunk, rightBytes = rightChunk[:0], 0
+				}
+				rightChunk = append(rightChunk, entry)
+				rightBytes += entryBytes
+				return nil
+			})
+		} else {
+			err = visitSQLSpillHashPartition(rightParts[index], control, func(entry sqlSpillHashInput) error {
+				entryBytes := sqlRowBytes(entry.Row) + 16
+				if len(rightChunk) > 0 && rightBytes+entryBytes > chunkLimit {
+					if err := processRightChunk(rightChunk); err != nil {
+						return err
+					}
+					rightChunk, rightBytes = rightChunk[:0], 0
+				}
+				rightChunk = append(rightChunk, entry)
+				rightBytes += entryBytes
+				return nil
+			})
+		}
 		if err != nil {
 			return SQLQueryResult{}, true, err
 		}
@@ -5046,6 +5071,10 @@ func executeSQLSpillHashJoin(query *sqlQuery, resolver SQLSourceResolver, contro
 		return SQLQueryResult{}, true, err
 	}
 	if metrics != nil {
+		if spillFilterEnabled {
+			filterDetail := fmt.Sprintf("spill Bloom build-side probes=%d skipped=%d false_positive_rate=%.2f%%", spillFilterProbes, spillFilterSkipped, 0.01*100)
+			metrics.record("RUNTIME JOIN FILTER", filterDetail, rightRows, spillFilterProbes-spillFilterSkipped, time.Now())
+		}
 		metrics.record("SPILL HASH JOIN", fmt.Sprintf("partitioned equality join (%d partitions)", sqlSpillHashPartitions), leftRows+rightRows, len(rows), time.Now())
 	}
 	return SQLQueryResult{Columns: columns, Rows: rows}, true, nil

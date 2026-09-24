@@ -29313,6 +29313,26 @@ The focused tests also verify successful deterministic output, rejection when
 the frontier exceeds the budget, cleanup of temporary files, and negative-value
 validation. See [C227_GROUP_MERGE_BUDGET.md](C227_GROUP_MERGE_BUDGET.md).
 
+## CHU14: Spill Runtime Join Filter
+
+Command: `make benchmark-chu14`.
+
+The benchmark used Linux amd64 on an AMD Ryzen 9 5950X, five samples per
+case, a direct equality spill join, `MaxJoinBytes=256`, and `MaxSpillBytes=64
+MiB`. The right-heavy case had 32 left rows, 4096 right rows, and 32 matching
+keys. Medians from the raw samples:
+
+| Configuration | ns/op | B/op | allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: |
+| Before, partition Bloom | 38,524,238 | 8,697,498 | 167,452 | 1.00x |
+| After, build-side runtime filter | 22,629,966 | 3,157,454 | 74,230 | 1.70x CPU, 2.75x memory, 2.26x allocations |
+
+The feature is default-off through `SpillBloom`. It activates the per-key
+build-side filter only when the right input is larger than the left input;
+balanced and left-heavy joins retain the existing exact-map path. The raw
+before/after samples and the rejected left-side probe experiment are recorded
+in [CHU14_RUNTIME_JOIN_FILTER.md](CHU14_RUNTIME_JOIN_FILTER.md).
+
 ## C229: Join Overflow Policy
 
 This benchmark compares the zero-value join policy with the opt-in materialized

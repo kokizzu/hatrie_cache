@@ -25020,3 +25020,30 @@ commit-c237:
 .PHONY: push-c237
 push-c237:
 	@bash scripts/run-c237.sh push
+.PHONY: test-chu14
+test-chu14:
+	bash ./scripts/test-chu14.sh test
+
+.PHONY: benchmark-chu14
+benchmark-chu14:
+	bash ./scripts/test-chu14.sh benchmark
+
+.PHONY: format-chu14
+format-chu14:
+	bash ./scripts/format-chu14.sh
+
+.PHONY: verify-chu14
+verify-chu14:
+	bash ./scripts/test-chu14.sh verify
+
+.PHONY: test-chu14-package
+test-chu14-package:
+	bash ./scripts/test-chu14.sh package
+
+.PHONY: commit-chu14
+commit-chu14:
+	bash ./scripts/commit-chu14.sh
+
+.PHONY: push-chu14
+push-chu14:
+	bash ./scripts/push-chu14.sh
