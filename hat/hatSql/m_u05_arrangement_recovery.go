@@ -199,9 +199,17 @@ func captureTypedTableAggregateArrangementCheckpoint(aggregate *TypedTableAggreg
 	}
 	groups := make([]TypedTableAggregateGroupCheckpoint, 0, aggregate.groupCount)
 	for _, bucket := range aggregate.groups {
-		groups = append(groups, typedTableAggregateGroupCheckpointFromGroup(bucket.group))
+		groupCheckpoint := typedTableAggregateGroupCheckpointFromGroup(bucket.group)
+		if groupCheckpoint.Key == "" {
+			groupCheckpoint.Key = aggregate.storedGroupKey(bucket.group)
+		}
+		groups = append(groups, groupCheckpoint)
 		for _, group := range bucket.collisions {
-			groups = append(groups, typedTableAggregateGroupCheckpointFromGroup(group))
+			groupCheckpoint := typedTableAggregateGroupCheckpointFromGroup(group)
+			if groupCheckpoint.Key == "" {
+				groupCheckpoint.Key = aggregate.storedGroupKey(group)
+			}
+			groups = append(groups, groupCheckpoint)
 		}
 	}
 	sort.Slice(groups, func(left, right int) bool {

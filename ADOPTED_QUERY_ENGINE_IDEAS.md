@@ -594,6 +594,19 @@ to encode and 15.66x faster to decode. See
 [MU01_DURABLE_CONNECTOR_STATE.md](MU01_DURABLE_CONNECTOR_STATE.md) and
 [BENCHMARK.md](BENCHMARK.md#m-u01-durable-connector-lifecycle-state).
 
+## Materialize M-U05: Arrangement-Only Recovery
+
+M-U05 is adopted as the opt-in `hatSql.CaptureTypedTableArrangementRecovery`
+and `RestoreTypedTableArrangementRecovery` coordinator. It bundles all supplied
+aggregate and join arrangement checkpoints, routes them by persisted source
+identity, rejects duplicate or missing catalogs and active targets before
+mutation, and releases every lease if a later catalog fails. Nested checkpoints
+retain exact source-version fencing, so recovery does not reread source rows.
+The zero-value query and write paths remain unchanged; storage and source
+lifecycle stay caller-owned. See
+[M041_ARRANGEMENT_RECOVERY_BUNDLE.md](M041_ARRANGEMENT_RECOVERY_BUNDLE.md) and
+[BENCHMARK.md](BENCHMARK.md#m-u05-arrangement-recovery-bundle).
+
 ## CH-004: `FINAL` Read Semantics
 
 ClickHouse-style query-time `FINAL` is adopted as an explicit opt-in SQL

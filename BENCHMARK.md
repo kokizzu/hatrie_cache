@@ -32779,6 +32779,32 @@ storage/transfer control paths rather than row-update or query hot paths. See
 [MU05_ARRANGEMENT_ONLY_RECOVERY.md](MU05_ARRANGEMENT_ONLY_RECOVERY.md) for the
 validation contract and operational guidance.
 
+### M-U05 Arrangement Recovery Bundle
+
+Command:
+
+```sh
+make benchmark-m041-mu05
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The fixture has
+4,096 aggregate rows, 64 aggregate groups, and 1,024 rows per join input. The
+manual rows call the existing per-catalog checkpoint methods separately; the
+bundle rows use the new all-catalog coordinator. `checkpoint-bytes` is the
+JSON-encoded bundle size and is shown for the wire/storage tradeoff.
+
+| Workload | Raw ns/op samples | Median ns/op | checkpoint-bytes | B/op | allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Manual capture | 1,998,614; 1,977,766; 2,005,044; 1,952,680; 2,030,178 | 1,998,614 | 1,283,432 | 1,506,180 | 3,215 | 1.00x baseline |
+| Bundle capture | 2,027,213; 2,011,244; 2,021,491; 1,993,883; 1,993,485 | 2,011,244 | 1,283,432 | 1,507,293 | 3,228 | 0.99x baseline, 0.6% slower |
+| Manual restore | 8,544,145; 8,805,719; 8,726,372; 8,885,052; 8,733,839 | 8,733,839 | 1,283,432 | 9,623,765 | 11,393 | 1.00x baseline |
+| Bundle restore | 8,720,672; 8,576,559; 8,499,957; 8,455,319; 8,580,419 | 8,576,559 | 1,283,432 | 9,625,013 | 11,412 | 1.02x measured, within noise |
+
+The bundle adds 1,113 B and 13 allocations to capture, and 1,248 B and 19
+allocations to restore in this fixture. That small control-plane cost buys
+deterministic routing, source-version validation across catalogs, and rollback
+of partially restored state. It is not a claim of faster row processing.
+
 ## M-U06 Differential Window Frames
 
 Commands:

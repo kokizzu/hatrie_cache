@@ -25209,3 +25209,43 @@ commit-m040:
 .PHONY: push-m040
 push-m040:
 	bash scripts/push-m040.sh
+.PHONY: inspect-m041
+.PHONY: test-m041-mu05
+test-m041-mu05:
+	bash ./scripts/test-m041-mu05.sh
+
+.PHONY: format-m041
+format-m041:
+	bash ./scripts/format-m041.sh
+
+.PHONY: benchmark-m041-mu05
+benchmark-m041-mu05:
+	bash ./scripts/benchmark-m041-mu05.sh
+
+.PHONY: status-m041
+status-m041:
+	bash ./scripts/status-m041.sh
+
+.PHONY: test-m041-package
+test-m041-package:
+	bash ./scripts/test-m041-package.sh
+
+.PHONY: test-m041-all
+test-m041-all:
+	bash ./scripts/test-m041-all.sh
+
+.PHONY: race-m041-mu05
+race-m041-mu05:
+	bash ./scripts/race-m041-mu05.sh
+
+.PHONY: vet-m041-mu05
+vet-m041-mu05:
+	bash ./scripts/vet-m041-mu05.sh
+
+.PHONY: commit-m041
+commit-m041:
+	bash ./scripts/commit-m041.sh
+
+.PHONY: push-m041
+push-m041:
+	bash ./scripts/push-m041.sh
