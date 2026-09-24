@@ -35601,6 +35601,22 @@ The syntax addition is read-only and has no ordinary-query-path cost. See
 verification commands.
 
 <a id="c238-mutation-progress"></a>
+## C235 bounded table-part task profiler
+
+The C235 benchmark compares the existing query profiler's single-label record
+path with the new bounded `(table, part, column, operation)` task collector.
+Both paths are already initialized and use non-zero timestamps where relevant;
+the benchmark measures repeated hot-key updates with `-benchmem`.
+
+| Path | Median-ish result | Memory |
+| --- | ---: | ---: |
+| Existing `SQLQueryProfiler.Record` control | 21.39 ns/op | 0 B/op, 0 allocs/op |
+| `SQLTaskProfiler.Record` | 60.18 ns/op | 0 B/op, 0 allocs/op |
+
+The task collector is about 2.8x the CPU cost of the narrower control, with no
+hot-path allocations. This is an observability tradeoff, not a query execution
+optimization; it remains opt-in and bounded. Reproduce with `make benchmark-c235`.
+
 ## C238 Mutation Queue Progress
 
 The paired `BenchmarkC238MutationSnapshot` fixture measures one active

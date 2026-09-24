@@ -68,7 +68,7 @@ operator control remain the preferred deployment model.
 - [x] C232 Query-complexity limits for rows, joins, and intermediate results.
 - [ ] C233 Per-query CPU-time budgets with cooperative cancellation.
 - [ ] C234 Query profiler records for stage time, bytes, and allocations.
-- [ ] C235 Read/write task profiler aggregation by table part and column.
+- [x] C235 Read/write task profiler aggregation by table part and column. See [C235_TASK_PROFILER.md](C235_TASK_PROFILER.md).
 - [ ] C236 Explain output for data-skipping-index decisions and rejected marks.
 - [ ] C237 Explain output for projection selection and estimated I/O cost.
 - [x] C238 Mutation queue progress with rows remaining and elapsed estimates is implemented as derived, read-time fields on `hatSql.MutationSnapshot`; the opt-in controller hot path and defaults remain unchanged. See [C238_MUTATION_PROGRESS.md](C238_MUTATION_PROGRESS.md).

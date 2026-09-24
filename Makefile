@@ -24950,3 +24950,34 @@ commit-c241:
 .PHONY: push-c241
 push-c241:
 	@bash scripts/push-c241.sh
+.PHONY: benchmark-c235
+benchmark-c235:
+	@bash scripts/benchmark-c235.sh
+
+.PHONY: test-c235
+test-c235:
+	@bash scripts/test-c235.sh
+.PHONY: format-c235
+format-c235:
+	@bash scripts/verify-c235.sh format
+.PHONY: test-c235-package
+test-c235-package:
+	@bash scripts/verify-c235.sh package
+.PHONY: race-c235
+race-c235:
+	@bash scripts/verify-c235.sh race
+.PHONY: vet-c235
+vet-c235:
+	@bash scripts/verify-c235.sh vet
+.PHONY: docs-c235
+docs-c235:
+	@bash scripts/verify-c235.sh docs
+.PHONY: status-c235
+status-c235:
+	@bash scripts/status-c235.sh
+.PHONY: commit-c235
+commit-c235:
+	@bash scripts/commit-c235.sh
+.PHONY: push-c235
+push-c235:
+	@bash scripts/push-c235.sh

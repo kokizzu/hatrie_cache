@@ -280,6 +280,7 @@ security guidance before exposing it on a network.
 - Slow-query projection recommendations without query-text retention: [SQL projection advisor](PROJECTION_ADVISOR.md)
 - Feedback-weighted projection selection from bounded execution cost: [CHU10_FEEDBACK_PROJECTION_SELECTION.md](CHU10_FEEDBACK_PROJECTION_SELECTION.md)
 - Workload-driven JSON data-skipping-index selection: [CHU11_AUTOMATIC_DATA_SKIPPING_INDEX_SELECTION.md](CHU11_AUTOMATIC_DATA_SKIPPING_INDEX_SELECTION.md)
+- Opt-in bounded read/write task profiling by table part and column: [C235_TASK_PROFILER.md](C235_TASK_PROFILER.md)
 - Fixed-width Decimal128/Decimal256 kernels for comparisons, arithmetic, and packed batch filtering: [CHU15_VECTORIZED_DECIMAL_KERNELS.md](CHU15_VECTORIZED_DECIMAL_KERNELS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u15-fixed-width-decimal-kernels)
 - Schema-checked compact SQL tables and exact delta aggregates: [Typed SQL tables](TYPED_TABLES.md)
 - Materialize-style guarded SQL columnar dictionary compression: [SQL_COLUMNAR_DICTIONARY.md](SQL_COLUMNAR_DICTIONARY.md)
