@@ -25583,3 +25583,30 @@ vet-mz040:
 .PHONY: deliver-mz040
 deliver-mz040:
 	bash scripts/deliver-mz040.sh
+.PHONY: test-mz038
+test-mz038:
+	bash scripts/test-mz038.sh
+
+.PHONY: benchmark-mz038
+benchmark-mz038:
+	bash scripts/benchmark-mz038.sh
+
+.PHONY: format-mz038
+format-mz038:
+	bash scripts/format-mz038.sh
+
+.PHONY: test-mz038-package
+test-mz038-package:
+	bash scripts/test-mz038-package.sh
+
+.PHONY: race-mz038
+race-mz038:
+	bash scripts/race-mz038.sh
+
+.PHONY: vet-mz038
+vet-mz038:
+	bash scripts/vet-mz038.sh
+
+.PHONY: deliver-mz038
+deliver-mz038:
+	bash scripts/deliver-mz038.sh

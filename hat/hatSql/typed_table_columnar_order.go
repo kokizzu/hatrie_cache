@@ -3,6 +3,7 @@ package hatSql
 import (
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -103,6 +104,125 @@ func (table *TypedTable) BorrowSQLColumnarSourceOrder(name string, key string, f
 	return order, true, nil
 }
 
+// BorrowSQLColumnarSourceOrderFields returns an immutable ascending ordinal
+// projection for an admitted composite columnar order. The projection is
+// admitted only after repeated compatible requests and shares the existing
+// columnar cache byte limit.
+func (table *TypedTable) BorrowSQLColumnarSourceOrderFields(name string, key string, fields, orderFields []string) ([]uint32, bool, error) {
+	return table.borrowSQLColumnarCompositeOrder(name, key, fields, orderFields, nil)
+}
+
+// BorrowSQLColumnarSourceOrderBy returns an immutable ordinal projection for
+// an admitted composite order with one direction per field. An empty
+// descending slice means all fields are ascending.
+func (table *TypedTable) BorrowSQLColumnarSourceOrderBy(name string, key string, fields, orderFields []string, descending []bool) ([]uint32, bool, error) {
+	return table.borrowSQLColumnarCompositeOrder(name, key, fields, orderFields, descending)
+}
+
+func (table *TypedTable) borrowSQLColumnarCompositeOrder(name string, key string, fields, orderFields []string, descending []bool) ([]uint32, bool, error) {
+	if table == nil || strings.ToUpper(strings.TrimSpace(name)) != table.schema.SourceName || key != table.schema.Name {
+		return nil, false, nil
+	}
+	orderKey, ok := typedTableColumnarCompositeOrderKey(orderFields, descending)
+	if !ok {
+		return nil, false, nil
+	}
+	cache := &table.columnar
+	if !cache.options.Enabled || !cache.options.SortedOrderCache {
+		return nil, false, nil
+	}
+	layoutKey := typedTableColumnarLayoutKey(fields)
+	observationKey := typedTableColumnarOrderCacheKey{layout: layoutKey, field: orderKey}
+
+	table.mu.RLock()
+	cache.mu.Lock()
+	layout, found := cache.layouts[layoutKey]
+	if !found {
+		cache.mu.Unlock()
+		table.mu.RUnlock()
+		return nil, false, nil
+	}
+	if order, found := layout.orders[orderKey]; found {
+		cache.tick++
+		layout.touched = cache.tick
+		cache.layouts[layoutKey] = layout
+		cache.mu.Unlock()
+		table.mu.RUnlock()
+		return order, true, nil
+	}
+	if cache.orderObservations == nil {
+		cache.orderObservations = make(map[typedTableColumnarOrderCacheKey]uint8)
+	}
+	reads := cache.orderObservations[observationKey] + 1
+	if reads < typedTableColumnarOrderCacheMinReads {
+		if len(cache.orderObservations) >= typedTableColumnarOrderCacheMaxCandidates {
+			for candidate := range cache.orderObservations {
+				delete(cache.orderObservations, candidate)
+				break
+			}
+		}
+		cache.orderObservations[observationKey] = reads
+		cache.mu.Unlock()
+		table.mu.RUnlock()
+		return nil, false, nil
+	}
+	delete(cache.orderObservations, observationKey)
+	batch, sourceSequence := layout.batch, layout.sourceSequence
+	cache.mu.Unlock()
+	table.mu.RUnlock()
+
+	order, bytes, ok := typedTableColumnarOrderFields(batch, orderFields, descending)
+	if !ok {
+		return nil, false, nil
+	}
+
+	table.mu.RLock()
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	defer table.mu.RUnlock()
+	layout, found = cache.layouts[layoutKey]
+	if !found || layout.sourceSequence != sourceSequence {
+		return nil, false, nil
+	}
+	if existing, found := layout.orders[orderKey]; found {
+		return existing, true, nil
+	}
+	if bytes > cache.options.MaxBytes || cache.bytes > cache.options.MaxBytes-bytes {
+		return nil, false, nil
+	}
+	if layout.orders == nil {
+		layout.orders = make(map[string][]uint32)
+	}
+	layout.orders[orderKey] = order
+	layout.bytes += bytes
+	cache.layouts[layoutKey] = layout
+	cache.bytes += bytes
+	return order, true, nil
+}
+
+func typedTableColumnarCompositeOrderKey(orderFields []string, descending []bool) (string, bool) {
+	if len(orderFields) < 2 || (len(descending) != 0 && len(descending) != len(orderFields)) {
+		return "", false
+	}
+	var builder strings.Builder
+	builder.WriteString("\x00C;")
+	for index, field := range orderFields {
+		if field == "" {
+			return "", false
+		}
+		builder.WriteString(strconv.Itoa(len(field)))
+		builder.WriteByte(':')
+		builder.WriteString(field)
+		if len(descending) > 0 && descending[index] {
+			builder.WriteByte('D')
+		} else {
+			builder.WriteByte('A')
+		}
+		builder.WriteByte(';')
+	}
+	return builder.String(), true
+}
+
 func typedTableColumnarOrder(batch ColumnarBatch, field string) ([]uint32, int, bool) {
 	if batch.Rows <= 0 || uint64(batch.Rows) > uint64(^uint32(0)) || field == "" {
 		return nil, 0, false
@@ -147,6 +267,69 @@ func typedTableColumnarOrder(batch ColumnarBatch, field string) ([]uint32, int, 
 			return leftValue.number < rightValue.number
 		}
 		return order[left] < order[right]
+	})
+	return order, len(order) * 4, true
+}
+
+func typedTableColumnarOrderFields(batch ColumnarBatch, orderFields []string, descending []bool) ([]uint32, int, bool) {
+	if batch.Rows <= 0 || uint64(batch.Rows) > uint64(^uint32(0)) || len(orderFields) == 0 || (len(descending) != 0 && len(descending) != len(orderFields)) {
+		return nil, 0, false
+	}
+	if len(orderFields) > int(^uint(0)>>1)/batch.Rows {
+		return nil, 0, false
+	}
+	values := make([]typedTableColumnarOrderValue, batch.Rows*len(orderFields))
+	kinds := make([]uint8, len(orderFields))
+	order := make([]uint32, batch.Rows)
+	for row := 0; row < batch.Rows; row++ {
+		for fieldIndex, field := range orderFields {
+			value, available := batch.Value(field, row)
+			if !available || value == nil {
+				return nil, 0, false
+			}
+			valueIndex := row*len(orderFields) + fieldIndex
+			if text, ok := value.(string); ok {
+				if kinds[fieldIndex] == 2 {
+					return nil, 0, false
+				}
+				kinds[fieldIndex] = 1
+				values[valueIndex] = typedTableColumnarOrderValue{text: text, kind: 1}
+				continue
+			}
+			number, ok := sqlNumber(value)
+			if !ok || math.IsNaN(number) {
+				return nil, 0, false
+			}
+			if kinds[fieldIndex] == 1 {
+				return nil, 0, false
+			}
+			kinds[fieldIndex] = 2
+			values[valueIndex] = typedTableColumnarOrderValue{number: number, kind: 2}
+		}
+	}
+	for row := range order {
+		order[row] = uint32(row)
+	}
+	sort.Slice(order, func(left, right int) bool {
+		leftRow, rightRow := int(order[left]), int(order[right])
+		for fieldIndex := range orderFields {
+			leftValue := values[leftRow*len(orderFields)+fieldIndex]
+			rightValue := values[rightRow*len(orderFields)+fieldIndex]
+			if leftValue.kind == 1 {
+				if leftValue.text != rightValue.text {
+					if len(descending) > 0 && descending[fieldIndex] {
+						return leftValue.text > rightValue.text
+					}
+					return leftValue.text < rightValue.text
+				}
+			} else if leftValue.number != rightValue.number {
+				if len(descending) > 0 && descending[fieldIndex] {
+					return leftValue.number > rightValue.number
+				}
+				return leftValue.number < rightValue.number
+			}
+		}
+		return leftRow < rightRow
 	})
 	return order, len(order) * 4, true
 }

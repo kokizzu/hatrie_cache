@@ -1,6 +1,9 @@
 package hatSql
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestC212TypedTableColumnarOrderIsAdmittedAndInvalidated(t *testing.T) {
 	table := newC212TypedTableOrderTestTable(t)
@@ -187,4 +190,124 @@ func TestC212TypedTableColumnarOrderObservationEviction(t *testing.T) {
 	if _, available, err := table.BorrowSQLColumnarSourceOrder("CACHE", "events", fieldsA, "score"); err != nil || available {
 		t.Fatalf("recreated layout A first order available = %t, error = %v; want observation reset", available, err)
 	}
+}
+
+func TestC212TypedTableColumnarCompositeOrderIsAdmittedAndServesSQL(t *testing.T) {
+	table := newC212TypedTableCompositeOrderTestTable(t)
+	fields := []string{"id", "score"}
+	orderFields := []string{"score", "id"}
+	if _, available, err := table.ResolveSQLColumnarSource("CACHE", "events", fields); err != nil || !available {
+		t.Fatalf("ResolveSQLColumnarSource() available = %t, error = %v", available, err)
+	}
+	layoutKey := typedTableColumnarLayoutKey(fields)
+	table.columnar.mu.Lock()
+	baseBytes := table.columnar.layouts[layoutKey].bytes
+	table.columnar.mu.Unlock()
+	composite, ok := interface{}(table).(CompositeSortedColumnarSourceResolver)
+	if !ok {
+		t.Fatalf("typed table does not implement CompositeSortedColumnarSourceResolver")
+	}
+	directed, ok := interface{}(table).(DirectedCompositeSortedColumnarSourceResolver)
+	if !ok {
+		t.Fatalf("typed table does not implement DirectedCompositeSortedColumnarSourceResolver")
+	}
+	for attempt := 0; attempt < typedTableColumnarOrderCacheMinReads-1; attempt++ {
+		if _, available, err := composite.BorrowSQLColumnarSourceOrderFields("CACHE", "events", fields, orderFields); err != nil || available {
+			t.Fatalf("ascending composite warm-up %d available = %t, error = %v", attempt, available, err)
+		}
+	}
+	ascending, available, err := composite.BorrowSQLColumnarSourceOrderFields("CACHE", "events", fields, orderFields)
+	if err != nil || !available {
+		t.Fatalf("ascending composite order = %#v, available = %t, error = %v", ascending, available, err)
+	}
+	if got, want := c212CompositeOrderIDs(t, table, ascending), []int64{4, 1, 2, 3}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ascending composite order ids = %#v, want %#v", got, want)
+	}
+
+	descending := []bool{false, true}
+	for attempt := 0; attempt < typedTableColumnarOrderCacheMinReads-1; attempt++ {
+		if _, available, err := directed.BorrowSQLColumnarSourceOrderBy("CACHE", "events", fields, orderFields, descending); err != nil || available {
+			t.Fatalf("directed composite warm-up %d available = %t, error = %v", attempt, available, err)
+		}
+	}
+	ordered, available, err := directed.BorrowSQLColumnarSourceOrderBy("CACHE", "events", fields, orderFields, descending)
+	if err != nil || !available {
+		t.Fatalf("directed composite order = %#v, available = %t, error = %v", ordered, available, err)
+	}
+	if got, want := c212CompositeOrderIDs(t, table, ordered), []int64{4, 2, 1, 3}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("directed composite order ids = %#v, want %#v", got, want)
+	}
+	table.columnar.mu.Lock()
+	retainedBytes := table.columnar.layouts[layoutKey].bytes - baseBytes
+	table.columnar.mu.Unlock()
+	if got, want := retainedBytes, (len(ascending)+len(ordered))*4; got != want {
+		t.Fatalf("retained composite order bytes = %d, want %d", got, want)
+	}
+
+	query := "FROM CACHE('events') AS item SELECT item.id, item.score ORDER BY item.score ASC, item.id DESC LIMIT 3"
+	result, err := ExecuteSQLQuery(query, table)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := []interface{}{result.Rows[0]["id"], result.Rows[1]["id"], result.Rows[2]["id"]}, []interface{}{int64(4), int64(2), int64(1)}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("SQL composite ordered ids = %#v, want %#v", got, want)
+	}
+	if _, err := table.Upsert("row-2", []TypedTableValue{TypedInt64(2), TypedInt64(25)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, available, err := composite.BorrowSQLColumnarSourceOrderFields("CACHE", "events", fields, orderFields); err != nil || available {
+		t.Fatalf("composite order after mutation available = %t, error = %v; want invalidated", available, err)
+	}
+}
+
+func newC212TypedTableCompositeOrderTestTable(t testing.TB) *TypedTable {
+	table, err := NewTypedTable(TypedTableSchema{
+		Name: "events",
+		Columns: []TypedTableColumn{
+			{Name: "id", Kind: TypedTableInt64},
+			{Name: "score", Kind: TypedTableInt64},
+		},
+		ColumnarCache: TypedTableColumnarCacheOptions{
+			Enabled:          true,
+			SortedOrderCache: true,
+			MaxBytes:         1 << 20,
+			MinReads:         1,
+			RowsPerSegment:   256,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []struct {
+		key   string
+		id    int64
+		score int64
+	}{
+		{key: "row-1", id: 1, score: 10},
+		{key: "row-2", id: 2, score: 10},
+		{key: "row-3", id: 3, score: 20},
+		{key: "row-4", id: 4, score: 5},
+	} {
+		if _, err := table.Upsert(row.key, []TypedTableValue{TypedInt64(row.id), TypedInt64(row.score)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return table
+}
+
+func c212CompositeOrderIDs(t testing.TB, table *TypedTable, order []uint32) []int64 {
+	t.Helper()
+	batch, available, err := table.BorrowSQLColumnarSource("CACHE", "events", []string{"id", "score"})
+	if err != nil || !available {
+		t.Fatalf("BorrowSQLColumnarSource() available = %t, error = %v", available, err)
+	}
+	ids := make([]int64, 0, len(order))
+	for _, ordinal := range order {
+		value, available := batch.Value("id", int(ordinal))
+		if !available {
+			t.Fatalf("id ordinal %d unavailable", ordinal)
+		}
+		ids = append(ids, value.(int64))
+	}
+	return ids
 }

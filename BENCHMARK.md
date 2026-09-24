@@ -22447,13 +22447,13 @@ implemented; the cached path enabled `SortedOrderCache`, warmed it through its
 eight-request admission threshold, and then measured steady-state execution.
 
 ```text
-make benchmark-c212-typed-table-order-cache
+make benchmark-mz038
 ```
 
 | Path | Median ns/op | B/op | Allocs/op | Relative result |
 | --- | ---: | ---: | ---: | --- |
-| Columnar top-N scan before | 1,321,778 | 169,791 | 17,629 | 1.00x |
-| Admitted sorted ordinal projection after | 15,659 | 21,128 | 122 | 84.4x faster; 8.0x lower bytes; 144.5x fewer allocations |
+| Columnar top-N scan before | 1,432,985 | 170,414 | 17,634 | 1.00x |
+| Admitted sorted ordinal projection after | 21,613 | 21,640 | 122 | 66.3x faster; 7.9x lower bytes; 144.5x fewer allocations |
 
 The retained order vector is exactly `20,000 * 4 = 80,000` bytes in this
 fixture, plus ordinary cache metadata, and is charged to `MaxBytes`. Row values
@@ -22465,12 +22465,30 @@ Unsupported or nullable order fields retain the existing fallback.
 Raw samples:
 
 ```text
-Before: 1315769, 1321966, 1321778, 1321748, 1385643 ns/op; 169764-169863 B/op; 17628-17631 allocs/op
-After:  15659, 15885, 15734, 15595, 15474 ns/op; 21128 B/op; 122 allocs/op
+Before: 1452410, 1415420, 1475182, 1422617, 1432985 ns/op; 170400-170514 B/op; 17634-17636 allocs/op
+After:  20847, 21231, 21613, 22013, 21663 ns/op; 21640 B/op; 122 allocs/op
 ```
 
 Full correctness and invalidation coverage is in
 [C212_TYPED_TABLE_ORDER_CACHE.md](C212_TYPED_TABLE_ORDER_CACHE.md).
+
+### Composite ordered projection
+
+`make benchmark-mz038` uses the same 20,000-row table and a 50-row page with
+`ORDER BY score ASC, id DESC`. The control was measured without the composite
+cache; the cached path was warmed through the eight-request admission
+threshold before steady-state measurement.
+
+| Path | Raw ns/op (5 runs) | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | --- | ---: | ---: | ---: | --- |
+| Composite top-N control | 3,299,175; 3,275,129; 3,382,226; 3,213,544; 3,314,648 | 3,299,175 | 993,161 | 60,287 | 1.00x |
+| Composite admitted projection | 20,119; 19,867; 20,386; 20,038; 20,626 | 20,119 | 22,120 | 126 | 164.0x faster; 44.9x lower bytes; 478.5x fewer allocations |
+
+The retained vectors cost four bytes per active row per distinct direction
+pattern. Admission sorting is one-time per layout/order, and writes invalidate
+the derived vectors. The feature remains opt-in and unsupported shapes retain
+the existing fallback.
+
 ## MZ-007 source frontier requirement
 
 `make benchmark-mz007-frontier-rejection` (five samples, `-benchmem`, AMD Ryzen 9 5950X):
