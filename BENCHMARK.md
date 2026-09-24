@@ -35898,3 +35898,46 @@ it is not paid by attach, detach, lookup, or part-byte reads. Use
 `MarshalBinary` for memory-only transport and `Save` only at the desired
 checkpoint cadence. Full semantics and bounds are in
 [M038_PERSISTED_IMMUTABLE_PARTS.md](M038_PERSISTED_IMMUTABLE_PARTS.md).
+
+<a id="m-u39-partition-and-order-declarations"></a>
+## M-U39 Partition and Order Declarations
+
+Five benchmark samples on Linux/amd64 with an AMD Ryzen 9 5950X. The registry
+contains one `CACHE/events` declaration with one partition field and one order
+field. The legacy EXPLAIN row is the control; the declaration path is opt-in
+and measures the additional metadata lookup, copy, and formatted detail.
+
+```text
+BenchmarkM039PartitionOrderLookup-32
+10757978 114.2 ns/op 40 B/op 2 allocs/op
+10717155 114.2 ns/op 40 B/op 2 allocs/op
+10526308 113.0 ns/op 40 B/op 2 allocs/op
+10887234 108.6 ns/op 40 B/op 2 allocs/op
+11412982 107.4 ns/op 40 B/op 2 allocs/op
+BenchmarkM039ExplainPartitionOrder-32
+495828 2386 ns/op 2766 B/op 15 allocs/op
+461880 2363 ns/op 2766 B/op 15 allocs/op
+476458 2333 ns/op 2766 B/op 15 allocs/op
+453873 2315 ns/op 2766 B/op 15 allocs/op
+491557 2347 ns/op 2766 B/op 15 allocs/op
+BenchmarkM039ExplainWithoutPartitionOrder-32
+720634 1666 ns/op 2469 B/op 7 allocs/op
+648517 1790 ns/op 2469 B/op 7 allocs/op
+549748 1886 ns/op 2469 B/op 7 allocs/op
+616653 1858 ns/op 2469 B/op 7 allocs/op
+772598 1843 ns/op 2469 B/op 7 allocs/op
+```
+
+| Operation | Median CPU | Memory | Comparison |
+| --- | ---: | ---: | --- |
+| Registry lookup | 113 ns | 40 B/op, 2 allocs/op | bounded copy-safe metadata read |
+| Legacy EXPLAIN | 1,843 ns | 2,469 B/op, 7 allocs/op | control, 1.00x |
+| EXPLAIN with declaration | 2,347 ns | 2,766 B/op, 15 allocs/op | 1.27x CPU, 1.12x bytes, 2.14x allocs vs control |
+
+This is a planner visibility and connector contract feature, not a query-speed
+optimization. The measured cost is paid only when `PartitionOrderResolver` is
+provided to EXPLAIN; the default nil option does not perform registry lookup.
+The declaration does not prune or rewrite rows, so any source-side gain must be
+measured by the connector implementing `PartitionPruningSourceResolver`. Full
+semantics and fallback rules are in
+[M039_PARTITION_ORDER_DECLARATIONS.md](M039_PARTITION_ORDER_DECLARATIONS.md).

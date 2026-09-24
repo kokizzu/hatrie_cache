@@ -25162,3 +25162,23 @@ benchmark-m038:
 
 commit-m038:
 	@bash scripts/commit-m038.sh
+test-m039:
+	@bash scripts/test-m039.sh
+
+format-m039:
+	@bash scripts/format-m039.sh
+
+benchmark-m039:
+	@bash scripts/benchmark-m039.sh
+
+test-m039-package:
+	@bash scripts/test-m039-package.sh
+
+race-m039:
+	@bash scripts/race-m039.sh
+
+vet-m039:
+	@bash scripts/vet-m039.sh
+
+commit-m039:
+	@bash scripts/commit-m039.sh

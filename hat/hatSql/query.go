@@ -399,6 +399,9 @@ type SQLQueryOptions struct {
 	// PlanSnapshot enables an immutable explain snapshot on the returned
 	// materialized result, including any source-frontier requirements.
 	PlanSnapshot *SQLPlanSnapshotOptions
+	// PartitionOrderResolver supplies opt-in partition/order declarations for
+	// EXPLAIN. It never changes execution or source resolution by itself.
+	PartitionOrderResolver SQLPartitionOrderResolver
 }
 
 // QueryOptions bounds one query. It is the package-native name for
@@ -13170,16 +13173,20 @@ func sqlCTEOutputRows(cte sqlCTE, result SQLQueryResult) ([]SQLRow, error) {
 }
 
 func explainSQLQuery(source string, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) (SQLQueryResult, error) {
+	var partitionOrderResolver SQLPartitionOrderResolver
+	if control != nil {
+		partitionOrderResolver = control.options.PartitionOrderResolver
+	}
 	if query.pipeline {
-		return explainSQLPipelineQuery(query, resolver)
+		return explainSQLPipelineQueryWithPartitionOrder(query, resolver, partitionOrderResolver)
 	}
 	steps := sqlExplainSteps(query)
 	var estimatedSteps []SQLExplainStep
 	if query.analyze {
-		estimatedSteps = sqlExplainStepsWithResolver(query, resolver)
+		estimatedSteps = sqlExplainStepsWithPartitionOrder(query, resolver, partitionOrderResolver)
 	}
 	if !query.analyze {
-		steps = sqlExplainStepsWithResolver(query, resolver)
+		steps = sqlExplainStepsWithPartitionOrder(query, resolver, partitionOrderResolver)
 		projectionOptions := control.options
 		projectionOptions.IndexHint = query.indexHint
 		steps = sqlAddProjectionExplainStep(steps, source, resolver, projectionOptions)
@@ -13392,16 +13399,20 @@ func sqlExplainSteps(query *sqlQuery) []SQLExplainStep {
 }
 
 func sqlExplainStepsWithResolver(query *sqlQuery, resolver SQLSourceResolver) []SQLExplainStep {
+	return sqlExplainStepsWithPartitionOrder(query, resolver, nil)
+}
+
+func sqlExplainStepsWithPartitionOrder(query *sqlQuery, resolver SQLSourceResolver, partitionOrderResolver SQLPartitionOrderResolver) []SQLExplainStep {
 	steps := make([]SQLExplainStep, 0, 8+len(query.ctes)+len(query.joins)+len(query.unions))
-	sqlAppendExplainSteps(&steps, query, "", resolver)
+	sqlAppendExplainSteps(&steps, query, "", resolver, partitionOrderResolver)
 	return steps
 }
 
-func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix string, resolver SQLSourceResolver) {
+func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix string, resolver SQLSourceResolver, partitionOrderResolver SQLPartitionOrderResolver) {
 	for _, cte := range query.ctes {
 		*steps = append(*steps, SQLExplainStep{Node: prefix + "CTE", Detail: cte.name})
 		if cte.query != nil {
-			sqlAppendExplainSteps(steps, cte.query, prefix+"  ", resolver)
+			sqlAppendExplainSteps(steps, cte.query, prefix+"  ", resolver, partitionOrderResolver)
 		} else {
 			estimate := len(cte.values)
 			*steps = append(*steps, SQLExplainStep{Node: prefix + "  VALUES", Detail: "CTE " + cte.name, EstimatedRows: &estimate})
@@ -13421,12 +13432,12 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 		whereEstimate = sqlCardinalityEstimateForFilter(currentEstimate, *query.from, query.where, resolver, true)
 		currentEstimate = whereEstimate
 	}
-	scanStep := sqlExplainSourceStep(prefix+"SCAN", *query.from, resolver)
+	scanStep := sqlExplainSourceStepWithPartitionOrder(prefix+"SCAN", *query.from, resolver, partitionOrderResolver)
 	sqlMarkArrangementRecommendation(scanStep.Arrangements, workload)
 	sqlSetExplainCardinalityEstimate(&scanStep, sourceEstimate)
 	*steps = append(*steps, scanStep)
 	if query.from.kind == "SUBQUERY" && query.from.query != nil {
-		sqlAppendExplainSteps(steps, query.from.query, prefix+"  ", resolver)
+		sqlAppendExplainSteps(steps, query.from.query, prefix+"  ", resolver, partitionOrderResolver)
 	}
 	leftAliases := []string{}
 	if query.from != nil && query.from.alias != "" {
@@ -13464,6 +13475,7 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 			}
 		}
 		joinStep := SQLExplainStep{Node: prefix + node, Detail: detail}
+		sqlAttachPartitionOrder(&joinStep, join.source, partitionOrderResolver)
 		joinStep.Arrangements = resolveSQLArrangementMetadata(resolver, join.source)
 		sqlMarkArrangementRecommendation(joinStep.Arrangements, workload)
 		joinEstimate := sqlCardinalityEstimateForJoin(currentEstimate, join, leftAliases, resolver)
@@ -13471,7 +13483,7 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 		currentEstimate = joinEstimate
 		*steps = append(*steps, joinStep)
 		if join.source.kind == "SUBQUERY" && join.source.query != nil {
-			sqlAppendExplainSteps(steps, join.source.query, prefix+"  ", resolver)
+			sqlAppendExplainSteps(steps, join.source.query, prefix+"  ", resolver, partitionOrderResolver)
 		}
 		if join.source.alias != "" {
 			leftAliases = append(leftAliases, join.source.alias)
@@ -13526,18 +13538,37 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 			kind += " ALL"
 		}
 		*steps = append(*steps, SQLExplainStep{Node: prefix + "SET", Detail: kind})
-		sqlAppendExplainSteps(steps, union.query, prefix+"  ", resolver)
+		sqlAppendExplainSteps(steps, union.query, prefix+"  ", resolver, partitionOrderResolver)
 	}
 }
 
 func sqlExplainSourceStep(node string, source sqlSource, resolver SQLSourceResolver) SQLExplainStep {
+	return sqlExplainSourceStepWithPartitionOrder(node, source, resolver, nil)
+}
+
+func sqlExplainSourceStepWithPartitionOrder(node string, source sqlSource, resolver SQLSourceResolver, partitionOrderResolver SQLPartitionOrderResolver) SQLExplainStep {
 	step := SQLExplainStep{Node: node, Detail: sqlExplainSource(source)}
+	sqlAttachPartitionOrder(&step, source, partitionOrderResolver)
 	step.Arrangements = resolveSQLArrangementMetadata(resolver, source)
 	if source.kind == "VALUES" {
 		estimate := len(source.values)
 		step.EstimatedRows = &estimate
 	}
 	return step
+}
+
+func sqlAttachPartitionOrder(step *SQLExplainStep, source sqlSource, resolver SQLPartitionOrderResolver) {
+	if step == nil || resolver == nil {
+		return
+	}
+	declaration, available, err := resolver.ResolveSQLPartitionOrder(source.kind, source.key)
+	if err != nil || !available {
+		return
+	}
+	step.PartitionOrder = &declaration
+	if detail := declaration.String(); detail != "" {
+		step.Detail += "; " + detail
+	}
 }
 
 func sqlExplainSource(source sqlSource) string {

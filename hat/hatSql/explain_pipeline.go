@@ -6,13 +6,17 @@ import (
 )
 
 func explainSQLPipelineQuery(query *sqlQuery, resolver SQLSourceResolver) (SQLQueryResult, error) {
+	return explainSQLPipelineQueryWithPartitionOrder(query, resolver, nil)
+}
+
+func explainSQLPipelineQueryWithPartitionOrder(query *sqlQuery, resolver SQLSourceResolver, partitionOrderResolver SQLPartitionOrderResolver) (SQLQueryResult, error) {
 	if query == nil {
 		return SQLQueryResult{}, fmt.Errorf("SQL pipeline query is nil")
 	}
 	if query.analyze {
 		return SQLQueryResult{}, fmt.Errorf("EXPLAIN PIPELINE ANALYZE is not supported")
 	}
-	steps := sqlExplainPipelineStepsWithResolver(query, resolver)
+	steps := sqlExplainPipelineStepsWithPartitionOrder(query, resolver, partitionOrderResolver)
 	if query.explainCost {
 		steps = CostSQLExplainSteps(steps, SQLExplainCostOptions{})
 	}
@@ -60,7 +64,11 @@ func sqlExplainPipelineSteps(query *sqlQuery) []SQLExplainStep {
 }
 
 func sqlExplainPipelineStepsWithResolver(query *sqlQuery, resolver SQLSourceResolver) []SQLExplainStep {
-	steps := sqlExplainStepsWithResolver(query, resolver)
+	return sqlExplainPipelineStepsWithPartitionOrder(query, resolver, nil)
+}
+
+func sqlExplainPipelineStepsWithPartitionOrder(query *sqlQuery, resolver SQLSourceResolver, partitionOrderResolver SQLPartitionOrderResolver) []SQLExplainStep {
+	steps := sqlExplainStepsWithPartitionOrder(query, resolver, partitionOrderResolver)
 	stage := 1
 	for index := range steps {
 		if index > 0 && sqlExplainPipelineBoundary(steps[index].Node) {

@@ -1069,3 +1069,14 @@ one-region-update benchmark, 64 KiB chunks measured 1.62x lower CPU time,
 9.98x lower allocation bytes, and 16x lower new-object payload, with 1.84x
 more allocations. See [C241_INCREMENTAL_CHUNK_DEDUP.md](C241_INCREMENTAL_CHUNK_DEDUP.md)
 and [BENCHMARK.md](BENCHMARK.md#c241-incremental-backup-chunk-deduplication).
+
+## M-U39: Partition and order declarations
+
+Adopted as an opt-in `hatSql.SQLPartitionOrderRegistry` for connector-owned
+physical partition metadata. `SQLQueryOptions.PartitionOrderResolver` exposes
+the declaration in ordinary and pipeline EXPLAIN plans, while
+`SupportsPartitionPredicate` lets a source adapter gate the existing
+`PartitionPruningSourceResolver` contract. The default query path is unchanged;
+the engine never prunes rows or rewrites source data from metadata alone. See
+[M039_PARTITION_ORDER_DECLARATIONS.md](M039_PARTITION_ORDER_DECLARATIONS.md) and
+[BENCHMARK.md](BENCHMARK.md#m-u39-partition-and-order-declarations).

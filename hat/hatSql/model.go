@@ -32,28 +32,29 @@ type QueryResult struct {
 
 // ExplainStep is one stable operation in an EXPLAIN plan.
 type ExplainStep struct {
-	Node                 string                   `json:"node"`
-	Detail               string                   `json:"detail"`
-	Alternatives         []ExplainAlternative     `json:"alternatives,omitempty"`
-	Projections          []ExplainProjection      `json:"projections,omitempty"`
-	Notices              []ExplainNotice          `json:"notices,omitempty"`
-	Index                *SQLIndexDiagnostics     `json:"index,omitempty"`
-	Pruning              *ExplainPruning          `json:"pruning,omitempty"`
-	Arrangements         []SQLArrangementMetadata `json:"arrangements,omitempty"`
-	Stage                int                      `json:"stage,omitempty"`
-	Worker               int                      `json:"worker,omitempty"`
-	Workers              int                      `json:"workers,omitempty"`
-	Lineage              []ColumnLineage          `json:"lineage,omitempty"`
-	EstimatedRows        *int                     `json:"estimated_rows,omitempty"`
-	EstimatedCost        *int                     `json:"estimated_cost,omitempty"`
-	EstimatedMemoryBytes *int                     `json:"estimated_memory_bytes,omitempty"`
-	ActualInputRows      *int                     `json:"actual_input_rows,omitempty"`
-	ActualOutputRows     *int                     `json:"actual_output_rows,omitempty"`
-	ActualInputBytes     *int                     `json:"actual_input_bytes,omitempty"`
-	ActualOutputBytes    *int                     `json:"actual_output_bytes,omitempty"`
-	EstimateErrorRows    *int                     `json:"estimate_error_rows,omitempty"`
-	EstimateErrorPercent *float64                 `json:"estimate_error_percent,omitempty"`
-	ElapsedNanos         *int64                   `json:"elapsed_ns,omitempty"`
+	Node                 string                        `json:"node"`
+	Detail               string                        `json:"detail"`
+	Alternatives         []ExplainAlternative          `json:"alternatives,omitempty"`
+	Projections          []ExplainProjection           `json:"projections,omitempty"`
+	Notices              []ExplainNotice               `json:"notices,omitempty"`
+	Index                *SQLIndexDiagnostics          `json:"index,omitempty"`
+	Pruning              *ExplainPruning               `json:"pruning,omitempty"`
+	PartitionOrder       *SQLPartitionOrderDeclaration `json:"partition_order,omitempty"`
+	Arrangements         []SQLArrangementMetadata      `json:"arrangements,omitempty"`
+	Stage                int                           `json:"stage,omitempty"`
+	Worker               int                           `json:"worker,omitempty"`
+	Workers              int                           `json:"workers,omitempty"`
+	Lineage              []ColumnLineage               `json:"lineage,omitempty"`
+	EstimatedRows        *int                          `json:"estimated_rows,omitempty"`
+	EstimatedCost        *int                          `json:"estimated_cost,omitempty"`
+	EstimatedMemoryBytes *int                          `json:"estimated_memory_bytes,omitempty"`
+	ActualInputRows      *int                          `json:"actual_input_rows,omitempty"`
+	ActualOutputRows     *int                          `json:"actual_output_rows,omitempty"`
+	ActualInputBytes     *int                          `json:"actual_input_bytes,omitempty"`
+	ActualOutputBytes    *int                          `json:"actual_output_bytes,omitempty"`
+	EstimateErrorRows    *int                          `json:"estimate_error_rows,omitempty"`
+	EstimateErrorPercent *float64                      `json:"estimate_error_percent,omitempty"`
+	ElapsedNanos         *int64                        `json:"elapsed_ns,omitempty"`
 }
 
 // ExplainPruning contains machine-readable row counts for an index, mark, or
