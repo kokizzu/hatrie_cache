@@ -56,12 +56,13 @@ type MaterializedUpsertResult struct {
 type FunctionalIndexEvaluator func(Row) (interface{}, error)
 
 type DerivedColumn struct {
-	Name      string
-	Default   interface{}
-	Identity  bool
-	Sequence  string
-	Generated GeneratedValue
-	Indexed   bool
+	Name                  string
+	Default               interface{}
+	Identity              bool
+	Sequence              string
+	Generated             GeneratedValue
+	GeneratedDependencies []string
+	Indexed               bool
 }
 
 type SQLResolverAdapter struct {
@@ -188,6 +189,7 @@ type materializedFunctionalIndex struct {
 type MaterializedSource struct {
 	mu                sync.RWMutex
 	columns           []DerivedColumn
+	generatedOrder    []int
 	nextID            map[string]int64
 	rows              []Row
 	indexes           map[string]map[string][]int
@@ -368,17 +370,35 @@ func (source *MaterializedSource) materializeRowLocked(row Row) (Row, error) {
 			materialized[column.Name] = source.nextID[sequence]
 		}
 	}
-	for _, column := range source.columns {
-		if column.Generated == nil {
-			continue
+	if source.generatedOrder == nil {
+		for _, column := range source.columns {
+			if err := source.generateColumnLocked(materialized, column); err != nil {
+				return nil, err
+			}
 		}
-		value, err := column.Generated(cloneRow(materialized))
-		if err != nil {
-			return nil, fmt.Errorf("hatSchema: generate %q: %w", column.Name, err)
+	} else {
+		for _, index := range source.generatedOrder {
+			if index < 0 || index >= len(source.columns) {
+				return nil, fmt.Errorf("hatSchema: generated column order index %d is invalid", index)
+			}
+			if err := source.generateColumnLocked(materialized, source.columns[index]); err != nil {
+				return nil, err
+			}
 		}
-		materialized[column.Name] = value
 	}
 	return materialized, nil
+}
+
+func (source *MaterializedSource) generateColumnLocked(materialized Row, column DerivedColumn) error {
+	if column.Generated == nil {
+		return nil
+	}
+	value, err := column.Generated(cloneRow(materialized))
+	if err != nil {
+		return fmt.Errorf("hatSchema: generate %q: %w", column.Name, err)
+	}
+	materialized[column.Name] = value
+	return nil
 }
 
 func (source *MaterializedSource) insertMaterializedLocked(materialized Row) (Row, error) {

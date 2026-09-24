@@ -26316,3 +26316,30 @@ commit-mz045-arrangement-cache:
 .PHONY: push-mz045-arrangement-cache
 push-mz045-arrangement-cache:
 	@bash scripts/push-mz045-arrangement-cache.sh
+.PHONY: test-tt027-generated-columns
+test-tt027-generated-columns:
+	@bash scripts/test-tt027-generated-columns.sh
+
+.PHONY: format-tt027-generated-columns
+format-tt027-generated-columns:
+	@bash scripts/format-tt027-generated-columns.sh
+
+.PHONY: benchmark-tt027-generated-columns
+benchmark-tt027-generated-columns:
+	@bash scripts/benchmark-tt027-generated-columns.sh
+
+.PHONY: verify-tt027-generated-columns
+verify-tt027-generated-columns:
+	@bash scripts/verify-tt027-generated-columns.sh
+
+.PHONY: stage-tt027-generated-columns
+stage-tt027-generated-columns:
+	@bash scripts/stage-tt027-generated-columns.sh
+
+.PHONY: commit-tt027-generated-columns
+commit-tt027-generated-columns:
+	@bash scripts/commit-tt027-generated-columns.sh
+
+.PHONY: push-tt027-generated-columns
+push-tt027-generated-columns:
+	@bash scripts/push-tt027-generated-columns.sh
