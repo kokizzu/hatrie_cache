@@ -31,16 +31,31 @@ diagnostic.
 For literal and field arguments, `VALID_AT` is recognized as a scalar-safe
 builtin by the automatic native SQL dataflow planner. This keeps the common
 row-filter path on the same low-allocation executor as ordinary comparisons.
-Computed arguments retain the existing general expression fallback. The
-predicate does not yet create or consult a physical validity index, and it does
-not claim frontier-aware partition pruning; those require a provider-level
-temporal index contract and remain future work.
+Computed arguments retain the existing general expression fallback.
+
+`hatCache.HatTrie` can additionally build an opt-in physical validity index:
+
+```go
+if err := trie.CreateSQLJSONValidityIndex("orders", "valid_from", "valid_to"); err != nil {
+	return err
+}
+```
+
+The index uses the shared augmented interval arrangement, rebuilds lazily when
+the source generation changes, and returns candidates that the SQL executor
+rechecks with the original predicate. Unsupported timestamp text, out-of-range
+timestamps, admission-budget rejection, and computed arguments safely fall
+back to the normal scan. This does not yet provide frontier-aware partition
+pruning; that remains a separate provider-level feature.
 
 Focused correctness and race checks:
 
 ```text
 make test-mz009-temporal-validity
 make test-race-mz009-temporal-validity
+make test-mz009-validity-index
+make race-mz009-validity-index
+make benchmark-mz009-validity-index
 ```
 
 The benchmark and raw samples are recorded in

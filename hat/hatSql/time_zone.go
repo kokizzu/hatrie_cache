@@ -303,6 +303,12 @@ func sqlTimestampValue(value interface{}, location *time.Location) (time.Time, e
 	return time.Time{}, fmt.Errorf("timestamp must be RFC3339 or YYYY-MM-DD HH:MM:SS text")
 }
 
+// ParseSQLTimestamp parses the timestamp forms accepted by SQL time
+// functions, using UTC for timestamp text without an explicit offset.
+func ParseSQLTimestamp(value interface{}) (time.Time, error) {
+	return sqlTimestampValue(value, time.UTC)
+}
+
 func sqlDurationValue(value interface{}) (time.Duration, error) {
 	switch duration := value.(type) {
 	case sqlDuration:

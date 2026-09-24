@@ -145,6 +145,7 @@ type SQLSnapshotLocker = SnapshotLocker
 type SQLIndexedSourceResolver = IndexedSourceResolver
 type SQLLookupSourceResolver = LookupSourceResolver
 type SQLRangeIndexedSourceResolver = RangeIndexedSourceResolver
+type SQLTemporalValidityIndexedSourceResolver = TemporalValidityIndexedSourceResolver
 type SQLBorrowedPrefixIndexedSourceResolver = BorrowedPrefixIndexedSourceResolver
 type SQLOrderedSourceResolver = OrderedSourceResolver
 type SQLOrderedRangeSourceResolver = OrderedRangeSourceResolver
@@ -14270,6 +14271,18 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 	if hint.Mode == SQLIndexHintForce {
 		return resolveSQLForcedIndex(source, condition, resolver, metrics, hint)
 	}
+	if indexed, ok := resolver.(TemporalValidityIndexedSourceResolver); ok {
+		if at, validFromField, validToField, matched := sqlTemporalValidityIndexArgs(source, condition); matched && hint.allowsField(source, validFromField) && hint.allowsField(source, validToField) {
+			started := time.Now()
+			rows, available, err := indexed.ResolveSQLTemporalValiditySource(source.kind, source.key, at, validFromField, validToField)
+			if available || err != nil {
+				if available && metrics != nil {
+					metrics.record("VALIDITY INDEX SCAN", sqlExplainSource(source)+" fields="+validFromField+","+validToField, 2, len(rows), started)
+				}
+				return rows, available, err
+			}
+		}
+	}
 	if indexed, ok := resolver.(SQLCoveringIndexedSourceResolver); ok && len(coveringFields) > 0 {
 		if field, value, matched := sqlCoveringIndexedEquality(source, condition); matched {
 			if hint.allowsField(source, field) {
@@ -14413,6 +14426,25 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 		metrics.adaptive.ObserveIndex(adaptiveKey, *adaptiveEstimate, len(rows))
 	}
 	return rows, indexed, err
+}
+
+func sqlTemporalValidityIndexArgs(source sqlSource, condition sqlExpr) (time.Time, string, string, bool) {
+	if condition.kind != "func" || condition.name != "VALID_AT" || len(condition.args) != 3 || condition.args[0].kind != "literal" {
+		return time.Time{}, "", "", false
+	}
+	at, err := sqlTimestampValue(condition.args[0].value, time.UTC)
+	if err != nil {
+		return time.Time{}, "", "", false
+	}
+	fields := [2]string{}
+	for index := 0; index < len(fields); index++ {
+		argument := condition.args[index+1]
+		if argument.kind != "field" || argument.name == "" || (argument.qualifier != "" && argument.qualifier != source.alias) {
+			return time.Time{}, "", "", false
+		}
+		fields[index] = argument.name
+	}
+	return at, fields[0], fields[1], true
 }
 
 // resolveSQLIndexedLiteralINSource unions disjoint equality postings for a

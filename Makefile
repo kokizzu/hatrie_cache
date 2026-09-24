@@ -25804,3 +25804,44 @@ commit-ch046-dictionary:
 
 push-ch046-dictionary:
 	bash scripts/push-ch046-dictionary.sh
+
+.PHONY: test-mz009-validity-index test-mz009-validity-index-package benchmark-mz009-validity-baseline benchmark-mz009-validity-index race-mz009-validity-index vet-mz009-validity-index
+
+test-mz009-validity-index:
+	bash scripts/test-mz009-validity-index.sh
+
+test-mz009-validity-index-package:
+	bash scripts/test-mz009-validity-index-package.sh
+
+benchmark-mz009-validity-baseline:
+	bash scripts/benchmark-mz009-validity-baseline.sh
+
+benchmark-mz009-validity-index:
+	bash scripts/benchmark-mz009-validity-index.sh
+
+race-mz009-validity-index:
+	bash scripts/race-mz009-validity-index.sh
+
+vet-mz009-validity-index:
+	bash scripts/vet-mz009-validity-index.sh
+
+.PHONY: review-mz009-validity-index
+
+review-mz009-validity-index:
+	bash scripts/review-mz009-validity-index.sh
+
+.PHONY: commit-mz009-validity-index push-mz009-validity-index
+
+commit-mz009-validity-index:
+	bash scripts/commit-mz009-validity-index.sh
+
+push-mz009-validity-index:
+	bash scripts/push-mz009-validity-index.sh
+
+
+
+
+.PHONY: format-mz009-validity-index
+
+format-mz009-validity-index:
+	bash scripts/format-mz009-validity-index.sh

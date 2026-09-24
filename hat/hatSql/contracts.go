@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/bits"
 	"strings"
+	"time"
 )
 
 // QueryObserver receives one privacy-safe execution summary per query.
@@ -1416,6 +1417,13 @@ type CoveringIndexedSourceResolver interface {
 // RangeIndexedSourceResolver optionally resolves ordered comparisons through an index.
 type RangeIndexedSourceResolver interface {
 	ResolveSQLIndexedRangeSource(name, key, field, operator string, value interface{}) ([]Row, bool, error)
+}
+
+// TemporalValidityIndexedSourceResolver optionally resolves a literal VALID_AT
+// predicate through an interval index. Implementations may return candidates;
+// the SQL executor evaluates VALID_AT again before publishing rows.
+type TemporalValidityIndexedSourceResolver interface {
+	ResolveSQLTemporalValiditySource(name, key string, at time.Time, validFromField, validToField string) ([]Row, bool, error)
 }
 
 // StrategyRangeIndexedSourceResolver optionally resolves a range predicate

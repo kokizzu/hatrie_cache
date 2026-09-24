@@ -22598,8 +22598,28 @@ The final path is faster because the planner admits the builtin into native
 scalar execution; the predicate itself does not materialize per-row argument
 vectors. An earlier generic batch implementation was rejected after measuring
 about 1.25x slower execution, 8.9x higher allocated bytes, and 8.9x more
-allocations than the explicit predicate. Validity-index construction and
-frontier-aware pruning are not included because they are not implemented.
+allocations than the explicit predicate. The opt-in source validity index is
+measured separately below; frontier-aware pruning is still not implemented.
+
+<a id="mz-009-temporal-validity-index"></a>
+## MZ-009 temporal validity index
+
+`make benchmark-mz009-validity-index` (five samples, `-benchtime=200ms`,
+`-benchmem`, AMD Ryzen 9 5950X; 10,000 JSON rows; warm index excludes the
+one-time rebuild):
+
+| Mode | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative result vs scan |
+| --- | --- | ---: | ---: | ---: | --- |
+| Normal `VALID_AT` JSON source scan | 17254963; 17118033; 17672242; 17619197; 18592319 | 17619197 | 7701729 | 150040 | 1.00x |
+| Warm `CreateSQLJSONValidityIndex` interval lookup | 7656; 8053; 8286; 8108; 8404 | 8108 | 6064 | 29 | 2,173x faster; 1,270x lower heap; 5,174x fewer allocations |
+| Cold index build plus first query | 25672588; 26131474; 25849339; 25881119; 26614145 | 25881119 | 12122296 | 207523 | 1.47x slower; 1.57x higher heap; 1.38x more allocations |
+
+The index is therefore deliberately opt-in. Its steady-state read path is a
+large win for repeated point-in-time lookups over a stable source, while the
+cold row rebuild is more expensive than one scan. Source generation changes,
+malformed or out-of-range bounds, and admission-budget rejection use the
+correctness-preserving scan fallback. The benchmark command and focused tests
+are also recorded in [SQL_TEMPORAL_VALIDITY.md](SQL_TEMPORAL_VALIDITY.md).
 
 ## MZ-010 Command-Journal Subscriptions
 
