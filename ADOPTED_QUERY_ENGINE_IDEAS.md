@@ -1114,3 +1114,14 @@ for transfer and storage. `EncodeSQLDataflowPlan` writes binary by default;
 both. The binary path is 3.79x faster to encode, 7.53x faster to decode, and
 36.5% smaller on the measured 32-fragment plan. See
 [M052_DATAFLOW_PLAN_CODEC.md](M052_DATAFLOW_PLAN_CODEC.md).
+
+## M049: Concurrent Compiled Plan Miss Coalescing
+
+The opt-in `hatSql.SQLCompiledQueryCache` now coalesces concurrent exact-source
+cache misses. One leader compiles an immutable plan while waiters receive the
+same plan or the same compile error; `SQLCompiledQueryCacheStats.Coalesced`
+exposes the bounded diagnostic count. Completed-plan limits and all default
+query paths remain unchanged. The measured 16-caller cold-miss burst is 1.95x
+faster, with 3.43x lower transient bytes and 2.78x fewer allocations. See
+[M049_COMPILED_PLAN_SINGLEFLIGHT.md](M049_COMPILED_PLAN_SINGLEFLIGHT.md) and
+[BENCHMARK.md](BENCHMARK.md#m049-concurrent-compiled-plan-miss-coalescing).

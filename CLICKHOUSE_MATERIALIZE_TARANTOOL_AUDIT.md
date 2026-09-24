@@ -234,6 +234,16 @@ and the decoder accepts both formats. Full operator semantics and planner
 fragment sharing remain open. See [M052_DATAFLOW_PLAN_CODEC.md](M052_DATAFLOW_PLAN_CODEC.md)
 and [BENCHMARK.md](BENCHMARK.md#m052ab-compact-sql-dataflow-plan-codec).
 
+### M049: Concurrent compiled-plan miss coalescing
+
+Adopted a bounded exact-key singleflight layer in the opt-in compiled SQL plan
+cache. Concurrent cold callers now share one parse/compile result or error;
+completed-plan eviction, schema-version namespaces, and default query paths are
+unchanged. The measured burst is 1.95x faster with 3.43x lower transient bytes
+and 2.78x fewer allocations. See
+[M049_COMPILED_PLAN_SINGLEFLIGHT.md](M049_COMPILED_PLAN_SINGLEFLIGHT.md) and
+[BENCHMARK.md](BENCHMARK.md#m049-concurrent-compiled-plan-miss-coalescing).
+
 ### M065m: Peer-Aware Incremental Numeric RANGE Windows
 
 Adopted as an opt-in append-only capability for `COUNT(*)` and `SUM(int64)`.

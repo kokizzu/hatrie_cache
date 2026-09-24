@@ -25485,3 +25485,40 @@ deliver-m048:
 .PHONY: show-m048-targets
 show-m048-targets:
 	bash scripts/show-m048-targets.sh
+.PHONY: test-m049-compiled-cache
+test-m049-compiled-cache:
+	bash scripts/test-m049-compiled-cache.sh
+.PHONY: benchmark-m049-compiled-cache
+benchmark-m049-compiled-cache:
+	bash scripts/benchmark-m049-compiled-cache.sh
+.PHONY: format-m049-compiled-cache
+format-m049-compiled-cache:
+	bash scripts/format-m049-compiled-cache.sh
+
+.PHONY: test-m049-sql-package
+test-m049-sql-package:
+	bash scripts/test-m049-sql-package.sh
+
+.PHONY: race-m049-sql-package
+race-m049-sql-package:
+	bash scripts/race-m049-sql-package.sh
+
+.PHONY: vet-m049-sql-package
+vet-m049-sql-package:
+	bash scripts/vet-m049-sql-package.sh
+
+.PHONY: verify-m049-docs
+verify-m049-docs:
+	bash scripts/verify-m049-docs.sh
+
+.PHONY: test-m049-all
+test-m049-all:
+	bash scripts/test-m049-all.sh
+
+.PHONY: diffcheck-m049
+diffcheck-m049:
+	bash scripts/diffcheck-m049.sh
+
+.PHONY: deliver-m049
+deliver-m049:
+	bash scripts/deliver-m049.sh

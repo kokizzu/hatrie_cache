@@ -38,6 +38,8 @@ type SQLCompiledQueryCacheStats struct {
 	MaxBytes   int64
 	Hits       uint64
 	Misses     uint64
+	// Coalesced counts callers that shared an in-flight exact-key compilation.
+	Coalesced  uint64
 	Evictions  uint64
 	Oversized  uint64
 }
@@ -56,9 +58,12 @@ type SQLCompiledQueryCache struct {
 	bytes      int64
 	entries    map[sqlCompiledQueryCacheKey]sqlCompiledQueryCacheEntry
 	canonical  map[sqlCompiledQueryCanonicalCacheKey]sqlCompiledQueryCacheEntry
+	flights    map[sqlCompiledQueryCacheKey]*sqlCompiledQueryCacheFlight
+	compile    func(string) (*CompiledSQLQuery, error)
 	order      *list.List
 	hits       uint64
 	misses     uint64
+	coalesced  uint64
 	evictions  uint64
 	oversized  uint64
 }
@@ -80,6 +85,12 @@ type sqlCompiledQueryCacheEntry struct {
 	canonicalKey sqlCompiledQueryCanonicalCacheKey
 }
 
+type sqlCompiledQueryCacheFlight struct {
+	done  chan struct{}
+	query *CompiledSQLQuery
+	err   error
+}
+
 // CompiledQueryCache is the package-native short name for
 // SQLCompiledQueryCache.
 type CompiledQueryCache = SQLCompiledQueryCache
@@ -97,6 +108,8 @@ func NewSQLCompiledQueryCache(options SQLCompiledQueryCacheOptions) (*SQLCompile
 		maxBytes:   options.MaxBytes,
 		entries:    make(map[sqlCompiledQueryCacheKey]sqlCompiledQueryCacheEntry),
 		canonical:  make(map[sqlCompiledQueryCanonicalCacheKey]sqlCompiledQueryCacheEntry),
+		flights:    make(map[sqlCompiledQueryCacheKey]*sqlCompiledQueryCacheFlight),
+		compile:    CompileSQLQuery,
 		order:      list.New(),
 	}, nil
 }
@@ -125,25 +138,39 @@ func (cache *SQLCompiledQueryCache) CompileWithSchemaVersion(source, schemaVersi
 		cache.mu.Unlock()
 		return entry.query, nil
 	}
+	if flight, ok := cache.flights[key]; ok {
+		cache.coalesced++
+		cache.mu.Unlock()
+		<-flight.done
+		return flight.query, flight.err
+	}
+	flight := &sqlCompiledQueryCacheFlight{done: make(chan struct{})}
+	cache.flights[key] = flight
 	cache.mu.Unlock()
 
 	canonical, err := sqlPreparedQueryCacheKey(source, schemaVersion)
 	if err != nil {
-		return nil, err
+		return cache.finishCompiledQueryFlight(key, flight, nil, err)
 	}
 	canonicalKey := sqlCompiledQueryCanonicalCacheKey{key: canonical, schemaVersion: schemaVersion}
 	cache.mu.Lock()
 	if entry, ok := cache.canonical[canonicalKey]; ok {
 		cache.hits++
 		cache.order.MoveToBack(entry.order)
+		query := entry.query
+		result, resultErr := cache.finishCompiledQueryFlightLocked(key, flight, query, nil)
 		cache.mu.Unlock()
-		return entry.query, nil
+		return result, resultErr
 	}
 	cache.mu.Unlock()
 
-	query, err := CompileSQLQuery(source)
+	compile := cache.compile
+	if compile == nil {
+		compile = CompileSQLQuery
+	}
+	query, err := compile(source)
 	if err != nil {
-		return nil, err
+		return cache.finishCompiledQueryFlight(key, flight, nil, err)
 	}
 	weight := sqlCompiledQueryCacheWeight(source)
 
@@ -152,17 +179,17 @@ func (cache *SQLCompiledQueryCache) CompileWithSchemaVersion(source, schemaVersi
 	if entry, ok := cache.entries[key]; ok {
 		cache.hits++
 		cache.order.MoveToBack(entry.order)
-		return entry.query, nil
+		return cache.finishCompiledQueryFlightLocked(key, flight, entry.query, nil)
 	}
 	if entry, ok := cache.canonical[canonicalKey]; ok {
 		cache.hits++
 		cache.order.MoveToBack(entry.order)
-		return entry.query, nil
+		return cache.finishCompiledQueryFlightLocked(key, flight, entry.query, nil)
 	}
 	cache.misses++
 	if weight > cache.maxBytes {
 		cache.oversized++
-		return query, nil
+		return cache.finishCompiledQueryFlightLocked(key, flight, query, nil)
 	}
 	for len(cache.entries) >= cache.maxEntries || cache.bytes+weight > cache.maxBytes {
 		oldest := cache.order.Front()
@@ -182,7 +209,21 @@ func (cache *SQLCompiledQueryCache) CompileWithSchemaVersion(source, schemaVersi
 	cache.entries[key] = entry
 	cache.canonical[canonicalKey] = entry
 	cache.bytes += weight
-	return query, nil
+	return cache.finishCompiledQueryFlightLocked(key, flight, query, nil)
+}
+
+func (cache *SQLCompiledQueryCache) finishCompiledQueryFlight(key sqlCompiledQueryCacheKey, flight *sqlCompiledQueryCacheFlight, query *CompiledSQLQuery, err error) (*CompiledSQLQuery, error) {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	return cache.finishCompiledQueryFlightLocked(key, flight, query, err)
+}
+
+func (cache *SQLCompiledQueryCache) finishCompiledQueryFlightLocked(key sqlCompiledQueryCacheKey, flight *sqlCompiledQueryCacheFlight, query *CompiledSQLQuery, err error) (*CompiledSQLQuery, error) {
+	delete(cache.flights, key)
+	flight.query = query
+	flight.err = err
+	close(flight.done)
+	return query, err
 }
 
 // CompileSQLQueryWithCache compiles source through cache when non-nil.
@@ -207,6 +248,7 @@ func (cache *SQLCompiledQueryCache) Stats() SQLCompiledQueryCacheStats {
 		MaxBytes:   cache.maxBytes,
 		Hits:       cache.hits,
 		Misses:     cache.misses,
+		Coalesced:  cache.coalesced,
 		Evictions:  cache.evictions,
 		Oversized:  cache.oversized,
 	}

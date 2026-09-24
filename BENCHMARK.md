@@ -36220,3 +36220,45 @@ atomic settings snapshot plus context policy check. The active timeout path
 intentionally pays four allocations and 272 bytes for a cancellable timer.
 No settings are enabled by default. Reproduce with
 `make benchmark-tu05-m042-baseline` and `make benchmark-tu05-m042`.
+
+## M049 Concurrent Compiled-Plan Miss Coalescing
+
+Command:
+
+```text
+make benchmark-m049-compiled-cache
+```
+
+The benchmark starts 16 concurrent callers against a fresh
+`SQLCompiledQueryCache` for each iteration. It used five Go benchmark samples
+with `-benchmem` on Linux/amd64 and an AMD Ryzen 9 5950X.
+
+Before:
+
+```text
+BenchmarkSQLCompiledQueryCacheConcurrentMiss-32  10000  100486 ns/op  47596 B/op  192 allocs/op
+BenchmarkSQLCompiledQueryCacheConcurrentMiss-32  12620   94758 ns/op  46861 B/op  189 allocs/op
+BenchmarkSQLCompiledQueryCacheConcurrentMiss-32  12301   98783 ns/op  46605 B/op  188 allocs/op
+BenchmarkSQLCompiledQueryCacheConcurrentMiss-32  12626   94921 ns/op  48151 B/op  194 allocs/op
+BenchmarkSQLCompiledQueryCacheConcurrentMiss-32  12709   92529 ns/op  47550 B/op  192 allocs/op
+```
+
+After:
+
+```text
+BenchmarkSQLCompiledQueryCacheConcurrentMiss-32  22614  51989 ns/op  13864 B/op  69 allocs/op
+BenchmarkSQLCompiledQueryCacheConcurrentMiss-32  24872  46981 ns/op  13861 B/op  69 allocs/op
+BenchmarkSQLCompiledQueryCacheConcurrentMiss-32  24589  47149 ns/op  13857 B/op  69 allocs/op
+BenchmarkSQLCompiledQueryCacheConcurrentMiss-32  25239  50344 ns/op  13856 B/op  69 allocs/op
+BenchmarkSQLCompiledQueryCacheConcurrentMiss-32  23065  48738 ns/op  13856 B/op  69 allocs/op
+```
+
+| Metric | Before median | After median | Improvement |
+| --- | ---: | ---: | ---: |
+| Concurrent cold-miss CPU | 94,921 ns/op | 48,738 ns/op | 1.95x faster |
+| Transient allocated bytes | 47,550 B/op | 13,857 B/op | 3.43x lower |
+| Allocations | 192 allocs/op | 69 allocs/op | 2.78x fewer |
+
+The optimization affects only concurrent exact-key misses in the opt-in
+compiled-plan cache. It adds no flight allocation on completed hits and leaves
+`CompileSQLQuery` defaults, SQL semantics, and wire/storage formats unchanged.
