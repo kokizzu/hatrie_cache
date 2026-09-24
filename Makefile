@@ -26262,3 +26262,30 @@ commit-tt021-spatial-persistence:
 .PHONY: push-tt021-spatial-persistence
 push-tt021-spatial-persistence:
 	@bash scripts/push-tt021-spatial-persistence.sh
+.PHONY: format-mz025-arrangement-sharing
+format-mz025-arrangement-sharing:
+	@bash scripts/format-mz025-arrangement-sharing.sh
+
+.PHONY: test-mz025-arrangement-sharing
+test-mz025-arrangement-sharing:
+	@bash scripts/test-mz025-arrangement-sharing.sh
+
+.PHONY: benchmark-mz025-arrangement-sharing
+benchmark-mz025-arrangement-sharing:
+	@bash scripts/benchmark-mz025-arrangement-sharing.sh
+
+.PHONY: verify-mz025-arrangement-sharing
+verify-mz025-arrangement-sharing:
+	@bash scripts/verify-mz025-arrangement-sharing.sh
+
+.PHONY: stage-mz025-arrangement-sharing
+stage-mz025-arrangement-sharing:
+	@bash scripts/stage-mz025-arrangement-sharing.sh
+
+.PHONY: commit-mz025-arrangement-sharing
+commit-mz025-arrangement-sharing:
+	@bash scripts/commit-mz025-arrangement-sharing.sh
+
+.PHONY: push-mz025-arrangement-sharing
+push-mz025-arrangement-sharing:
+	@bash scripts/push-mz025-arrangement-sharing.sh

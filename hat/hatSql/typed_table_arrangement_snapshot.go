@@ -25,14 +25,9 @@ func (arrangements *TypedTableAggregateArrangements) Snapshot() []TypedTableAggr
 	}
 	arrangements.mu.Lock()
 	defer arrangements.mu.Unlock()
-	keys := make([]string, 0, len(arrangements.entries))
-	for key := range arrangements.entries {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	snapshot := make([]TypedTableAggregateArrangementInfo, 0, len(keys))
-	for _, key := range keys {
-		entry := arrangements.entries[key]
+	entries := sortedTypedTableAggregateArrangementEntriesLocked(arrangements)
+	snapshot := make([]TypedTableAggregateArrangementInfo, 0, len(entries))
+	for _, entry := range entries {
 		if entry == nil || entry.aggregate == nil {
 			continue
 		}

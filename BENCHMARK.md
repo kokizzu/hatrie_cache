@@ -19,6 +19,27 @@ The small before/after variation is within separate benchmark-run noise; the
 existing registration implementations were not modified. The new parser is
 opt-in and adds no cost to callers that continue using the existing APIs.
 
+## MZ-025 Canonical Aggregate Arrangement Sharing
+
+Command: `make benchmark-mz025-arrangement-sharing`
+
+This measures repeated acquire/release of an already existing aggregate
+arrangement. The optimized path hashes a canonical definition and compares only
+the matching hash bucket; it no longer builds the serialized string key on
+each acquire. Both runs used `-benchtime=100x -count=5`.
+
+| Path | Samples (ns/op) | Median | Heap | Allocations | Relative result |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Existing serialized string key | 302.4, 244.0, 254.0, 250.4, 193.7 | 254.0 | 104 B/op | 4 allocs/op | baseline |
+| Canonical numeric hash bucket | 277.0, 174.6, 202.3, 214.7, 281.5 | 214.7 | 64 B/op | 2 allocs/op | 1.18x faster, 1.63x less heap, 2x fewer allocations |
+
+The optimization keeps an exact canonical-definition comparison after hashing,
+so a hash collision cannot incorrectly share aggregate state. Correctness was
+checked with the focused sharing test, the full `hatSql` package test suite, a
+focused race run, and `go vet ./hat/hatSql`. See
+[MZ025_ARRANGEMENT_SHARING.md](MZ025_ARRANGEMENT_SHARING.md) for raw commands,
+scope, and tradeoffs.
+
 ## M052 Reusable Dataflow Plan View
 
 Command: `make benchmark-m052-plan-view`

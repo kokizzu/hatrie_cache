@@ -2,6 +2,7 @@ package hatSql
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,7 +35,7 @@ type TypedTableAggregateArrangementHydration struct {
 type TypedTableAggregateArrangements struct {
 	mu      sync.Mutex
 	table   *TypedTable
-	entries map[string]*typedTableAggregateArrangementEntry
+	entries map[uint64][]*typedTableAggregateArrangementEntry
 }
 
 type typedTableAggregateArrangementEntry struct {
@@ -42,6 +43,20 @@ type typedTableAggregateArrangementEntry struct {
 	aggregate  *TypedTableAggregate
 	references int
 	hydration  typedTableArrangementHydrationState
+	definition typedTableAggregateArrangementDefinition
+}
+
+type typedTableAggregateArrangementDefinition struct {
+	groupBy                []string
+	sumField               string
+	minField               string
+	maxField               string
+	distinctField          string
+	sumConfigured          bool
+	minConfigured          bool
+	maxConfigured          bool
+	distinctConfigured     bool
+	dictionaryEncodeGroups bool
 }
 
 // TypedTableAggregateArrangement is one reference-counted lease on shared
@@ -49,7 +64,7 @@ type typedTableAggregateArrangementEntry struct {
 type TypedTableAggregateArrangement struct {
 	mu       sync.Mutex
 	owner    *TypedTableAggregateArrangements
-	key      string
+	hash     uint64
 	entry    *typedTableAggregateArrangementEntry
 	released bool
 }
@@ -59,7 +74,7 @@ func NewTypedTableAggregateArrangements(table *TypedTable) (*TypedTableAggregate
 	if table == nil {
 		return nil, fmt.Errorf("typed table aggregate arrangements require a table")
 	}
-	return &TypedTableAggregateArrangements{table: table, entries: make(map[string]*typedTableAggregateArrangementEntry)}, nil
+	return &TypedTableAggregateArrangements{table: table, entries: make(map[uint64][]*typedTableAggregateArrangementEntry)}, nil
 }
 
 // Acquire returns a lease for the exact aggregate definition. Equivalent
@@ -68,20 +83,46 @@ func (arrangements *TypedTableAggregateArrangements) Acquire(definition TypedTab
 	if arrangements == nil {
 		return nil, fmt.Errorf("typed table aggregate arrangements are nil")
 	}
-	key := typedTableAggregateArrangementKey(definition)
+	canonical := typedTableAggregateArrangementDefinitionOf(definition)
+	hash := typedTableAggregateArrangementHash(canonical)
 	arrangements.mu.Lock()
 	defer arrangements.mu.Unlock()
-	entry := arrangements.entries[key]
-	if entry == nil {
-		aggregate, err := NewTypedTableAggregate(arrangements.table, definition)
-		if err != nil {
-			return nil, err
-		}
-		entry = &typedTableAggregateArrangementEntry{aggregate: aggregate, hydration: newTypedTableArrangementHydrationState()}
-		arrangements.entries[key] = entry
+	if entry := typedTableAggregateArrangementEntryForDefinitionLocked(arrangements, canonical, hash); entry != nil {
+		entry.references++
+		return &TypedTableAggregateArrangement{owner: arrangements, hash: hash, entry: entry}, nil
 	}
+	aggregate, err := NewTypedTableAggregate(arrangements.table, definition)
+	if err != nil {
+		return nil, err
+	}
+	entry := &typedTableAggregateArrangementEntry{
+		aggregate:  aggregate,
+		hydration:  newTypedTableArrangementHydrationState(),
+		definition: canonical,
+	}
+	arrangements.entries[hash] = append(arrangements.entries[hash], entry)
 	entry.references++
-	return &TypedTableAggregateArrangement{owner: arrangements, key: key, entry: entry}, nil
+	return &TypedTableAggregateArrangement{owner: arrangements, hash: hash, entry: entry}, nil
+}
+
+func typedTableAggregateArrangementEntryForDefinitionLocked(arrangements *TypedTableAggregateArrangements, definition typedTableAggregateArrangementDefinition, hash uint64) *typedTableAggregateArrangementEntry {
+	for _, entry := range arrangements.entries[hash] {
+		if typedTableAggregateArrangementDefinitionEqual(entry.definition, definition) {
+			return entry
+		}
+	}
+	return nil
+}
+
+func sortedTypedTableAggregateArrangementEntriesLocked(arrangements *TypedTableAggregateArrangements) []*typedTableAggregateArrangementEntry {
+	entries := make([]*typedTableAggregateArrangementEntry, 0, len(arrangements.entries))
+	for _, bucket := range arrangements.entries {
+		entries = append(entries, bucket...)
+	}
+	sort.Slice(entries, func(left, right int) bool {
+		return typedTableAggregateArrangementDefinitionKey(entries[left].definition) < typedTableAggregateArrangementDefinitionKey(entries[right].definition)
+	})
+	return entries
 }
 
 // Active returns the number of distinct aggregate definitions currently held
@@ -92,7 +133,11 @@ func (arrangements *TypedTableAggregateArrangements) Active() int {
 	}
 	arrangements.mu.Lock()
 	defer arrangements.mu.Unlock()
-	return len(arrangements.entries)
+	active := 0
+	for _, bucket := range arrangements.entries {
+		active += len(bucket)
+	}
+	return active
 }
 
 // Apply advances the shared aggregate through ordered table changes. Its
@@ -204,12 +249,27 @@ func (arrangement *TypedTableAggregateArrangement) Release() bool {
 	owner.mu.Lock()
 	defer owner.mu.Unlock()
 	entry := arrangement.entry
-	if current := owner.entries[arrangement.key]; current != entry || entry.references <= 0 {
+	bucket := owner.entries[arrangement.hash]
+	entryIndex := -1
+	for index, current := range bucket {
+		if current == entry {
+			entryIndex = index
+			break
+		}
+	}
+	if entryIndex < 0 || entry.references <= 0 {
 		return false
 	}
 	entry.references--
 	if entry.references == 0 {
-		delete(owner.entries, arrangement.key)
+		copy(bucket[entryIndex:], bucket[entryIndex+1:])
+		bucket[len(bucket)-1] = nil
+		bucket = bucket[:len(bucket)-1]
+		if len(bucket) == 0 {
+			delete(owner.entries, arrangement.hash)
+		} else {
+			owner.entries[arrangement.hash] = bucket
+		}
 	}
 	arrangement.released = true
 	return true
@@ -227,19 +287,93 @@ func (arrangement *TypedTableAggregateArrangement) activeEntry() (*typedTableAgg
 	return arrangement.entry, nil
 }
 
+func typedTableAggregateArrangementDefinitionOf(definition TypedTableAggregateDefinition) typedTableAggregateArrangementDefinition {
+	canonical := typedTableAggregateArrangementDefinition{
+		groupBy:                make([]string, len(definition.GroupBy)),
+		sumField:               strings.TrimSpace(definition.SumField),
+		minField:               strings.TrimSpace(definition.MinField),
+		maxField:               strings.TrimSpace(definition.MaxField),
+		distinctField:          strings.TrimSpace(definition.DistinctField),
+		sumConfigured:          definition.SumField != "",
+		minConfigured:          definition.MinField != "",
+		maxConfigured:          definition.MaxField != "",
+		distinctConfigured:     definition.DistinctField != "",
+		dictionaryEncodeGroups: definition.DictionaryEncodeGroups,
+	}
+	for index, field := range definition.GroupBy {
+		canonical.groupBy[index] = strings.TrimSpace(field)
+	}
+	return canonical
+}
+
+func typedTableAggregateArrangementDefinitionEqual(left, right typedTableAggregateArrangementDefinition) bool {
+	if left.sumField != right.sumField || left.minField != right.minField || left.maxField != right.maxField || left.distinctField != right.distinctField || left.sumConfigured != right.sumConfigured || left.minConfigured != right.minConfigured || left.maxConfigured != right.maxConfigured || left.distinctConfigured != right.distinctConfigured || left.dictionaryEncodeGroups != right.dictionaryEncodeGroups || len(left.groupBy) != len(right.groupBy) {
+		return false
+	}
+	for index := range left.groupBy {
+		if left.groupBy[index] != right.groupBy[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func typedTableAggregateArrangementHash(definition typedTableAggregateArrangementDefinition) uint64 {
+	const (
+		fnvOffset64 = uint64(14695981039346656037)
+		fnvPrime64  = uint64(1099511628211)
+	)
+	hash := fnvOffset64
+	addByte := func(value byte) {
+		hash ^= uint64(value)
+		hash *= fnvPrime64
+	}
+	addString := func(value string) {
+		for index := 0; index < len(value); index++ {
+			addByte(value[index])
+		}
+		addByte(0)
+	}
+	for _, field := range definition.groupBy {
+		addString(field)
+		addByte('|')
+	}
+	addByte(';')
+	addField := func(configured bool, field string) {
+		if configured {
+			addByte(1)
+		} else {
+			addByte(0)
+		}
+		addString(field)
+		addByte(';')
+	}
+	addField(definition.sumConfigured, definition.sumField)
+	addField(definition.minConfigured, definition.minField)
+	addField(definition.maxConfigured, definition.maxField)
+	addField(definition.distinctConfigured, definition.distinctField)
+	if definition.dictionaryEncodeGroups {
+		addByte(1)
+	} else {
+		addByte(0)
+	}
+	return hash
+}
+
 func typedTableAggregateArrangementKey(definition TypedTableAggregateDefinition) string {
+	return typedTableAggregateArrangementDefinitionKey(typedTableAggregateArrangementDefinitionOf(definition))
+}
+
+func typedTableAggregateArrangementDefinitionKey(definition typedTableAggregateArrangementDefinition) string {
 	var builder strings.Builder
-	for _, field := range definition.GroupBy {
-		field = strings.TrimSpace(field)
+	for _, field := range definition.groupBy {
 		builder.WriteString(strconv.Itoa(len(field)))
 		builder.WriteByte(':')
 		builder.WriteString(field)
 		builder.WriteByte('|')
 	}
 	builder.WriteByte(';')
-	for _, field := range []string{definition.SumField, definition.MinField, definition.MaxField, definition.DistinctField} {
-		configured := field != ""
-		field = strings.TrimSpace(field)
+	writeField := func(configured bool, field string) {
 		if configured {
 			builder.WriteByte('1')
 		} else {
@@ -250,7 +384,11 @@ func typedTableAggregateArrangementKey(definition TypedTableAggregateDefinition)
 		builder.WriteString(field)
 		builder.WriteByte(';')
 	}
-	if definition.DictionaryEncodeGroups {
+	writeField(definition.sumConfigured, definition.sumField)
+	writeField(definition.minConfigured, definition.minField)
+	writeField(definition.maxConfigured, definition.maxField)
+	writeField(definition.distinctConfigured, definition.distinctField)
+	if definition.dictionaryEncodeGroups {
 		builder.WriteByte('1')
 	} else {
 		builder.WriteByte('0')

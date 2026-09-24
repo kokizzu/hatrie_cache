@@ -36,15 +36,16 @@ func (arrangements *TypedTableAggregateArrangements) Stats() TypedTableAggregate
 	}
 	arrangements.mu.Lock()
 	defer arrangements.mu.Unlock()
+	entries := sortedTypedTableAggregateArrangementEntriesLocked(arrangements)
 	stats := TypedTableAggregateArrangementsStats{
-		ActiveDefinitions: len(arrangements.entries),
-		Arrangements:      make([]TypedTableAggregateArrangementStats, 0, len(arrangements.entries)),
+		ActiveDefinitions: len(entries),
+		Arrangements:      make([]TypedTableAggregateArrangementStats, 0, len(entries)),
 	}
 	var compactedThrough uint64
 	stats.SourceSequence, compactedThrough = typedTableAggregateTableState(arrangements.table)
-	for key, entry := range arrangements.entries {
+	for _, entry := range entries {
 		entry.mu.Lock()
-		arrangementStats := typedTableAggregateArrangementStats(key, entry.references, entry.aggregate, stats.SourceSequence, compactedThrough)
+		arrangementStats := typedTableAggregateArrangementStats(typedTableAggregateArrangementDefinitionKey(entry.definition), entry.references, entry.aggregate, stats.SourceSequence, compactedThrough)
 		entry.mu.Unlock()
 		stats.ActiveLeases += entry.references
 		stats.Arrangements = append(stats.Arrangements, arrangementStats)
@@ -69,7 +70,7 @@ func (arrangement *TypedTableAggregateArrangement) Stats() (TypedTableAggregateA
 		table = entry.aggregate.table
 	}
 	sourceSequence, compactedThrough := typedTableAggregateTableState(table)
-	return typedTableAggregateArrangementStats(arrangement.key, entry.references, entry.aggregate, sourceSequence, compactedThrough), nil
+	return typedTableAggregateArrangementStats(typedTableAggregateArrangementDefinitionKey(entry.definition), entry.references, entry.aggregate, sourceSequence, compactedThrough), nil
 }
 
 func typedTableAggregateArrangementStats(key string, references int, aggregate *TypedTableAggregate, sourceSequence, compactedThrough uint64) TypedTableAggregateArrangementStats {

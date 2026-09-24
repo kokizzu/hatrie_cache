@@ -111,14 +111,9 @@ func (arrangements *TypedTableAggregateArrangements) CaptureCheckpoints() ([]Typ
 	}
 	arrangements.mu.Lock()
 	defer arrangements.mu.Unlock()
-	keys := make([]string, 0, len(arrangements.entries))
-	for key := range arrangements.entries {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	checkpoints := make([]TypedTableAggregateArrangementCheckpoint, 0, len(keys))
-	for _, key := range keys {
-		entry := arrangements.entries[key]
+	entries := sortedTypedTableAggregateArrangementEntriesLocked(arrangements)
+	checkpoints := make([]TypedTableAggregateArrangementCheckpoint, 0, len(entries))
+	for _, entry := range entries {
 		if entry == nil || entry.aggregate == nil {
 			continue
 		}
@@ -155,9 +150,10 @@ func (arrangements *TypedTableAggregateArrangements) RestoreCheckpoints(checkpoi
 		}
 	}
 	for _, checkpoint := range checkpoints {
-		key := typedTableAggregateArrangementKey(checkpoint.Definition)
+		definition := typedTableAggregateArrangementDefinitionOf(checkpoint.Definition)
+		hash := typedTableAggregateArrangementHash(definition)
 		arrangements.mu.Lock()
-		_, exists := arrangements.entries[key]
+		exists := typedTableAggregateArrangementEntryForDefinitionLocked(arrangements, definition, hash) != nil
 		arrangements.mu.Unlock()
 		if exists {
 			releaseAll()
