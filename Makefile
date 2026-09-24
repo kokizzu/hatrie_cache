@@ -26289,3 +26289,30 @@ commit-mz025-arrangement-sharing:
 .PHONY: push-mz025-arrangement-sharing
 push-mz025-arrangement-sharing:
 	@bash scripts/push-mz025-arrangement-sharing.sh
+
+.PHONY: format-mz045-arrangement-cache
+format-mz045-arrangement-cache:
+	@bash scripts/format-mz045-arrangement-cache.sh
+
+.PHONY: test-mz045-arrangement-cache
+test-mz045-arrangement-cache:
+	@bash scripts/test-mz045-arrangement-cache.sh
+
+.PHONY: benchmark-mz045-arrangement-cache
+benchmark-mz045-arrangement-cache:
+	@bash scripts/benchmark-mz045-arrangement-cache.sh
+.PHONY: verify-mz045-arrangement-cache
+verify-mz045-arrangement-cache:
+	@bash scripts/verify-mz045-arrangement-cache.sh
+
+.PHONY: stage-mz045-arrangement-cache
+stage-mz045-arrangement-cache:
+	@bash scripts/stage-mz045-arrangement-cache.sh
+
+.PHONY: commit-mz045-arrangement-cache
+commit-mz045-arrangement-cache:
+	@bash scripts/commit-mz045-arrangement-cache.sh
+
+.PHONY: push-mz045-arrangement-cache
+push-mz045-arrangement-cache:
+	@bash scripts/push-mz045-arrangement-cache.sh

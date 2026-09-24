@@ -307,6 +307,13 @@ type SQLQueryOptions struct {
 	// It is disabled by default. PreparedSchemaVersion also namespaces compiled
 	// handles so schema, index, or projection changes can invalidate one version.
 	CompiledCache *SQLCompiledQueryCache
+	// ArrangementPlanCache optionally reuses bounded EXPLAIN arrangement
+	// metadata and recommendations. It is disabled by default.
+	ArrangementPlanCache *SQLArrangementPlanCache
+	// ArrangementPlanCacheVersion namespaces cached arrangement metadata. Set a
+	// new value whenever the source's physical arrangement metadata changes;
+	// empty disables arrangement-plan cache reuse.
+	ArrangementPlanCacheVersion string
 	// compiledTemplate is set only by CompiledSQLQuery and is intentionally not
 	// exported. It bypasses parsing and cache lookup. Static default executions
 	// may use the immutable template directly; other executions clone it.
@@ -13186,8 +13193,12 @@ func sqlCTEOutputRows(cte sqlCTE, result SQLQueryResult) ([]SQLRow, error) {
 
 func explainSQLQuery(source string, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) (SQLQueryResult, error) {
 	var partitionOrderResolver SQLPartitionOrderResolver
+	var arrangementPlanCache *SQLArrangementPlanCache
+	var arrangementPlanCacheVersion string
 	if control != nil {
 		partitionOrderResolver = control.options.PartitionOrderResolver
+		arrangementPlanCache = control.options.ArrangementPlanCache
+		arrangementPlanCacheVersion = control.options.ArrangementPlanCacheVersion
 	}
 	if query.pipeline {
 		return explainSQLPipelineQueryWithPartitionOrder(query, resolver, partitionOrderResolver)
@@ -13195,10 +13206,10 @@ func explainSQLQuery(source string, query *sqlQuery, resolver SQLSourceResolver,
 	steps := sqlExplainSteps(query)
 	var estimatedSteps []SQLExplainStep
 	if query.analyze {
-		estimatedSteps = sqlExplainStepsWithPartitionOrder(query, resolver, partitionOrderResolver)
+		estimatedSteps = sqlExplainStepsWithArrangementPlanCache(query, resolver, partitionOrderResolver, arrangementPlanCache, arrangementPlanCacheVersion)
 	}
 	if !query.analyze {
-		steps = sqlExplainStepsWithPartitionOrder(query, resolver, partitionOrderResolver)
+		steps = sqlExplainStepsWithArrangementPlanCache(query, resolver, partitionOrderResolver, arrangementPlanCache, arrangementPlanCacheVersion)
 		projectionOptions := control.options
 		projectionOptions.IndexHint = query.indexHint
 		steps = sqlAddProjectionExplainStep(steps, source, resolver, projectionOptions)
@@ -13415,16 +13426,24 @@ func sqlExplainStepsWithResolver(query *sqlQuery, resolver SQLSourceResolver) []
 }
 
 func sqlExplainStepsWithPartitionOrder(query *sqlQuery, resolver SQLSourceResolver, partitionOrderResolver SQLPartitionOrderResolver) []SQLExplainStep {
+	return sqlExplainStepsWithArrangementPlanCache(query, resolver, partitionOrderResolver, nil, "")
+}
+
+func sqlExplainStepsWithArrangementPlanCache(query *sqlQuery, resolver SQLSourceResolver, partitionOrderResolver SQLPartitionOrderResolver, arrangementPlanCache *SQLArrangementPlanCache, arrangementPlanCacheVersion string) []SQLExplainStep {
 	steps := make([]SQLExplainStep, 0, 8+len(query.ctes)+len(query.joins)+len(query.unions))
-	sqlAppendExplainSteps(&steps, query, "", resolver, partitionOrderResolver)
+	sqlAppendExplainStepsWithArrangementPlanCache(&steps, query, "", resolver, partitionOrderResolver, arrangementPlanCache, arrangementPlanCacheVersion)
 	return steps
 }
 
 func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix string, resolver SQLSourceResolver, partitionOrderResolver SQLPartitionOrderResolver) {
+	sqlAppendExplainStepsWithArrangementPlanCache(steps, query, prefix, resolver, partitionOrderResolver, nil, "")
+}
+
+func sqlAppendExplainStepsWithArrangementPlanCache(steps *[]SQLExplainStep, query *sqlQuery, prefix string, resolver SQLSourceResolver, partitionOrderResolver SQLPartitionOrderResolver, arrangementPlanCache *SQLArrangementPlanCache, arrangementPlanCacheVersion string) {
 	for _, cte := range query.ctes {
 		*steps = append(*steps, SQLExplainStep{Node: prefix + "CTE", Detail: cte.name})
 		if cte.query != nil {
-			sqlAppendExplainSteps(steps, cte.query, prefix+"  ", resolver, partitionOrderResolver)
+			sqlAppendExplainStepsWithArrangementPlanCache(steps, cte.query, prefix+"  ", resolver, partitionOrderResolver, arrangementPlanCache, arrangementPlanCacheVersion)
 		} else {
 			estimate := len(cte.values)
 			*steps = append(*steps, SQLExplainStep{Node: prefix + "  VALUES", Detail: "CTE " + cte.name, EstimatedRows: &estimate})
@@ -13444,12 +13463,11 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 		whereEstimate = sqlCardinalityEstimateForFilter(currentEstimate, *query.from, query.where, resolver, true)
 		currentEstimate = whereEstimate
 	}
-	scanStep := sqlExplainSourceStepWithPartitionOrder(prefix+"SCAN", *query.from, resolver, partitionOrderResolver)
-	sqlMarkArrangementRecommendation(scanStep.Arrangements, workload)
+	scanStep := sqlExplainSourceStepWithArrangementPlanCache(prefix+"SCAN", *query.from, resolver, partitionOrderResolver, query, workload, arrangementPlanCache, arrangementPlanCacheVersion)
 	sqlSetExplainCardinalityEstimate(&scanStep, sourceEstimate)
 	*steps = append(*steps, scanStep)
 	if query.from.kind == "SUBQUERY" && query.from.query != nil {
-		sqlAppendExplainSteps(steps, query.from.query, prefix+"  ", resolver, partitionOrderResolver)
+		sqlAppendExplainStepsWithArrangementPlanCache(steps, query.from.query, prefix+"  ", resolver, partitionOrderResolver, arrangementPlanCache, arrangementPlanCacheVersion)
 	}
 	leftAliases := []string{}
 	if query.from != nil && query.from.alias != "" {
@@ -13488,14 +13506,13 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 		}
 		joinStep := SQLExplainStep{Node: prefix + node, Detail: detail}
 		sqlAttachPartitionOrder(&joinStep, join.source, partitionOrderResolver)
-		joinStep.Arrangements = resolveSQLArrangementMetadata(resolver, join.source)
-		sqlMarkArrangementRecommendation(joinStep.Arrangements, workload)
+		joinStep.Arrangements = sqlResolveArrangementPlan(query, resolver, join.source, workload, arrangementPlanCache, arrangementPlanCacheVersion)
 		joinEstimate := sqlCardinalityEstimateForJoin(currentEstimate, join, leftAliases, resolver)
 		sqlSetExplainCardinalityEstimate(&joinStep, joinEstimate)
 		currentEstimate = joinEstimate
 		*steps = append(*steps, joinStep)
 		if join.source.kind == "SUBQUERY" && join.source.query != nil {
-			sqlAppendExplainSteps(steps, join.source.query, prefix+"  ", resolver, partitionOrderResolver)
+			sqlAppendExplainStepsWithArrangementPlanCache(steps, join.source.query, prefix+"  ", resolver, partitionOrderResolver, arrangementPlanCache, arrangementPlanCacheVersion)
 		}
 		if join.source.alias != "" {
 			leftAliases = append(leftAliases, join.source.alias)
@@ -13550,7 +13567,7 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 			kind += " ALL"
 		}
 		*steps = append(*steps, SQLExplainStep{Node: prefix + "SET", Detail: kind})
-		sqlAppendExplainSteps(steps, union.query, prefix+"  ", resolver, partitionOrderResolver)
+		sqlAppendExplainStepsWithArrangementPlanCache(steps, union.query, prefix+"  ", resolver, partitionOrderResolver, arrangementPlanCache, arrangementPlanCacheVersion)
 	}
 }
 
@@ -13562,6 +13579,17 @@ func sqlExplainSourceStepWithPartitionOrder(node string, source sqlSource, resol
 	step := SQLExplainStep{Node: node, Detail: sqlExplainSource(source)}
 	sqlAttachPartitionOrder(&step, source, partitionOrderResolver)
 	step.Arrangements = resolveSQLArrangementMetadata(resolver, source)
+	if source.kind == "VALUES" {
+		estimate := len(source.values)
+		step.EstimatedRows = &estimate
+	}
+	return step
+}
+
+func sqlExplainSourceStepWithArrangementPlanCache(node string, source sqlSource, resolver SQLSourceResolver, partitionOrderResolver SQLPartitionOrderResolver, query *sqlQuery, workload SQLArrangementWorkload, arrangementPlanCache *SQLArrangementPlanCache, arrangementPlanCacheVersion string) SQLExplainStep {
+	step := SQLExplainStep{Node: node, Detail: sqlExplainSource(source)}
+	sqlAttachPartitionOrder(&step, source, partitionOrderResolver)
+	step.Arrangements = sqlResolveArrangementPlan(query, resolver, source, workload, arrangementPlanCache, arrangementPlanCacheVersion)
 	if source.kind == "VALUES" {
 		estimate := len(source.values)
 		step.EstimatedRows = &estimate

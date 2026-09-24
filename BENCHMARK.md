@@ -36983,3 +36983,39 @@ BenchmarkTT024TextIndexRestore-32    100 11916073 ns/op 32.94 MB/s 392482 wire-b
 BenchmarkTT024TextIndexRestore-32    100 10515084 ns/op 37.33 MB/s 392482 wire-bytes 6879870 B/op 160055 allocs/op
 BenchmarkTT024TextIndexRestore-32    100 9478444 ns/op 41.41 MB/s 392482 wire-bytes 6879926 B/op 160055 allocs/op
 ```
+
+<a id="mz-045-arrangement-plan-cache"></a>
+## MZ-045 Versioned Arrangement Plan Cache
+
+This compares repeated EXPLAIN planning for the same normalized query and
+source metadata. The baseline resolves and clones arrangement metadata on
+every plan. The cache case warms one bounded versioned entry, then reuses the
+marked recommendation. Linux amd64, AMD Ryzen 9 5950X, five samples per case,
+`-benchtime=100x`.
+
+| Case | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Metadata resolution baseline | 2,468 | 3,026 | 23 | baseline |
+| Warm versioned plan cache | 1,955 | 2,768 | 17 | 1.26x faster; 8.5% lower B/op; 26.1% fewer allocs |
+
+The cache is opt-in, bounded to 64 entries and 1 MiB by default, and bypassed
+when either the cache pointer or explicit version is absent. The key combines
+the compiled query token fingerprint, source kind/key, and caller-supplied
+metadata version. Callers must advance the version or call `Invalidate` when
+physical arrangement metadata changes. Cached output is cloned before return,
+so callers cannot mutate retained entries.
+
+Raw output:
+
+```text
+BenchmarkMZ045ArrangementMetadataBaseline-32    100 2750 ns/op 3026 B/op 23 allocs/op
+BenchmarkMZ045ArrangementMetadataBaseline-32    100 2186 ns/op 3026 B/op 23 allocs/op
+BenchmarkMZ045ArrangementMetadataBaseline-32    100 2920 ns/op 3027 B/op 23 allocs/op
+BenchmarkMZ045ArrangementMetadataBaseline-32    100 2043 ns/op 3024 B/op 23 allocs/op
+BenchmarkMZ045ArrangementMetadataBaseline-32    100 2468 ns/op 3026 B/op 23 allocs/op
+BenchmarkMZ045ArrangementMetadataCache-32       100 1596 ns/op 2768 B/op 17 allocs/op
+BenchmarkMZ045ArrangementMetadataCache-32       100 1731 ns/op 2768 B/op 17 allocs/op
+BenchmarkMZ045ArrangementMetadataCache-32       100 2399 ns/op 2768 B/op 17 allocs/op
+BenchmarkMZ045ArrangementMetadataCache-32       100 1955 ns/op 2768 B/op 17 allocs/op
+BenchmarkMZ045ArrangementMetadataCache-32       100 2094 ns/op 2768 B/op 17 allocs/op
+```
