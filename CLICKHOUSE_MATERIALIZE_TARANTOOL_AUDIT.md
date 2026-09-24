@@ -22,6 +22,13 @@ or intentionally deferred, and `[-]` rejected or rolled back.
   independent mutable copy. See
   [M052_REUSABLE_DATAFLOW_PLAN_VIEW.md](M052_REUSABLE_DATAFLOW_PLAN_VIEW.md).
 
+### MZ010b SQL Subscription Statement Grammar
+
+- [x] MZ010b adds an importable `SUBSCRIBE`/`TAIL` statement envelope with
+  snapshot and differential modes. It delegates query validation, dependency
+  discovery, and execution to the existing bounded subscription APIs; transport
+  and signed wire envelopes remain open.
+
 ## ClickHouse (50 ideas)
 - [x] C001 Column-oriented storage for analytical values - local columnar tables cover the compatible case.
 - [x] C002 Read only referenced columns - SQL projection pruning is present.

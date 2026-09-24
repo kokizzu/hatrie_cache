@@ -25730,3 +25730,40 @@ commit-m052-plan-view:
 .PHONY: push-m052-plan-view
 push-m052-plan-view:
 	bash ./scripts/push-m052-plan-view.sh
+.PHONY: test-mz010-statement
+test-mz010-statement:
+	bash ./scripts/test-mz010-statement.sh
+.PHONY: format-mz010-statement
+format-mz010-statement:
+	bash ./scripts/format-mz010-statement.sh
+
+.PHONY: test-mz010-statement-package
+test-mz010-statement-package:
+	bash ./scripts/test-mz010-statement-package.sh
+
+.PHONY: race-mz010-statement
+race-mz010-statement:
+	bash ./scripts/race-mz010-statement.sh
+
+.PHONY: vet-mz010-statement
+vet-mz010-statement:
+	bash ./scripts/vet-mz010-statement.sh
+
+.PHONY: review-mz010-statement
+review-mz010-statement:
+	bash ./scripts/review-mz010-statement.sh
+
+.PHONY: stage-mz010-statement
+stage-mz010-statement:
+	bash ./scripts/stage-mz010-statement.sh
+
+.PHONY: commit-mz010-statement
+commit-mz010-statement:
+	bash ./scripts/commit-mz010-statement.sh
+
+.PHONY: push-mz010-statement
+push-mz010-statement:
+	bash ./scripts/push-mz010-statement.sh
+.PHONY: benchmark-mz010-statement
+benchmark-mz010-statement:
+	bash ./scripts/benchmark-mz010-statement.sh

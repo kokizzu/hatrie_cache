@@ -64,6 +64,24 @@ negative `Diff` retracts it. Existing bounded coalescing semantics still apply;
 when a differential queue coalesces, `Reset` tells the consumer to rebuild
 from the positive batch.
 
+## Statement Grammar
+
+`ParseSQLSubscriptionStatement` adds an importable, opt-in statement envelope
+without changing the existing query grammar:
+
+```sql
+SUBSCRIBE FROM CACHE('people') SELECT id, name
+SUBSCRIBE SNAPSHOT FROM CACHE('people') SELECT id, name
+SUBSCRIBE DIFFERENTIAL FROM CACHE('people') SELECT id, name
+TAIL FROM CACHE('people') SELECT id, name
+```
+
+`SUBSCRIBE` defaults to snapshot mode. `TAIL` is an alias for differential
+mode. The returned `SQLSubscriptionStatement.Definition` can be passed to
+`SubscribeSQL` or `SubscribeDifferentialSQL` according to its `Mode`; those
+existing methods still perform query validation, dependency discovery, and
+source resolution.
+
 ## Cost And Limits
 
 Automatic dependency discovery is opt-in and happens only when a subscription
@@ -74,6 +92,6 @@ AMD Ryzen 9 5950X benchmark, explicit dependencies had a median of about
 discovery had `8.78 us`, `8.1 KB`, and 32 allocations. Use explicit dependencies
 for hot churn of short-lived subscriptions or dynamic source graphs.
 
-This does not add `TAIL` or `SUBSCRIBE` SQL statement grammar, cross-process
-transport, or a signed network envelope. Those remain separate features so
-the current query and transport contracts are not changed implicitly.
+This does not add cross-process transport or a signed network envelope. Those
+remain separate features so the current transport contracts are not changed
+implicitly.

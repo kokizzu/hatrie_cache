@@ -1,5 +1,24 @@
 # Benchmark
 
+## MZ-010 SQL Subscription Statement Grammar
+
+Command: `make benchmark-mz010-statement`
+
+The existing registration paths were measured before and after the statement
+parser. The parser itself is a separate allocation-free benchmark because it
+only removes the statement envelope; query validation and subscription
+execution stay in the existing APIs.
+
+| Path | Before | After | Heap / allocations |
+| --- | ---: | ---: | ---: |
+| Existing manual registration | 6.29-6.70 us/op | 6.64-6.84 us/op | 6,088 B/op, 28 allocs/op |
+| Existing automatic registration | 8.79-8.95 us/op | 8.98-9.27 us/op | 8,776 B/op, 32 allocs/op |
+| `ParseSQLSubscriptionStatement` | n/a | 31.92-33.54 ns/op | 0 B/op, 0 allocs/op |
+
+The small before/after variation is within separate benchmark-run noise; the
+existing registration implementations were not modified. The new parser is
+opt-in and adds no cost to callers that continue using the existing APIs.
+
 ## M052 Reusable Dataflow Plan View
 
 Command: `make benchmark-m052-plan-view`
