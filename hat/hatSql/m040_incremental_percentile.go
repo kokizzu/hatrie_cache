@@ -84,6 +84,9 @@ func (percentile *IncrementalPercentile) Apply(updates []DifferentialRow) error 
 	if len(updates) == 0 {
 		return nil
 	}
+	if len(updates) == 1 {
+		return percentile.applySingle(updates[0])
+	}
 	if len(updates) == 2 && updates[0].Key == updates[1].Key && updates[0].Diff < 0 && updates[1].Diff > 0 {
 		if _, exists := percentile.entries[updates[0].Key]; exists {
 			return percentile.applyReplacement(updates)
@@ -202,6 +205,79 @@ func (percentile *IncrementalPercentile) Apply(updates []DifferentialRow) error 
 		} else {
 			percentile.root = incrementalPercentileSetCount(percentile.root, current, current.count)
 		}
+	}
+	return nil
+}
+
+func (percentile *IncrementalPercentile) applySingle(update DifferentialRow) error {
+	if update.Key == "" {
+		return fmt.Errorf("incremental percentile update 0: %w", ErrIncrementalPercentileKeyRequired)
+	}
+	if update.Diff == 0 {
+		return nil
+	}
+
+	current, exists := percentile.entries[update.Key]
+	if update.Diff > 0 {
+		increment := uint64(update.Diff)
+		if exists {
+			if update.Row != nil {
+				order, err := percentile.orderKey(update.Row)
+				if err != nil {
+					return fmt.Errorf("incremental percentile update 0 key %q order key: %w", update.Key, err)
+				}
+				if Compare(order, current.order) != 0 || !reflect.DeepEqual(update.Row, current.row) {
+					return fmt.Errorf("incremental percentile update 0 key %q: %w", update.Key, ErrIncrementalPercentileRowConflict)
+				}
+			}
+			nextCount, ok := incrementalPercentileAddMultiplicity(current.count, update.Diff)
+			if !ok {
+				return fmt.Errorf("incremental percentile update 0 key %q: %w", update.Key, ErrIncrementalPercentileOverflow)
+			}
+			if ^uint64(0)-percentile.total < increment {
+				return fmt.Errorf("incremental percentile update 0 key %q: %w", update.Key, ErrIncrementalPercentileOverflow)
+			}
+			current.count = nextCount
+			percentile.root = incrementalPercentileSetCount(percentile.root, current, current.count)
+			percentile.total += increment
+			return nil
+		}
+
+		order, err := percentile.orderKey(update.Row)
+		if err != nil {
+			return fmt.Errorf("incremental percentile update 0 key %q order key: %w", update.Key, err)
+		}
+		if ^uint64(0)-percentile.total < increment {
+			return fmt.Errorf("incremental percentile update 0 key %q: %w", update.Key, ErrIncrementalPercentileOverflow)
+		}
+		current = &incrementalPercentileNode{
+			key:      update.Key,
+			time:     update.Time,
+			row:      cloneDifferentialRow(update.Row),
+			order:    cloneIncrementalTopKOrder(order),
+			count:    increment,
+			priority: percentile.nextPriority(),
+		}
+		percentile.entries[update.Key] = current
+		percentile.root = incrementalPercentileInsert(percentile.root, current)
+		percentile.total += increment
+		return nil
+	}
+
+	if !exists {
+		return fmt.Errorf("incremental percentile update 0 key %q: %w", update.Key, ErrIncrementalPercentileNegativeMultiplicity)
+	}
+	decrement := incrementalPercentileMagnitude(update.Diff)
+	if decrement > current.count {
+		return fmt.Errorf("incremental percentile update 0 key %q: %w", update.Key, ErrIncrementalPercentileNegativeMultiplicity)
+	}
+	current.count -= decrement
+	percentile.total -= decrement
+	if current.count == 0 {
+		percentile.root = incrementalPercentileErase(percentile.root, current)
+		delete(percentile.entries, update.Key)
+	} else {
+		percentile.root = incrementalPercentileSetCount(percentile.root, current, current.count)
 	}
 	return nil
 }

@@ -25555,3 +25555,31 @@ verify-mz037-topk:
 
 deliver-mz037-topk:
 	bash scripts/deliver-mz037-topk.sh
+
+.PHONY: test-mz040
+test-mz040:
+	bash scripts/test-mz040.sh
+
+.PHONY: benchmark-mz040
+benchmark-mz040:
+	bash scripts/benchmark-mz040.sh
+
+.PHONY: format-mz040
+format-mz040:
+	bash scripts/format-mz040.sh
+
+.PHONY: test-mz040-package
+test-mz040-package:
+	bash scripts/test-mz040-package.sh
+
+.PHONY: race-mz040
+race-mz040:
+	bash scripts/race-mz040.sh
+
+.PHONY: vet-mz040
+vet-mz040:
+	bash scripts/vet-mz040.sh
+
+.PHONY: deliver-mz040
+deliver-mz040:
+	bash scripts/deliver-mz040.sh

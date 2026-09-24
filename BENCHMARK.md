@@ -26775,6 +26775,27 @@ incremental path still uses about 6.5x the rebuild's transient bytes because
 it owns ordered state and clones the updated and returned rows. It retains one
 treap node and row payload per active key, so it is intended for repeated
 updates and percentile reads, not a one-shot sort.
+
+### MZ-040 single-update fast path
+
+Command: `make benchmark-mz040`
+
+Workload: 10,000 seeded rows, one existing-key increment per operation, and a
+95th-percentile lookup. The full-sort and two-record replacement paths are
+controls. Five samples were collected with `-benchmem` on Linux `amd64`, AMD
+Ryzen 9 5950X.
+
+| Path | Before median ns/op | After median ns/op | CPU improvement | Before B/op | After B/op | Before allocs/op | After allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Full sort rebuild control | 80,148 | 83,698 | 0.96x | 104 | 104 | 4 | 4 |
+| Two-record replacement control | 776.0 | 733.6 | 1.06x | 679 | 679 | 4 | 4 |
+| Single existing-key update | 474.4 | 333.2 | 1.42x | 400 | 336 | 3 | 2 |
+
+Raw samples and interpretation are recorded in
+[MZ040_INCREMENTAL_PERCENTILE.md](MZ040_INCREMENTAL_PERCENTILE.md). The
+single-update result is the only clear optimization win in this comparison;
+the control changes are reported for reproducibility and are not presented as
+additional improvements.
 ## MZ-028: Temporal interval arrangement
 
 Workload: one-key valid-time rows with half-open intervals. The first two rows

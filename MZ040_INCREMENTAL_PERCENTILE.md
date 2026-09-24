@@ -42,9 +42,11 @@ overflow. Stored rows and returned rows are cloned, so callers may reuse or
 mutate their input maps after the call.
 
 The common two-record replacement shape, a negative update followed by a
-positive update for the same existing key, has an allocation-free validation
-path. A complete replacement reuses its treap node; all other batches retain
-the general atomic validation path.
+positive update for the same existing key, reuses its treap node; all other
+batches retain the general atomic validation path. A one-record `Apply` also
+uses a dedicated path: existing-key increments and deletes avoid constructing
+the batch pending map and prepared-update slice while retaining the same
+validation and overflow rules.
 
 ## Costs And Scope
 
@@ -62,7 +64,7 @@ outside this feature.
 
 ## Benchmark
 
-Run:
+The historical replacement benchmark can be run with:
 
 ```text
 make benchmark-mz040-incremental-percentile
@@ -89,3 +91,26 @@ baseline because the operator clones the updated row and returns an isolated
 row while retaining the ordered state. Use it for repeated updates and
 queries; use a one-shot sort for a single percentile over an otherwise unused
 relation.
+
+The focused single-update comparison can be run with:
+
+```text
+make benchmark-mz040
+```
+
+It uses 10,000 seeded rows, applies one existing-key increment, and reads the
+95th percentile. Five samples were collected with `-benchmem` on the same
+Linux `amd64` AMD Ryzen 9 5950X host. The rebuild and two-record paths are
+controls; only the single-update path is changed by this optimization.
+
+| Path | Before raw ns/op | Before median | After raw ns/op | After median | Before B/op | After B/op | Before allocs/op | After allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Full sort rebuild | 81,493; 77,167; 80,148; 77,350; 82,641 | 80,148 | 79,624; 85,692; 88,422; 83,698; 79,391 | 83,698 | 104 | 104 | 4 | 4 |
+| Two-record replacement | 750.0; 765.6; 785.3; 781.8; 776.0 | 776.0 | 733.6; 766.5; 743.0; 705.9; 712.0 | 733.6 | 679 | 679 | 4 | 4 |
+| Single existing-key update | 462.8; 474.4; 456.9; 479.0; 486.1 | 474.4 | 339.0; 334.5; 332.9; 330.9; 333.2 | 333.2 | 400 | 336 | 3 | 2 |
+
+The single-update path is about `1.42x` faster, uses `1.19x` fewer transient
+bytes, and removes one allocation. The two-record control is about `1.06x`
+faster with unchanged memory, which is treated as noise-level rather than a
+separate claimed improvement. The full-sort control is also unchanged within
+normal benchmark variance.

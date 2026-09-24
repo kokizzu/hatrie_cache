@@ -108,6 +108,52 @@ func TestMZ040IncrementalPercentileReplacementPreservesPartialMultiplicity(t *te
 	}
 }
 
+func TestMZ040IncrementalPercentileSingleUpdatePreservesOwnershipAndAtomicity(t *testing.T) {
+	percentile, err := NewIncrementalPercentile(IncrementalPercentileDefinition{
+		OrderKey: m040PercentileOrderKey,
+	})
+	if err != nil {
+		t.Fatalf("NewIncrementalPercentile() error = %v", err)
+	}
+	mutable := Row{"score": int64(10), "payload": []byte("before")}
+	if err := percentile.Apply([]DifferentialRow{{Key: "a", Time: 1, Diff: 1, Row: mutable}}); err != nil {
+		t.Fatalf("single insert Apply() error = %v", err)
+	}
+	mutable["score"] = int64(99)
+	mutable["payload"].([]byte)[0] = 'x'
+	row, ok, err := percentile.Percentile(0)
+	if err != nil || !ok || row.Key != "a" || row.Time != 1 || row.Row["score"] != int64(10) || string(row.Row["payload"].([]byte)) != "before" {
+		t.Fatalf("insert Percentile(0) = %#v, %v, %v; want owned score 10 payload before", row, ok, err)
+	}
+
+	if err := percentile.Apply([]DifferentialRow{{Key: "a", Diff: 1}}); err != nil {
+		t.Fatalf("single increment Apply() error = %v", err)
+	}
+	if got, want := percentile.TotalWeight(), uint64(2); got != want {
+		t.Fatalf("TotalWeight() after increment = %d, want %d", got, want)
+	}
+	if err := percentile.Apply([]DifferentialRow{{Key: "a", Diff: -1}}); err != nil {
+		t.Fatalf("single partial delete Apply() error = %v", err)
+	}
+	if got, want := percentile.TotalWeight(), uint64(1); got != want {
+		t.Fatalf("TotalWeight() after partial delete = %d, want %d", got, want)
+	}
+
+	before := percentile.AllRows()
+	if err := percentile.Apply([]DifferentialRow{{Key: "a", Diff: 1, Row: Row{"score": int64(11)}}}); !errors.Is(err, ErrIncrementalPercentileRowConflict) {
+		t.Fatalf("single conflicting update error = %v, want ErrIncrementalPercentileRowConflict", err)
+	}
+	if got := percentile.AllRows(); !reflect.DeepEqual(got, before) {
+		t.Fatalf("state after rejected single update = %#v, want %#v", got, before)
+	}
+	if err := percentile.Apply([]DifferentialRow{{Key: "missing", Diff: -1}}); !errors.Is(err, ErrIncrementalPercentileNegativeMultiplicity) {
+		t.Fatalf("single missing delete error = %v, want ErrIncrementalPercentileNegativeMultiplicity", err)
+	}
+	if got := percentile.AllRows(); !reflect.DeepEqual(got, before) {
+		t.Fatalf("state after rejected missing delete = %#v, want %#v", got, before)
+	}
+}
+
 func TestMZ040IncrementalPercentileApplyIsAtomic(t *testing.T) {
 	percentile, err := NewIncrementalPercentile(IncrementalPercentileDefinition{
 		OrderKey: m040PercentileOrderKey,

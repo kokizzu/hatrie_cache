@@ -86,3 +86,40 @@ func BenchmarkMZ040PercentileIncremental(b *testing.B) {
 	b.StopTimer()
 	b.ReportMetric(float64(checksum), "checksum")
 }
+
+func BenchmarkMZ040PercentileSingleUpdate(b *testing.B) {
+	const rows = 10000
+	seed := make([]DifferentialRow, rows)
+	for index := range seed {
+		seed[index] = DifferentialRow{
+			Key:  fmt.Sprintf("row-%05d", index),
+			Diff: 1,
+			Row:  Row{"value": int64(index)},
+		}
+	}
+	percentile, err := NewIncrementalPercentile(IncrementalPercentileDefinition{
+		OrderKey: m040PercentileOrderKey,
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	if err := percentile.Apply(seed); err != nil {
+		b.Fatal(err)
+	}
+	update := DifferentialRow{Key: "row-00000", Diff: 1}
+	b.ReportAllocs()
+	b.ResetTimer()
+	var checksum int64
+	for iteration := 0; iteration < b.N; iteration++ {
+		if err := percentile.Apply([]DifferentialRow{update}); err != nil {
+			b.Fatal(err)
+		}
+		selected, ok, err := percentile.Percentile(.95)
+		if err != nil || !ok {
+			b.Fatalf("Percentile() = %#v, %v, %v", selected, ok, err)
+		}
+		checksum += selected.Row["value"].(int64)
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(checksum), "checksum")
+}
