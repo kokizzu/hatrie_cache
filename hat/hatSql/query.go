@@ -18071,7 +18071,15 @@ func sqlField(row sqlExecRow, qualifier, name string) interface{} {
 		}
 		if qualifier != "" {
 			if source, ok := current.sources[qualifier]; ok {
-				return source[name]
+				if value, found := source[name]; found {
+					return value
+				}
+				if value, found := source[qualifier]; found {
+					if nested, found := sqlArrayJoinNestedField(value, name); found {
+						return nested
+					}
+				}
+				return nil
 			}
 			continue
 		}

@@ -13,8 +13,19 @@ Ordinary `ARRAY JOIN` behavior is unchanged: an empty or `NULL` array emits no
 row. `LEFT ARRAY JOIN` emits one row for those inputs and sets the array alias
 to `NULL`; non-empty arrays preserve input order and emit one row per element.
 Scalar expressions are still rejected, and the existing row/work limits apply
-to the preserved rows. Nested-array traversal and physical nested-column
-execution remain outside this incremental surface.
+to the preserved rows. Explicit nested traversal through row or string-keyed
+map elements is also supported:
+
+```sql
+FROM CACHE('items')
+ARRAY JOIN groups AS group
+ARRAY JOIN group.tags AS tag
+SELECT id, group.name AS group_name, tag
+```
+
+The nested form requires explicit one-level-at-a-time `ARRAY JOIN` clauses;
+automatic flattening and physical nested-column execution remain outside this
+incremental surface.
 
 ## Measurement
 
@@ -32,12 +43,19 @@ stable at approximately 14.01 ms, 17.15 MB, and 104,481 allocations before
 the change, versus approximately 13.91 ms, 17.15 MB, and 104,481 allocations
 afterward.
 
+The nested traversal benchmark uses 1,024 rows, two row elements per parent,
+and two tags per element. Five current samples have a median of 10.53 ms,
+11.86 MB, and 78,886 allocations for 4,096 output rows. This is a capability
+benchmark rather than a direct-path speed comparison.
+
 ## Verification
 
 ```text
 make test-ch037-left-array-join
+make test-ch037-nested-array-join
 make race-ch037-left-array-join
 make vet-ch037-left-array-join
 make benchmark-ch037-left-array-join-before
 make benchmark-ch037-left-array-join
+make benchmark-ch037-array-join
 ```

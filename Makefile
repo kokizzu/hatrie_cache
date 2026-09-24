@@ -25876,3 +25876,35 @@ push-mz010-subscription-envelope:
 .PHONY: test-mz010-subscription-envelope-package
 test-mz010-subscription-envelope-package:
 	bash scripts/test-mz010-subscription-envelope-package.sh
+.PHONY: test-ch037-nested-array-join
+test-ch037-nested-array-join:
+	bash scripts/test-ch037-nested-array-join.sh
+.PHONY: format-ch037-nested-array-join
+format-ch037-nested-array-join:
+	bash scripts/format-ch037-nested-array-join.sh
+.PHONY: benchmark-ch037-array-join
+benchmark-ch037-array-join:
+	bash scripts/benchmark-ch037-array-join.sh
+.PHONY: test-ch037-nested-array-join-package
+test-ch037-nested-array-join-package:
+	bash scripts/test-ch037-nested-array-join-package.sh
+
+.PHONY: race-ch037-nested-array-join
+race-ch037-nested-array-join:
+	bash scripts/race-ch037-nested-array-join.sh
+
+.PHONY: vet-ch037-nested-array-join
+vet-ch037-nested-array-join:
+	bash scripts/vet-ch037-nested-array-join.sh
+
+.PHONY: review-ch037-nested-array-join
+review-ch037-nested-array-join:
+	bash scripts/review-ch037-nested-array-join.sh
+
+.PHONY: commit-ch037-nested-array-join
+commit-ch037-nested-array-join:
+	bash scripts/commit-ch037-nested-array-join.sh
+
+.PHONY: push-ch037-nested-array-join
+push-ch037-nested-array-join:
+	bash scripts/push-ch037-nested-array-join.sh

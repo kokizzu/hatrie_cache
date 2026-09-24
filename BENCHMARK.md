@@ -165,6 +165,29 @@ after BenchmarkCH037LeftArrayJoin:
 12759073 ns/op 15957290 B/op 95265 allocs/op
 ```
 
+<a id="ch-037-nested-array-join"></a>
+## CH-037 Nested Array Join Traversal
+
+This benchmark measures explicit two-level traversal through row elements:
+1,024 parents, two nested row elements per parent, two tags per element, and
+4,096 output rows. It adds field lookup for `group.name` and `group.tags`
+without changing direct-array representation or automatic flattening.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Output rows |
+| --- | ---: | ---: | ---: | ---: |
+| Nested `ARRAY JOIN` traversal | 10,532,196 | 11,861,836 | 78,886 | 4,096 |
+
+Raw samples from `make benchmark-ch037-array-join`:
+
+```text
+BenchmarkCH037NestedArrayJoin:
+10848272 ns/op 11861839 B/op 78886 allocs/op
+10439603 ns/op 11861828 B/op 78886 allocs/op
+10532196 ns/op 11861845 B/op 78886 allocs/op
+10223808 ns/op 11861836 B/op 78886 allocs/op
+10584777 ns/op 11861831 B/op 78886 allocs/op
+```
+
 ## C245 Vertical TTL Deletion
 
 Five 200 ms samples on Linux amd64, AMD Ryzen 9 5950X, with 65,536 rows.
