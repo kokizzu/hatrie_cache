@@ -35806,3 +35806,46 @@ That is the explicit tradeoff for queryable read consistency. The default SQL
 path remains unchanged because readiness tracking is not installed or consulted
 unless the caller opts in. Full semantics are in
 [M035_SNAPSHOT_BLOCKING.md](M035_SNAPSHOT_BLOCKING.md).
+
+<a id="m-u36-arrangement-hydration-admission"></a>
+## M-U36 Arrangement Hydration Admission
+
+Five `-benchmem` samples on Linux/amd64 with an AMD Ryzen 9 5950X. The
+existing `Freshness` rows are the baseline. New status and admission rows use
+the same ready aggregate or join arrangement and report no heap allocation.
+
+```text
+BenchmarkTypedTableAggregateArrangementFreshnessMU036-32
+13.00 13.22 14.02 13.82 14.67 ns/op
+0 0 0 0 0 B/op
+0 0 0 0 0 allocs/op
+BenchmarkTypedTableAggregateArrangementHydrationStatusMU036-32
+34.71 33.81 35.57 48.06 36.26 ns/op
+0 0 0 0 0 B/op
+0 0 0 0 0 allocs/op
+BenchmarkTypedTableAggregateArrangementWaitForHydrationMU036-32
+36.57 37.98 37.90 35.41 37.63 ns/op
+0 0 0 0 0 B/op
+0 0 0 0 0 allocs/op
+BenchmarkTypedTableJoinArrangementFreshnessMU036-32
+24.88 25.21 26.77 24.48 26.21 ns/op
+0 0 0 0 0 B/op
+0 0 0 0 0 allocs/op
+BenchmarkTypedTableJoinArrangementHydrationStatusMU036-32
+36.55 41.48 40.49 41.40 39.44 ns/op
+0 0 0 0 0 B/op
+0 0 0 0 0 allocs/op
+```
+
+| Operation | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Aggregate `Freshness` | 13.82 | 0 | 0 | 1.00x baseline |
+| Aggregate `HydrationStatus` | 35.57 | 0 | 0 | 2.57x slower, 0 B/op |
+| Aggregate `WaitForHydration` | 37.63 | 0 | 0 | 2.72x slower, 0 B/op |
+| Join `Freshness` | 25.21 | 0 | 0 | 1.00x baseline |
+| Join `HydrationStatus` | 40.49 | 0 | 0 | 1.61x slower, 0 B/op |
+
+This is a correctness and operational admission feature, not a query-speed
+optimization. The additional CPU is bounded control-plane work and is opt-in;
+the existing arrangement paths remain unchanged. Full semantics are in
+[M036_ARRANGEMENT_HYDRATION_ADMISSION.md](M036_ARRANGEMENT_HYDRATION_ADMISSION.md).

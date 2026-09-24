@@ -40,9 +40,10 @@ type TypedTableJoinArrangements struct {
 }
 
 type typedTableJoinArrangementEntry struct {
-	mu   sync.Mutex
-	join *TypedTableJoin
-	refs int
+	mu        sync.Mutex
+	join      *TypedTableJoin
+	refs      int
+	hydration typedTableArrangementHydrationState
 }
 
 // TypedTableJoinArrangement is a reference-counted lease on a shared join.
@@ -79,7 +80,7 @@ func (arrangements *TypedTableJoinArrangements) Acquire(definition TypedTableJoi
 		if err != nil {
 			return nil, err
 		}
-		entry = &typedTableJoinArrangementEntry{join: join}
+		entry = &typedTableJoinArrangementEntry{join: join, hydration: newTypedTableArrangementHydrationState()}
 		arrangements.entries[key] = entry
 	}
 	entry.refs++
@@ -147,24 +148,30 @@ func (arrangement *TypedTableJoinArrangement) Hydrate(limit int) (TypedTableJoin
 	}
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
+	entry.hydration.resetLocked()
 	leftBefore := entry.join.LeftCheckpoint()
 	rightBefore := entry.join.RightCheckpoint()
 	leftChanges, leftSourceSequence, err := entry.join.left.ChangesAfter(leftBefore, limit)
 	if err != nil {
+		entry.hydration.failLocked(err)
 		return TypedTableJoinArrangementHydration{}, err
 	}
 	rightChanges, rightSourceSequence, err := entry.join.right.ChangesAfter(rightBefore, limit)
 	if err != nil {
+		entry.hydration.failLocked(err)
 		return TypedTableJoinArrangementHydration{}, err
 	}
 	if err := entry.join.ApplyLeft(leftChanges); err != nil {
+		entry.hydration.failLocked(err)
 		return TypedTableJoinArrangementHydration{}, err
 	}
 	if err := entry.join.ApplyRight(rightChanges); err != nil {
+		entry.hydration.failLocked(err)
 		return TypedTableJoinArrangementHydration{}, err
 	}
 	leftAfter := entry.join.LeftCheckpoint()
 	rightAfter := entry.join.RightCheckpoint()
+	entry.hydration.completeLocked()
 	return TypedTableJoinArrangementHydration{
 		LeftBefore: leftBefore, LeftAfter: leftAfter, LeftSourceSequence: leftSourceSequence, LeftApplied: len(leftChanges),
 		RightBefore: rightBefore, RightAfter: rightAfter, RightSourceSequence: rightSourceSequence, RightApplied: len(rightChanges),

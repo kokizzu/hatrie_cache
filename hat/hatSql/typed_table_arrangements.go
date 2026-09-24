@@ -41,6 +41,7 @@ type typedTableAggregateArrangementEntry struct {
 	mu         sync.Mutex
 	aggregate  *TypedTableAggregate
 	references int
+	hydration  typedTableArrangementHydrationState
 }
 
 // TypedTableAggregateArrangement is one reference-counted lease on shared
@@ -76,7 +77,7 @@ func (arrangements *TypedTableAggregateArrangements) Acquire(definition TypedTab
 		if err != nil {
 			return nil, err
 		}
-		entry = &typedTableAggregateArrangementEntry{aggregate: aggregate}
+		entry = &typedTableAggregateArrangementEntry{aggregate: aggregate, hydration: newTypedTableArrangementHydrationState()}
 		arrangements.entries[key] = entry
 	}
 	entry.references++
@@ -155,15 +156,19 @@ func (arrangement *TypedTableAggregateArrangement) Hydrate(limit int) (TypedTabl
 	}
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
+	entry.hydration.resetLocked()
 	before := entry.aggregate.checkpoint
 	changes, sourceSequence, err := entry.aggregate.table.ChangesAfter(before, limit)
 	if err != nil {
+		entry.hydration.failLocked(err)
 		return TypedTableAggregateArrangementHydration{}, err
 	}
 	if err := entry.aggregate.Apply(changes); err != nil {
+		entry.hydration.failLocked(err)
 		return TypedTableAggregateArrangementHydration{}, err
 	}
 	after := entry.aggregate.checkpoint
+	entry.hydration.completeLocked()
 	return TypedTableAggregateArrangementHydration{
 		Before:         before,
 		After:          after,
