@@ -35768,3 +35768,41 @@ duplicate frontier delivery by checkpointing only consumer-applied state. It
 does not replace the zero-checkpoint lifecycle, and ordinary subscriptions do
 not allocate the lazy checkpoint state. Full semantics are in
 [M034_HISTORICAL_SUBSCRIPTION_CHECKPOINTS.md](M034_HISTORICAL_SUBSCRIPTION_CHECKPOINTS.md).
+
+<a id="m-u35-snapshot-blocking"></a>
+## M-U35 Snapshot Blocking
+
+Five `-benchmem` samples on Linux/amd64 with an AMD Ryzen 9 5950X. These
+measure the opt-in readiness control plane after all required objects are
+ready. There was no previous common readiness API to compare against; ordinary
+SQL execution does not instantiate this registry.
+
+```text
+BenchmarkSQLSnapshotReadinessSnapshot-32
+1216578 1000000 1000000 1204020 1354489 iterations
+1028 1015 1027 951.9 838.4 ns/op
+1280 1280 1280 1280 1280 B/op
+2 2 2 2 2 allocs/op
+BenchmarkSQLSnapshotReadinessSnapshotLarge-32
+360742 355291 366379 357369 388010 iterations
+3585 3311 3089 3156 3104 ns/op
+5248 5248 5248 5248 5248 B/op
+2 2 2 2 2 allocs/op
+BenchmarkSQLSnapshotReadinessWaitReady-32
+1439458 1543484 1529626 1423687 1413091 iterations
+798.6 786.9 828.4 834.1 812.9 ns/op
+1280 1280 1280 1280 1280 B/op
+2 2 2 2 2 allocs/op
+```
+
+| Operation | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| `Snapshot`, 16 objects | 1,015 | 1,280 | 2 | New opt-in control path |
+| `Snapshot`, 64 objects | 3,156 | 5,248 | 2 | 3.11x the 16-object snapshot time; 4.10x B/op |
+| `Wait`, already ready, 16 objects | 813 | 1,280 | 2 | 0.80x the 16-object snapshot time |
+
+The memory and CPU cost is proportional to the complete detached status view.
+That is the explicit tradeoff for queryable read consistency. The default SQL
+path remains unchanged because readiness tracking is not installed or consulted
+unless the caller opts in. Full semantics are in
+[M035_SNAPSHOT_BLOCKING.md](M035_SNAPSHOT_BLOCKING.md).

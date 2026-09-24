@@ -25083,3 +25083,34 @@ commit-mu034:
 .PHONY: push-mu034
 push-mu034:
 	bash ./scripts/push-mu034.sh
+.PHONY: test-mu035
+test-mu035:
+	bash scripts/test-mu035.sh
+
+.PHONY: format-mu035
+format-mu035:
+	bash scripts/format-mu035.sh
+
+.PHONY: race-mu035
+race-mu035:
+	bash scripts/race-mu035.sh
+
+.PHONY: vet-mu035
+vet-mu035:
+	bash scripts/vet-mu035.sh
+
+.PHONY: benchmark-mu035
+benchmark-mu035:
+	bash scripts/benchmark-mu035.sh
+
+.PHONY: test-mu035-package
+test-mu035-package:
+	bash scripts/test-mu035-package.sh
+
+.PHONY: commit-mu035
+commit-mu035:
+	bash scripts/commit-mu035.sh
+
+.PHONY: push-mu035
+push-mu035:
+	bash scripts/push-mu035.sh
