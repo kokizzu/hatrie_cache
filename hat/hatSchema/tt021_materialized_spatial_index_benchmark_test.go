@@ -30,6 +30,47 @@ func BenchmarkTT021MaterializedSpatialIndexBuild(b *testing.B) {
 	}
 }
 
+func BenchmarkTT021MaterializedSpatialIndexMarshal(b *testing.B) {
+	source := benchmarkTT021MaterializedSpatialSource(b)
+	if _, err := source.BuildSpatialIndex("latitude", "longitude"); err != nil {
+		b.Fatal(err)
+	}
+	wire, err := source.MarshalSpatialIndex("latitude", "longitude")
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.SetBytes(int64(len(wire)))
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := source.MarshalSpatialIndex("latitude", "longitude"); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.ReportMetric(float64(len(wire)), "wire-bytes")
+}
+
+func BenchmarkTT021MaterializedSpatialIndexRestore(b *testing.B) {
+	indexed := benchmarkTT021MaterializedSpatialSource(b)
+	if _, err := indexed.BuildSpatialIndex("latitude", "longitude"); err != nil {
+		b.Fatal(err)
+	}
+	wire, err := indexed.MarshalSpatialIndex("latitude", "longitude")
+	if err != nil {
+		b.Fatal(err)
+	}
+	source := benchmarkTT021MaterializedSpatialSource(b)
+	b.ReportAllocs()
+	b.SetBytes(int64(len(wire)))
+	b.ResetTimer()
+	for b.Loop() {
+		if err := source.RestoreSpatialIndex("latitude", "longitude", wire); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.ReportMetric(float64(len(wire)), "wire-bytes")
+}
+
 func BenchmarkTT021MaterializedSpatialUpsertScan(b *testing.B) {
 	benchmarkTT021MaterializedSpatialUpsert(b, false)
 }

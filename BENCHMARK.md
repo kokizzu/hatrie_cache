@@ -36797,17 +36797,23 @@ index size.
 
 | Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
 | --- | ---: | ---: | ---: | --- |
-| Full SQL source scan | 22,467,284 | 19,718,314 | 120,068 | Baseline |
-| Warm materialized R-tree | 34,366 | 27,672 | 153 | 653.8x faster, 712.4x lower B/op, 784.8x fewer allocs |
-| R-tree build | 43,363,374 | 5,496,445 | 5,959 | One-time build cost |
-| Existing-row upsert without index | 2,772 | 2,180 | 20 | Write baseline |
-| Existing-row upsert with index | 3,060 | 2,179 | 20 | 1.10x CPU, no allocation increase |
+| Full SQL source scan | 24,438,944 | 19,718,420 | 120,068 | Baseline |
+| Warm materialized R-tree | 33,616 | 27,672 | 153 | 727.0x faster, 712.4x lower B/op, 784.8x fewer allocs |
+| R-tree build | 41,278,080 | 5,496,444 | 5,959 | One-time build cost |
+| Marshal `HSI1` snapshot | 3,408,252 | 966,688 | 3 | 12.1x lower CPU than rebuild; 340,066 wire bytes |
+| Restore `HSI1` snapshot | 43,918,873 | 5,815,985 | 5,962 | 1.06x rebuild CPU, 1.06x B/op, 1.00x allocs |
+| Existing-row upsert without index | 2,673 | 2,179 | 20 | Write baseline |
+| Existing-row upsert with index | 2,912 | 2,179 | 20 | 1.09x CPU, no allocation increase |
 
 The build row reports cumulative construction allocation, not retained index
-size. The maintained write path costs about 10% CPU in the one-row upsert
-fixture, with no additional allocations. The query path is timed after the
-one-time build; broad predicates can return enough candidates to reduce its
-advantage.
+size. The snapshot benchmark includes frame decode, source validation, and tree
+reconstruction but not loading source rows. Restore is about 6% slower and 6%
+higher in transient bytes than rebuilding, with essentially the same allocation
+count; the benefit is avoiding coordinate scanning and index construction when
+a valid snapshot is available. The maintained write path costs about 9% CPU in
+the one-row upsert fixture, with no additional allocations. The query path is
+timed after the one-time build; broad predicates can return enough candidates
+to reduce its advantage.
 
 Raw samples and scope are in
 [TT021_MATERIALIZED_SPATIAL_INDEX.md](TT021_MATERIALIZED_SPATIAL_INDEX.md).

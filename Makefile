@@ -26235,6 +26235,30 @@ push-mz038-sorted-arrangement-cursor:
 format-tt024-text-persistence:
 	@bash scripts/format-tt024-text-persistence.sh
 
+.PHONY: test-tt021-spatial-persistence
+test-tt021-spatial-persistence:
+	@bash scripts/test-tt021-spatial-persistence.sh
+
+.PHONY: format-tt021-spatial-persistence
+format-tt021-spatial-persistence:
+	@bash scripts/format-tt021-spatial-persistence.sh
+
+
+
 .PHONY: stage-tt024-text-persistence
 stage-tt024-text-persistence:
 	@bash scripts/stage-tt024-text-persistence.sh
+.PHONY: verify-tt021-spatial-persistence
+verify-tt021-spatial-persistence:
+	@bash scripts/verify-tt021-spatial-persistence.sh
+.PHONY: stage-tt021-spatial-persistence
+stage-tt021-spatial-persistence:
+	@bash scripts/stage-tt021-spatial-persistence.sh
+
+.PHONY: commit-tt021-spatial-persistence
+commit-tt021-spatial-persistence:
+	@bash scripts/commit-tt021-spatial-persistence.sh
+
+.PHONY: push-tt021-spatial-persistence
+push-tt021-spatial-persistence:
+	@bash scripts/push-tt021-spatial-persistence.sh
