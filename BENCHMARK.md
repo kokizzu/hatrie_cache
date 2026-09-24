@@ -1,5 +1,41 @@
 # Benchmark
 
+## M064 Recursive Fixpoint Evaluation (Rejected)
+
+This opt-in Materialize-style recursive fixpoint scheduler was test-first
+implemented and then rolled back. It used stable breadth-first discovery,
+duplicate suppression, context cancellation, and bounded rows/iterations. The
+feature was rejected because the safety checks and dynamically growing result
+queue were materially more expensive than the existing traversal baseline.
+
+Linux amd64, AMD Ryzen 9 5950X, five samples over a 16,384-node graph:
+
+```text
+Clean pre-change baseline:
+BenchmarkM064BaselineTraversal-32  1727909 ns/op  1313683 B/op 145 allocs/op
+BenchmarkM064BaselineTraversal-32  1732547 ns/op  1313622 B/op 145 allocs/op
+BenchmarkM064BaselineTraversal-32  1727703 ns/op  1313671 B/op 145 allocs/op
+BenchmarkM064BaselineTraversal-32  1765062 ns/op  1313675 B/op 145 allocs/op
+BenchmarkM064BaselineTraversal-32  1731338 ns/op  1313673 B/op 145 allocs/op
+
+Scheduler after nil-context fast path:
+BenchmarkM064RecursiveFixpoint-32  1814843 ns/op  1671295 B/op 163 allocs/op
+BenchmarkM064RecursiveFixpoint-32  1892475 ns/op  1671293 B/op 163 allocs/op
+BenchmarkM064RecursiveFixpoint-32  1943974 ns/op  1671307 B/op 163 allocs/op
+BenchmarkM064RecursiveFixpoint-32  1820213 ns/op  1671297 B/op 163 allocs/op
+BenchmarkM064RecursiveFixpoint-32  1794713 ns/op  1671295 B/op 163 allocs/op
+```
+
+| Path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | ---: |
+| Existing traversal | 1,731,338 | 1,313,673 | 145 | 1.00x |
+| Rejected fixpoint scheduler | 1,820,213 | 1,671,295 | 163 | 1.05x slower, 1.27x bytes, 1.12x allocs |
+
+The focused and full `hatSql` tests passed, but the measurable memory and CPU
+cost was not justified for an unintegrated opt-in API. M064 remains open for a
+design that can stream or reuse caller-owned storage instead of retaining a
+growing result queue.
+
 ## M052ab Compact SQL Dataflow Plan Codec
 
 The reusable dataflow-plan codec uses a bounded `HDP1` binary representation;
