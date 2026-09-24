@@ -18318,6 +18318,9 @@ func evalSQLExprBatch(expr sqlExpr, rows []sqlExecRow, functions SQLFunctionReso
 		if functions == nil {
 			return nil, fmt.Errorf("unknown SQL function %q", expr.name)
 		}
+		if values, ok, err := evalSQLPureLiteralFunctionBatch(expr, rows, functions); ok {
+			return values, err
+		}
 		calls := make([]SQLFunctionCall, len(rows))
 		for index, row := range rows {
 			call := SQLFunctionCall{Arguments: make([]interface{}, len(expr.args))}
@@ -18477,6 +18480,60 @@ func evalSQLExprBatch(expr sqlExpr, rows []sqlExecRow, functions SQLFunctionReso
 		out[index] = evalSQLExpr(expr, []sqlExecRow{row}, row)
 	}
 	return out, nil
+}
+
+func evalSQLPureLiteralFunctionBatch(expr sqlExpr, rows []sqlExecRow, functions SQLFunctionResolver) ([]interface{}, bool, error) {
+	if len(rows) <= 1 {
+		return nil, false, nil
+	}
+	capabilities, ok := functions.(FunctionCapabilityResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	deterministic, pure, ok := capabilities.FunctionCapabilities(expr.name)
+	if !ok || !deterministic || !pure {
+		return nil, false, nil
+	}
+	arguments := make([]interface{}, len(expr.args))
+	for index, argument := range expr.args {
+		if argument.kind != "literal" {
+			return nil, false, nil
+		}
+		arguments[index] = argument.value
+	}
+	values, err := functions.EvaluateSQLFunction(expr.name, []SQLFunctionCall{{Arguments: arguments}})
+	if err != nil {
+		return nil, true, err
+	}
+	if len(values) != 1 {
+		return nil, true, fmt.Errorf("SQL function %q returned %d values for one literal call", expr.name, len(values))
+	}
+	out := make([]interface{}, len(rows))
+	for index := range out {
+		out[index] = cloneSQLPureFunctionValue(values[0])
+	}
+	return out, true, nil
+}
+
+func cloneSQLPureFunctionValue(value interface{}) interface{} {
+	switch typed := value.(type) {
+	case []byte:
+		return append([]byte(nil), typed...)
+	case []interface{}:
+		cloned := make([]interface{}, len(typed))
+		for index, item := range typed {
+			cloned[index] = cloneSQLPureFunctionValue(item)
+		}
+		return cloned
+	case map[string]interface{}:
+		cloned := make(map[string]interface{}, len(typed))
+		for key, item := range typed {
+			cloned[key] = cloneSQLPureFunctionValue(item)
+		}
+		return cloned
+	default:
+		return value
+	}
 }
 func sqlBinaryValue(op string, left, right interface{}) interface{} {
 	switch op {

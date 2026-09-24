@@ -25347,3 +25347,34 @@ commit-chu14-runtime-filter:
 .PHONY: push-chu14-runtime-filter
 push-chu14-runtime-filter:
 	bash ./scripts/push-chu14-runtime-filter.sh
+.PHONY: test-m045-udf-fastpath
+test-m045-udf-fastpath:
+	bash ./scripts/test-m045-udf-fastpath.sh
+
+.PHONY: benchmark-m045-udf-fastpath
+benchmark-m045-udf-fastpath:
+	bash ./scripts/benchmark-m045-udf-fastpath.sh
+
+.PHONY: race-m045-udf-fastpath
+race-m045-udf-fastpath:
+	bash ./scripts/race-m045-udf-fastpath.sh
+
+.PHONY: vet-m045-udf-fastpath
+vet-m045-udf-fastpath:
+	bash ./scripts/vet-m045-udf-fastpath.sh
+
+.PHONY: verify-m045-udf-fastpath
+verify-m045-udf-fastpath:
+	bash ./scripts/verify-m045-udf-fastpath.sh
+
+.PHONY: stage-m045
+stage-m045:
+	bash ./scripts/deliver-m045.sh stage
+
+.PHONY: commit-m045
+commit-m045:
+	bash ./scripts/deliver-m045.sh commit
+
+.PHONY: push-m045
+push-m045:
+	bash ./scripts/deliver-m045.sh push

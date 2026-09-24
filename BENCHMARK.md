@@ -30837,6 +30837,57 @@ argument slices are independent copies. See
 [MU032_UDF_CAPABILITIES.md](MU032_UDF_CAPABILITIES.md) for the trust model and
 planner integration limits.
 
+<a id="mu-045-pure-literal-udf-fast-path"></a>
+### M-U45 Pure Literal UDF Fast Path
+
+`make benchmark-m045-udf-fastpath` measures a 4,096-row batch invoking a
+custom UDF with one literal argument. The pre-change candidate is the existing
+per-row evaluator. The optimized candidate requires `Pure` and
+`Deterministic`; the fallback keeps the capability metadata but disables
+purity. Five samples ran on the AMD Ryzen 9 5950X Linux/amd64 host.
+
+Raw pre-change output:
+
+```text
+BenchmarkM045UDFLiteralBatch/candidate-32 1654 672601 ns/op 753669 B/op 12290 allocs/op
+BenchmarkM045UDFLiteralBatch/candidate-32 1729 652439 ns/op 753669 B/op 12290 allocs/op
+BenchmarkM045UDFLiteralBatch/candidate-32 1831 626783 ns/op 753669 B/op 12290 allocs/op
+BenchmarkM045UDFLiteralBatch/candidate-32 1905 655984 ns/op 753670 B/op 12290 allocs/op
+BenchmarkM045UDFLiteralBatch/candidate-32 1894 679281 ns/op 753669 B/op 12290 allocs/op
+```
+
+Raw post-change output:
+
+```text
+BenchmarkM045UDFLiteralBatch/legacy-32 1465 793716 ns/op 753685 B/op 12290 allocs/op
+BenchmarkM045UDFLiteralBatch/legacy-32 1419 758255 ns/op 753675 B/op 12290 allocs/op
+BenchmarkM045UDFLiteralBatch/legacy-32 1446 754564 ns/op 753675 B/op 12290 allocs/op
+BenchmarkM045UDFLiteralBatch/legacy-32 1538 762205 ns/op 753677 B/op 12290 allocs/op
+BenchmarkM045UDFLiteralBatch/legacy-32 1460 719207 ns/op 753671 B/op 12290 allocs/op
+BenchmarkM045UDFLiteralBatch/candidate-32 36567 32651 ns/op 65592 B/op 4 allocs/op
+BenchmarkM045UDFLiteralBatch/candidate-32 37960 32317 ns/op 65592 B/op 4 allocs/op
+BenchmarkM045UDFLiteralBatch/candidate-32 35414 33568 ns/op 65592 B/op 4 allocs/op
+BenchmarkM045UDFLiteralBatch/candidate-32 34622 33602 ns/op 65592 B/op 4 allocs/op
+BenchmarkM045UDFLiteralBatch/candidate-32 33842 33456 ns/op 65592 B/op 4 allocs/op
+BenchmarkM045UDFLiteralBatch/fallback-32 1884 723906 ns/op 753669 B/op 12290 allocs/op
+BenchmarkM045UDFLiteralBatch/fallback-32 1837 698888 ns/op 753669 B/op 12290 allocs/op
+BenchmarkM045UDFLiteralBatch/fallback-32 1882 735102 ns/op 753669 B/op 12290 allocs/op
+BenchmarkM045UDFLiteralBatch/fallback-32 1485 730857 ns/op 753671 B/op 12290 allocs/op
+BenchmarkM045UDFLiteralBatch/fallback-32 1687 704297 ns/op 753668 B/op 12290 allocs/op
+```
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Result |
+|---|---:|---:|---:|---|
+| Existing per-row evaluator | 655,984 | 753,669 | 12,290 | baseline |
+| Same-run legacy resolver control | 758,255 | 753,675 | 12,290 | control for fallback comparison |
+| Pure deterministic literal fast path | 33,456 | 65,592 | 4 | 19.6x faster, 11.5x lower heap, 3,072.5x fewer allocations |
+| Non-pure fallback after change | 723,906 | 753,669 | 12,290 | no allocation regression; 1.05x faster than same-run control |
+
+The fast path is default-off for existing resolvers because it requires the
+optional capability interface and both explicit capability declarations. It
+does not fold parameterized or row-dependent calls. Composite result shapes
+covered by tests are copied per row to prevent result aliasing.
+
 <a id="ch-004-final-read-semantics"></a>
 ## CH-004 FINAL Read Semantics
 

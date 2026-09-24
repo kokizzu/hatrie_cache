@@ -120,6 +120,21 @@ func (registry *Registry) Definition(name string) (FunctionDefinition, bool) {
 	return definition, ok
 }
 
+// FunctionCapabilities returns only the planner capability bits without
+// cloning the definition's argument metadata.
+func (registry *Registry) FunctionCapabilities(name string) (deterministic, pure, ok bool) {
+	if registry == nil {
+		return false, false, false
+	}
+	registry.mu.RLock()
+	definition, ok := registry.definitions[strings.ToUpper(strings.TrimSpace(name))]
+	registry.mu.RUnlock()
+	if !ok {
+		return false, false, false
+	}
+	return definition.Deterministic, definition.Pure, true
+}
+
 // Definitions returns all registered definitions in deterministic name order.
 // The returned definitions and their argument slices are independent copies.
 func (registry *Registry) Definitions() []FunctionDefinition {

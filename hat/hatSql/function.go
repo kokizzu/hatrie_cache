@@ -28,6 +28,10 @@ type FunctionDefinition struct {
 	// Deterministic is an explicit caller declaration that equal inputs always
 	// produce equal outputs. The false zero value means unknown.
 	Deterministic bool `json:"deterministic,omitempty"`
+	// Pure is an explicit caller declaration that evaluating the function has no
+	// observable side effects and returns a value safe for SQL expression reuse.
+	// It is only meaningful when Deterministic is also true.
+	Pure bool `json:"pure,omitempty"`
 	// Monotonicity is an optional proof hint for planner-owned incremental
 	// maintenance. It is never inferred from the function language.
 	Monotonicity FunctionMonotonicity `json:"monotonicity,omitempty"`
@@ -59,6 +63,9 @@ func NormalizeFunctionCapabilities(definition *FunctionDefinition) error {
 	}
 	if definition.Monotonicity != FunctionMonotonicityUnknown && !definition.Deterministic {
 		return fmt.Errorf("SQL function %q must be deterministic before declaring monotonicity", definition.Name)
+	}
+	if definition.Pure && !definition.Deterministic {
+		return fmt.Errorf("SQL function %q must be deterministic before declaring purity", definition.Name)
 	}
 	if definition.Retractable && !definition.Deterministic {
 		return fmt.Errorf("SQL function %q must be deterministic before declaring retraction", definition.Name)
@@ -112,4 +119,12 @@ func FormatFunctionDiagnostic(definition FunctionDefinition, err error) string {
 // FunctionResolver supplies vectorized custom SQL function results.
 type FunctionResolver interface {
 	EvaluateSQLFunction(name string, calls []FunctionCall) ([]interface{}, error)
+}
+
+// FunctionCapabilityResolver optionally exposes validated metadata to the SQL
+// planner while preserving compatibility with existing FunctionResolver
+// implementations.
+type FunctionCapabilityResolver interface {
+	FunctionResolver
+	FunctionCapabilities(name string) (deterministic, pure, ok bool)
 }
