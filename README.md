@@ -4411,6 +4411,8 @@ lookup and preparation tradeoff is documented in
 
 - Opt-in SQL phrase and ordered proximity search over JSON text indexes:
   [SQL_TEXT_PHRASE.md](SQL_TEXT_PHRASE.md)
+- Opt-in positional text indexes for `MaterializedSource` phrase/proximity
+  queries, including benchmark tradeoffs: [TT024_POSITIONAL_TEXT_INDEX.md](TT024_POSITIONAL_TEXT_INDEX.md)
 - Opt-in exact phrase matching for the reusable token postings index:
   [CHU13_PHRASE_POSTINGS.md](CHU13_PHRASE_POSTINGS.md)
 

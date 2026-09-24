@@ -36749,3 +36749,39 @@ The exact command used was:
 ```sh
 make benchmark-mz010-subscription-envelope
 ```
+## TT-024 Materialized positional text index
+
+This benchmark compares the ordinary full-scan phrase query with the warm
+positional index over the same deterministic 20,000-row `MaterializedSource`.
+The query returns 20 rows. Five samples ran with `-benchmem` on Linux/amd64 and
+an AMD Ryzen 9 5950X; each sample used 100 benchmark iterations.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Improvement / cost |
+| --- | ---: | ---: | ---: | --- |
+| Full scan phrase query | 27,020,082 | 23,558,076 | 180,068 | Baseline |
+| Warm positional-index phrase query | 37,468 | 30,896 | 210 | 721x faster, 762x less B/op, 857x fewer allocs |
+| Text-index build | 32,756,321 | 26,255,546 | 260,258 | 33 ms build; 26.3 MB cumulative allocation |
+
+The index is opt-in. These `B/op` values are timed allocation volume, not
+retained index size; map, slice-header, allocator, and token-string overhead are
+not separately measured. See [TT024_POSITIONAL_TEXT_INDEX.md](TT024_POSITIONAL_TEXT_INDEX.md).
+
+Raw output:
+
+```text
+BenchmarkTT024PhraseScan-32       100  26180557 ns/op  23558775 B/op 180069 allocs/op
+BenchmarkTT024PhraseScan-32       100  27917075 ns/op  23558125 B/op 180068 allocs/op
+BenchmarkTT024PhraseScan-32       100  27980885 ns/op  23558076 B/op 180068 allocs/op
+BenchmarkTT024PhraseScan-32       100  27020082 ns/op  23558071 B/op 180068 allocs/op
+BenchmarkTT024PhraseScan-32       100  26754358 ns/op  23558069 B/op 180068 allocs/op
+BenchmarkTT024PhraseIndexed-32    100     51038 ns/op     30896 B/op    210 allocs/op
+BenchmarkTT024PhraseIndexed-32    100     35686 ns/op     30896 B/op    210 allocs/op
+BenchmarkTT024PhraseIndexed-32    100     37468 ns/op     30896 B/op    210 allocs/op
+BenchmarkTT024PhraseIndexed-32    100     32369 ns/op     30896 B/op    210 allocs/op
+BenchmarkTT024PhraseIndexed-32    100     55009 ns/op     30896 B/op    210 allocs/op
+BenchmarkTT024TextIndexBuild-32   100  32756321 ns/op  26255545 B/op 260258 allocs/op
+BenchmarkTT024TextIndexBuild-32   100  32084940 ns/op  26255549 B/op 260258 allocs/op
+BenchmarkTT024TextIndexBuild-32   100  33393692 ns/op  26255546 B/op 260258 allocs/op
+BenchmarkTT024TextIndexBuild-32   100  32566476 ns/op  26255541 B/op 260258 allocs/op
+BenchmarkTT024TextIndexBuild-32   100  32911228 ns/op  26255594 B/op 260258 allocs/op
+```

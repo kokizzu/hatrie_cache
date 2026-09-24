@@ -9602,6 +9602,9 @@ push-ch048-numeric-predicate-kernel:
 audit-next-engine-idea:
 	bash scripts/audit-next-engine-idea.sh
 
+inspect-fulltext:
+	bash scripts/inspect-fulltext.sh
+
 test-tt024-text-prefix:
 	bash scripts/test-tt024-text-prefix.sh
 
@@ -25568,6 +25571,22 @@ deliver-m049:
 inspect-open-ideas:
 	bash scripts/inspect-open-ideas.sh
 
+list-next-benchmarks:
+	bash scripts/list-next-benchmarks.sh
+
+test-next-ch041:
+	bash scripts/test-ch041-grouping-plan.sh
+
+benchmark-next-ch041-before:
+	bash scripts/benchmark-ch041-before.sh
+
+benchmark-next-ch041-after:
+	bash scripts/benchmark-ch041-after.sh
+
+audit-next-engine-idea:
+	bash scripts/audit-next-engine-idea.sh
+
+
 test-mz028-batched-merge:
 	bash scripts/test-mz028-batched-merge.sh
 
@@ -26079,3 +26098,30 @@ commit-ch005-adaptive-delete-bitmap:
 .PHONY: push-ch005-adaptive-delete-bitmap
 push-ch005-adaptive-delete-bitmap:
 	bash scripts/push-ch005-adaptive-delete-bitmap.sh
+.PHONY: test-tt024-text-index
+test-tt024-text-index:
+	bash scripts/test-tt024-text-index.sh
+
+.PHONY: format-tt024-text-index
+format-tt024-text-index:
+	bash scripts/format-tt024-text-index.sh
+
+.PHONY: benchmark-tt024-text-index
+benchmark-tt024-text-index:
+	bash scripts/benchmark-tt024-text-index.sh
+
+.PHONY: verify-tt024-text-index
+verify-tt024-text-index:
+	bash scripts/verify-tt024-text-index.sh
+
+.PHONY: verify-tt024-dependencies
+verify-tt024-dependencies:
+	bash scripts/verify-tt024-dependencies.sh
+
+.PHONY: commit-tt024-text-index
+commit-tt024-text-index:
+	bash scripts/commit-tt024-text-index.sh
+
+.PHONY: push-tt024-text-index
+push-tt024-text-index:
+	bash scripts/push-tt024-text-index.sh
