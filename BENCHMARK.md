@@ -35992,3 +35992,48 @@ same-version activation is `20.5x` slower, with no measured allocations. The
 lazy constructor uses `341x` fewer bytes than the isolated eager-map baseline.
 These are control-plane measurements; the registry is not automatically
 called from CDC row processing. The existing unguarded path remains unchanged.
+
+<a id="t-u05-session-transaction-settings"></a>
+## T-U05 Session Transaction Settings
+
+This benchmark compares the same one-row `SQLSession.Execute` query before and
+after the opt-in session settings contract. The baseline ran in a detached
+M041 worktree; the post-change run used the current M042 implementation. Both
+used five Go benchmark samples with `-benchmem` on Linux/amd64 and an AMD Ryzen
+9 5950X. The timeout case measures the optional timer/deadline path separately.
+
+```text
+Baseline, M041:
+BenchmarkTU05SessionExecuteBaseline-32  124948 9718 ns/op 6072 B/op 41 allocs/op
+BenchmarkTU05SessionExecuteBaseline-32  115969 9699 ns/op 6072 B/op 41 allocs/op
+BenchmarkTU05SessionExecuteBaseline-32  127518 9175 ns/op 6072 B/op 41 allocs/op
+BenchmarkTU05SessionExecuteBaseline-32  132357 9337 ns/op 6072 B/op 41 allocs/op
+BenchmarkTU05SessionExecuteBaseline-32  135357 9149 ns/op 6072 B/op 41 allocs/op
+
+After, M042:
+BenchmarkTU05SessionExecuteBaseline-32  108802 10535 ns/op 6072 B/op 41 allocs/op
+BenchmarkTU05SessionExecuteBaseline-32  110622 9616 ns/op 6072 B/op 41 allocs/op
+BenchmarkTU05SessionExecuteBaseline-32  131632 9991 ns/op 6072 B/op 41 allocs/op
+BenchmarkTU05SessionExecuteBaseline-32  125450 9579 ns/op 6072 B/op 41 allocs/op
+BenchmarkTU05SessionExecuteBaseline-32  130212 9542 ns/op 6072 B/op 41 allocs/op
+
+Optional timeout:
+BenchmarkTU05SessionExecuteWithTimeout-32  105523 9941 ns/op 6344 B/op 45 allocs/op
+BenchmarkTU05SessionExecuteWithTimeout-32  115108 10273 ns/op 6344 B/op 45 allocs/op
+BenchmarkTU05SessionExecuteWithTimeout-32  129285 9897 ns/op 6344 B/op 45 allocs/op
+BenchmarkTU05SessionExecuteWithTimeout-32  113895 10049 ns/op 6344 B/op 45 allocs/op
+BenchmarkTU05SessionExecuteWithTimeout-32  118084 9939 ns/op 6344 B/op 45 allocs/op
+```
+
+| Variant | Median ns/op | B/op | Allocs/op | Relative CPU | Relative memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| M041 default | 9,337 | 6,072 | 41 | 1.00x | 1.00x |
+| M042 default settings | 9,616 | 6,072 | 41 | 1.03x | 1.00x |
+| M042 active timeout | 9,941 | 6,344 | 45 | 1.06x vs M041 | 1.04x |
+
+The default path adds no measured heap or allocation cost; the roughly 3%
+CPU difference is within normal microbenchmark variance and is the cost of the
+atomic settings snapshot plus context policy check. The active timeout path
+intentionally pays four allocations and 272 bytes for a cancellable timer.
+No settings are enabled by default. Reproduce with
+`make benchmark-tu05-m042-baseline` and `make benchmark-tu05-m042`.

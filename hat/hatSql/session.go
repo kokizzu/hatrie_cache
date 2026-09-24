@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // SQLSession owns temporary SQL sources and named result snapshots for one
@@ -17,6 +18,7 @@ type SQLSession struct {
 	views          map[string]sqlSessionView
 	projections    *MaterializedViews
 	catalogVersion uint64
+	transactionSettings atomic.Pointer[SQLSessionTransactionSettings]
 }
 
 type sqlSessionView struct {
@@ -25,18 +27,24 @@ type sqlSessionView struct {
 }
 
 func NewSQLSession(source SourceResolver) *SQLSession {
-	return &SQLSession{
+	session := &SQLSession{
 		source:      source,
 		tables:      map[string][]Row{},
 		results:     map[string][]Row{},
 		views:       map[string]sqlSessionView{},
 		projections: NewMaterializedViews(),
 	}
+	settings := SQLSessionTransactionSettings{}
+	session.transactionSettings.Store(&settings)
+	return session
 }
 
 func (session *SQLSession) CreateTemporaryTable(name string, rows []Row) error {
 	key, err := sessionObjectName(name)
 	if err != nil {
+		return err
+	}
+	if err := session.ensureSessionMutationAllowed(); err != nil {
 		return err
 	}
 	session.mu.Lock()
@@ -47,6 +55,16 @@ func (session *SQLSession) CreateTemporaryTable(name string, rows []Row) error {
 }
 
 func (session *SQLSession) DropTemporaryTable(name string) {
+	_ = session.DropTemporaryTableChecked(name)
+}
+
+// DropTemporaryTableChecked removes a session-local table and reports a
+// read-only rejection. DropTemporaryTable remains the compatibility wrapper
+// for callers that use its historical no-error signature.
+func (session *SQLSession) DropTemporaryTableChecked(name string) error {
+	if err := session.ensureSessionMutationAllowed(); err != nil {
+		return err
+	}
 	session.mu.Lock()
 	key := strings.ToLower(name)
 	if _, exists := session.tables[key]; exists {
@@ -54,11 +72,15 @@ func (session *SQLSession) DropTemporaryTable(name string) {
 		session.catalogVersion++
 	}
 	session.mu.Unlock()
+	return nil
 }
 
 func (session *SQLSession) StoreNamedResult(name string, result SQLQueryResult) error {
 	key, err := sessionObjectName(name)
 	if err != nil {
+		return err
+	}
+	if err := session.ensureSessionMutationAllowed(); err != nil {
 		return err
 	}
 	session.mu.Lock()
@@ -72,7 +94,10 @@ func (session *SQLSession) StoreNamedResult(name string, result SQLQueryResult) 
 // batch, with a single-change allocation fast path.
 func (session *SQLSession) CreateView(name, source string) error {
 	if session == nil {
-		return fmt.Errorf("SQL session is nil")
+		return ErrSQLSessionNil
+	}
+	if err := session.ensureSessionMutationAllowed(); err != nil {
+		return err
 	}
 	key, err := sessionObjectName(name)
 	if err != nil {
@@ -105,7 +130,10 @@ func (session *SQLSession) CreateView(name, source string) error {
 // matches; an unversioned source is rejected so stale rows cannot be served.
 func (session *SQLSession) CreateProjection(ctx context.Context, name, source string, options QueryOptions) error {
 	if session == nil {
-		return fmt.Errorf("SQL session is nil")
+		return ErrSQLSessionNil
+	}
+	if err := session.ensureSessionMutationAllowed(); err != nil {
+		return err
 	}
 	key, err := sessionObjectName(name)
 	if err != nil {
@@ -146,7 +174,10 @@ func (session *SQLSession) CreateProjection(ctx context.Context, name, source st
 // DropProjection removes one session-local materialized projection.
 func (session *SQLSession) DropProjection(name string) error {
 	if session == nil {
-		return fmt.Errorf("SQL session is nil")
+		return ErrSQLSessionNil
+	}
+	if err := session.ensureSessionMutationAllowed(); err != nil {
+		return err
 	}
 	key, err := sessionObjectName(name)
 	if err != nil {
@@ -160,7 +191,10 @@ func (session *SQLSession) DropProjection(name string) error {
 // are refreshed atomically in the same maintenance pass.
 func (session *SQLSession) RefreshProjection(ctx context.Context, name string, options QueryOptions) error {
 	if session == nil {
-		return fmt.Errorf("SQL session is nil")
+		return ErrSQLSessionNil
+	}
+	if err := session.ensureSessionMutationAllowed(); err != nil {
+		return err
 	}
 	key, err := sessionObjectName(name)
 	if err != nil {
@@ -529,6 +563,11 @@ func sqlQueryCacheDependencies(query *sqlQuery) []string {
 }
 
 func (session *SQLSession) Execute(ctx context.Context, source string, parameters []interface{}, options SQLQueryOptions) (SQLQueryResult, error) {
+	if session == nil {
+		return SQLQueryResult{}, ErrSQLSessionNil
+	}
+	ctx, cancel := session.transactionContext(ctx)
+	defer cancel()
 	if name, query, matched, err := sqlSessionCreateStatement(source, "CREATE PROJECTION"); matched {
 		if err != nil {
 			return SQLQueryResult{}, err

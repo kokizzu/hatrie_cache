@@ -1098,3 +1098,10 @@ the engine never prunes rows or rewrites source data from metadata alone. See
 | Source | Adopted idea | Implementation | Evidence |
 | --- | --- | --- | --- |
 | Materialize | Versioned source schema admission with bounded rollback | Importable `hatSchema.SourceSchemaRegistry` retains bounded source/version/fingerprint metadata, supports exact/backward/forward/full caller-supplied compatibility, atomically activates candidates, and rolls back to retained versions. It is opt-in and stores no raw schema or row data. | [M040_SOURCE_SCHEMA_REGISTRY.md](M040_SOURCE_SCHEMA_REGISTRY.md), [BENCHMARK.md#m-u40-source-schema-registry](BENCHMARK.md#m-u40-source-schema-registry) |
+## T-U05 Session Transaction Settings
+
+Tarantool-inspired session transaction policy is partially adopted through
+`hatSql.SQLSessionTransactionSettings`. Timeout inheritance and session-local
+read-only mutation guards are enforced; isolation and durability are validated
+for caller-owned transaction adapters. The default zero-value session remains
+unchanged, and setting changes are not an authorization boundary.

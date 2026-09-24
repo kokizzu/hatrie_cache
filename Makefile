@@ -25249,3 +25249,32 @@ commit-m041:
 .PHONY: push-m041
 push-m041:
 	bash ./scripts/push-m041.sh
+format-tu05-m042:
+	bash ./scripts/format-tu05-m042.sh
+
+test-tu05-m042:
+	bash ./scripts/test-tu05-m042.sh
+
+benchmark-tu05-m042-baseline:
+	bash ./scripts/benchmark-tu05-m042-baseline.sh
+
+benchmark-tu05-m042:
+	bash ./scripts/benchmark-tu05-m042.sh
+
+test-tu05-package-m042:
+	bash ./scripts/test-tu05-package-m042.sh
+
+race-tu05-m042:
+	bash ./scripts/race-tu05-m042.sh
+
+vet-tu05-m042:
+	bash ./scripts/vet-tu05-m042.sh
+
+status-tu05-m042:
+	bash ./scripts/status-tu05-m042.sh
+
+commit-tu05-m042:
+	bash ./scripts/commit-tu05-m042.sh
+
+push-tu05-m042:
+	bash ./scripts/push-tu05-m042.sh
