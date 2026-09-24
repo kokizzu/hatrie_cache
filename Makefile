@@ -25443,3 +25443,45 @@ verify-m047-diff:
 .PHONY: deliver-m047
 deliver-m047:
 	bash ./scripts/deliver-m047.sh
+.PHONY: benchmark-m048-baseline
+benchmark-m048-baseline:
+	bash scripts/benchmark-m048-baseline.sh
+
+.PHONY: test-m048-codec
+test-m048-codec:
+	bash scripts/test-m048-codec.sh
+
+.PHONY: benchmark-m048-codec
+benchmark-m048-codec:
+	bash scripts/benchmark-m048-codec.sh
+.PHONY: format-m048
+format-m048:
+	bash scripts/format-m048.sh
+
+.PHONY: test-m048-package
+test-m048-package:
+	bash scripts/test-m048-package.sh
+
+.PHONY: race-m048
+race-m048:
+	bash scripts/race-m048.sh
+
+.PHONY: vet-m048
+vet-m048:
+	bash scripts/vet-m048.sh
+
+.PHONY: verify-m048-docs
+verify-m048-docs:
+	bash scripts/verify-m048-docs.sh
+
+.PHONY: diffcheck-m048
+diffcheck-m048:
+	bash scripts/diffcheck-m048.sh
+
+.PHONY: deliver-m048
+deliver-m048:
+	bash scripts/deliver-m048.sh
+
+.PHONY: show-m048-targets
+show-m048-targets:
+	bash scripts/show-m048-targets.sh

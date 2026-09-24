@@ -1105,3 +1105,12 @@ Tarantool-inspired session transaction policy is partially adopted through
 read-only mutation guards are enforced; isolation and durability are validated
 for caller-owned transaction adapters. The default zero-value session remains
 unchanged, and setting changes are not an authorization boundary.
+
+## M052ab: Compact Dataflow Plan Transfer
+
+The reusable `hatSql.SQLDataflowPlan` now has a bounded versioned binary codec
+for transfer and storage. `EncodeSQLDataflowPlan` writes binary by default;
+`EncodeSQLDataflowPlanJSON` preserves the JSON fallback, and the decoder reads
+both. The binary path is 3.79x faster to encode, 7.53x faster to decode, and
+36.5% smaller on the measured 32-fragment plan. See
+[M052_DATAFLOW_PLAN_CODEC.md](M052_DATAFLOW_PLAN_CODEC.md).

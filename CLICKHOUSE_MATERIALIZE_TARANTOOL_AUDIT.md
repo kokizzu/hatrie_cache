@@ -226,6 +226,14 @@ rewritten template; parameterized and execution-local calls retain cloning.
 Verification and measurements are recorded in
 [COMPILED_TEMPLATE_REUSE.md](COMPILED_TEMPLATE_REUSE.md).
 
+### M052ab: Compact reusable dataflow-plan transfer
+
+Adopted the transport/storage portion of M052 with a bounded `HDP1` binary
+codec for reusable `SQLDataflowPlan` values. JSON remains an explicit fallback
+and the decoder accepts both formats. Full operator semantics and planner
+fragment sharing remain open. See [M052_DATAFLOW_PLAN_CODEC.md](M052_DATAFLOW_PLAN_CODEC.md)
+and [BENCHMARK.md](BENCHMARK.md#m052ab-compact-sql-dataflow-plan-codec).
+
 ### M065m: Peer-Aware Incremental Numeric RANGE Windows
 
 Adopted as an opt-in append-only capability for `COUNT(*)` and `SUM(int64)`.

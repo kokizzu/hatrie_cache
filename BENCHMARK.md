@@ -1,5 +1,21 @@
 # Benchmark
 
+## M052ab Compact SQL Dataflow Plan Codec
+
+The reusable dataflow-plan codec uses a bounded `HDP1` binary representation;
+JSON remains an explicit compatibility fallback. Five samples on Linux amd64,
+AMD Ryzen 9 5950X, with the same 32-fragment plan:
+
+| Operation | JSON baseline | Binary default | Improvement |
+| --- | ---: | ---: | ---: |
+| Encode | 8,290 ns/op, 4,173 B/op, 2 allocs | 2,187 ns/op, 2,688 B/op, 1 alloc | 3.79x faster, 35.6% fewer allocated bytes |
+| Decode | 45,771 ns/op, 7,489 B/op, 111 allocs | 6,078 ns/op, 4,456 B/op, 104 allocs | 7.53x faster, 40.5% fewer allocated bytes |
+| Wire payload | 3,698 bytes | 2,349 bytes | 1.57x smaller, 36.5% less bandwidth |
+
+Raw samples and API usage are in
+[M052_DATAFLOW_PLAN_CODEC.md](M052_DATAFLOW_PLAN_CODEC.md). Run
+`make benchmark-m048-codec` to reproduce the five-sample comparison.
+
 ## MZ-026 Adaptive Dictionary Arrangements
 
 Five samples per case on Linux amd64, AMD Ryzen 9 5950X, building a 4,096-row
