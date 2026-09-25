@@ -30,6 +30,22 @@ format-tt014-compaction-throttle:
 test-tt014-compaction-package:
 	bash ./scripts/test-tt014-compaction-package.sh
 
+.PHONY: benchmark-tt015-read-workers
+benchmark-tt015-read-workers:
+	bash ./scripts/benchmark-tt015-read-workers.sh
+
+.PHONY: test-tt015-read-workers
+test-tt015-read-workers:
+	bash ./scripts/test-tt015-read-workers.sh
+
+.PHONY: race-tt015-read-workers
+race-tt015-read-workers:
+	bash ./scripts/race-tt015-read-workers.sh
+
+.PHONY: format-tt015-read-workers
+format-tt015-read-workers:
+	bash ./scripts/format-tt015-read-workers.sh
+
 .PHONY: race-tt014-compaction-throttle
 race-tt014-compaction-throttle:
 	bash ./scripts/race-tt014-compaction-throttle.sh

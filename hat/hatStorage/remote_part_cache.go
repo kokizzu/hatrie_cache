@@ -22,6 +22,8 @@ const DefaultRemotePartCacheMaxEntries = 1024
 
 const maxRemotePartCacheAdmissionEntries = 1 << 20
 
+const maxRemotePartPrefetchConcurrency = 1 << 20
+
 // DefaultRemotePartPrefetchConcurrency bounds concurrent remote reads when a
 // caller leaves MaxConcurrent at zero.
 const DefaultRemotePartPrefetchConcurrency = 2
@@ -32,6 +34,9 @@ const DefaultRemotePartPrefetchConcurrency = 2
 type RemotePartCacheOptions struct {
 	MaxBytes   uint64
 	MaxEntries int
+	// MaxPrefetchConcurrency bounds remote loader calls across all concurrent
+	// Prefetch calls on this cache. Zero leaves only the per-call bound active.
+	MaxPrefetchConcurrency int
 	// MinAccesses enables frequency admission when positive. Zero preserves
 	// the legacy eager-admission behavior.
 	MinAccesses uint64
@@ -95,6 +100,7 @@ type RemotePartCache struct {
 	mu             sync.Mutex
 	maxBytes       uint64
 	maxEntries     int
+	prefetchSlots  chan struct{}
 	minAccesses    uint64
 	candidateLimit int
 	bytes          uint64
@@ -120,7 +126,7 @@ func NewRemotePartCache(options RemotePartCacheOptions) (*RemotePartCache, error
 	if options.MaxBytes == 0 {
 		return nil, ErrRemotePartCacheDisabled
 	}
-	if options.MaxEntries < 0 {
+	if options.MaxEntries < 0 || options.MaxPrefetchConcurrency < 0 || options.MaxPrefetchConcurrency > maxRemotePartPrefetchConcurrency {
 		return nil, ErrRemotePartCacheInvalidConfig
 	}
 	if options.MaxEntries == 0 {
@@ -138,9 +144,14 @@ func NewRemotePartCache(options RemotePartCacheOptions) (*RemotePartCache, error
 	if options.MinAccesses > 0 {
 		candidates = make(map[remotePartCacheKey]remotePartCacheCandidate)
 	}
+	var prefetchSlots chan struct{}
+	if options.MaxPrefetchConcurrency > 0 {
+		prefetchSlots = make(chan struct{}, options.MaxPrefetchConcurrency)
+	}
 	return &RemotePartCache{
 		maxBytes:       options.MaxBytes,
 		maxEntries:     options.MaxEntries,
+		prefetchSlots:  prefetchSlots,
 		minAccesses:    options.MinAccesses,
 		candidateLimit: candidateLimit,
 		entries:        make(map[remotePartCacheKey]*remotePartCacheEntry),
@@ -211,7 +222,7 @@ func (cache *RemotePartCache) Prefetch(ctx context.Context, references []RemoteP
 	}
 	if concurrency == 1 {
 		for _, reference := range unique {
-			if _, err := cache.Get(ctx, reference, options.Priority, loader); err != nil {
+			if _, err := cache.prefetchGet(ctx, reference, options.Priority, loader); err != nil {
 				return err
 			}
 		}
@@ -244,7 +255,7 @@ func (cache *RemotePartCache) Prefetch(ctx context.Context, references []RemoteP
 				if !ok {
 					return
 				}
-				if _, err := cache.Get(workCtx, reference, options.Priority, loader); err != nil {
+				if _, err := cache.prefetchGet(workCtx, reference, options.Priority, loader); err != nil {
 					recordError(err)
 					return
 				}
@@ -275,6 +286,32 @@ func (cache *RemotePartCache) Prefetch(ctx context.Context, references []RemoteP
 		return err
 	}
 	return ctx.Err()
+}
+
+func (cache *RemotePartCache) prefetchGet(ctx context.Context, reference RemotePartReference, priority int, loader RemotePartCacheLoader) ([]byte, error) {
+	if err := cache.acquirePrefetchSlot(ctx); err != nil {
+		return nil, err
+	}
+	defer cache.releasePrefetchSlot()
+	return cache.Get(ctx, reference, priority, loader)
+}
+
+func (cache *RemotePartCache) acquirePrefetchSlot(ctx context.Context) error {
+	if cache.prefetchSlots == nil {
+		return nil
+	}
+	select {
+	case cache.prefetchSlots <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (cache *RemotePartCache) releasePrefetchSlot() {
+	if cache.prefetchSlots != nil {
+		<-cache.prefetchSlots
+	}
 }
 
 // Bytes returns the immutable part bytes. It returns nil for a nil handle.

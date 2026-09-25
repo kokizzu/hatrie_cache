@@ -37640,3 +37640,26 @@ Raw controller samples were 35,527/35,290/34,994/33,068/35,414 ns/op with
 the budget off and 34,190/35,539/33,641/32,333/31,763 ns/op with it on. Both
 paths measured 36,120 B/op and 183 allocs/op in every sample except the first
 off sample, which measured 36,122 B/op.
+
+## TT-015: Read-Worker Tuning
+
+The fixture runs two concurrent `RemotePartCache.Prefetch` calls, each with a
+per-call limit of four and four unique one-byte parts. Five samples used
+`-benchtime=100ms` and `-benchmem` on the same AMD Ryzen 9 5950X Linux/amd64
+host. The baseline leaves the cache-wide limit at zero; the enabled path uses
+`MaxPrefetchConcurrency=2`.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative CPU | Relative bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Cache-wide limit disabled | 22,430 | 5,090 | 70 | 1.00x | 1.00x |
+| Cache-wide limit = 2 | 22,962 | 5,189 | 71 | 1.02x slower | 1.02x |
+
+This is an intentional guardrail measurement, not a throughput claim: the
+enabled cap prevents concurrent callers from multiplying remote-read workers,
+with a small coordination cost when enabled. The default remains disabled and
+the existing per-call behavior is unchanged. Raw baseline samples were
+22,743/22,827/21,884/22,430/21,802 ns/op, 5,126/5,090/5,091/5,086/5,081
+B/op, and 70 allocs/op. Raw capped samples were
+22,962/22,662/24,301/22,308/24,212 ns/op, 5,188/5,189/5,188/5,189/5,191
+B/op, and 71 allocs/op. See
+[TT015_READ_WORKER_TUNING.md](TT015_READ_WORKER_TUNING.md).
