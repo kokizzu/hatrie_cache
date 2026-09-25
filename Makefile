@@ -27567,3 +27567,39 @@ commit-m052aa-native-join:
 	bash scripts/commit-m052aa-native-join.sh
 push-m052aa-native-join:
 	bash scripts/push-m052aa-native-join.sh
+
+.PHONY: format-m052ad-conditional-aggregate
+format-m052ad-conditional-aggregate:
+	bash scripts/format-m052ad-conditional-aggregate.sh
+
+.PHONY: test-m052ad-conditional-aggregate
+test-m052ad-conditional-aggregate:
+	bash scripts/test-m052ad-conditional-aggregate.sh
+
+.PHONY: benchmark-m052ad-conditional-aggregate
+benchmark-m052ad-conditional-aggregate:
+	bash scripts/benchmark-m052ad-conditional-aggregate.sh
+
+.PHONY: test-m052ad-package
+test-m052ad-package:
+	bash scripts/test-m052ad-package.sh
+
+.PHONY: race-m052ad-package
+race-m052ad-package:
+	bash scripts/race-m052ad-package.sh
+
+.PHONY: vet-m052ad-package
+vet-m052ad-package:
+	bash scripts/vet-m052ad-package.sh
+
+.PHONY: stage-m052ad-conditional-aggregate
+stage-m052ad-conditional-aggregate:
+	bash scripts/stage-m052ad-conditional-aggregate.sh
+
+.PHONY: commit-m052ad-conditional-aggregate
+commit-m052ad-conditional-aggregate:
+	bash scripts/commit-m052ad-conditional-aggregate.sh
+
+.PHONY: push-m052ad-conditional-aggregate
+push-m052ad-conditional-aggregate:
+	bash scripts/push-m052ad-conditional-aggregate.sh

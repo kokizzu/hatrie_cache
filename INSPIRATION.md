@@ -1115,3 +1115,10 @@ SQL shape. See [CH035_REMOTE_SHARD_PRUNING.md](CH035_REMOTE_SHARD_PRUNING.md).
   specialized, indexed, spillable, frontier-aware, and richer shapes retain
   the established executor. See
   [M052AA_NATIVE_HASH_JOIN.md](M052AA_NATIVE_HASH_JOIN.md).
+- [x] M052ad Automatic safe native conditional aggregates. Supported
+  ClickHouse-style `COUNT_IF`/`COUNTIF`, `SUM_IF`/`SUMIF`, `AVG_IF`/`AVGIF`,
+  `MIN_IF`/`MINIF`, and `MAX_IF`/`MAXIF` forms reuse the native grouped
+  aggregate state; filtered aggregate expressions and unsupported shapes keep
+  the correct fallback. See
+  [M052AD_AUTO_NATIVE_CONDITIONAL_AGGREGATES.md](M052AD_AUTO_NATIVE_CONDITIONAL_AGGREGATES.md)
+  and [BENCHMARK.md](BENCHMARK.md#m052ad-automatic-native-conditional-aggregates).

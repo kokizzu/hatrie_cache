@@ -103,14 +103,14 @@ func validateNativeSQLDataflowQuery(query *sqlQuery) error {
 type nativeSQLDataflowGroupPlan struct {
 	group               sqlExpr
 	projectionAggregate []int
-	aggregates          []sqlStreamAggregate
+	aggregates           []sqlStreamAggregate
 }
 
 type nativeSQLDataflowCompositeGroupPlan struct {
 	groups              [2]sqlExpr
 	projectionGroup     []int
 	projectionAggregate []int
-	aggregates           []sqlStreamAggregate
+	aggregates          []sqlStreamAggregate
 }
 
 type nativeSQLDataflowGroupedOrderedPlan struct {
@@ -408,11 +408,16 @@ func nativeSQLDataflowRewriteGroupedHaving(expr sqlExpr, query *sqlQuery, column
 }
 
 func nativeSQLDataflowAggregateExpression(expr sqlExpr) (sqlStreamAggregate, bool) {
-	if expr.kind != "func" || expr.window != nil || expr.filter != nil || sqlExprHasCustomFunction(expr, nil) {
+	if expr.kind != "func" || expr.window != nil || sqlExprHasCustomFunction(expr, nil) {
 		return sqlStreamAggregate{}, false
 	}
-	aggregate := sqlStreamAggregate{name: expr.name}
-	switch expr.name {
+	name := strings.ToUpper(expr.name)
+	conditional := nativeSQLDataflowConditionalAggregate(expr)
+	if expr.filter != nil && !conditional {
+		return sqlStreamAggregate{}, false
+	}
+	aggregate := sqlStreamAggregate{name: name}
+	switch name {
 	case "COUNT":
 		if len(expr.args) > 1 {
 			return sqlStreamAggregate{}, false
@@ -430,10 +435,50 @@ func nativeSQLDataflowAggregateExpression(expr sqlExpr) (sqlStreamAggregate, boo
 		}
 		argument := expr.args[0]
 		aggregate.arg = &argument
+	case "COUNTIF", "COUNT_IF":
+		if len(expr.args) != 1 || !sqlStreamScalarExpr(expr.args[0]) {
+			return sqlStreamAggregate{}, false
+		}
+		filter := expr.args[0]
+		aggregate.name = "COUNT"
+		aggregate.filter = &filter
+	case "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF":
+		if len(expr.args) != 2 || expr.args[0].kind == "star" || !sqlStreamScalarExpr(expr.args[0]) || !sqlStreamScalarExpr(expr.args[1]) {
+			return sqlStreamAggregate{}, false
+		}
+		argument, filter := expr.args[0], expr.args[1]
+		aggregate.name = strings.TrimSuffix(name, "IF")
+		if strings.HasSuffix(aggregate.name, "_") {
+			aggregate.name = strings.TrimSuffix(aggregate.name, "_")
+		}
+		aggregate.arg = &argument
+		aggregate.filter = &filter
 	default:
 		return sqlStreamAggregate{}, false
 	}
+	if expr.filter != nil {
+		filter := *expr.filter
+		if !sqlStreamScalarExpr(filter) {
+			return sqlStreamAggregate{}, false
+		}
+		aggregate.filter = &filter
+	}
 	return aggregate, true
+}
+
+func nativeSQLDataflowConditionalAggregate(expr sqlExpr) bool {
+	name := strings.ToUpper(expr.name)
+	token := strings.ToUpper(expr.token.text)
+	switch name {
+	case "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF":
+		return true
+	}
+	switch token {
+	case "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF":
+		return true
+	default:
+		return false
+	}
 }
 
 func nativeSQLDataflowAggregatePlan(query *sqlQuery) ([]sqlStreamAggregate, bool) {

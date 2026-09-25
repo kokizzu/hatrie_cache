@@ -38037,3 +38037,35 @@ eligible, while indexed, streaming, columnar, spillable, frontier-aware,
 typed-source, and richer query shapes keep their established execution path.
 `DisableNativeDataflow` remains the explicit fallback switch. See
 [M052AA_NATIVE_HASH_JOIN.md](M052AA_NATIVE_HASH_JOIN.md).
+
+<a id="m052ad-automatic-native-conditional-aggregates"></a>
+## M052ad: Automatic Native Conditional Aggregates
+
+`make benchmark-m052ad-conditional-aggregate` compares the correct materialized
+fallback with automatic native grouped execution for ClickHouse-style
+conditional aggregates. The fixture has 20,000 rows, 257 groups, one
+conditional count, and one conditional sum. Linux/amd64, AMD Ryzen 9 5950X,
+three samples per path:
+
+```text
+fallback:
+17817491 ns/op 31145881 B/op 137758 allocs/op
+17801243 ns/op 31145692 B/op 137757 allocs/op
+17711667 ns/op 31145461 B/op 137758 allocs/op
+automatic:
+5194889 ns/op 7622228 B/op 60881 allocs/op
+5286292 ns/op 7622226 B/op 60881 allocs/op
+5303246 ns/op 7622228 B/op 60881 allocs/op
+```
+
+| Path | Median time | Median bytes | Median allocs | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Correct materialized fallback | 17.817 ms/op | 31,145,692 B/op | 137,758 | 1.00x |
+| Automatic native conditional aggregates | 5.286 ms/op | 7,622,228 B/op | 60,881 | **3.37x faster; 4.09x lower bytes; 2.26x fewer allocations** |
+
+The grouped hash fast path now rejects filtered aggregate expressions instead of
+silently ignoring their filters. The old misclassified path was incorrect and
+is not a valid performance baseline. Native selection is restricted to proven
+scalar conditional forms; `DisableNativeDataflow` remains the explicit
+fallback switch. See
+[M052AD_AUTO_NATIVE_CONDITIONAL_AGGREGATES.md](M052AD_AUTO_NATIVE_CONDITIONAL_AGGREGATES.md).

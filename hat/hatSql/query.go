@@ -16814,7 +16814,7 @@ func sqlOrderedGroupProjections(q *sqlQuery) ([]sqlOrderedGroupProjection, bool)
 			projections[index] = projection
 			continue
 		}
-		if item.expr.kind != "func" {
+		if item.expr.kind != "func" || item.expr.window != nil || item.expr.filter != nil || sqlExprHasCustomFunction(item.expr, nil) {
 			return nil, false
 		}
 		name := strings.ToUpper(item.expr.name)
