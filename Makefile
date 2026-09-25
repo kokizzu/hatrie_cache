@@ -26927,3 +26927,11 @@ commit-ch012-projection-advisor-persistence:
 	bash ./scripts/commit-ch012-projection-advisor-persistence.sh
 push-ch012-projection-advisor-persistence:
 	bash ./scripts/push-ch012-projection-advisor-persistence.sh
+
+.PHONY: stage-ledger-corrections commit-ledger-corrections push-ledger-corrections
+stage-ledger-corrections:
+	bash ./scripts/stage-ledger-corrections.sh
+commit-ledger-corrections:
+	bash ./scripts/commit-ledger-corrections.sh
+push-ledger-corrections:
+	bash ./scripts/push-ledger-corrections.sh
