@@ -1273,6 +1273,25 @@ type SegmentedColumnarSourceResolver interface {
 	BorrowSQLColumnarSourceSegments(name, key string, fields []string) (ColumnarBatch, *ColumnarNumericSegments, bool, error)
 }
 
+// ColumnarSourcePart is one immutable physical part of a columnar source.
+// Segments may contain numeric min/max and sparse-primary bounds for the part.
+// The SQL executor may discard a part before scanning it when those bounds
+// prove that a query cannot match it. If multiple parts remain, it retains the
+// existing resolver path rather than materializing a temporary merged batch.
+type ColumnarSourcePart struct {
+	Batch    ColumnarBatch
+	Segments *ColumnarNumericSegments
+}
+
+// ColumnarPartsSourceResolver optionally supplies immutable physical parts for
+// one columnar source. Implementations should also implement
+// ColumnarSourceResolver so ordinary columnar fallback remains available when
+// this capability is unavailable. Returned parts and their backing slices must
+// remain valid for the query and must not be mutated by the executor.
+type ColumnarPartsSourceResolver interface {
+	BorrowSQLColumnarSourceParts(name, key string, fields []string) ([]ColumnarSourcePart, bool, error)
+}
+
 // SortedColumnarSourceResolver optionally supplies an immutable ascending row
 // ordinal projection for one exact cached columnar layout. Returned ordinals
 // must remain valid for the query and must not be retained or mutated by the

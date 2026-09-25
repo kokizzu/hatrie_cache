@@ -59,7 +59,7 @@ name.
 - [x] C002 Read only referenced columns - SQL projection pruning is present.
 - [x] C003 Granule-sized reads - columnar blocks provide the current scan unit.
 - [x] C004 Primary ordering chosen from common predicates. `SQLIndexAdvisor.PrimaryOrderRecommendations` groups existing bounded slow-scan field counts into deterministic source-local field orders; it is advisory-only and leaves the default query planner and storage layout unchanged.
-- [x] C005 Sparse primary-key index with mark pruning. Typed-table columnar caches can opt in to binary-searching validated nondecreasing numeric segment bounds; unordered, NULL, or NaN data retains the ordinary scan.
+- [x] C005 Sparse primary-key index with mark pruning. Typed-table columnar caches can opt in to binary-searching validated nondecreasing numeric segment bounds, and columnar storage adapters can opt in to whole-part pruning through `ColumnarPartsSourceResolver`; unordered, malformed, NULL, or NaN data retains the ordinary scan.
 - [x] C005b Compact delete-bitmap snapshots. Typed-table patch snapshots use a cached deterministic 128-bit physical-key fingerprint instead of serializing every key, while v1 key-list snapshots remain readable.
 - [x] C006 Min/max skipping over ordered blocks.
 - [x] C007 Set-style skipping for low-cardinality predicates.

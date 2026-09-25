@@ -27203,3 +27203,23 @@ race-tt034-task-cancellation:
 .PHONY: vet-tt034-task-cancellation
 vet-tt034-task-cancellation:
 	bash ./scripts/vet-tt034-task-cancellation.sh
+
+.PHONY: format-ch002-physical-part-pruning
+format-ch002-physical-part-pruning:
+	bash ./scripts/format-ch002-physical-part-pruning.sh
+
+.PHONY: test-ch002-physical-part-pruning
+test-ch002-physical-part-pruning:
+	bash ./scripts/test-ch002-physical-part-pruning.sh
+
+.PHONY: benchmark-ch002-physical-part-pruning
+benchmark-ch002-physical-part-pruning:
+	bash ./scripts/benchmark-ch002-physical-part-pruning.sh
+
+.PHONY: race-ch002-physical-part-pruning
+race-ch002-physical-part-pruning:
+	bash ./scripts/race-ch002-physical-part-pruning.sh
+
+.PHONY: vet-ch002-physical-part-pruning
+vet-ch002-physical-part-pruning:
+	bash ./scripts/vet-ch002-physical-part-pruning.sh

@@ -37808,3 +37808,31 @@ make race-tt012-space-store
 make vet-tt012-space-store
 make benchmark-tt012-space-store
 ```
+
+<a id="ch-002-physical-part-pruning"></a>
+## CH-002: Physical Part And Mark Pruning
+
+This opt-in columnar source path uses validated sparse-primary bounds to skip
+whole physical parts. A single surviving part is returned without copying;
+multiple surviving parts deliberately use the existing resolver path. Full raw
+samples and the rejected temporary-merge experiment are in
+[CH002_PHYSICAL_PART_PRUNING.md](CH002_PHYSICAL_PART_PRUNING.md).
+
+Linux/amd64, AMD Ryzen 9 5950X, 64 parts with 1,024 rows each:
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Scan all parts (baseline) | 49,016 | 0 | 0 | 1.00x |
+| Select one part and scan | 2,611 | 0 | 0 | 18.78x faster |
+
+The rejected design merged all selected parts and measured 419,053 ns/op,
+638,123 B/op, and 52 allocs/op, so it was removed rather than shipped.
+
+Commands:
+
+```text
+make test-ch002-physical-part-pruning
+make race-ch002-physical-part-pruning
+make vet-ch002-physical-part-pruning
+make benchmark-ch002-physical-part-pruning
+```

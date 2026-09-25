@@ -1162,7 +1162,7 @@ func executeSQLColumnarQueryRows(query *sqlQuery, resolver SQLSourceResolver, co
 	if err != nil {
 		return true, err
 	}
-	batch, segments, available, err := resolveSQLColumnarSource(columnar, query.from.kind, query.from.key, fields)
+	batch, segments, available, err := resolveSQLColumnarQuerySource(query, columnar, fields)
 	if err != nil || !available {
 		return available, err
 	}
@@ -8868,7 +8868,7 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		return SQLQueryResult{}, true, err
 	}
 	started := time.Now()
-	batch, segments, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, fields)
+	batch, segments, available, err := resolveSQLColumnarQuerySource(q, columnar, fields)
 	if err != nil || !available {
 		return SQLQueryResult{}, available, err
 	}
@@ -9180,7 +9180,7 @@ func executeSQLColumnarDictionaryDistinct(q *sqlQuery, columnar SQLColumnarSourc
 		return SQLQueryResult{}, false, nil
 	}
 	started := time.Now()
-	batch, segments, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, fields)
+	batch, segments, available, err := resolveSQLColumnarQuerySource(q, columnar, fields)
 	if err != nil || !available {
 		return SQLQueryResult{}, available, err
 	}
@@ -9335,7 +9335,7 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 		return SQLQueryResult{}, false, nil
 	}
 	started := time.Now()
-	batch, segments, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, fields)
+	batch, segments, available, err := resolveSQLColumnarQuerySource(q, columnar, fields)
 	if err != nil || !available {
 		return SQLQueryResult{}, available, err
 	}
@@ -10346,7 +10346,7 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 		}
 	}
 	started := time.Now()
-	batch, segments, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, fields)
+	batch, segments, available, err := resolveSQLColumnarQuerySource(q, columnar, fields)
 	if err != nil || !available {
 		return SQLQueryResult{}, available, err
 	}
@@ -10658,7 +10658,7 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 		return SQLQueryResult{}, false, nil
 	}
 	started := time.Now()
-	batch, segments, available, err := resolveSQLColumnarSource(columnar, q.from.kind, q.from.key, fields)
+	batch, segments, available, err := resolveSQLColumnarQuerySource(q, columnar, fields)
 	if err != nil || !available {
 		return SQLQueryResult{}, available, err
 	}
