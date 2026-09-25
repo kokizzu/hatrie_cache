@@ -30127,6 +30127,35 @@ validation, and operational behavior.
 See [CH048_STRING_PREDICATE.md](CH048_STRING_PREDICATE.md) for raw runs and
 scope guards.
 
+## CH-048 dictionary ordered predicate kernel
+
+`make benchmark-ch048-dictionary` scans 4,096 rows from an eight-value
+dictionary-backed string column with a binary `name >= 'name-4'` predicate.
+The before samples were captured immediately before the dictionary kernel was
+enabled; the after samples include the compact code mask. Lower is better.
+
+| Dictionary code layout | Before median ns/op | After median ns/op | Improvement | Before B/op | After B/op | Before allocs/op | After allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Legacy `uint32` codes | 645,506 | 32,116 | 20.09x faster | 65,539 | 0 | 4,096 | 0 |
+| Packed `uint8` codes | 692,892 | 31,724 | 21.84x faster | 65,539 | 0 | 4,096 | 0 |
+
+The fast path supports direct field/string-literal `<`, `<=`, `>`, and `>=`
+comparisons in either operand order for binary collation. Dictionaries with up
+to 64 values use an allocation-free `uint64` match mask; wider dictionaries
+use one precomputed boolean mask. Invalid dictionary data, Unicode collation,
+and wider SQL expression shapes retain the existing evaluator fallback. This
+benchmark measures the condition matcher loop, not end-to-end result-row
+materialization.
+
+Raw five-run output:
+
+```text
+before legacy_uint32: 645506 647029 653359 643318 638243 ns/op; 65539 B/op; 4096 allocs/op
+before packed_uint8:  670577 692892 705264 697284 683822 ns/op; 65539 B/op; 4096 allocs/op
+after legacy_uint32:  30761 31592 32116 32290 32499 ns/op; 0 B/op; 0 allocs/op
+after packed_uint8:   31860 30283 30014 31890 31724 ns/op; 0 B/op; 0 allocs/op
+```
+
 ## TT-023 string equality index fast path
 
 `make benchmark-tt023` measures repeated exact lookup in an ordinary SQL JSON

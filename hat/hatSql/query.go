@@ -1288,6 +1288,15 @@ func sqlColumnarQueryRowsMatcher(query *sqlQuery, batch ColumnarBatch, functions
 			return codes[code], nil
 		}
 	}
+	if dictionary, codes, encoded := sqlColumnarDictionaryOrderedPredicate(query.where, query.from.alias, batch); encoded {
+		return func(rowIndex int) (bool, error) {
+			code, ok := dictionary.CodeAt(rowIndex)
+			if !ok {
+				return false, fmt.Errorf("SQL columnar source %q returned an invalid dictionary code", query.from.key)
+			}
+			return codes.matches(code), nil
+		}
+	}
 	if dictionary, operator, value, collation, encoded := sqlColumnarDictionaryPredicate(query.where, query.from.alias, batch); encoded {
 		code, found := sqlDictionaryCode(dictionary, value, collation)
 		return func(rowIndex int) (bool, error) {
@@ -8932,6 +8941,17 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		}, metrics != nil)
 		if metrics != nil {
 			metrics.record("COLUMNAR DICTIONARY OR FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
+			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
+		}
+		return result, true, nil
+	} else if dictionary, codes, encoded := sqlColumnarDictionaryOrderedPredicate(q.where, q.from.alias, batch); encoded {
+		filterStarted := time.Now()
+		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
+			code, ok := dictionary.CodeAt(rowIndex)
+			return ok && codes.matches(code)
+		}, metrics != nil)
+		if metrics != nil {
+			metrics.record("COLUMNAR DICTIONARY ORDER FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
 		}
 		return result, true, nil

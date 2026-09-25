@@ -26798,3 +26798,32 @@ commit-ch011-projection-persistence:
 .PHONY: push-ch011-projection-persistence
 push-ch011-projection-persistence:
 	bash ./scripts/push-ch011-projection-persistence.sh
+.PHONY: test-ch048-dictionary test-ch048-dictionary-package format-ch048-dictionary benchmark-ch048-dictionary race-ch048-dictionary vet-ch048-dictionary stage-ch048-dictionary commit-ch048-dictionary push-ch048-dictionary
+
+test-ch048-dictionary:
+	bash scripts/test-ch048-dictionary.sh
+
+test-ch048-dictionary-package:
+	bash scripts/test-ch048-dictionary-package.sh
+
+format-ch048-dictionary:
+	bash scripts/format-ch048-dictionary.sh
+
+benchmark-ch048-dictionary:
+	bash scripts/benchmark-ch048-dictionary.sh
+
+race-ch048-dictionary:
+	bash scripts/race-ch048-dictionary.sh
+
+vet-ch048-dictionary:
+	bash scripts/vet-ch048-dictionary.sh
+
+
+stage-ch048-dictionary:
+	bash scripts/stage-ch048-dictionary.sh
+
+commit-ch048-dictionary:
+	bash scripts/commit-ch048-dictionary.sh
+
+push-ch048-dictionary:
+	bash scripts/push-ch048-dictionary.sh
