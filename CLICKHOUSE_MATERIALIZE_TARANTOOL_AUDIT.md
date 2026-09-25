@@ -249,6 +249,7 @@ records a separate implementation boundary.
   [BENCHMARK.md](BENCHMARK.md#m052z-native-scalar-set-operation-fragments).
 - [ ] M064 Recursive dataflow maintenance.
 - [-] M064e Generic recursive fixpoint scheduler evaluated and rolled back: the post-change median was 1.05x slower, used 1.27x more transient bytes, and 1.12x more allocations than the existing traversal baseline. See [BENCHMARK.md](BENCHMARK.md#m064-recursive-fixpoint-evaluation-rejected).
+- [x] M064f Importable bounded recursive worklist primitive. `hatPipeline.RunFixpoint` provides deterministic FIFO frontier processing, duplicate-key coalescing, cancellation, and step/pending limits without changing SQL defaults; planner wiring remains open. See [MZ036_FIXPOINT_SCHEDULER.md](MZ036_FIXPOINT_SCHEDULER.md).
 - [x] M064a Append-only incremental transitive reachability with cycle-safe positive deltas; arbitrary deletes and updates remain rebuild-only. See [INCREMENTAL_RECURSIVE_REACHABILITY.md](INCREMENTAL_RECURSIVE_REACHABILITY.md).
 - [ ] M065 Incremental window-function maintenance.
 - [x] M065a Append-only incremental `ROW_NUMBER`, `RANK`, and `DENSE_RANK` maintenance with atomic batch validation; arbitrary updates and retractions remain open. See [INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md).

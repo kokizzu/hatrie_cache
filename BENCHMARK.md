@@ -37496,3 +37496,24 @@ parallel prototype:
 
 The benchmark and implementation targets were temporary and were removed with
 the rollback; this section is the permanent rejection record.
+
+<a id="mz-036-bounded-fixpoint-scheduler"></a>
+## MZ-036 Bounded Fixpoint Scheduler
+
+The new `hatPipeline.RunFixpoint` primitive was tested before implementation,
+then benchmarked after the queue-reuse optimization. It is opt-in and does not
+replace the rejected generic SQL-wide M064 experiment.
+
+The measured fixture is a 2,048-node reverse chain. Five samples were run with
+`-benchtime=200ms`, `-benchmem`, and isolated temporary `GOCACHE` directories.
+
+| Path | Median ns/op | B/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Full-scan baseline | 3,637,813 | 2,048 | 1 | 1.00x |
+| Fixpoint scheduler | 73,230 | 392 | 6 | 49.68x faster, 0.19x bytes |
+
+The scheduler initially allocated once per processed item because the FIFO
+slice lost its reusable head capacity. Reusing a queue head reduced the result
+to 392 B/op and six allocations. Correctness tests and the race test passed.
+See [MZ036_FIXPOINT_SCHEDULER.md](MZ036_FIXPOINT_SCHEDULER.md) for raw samples,
+API semantics, bounds, and workload limitations.
