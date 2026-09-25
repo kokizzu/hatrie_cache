@@ -433,6 +433,13 @@ Materialize's Timely/Differential Dataflow runtime.
   runtime by default for direct source-field keys, mixed directions, and
   `LIMIT`/`OFFSET`; unbounded and richer ordered shapes remain on the existing
   executor. See [SQL_AUTO_NATIVE_ORDERED.md](SQL_AUTO_NATIVE_ORDERED.md).
+- [x] M052ac Native scalar set-operation fragment composition. Eligible
+  top-level `UNION`, `INTERSECT`, and `EXCEPT` branches share the existing
+  native scan/filter/project runtime while duplicate-sensitive assembly and
+  conservative fallback boundaries remain unchanged. The benchmark is 1.50x
+  faster with 65.1% lower bytes/op and 33.3% fewer allocations; see
+  [M052_NATIVE_UNION.md](M052_NATIVE_UNION.md) and
+  [BENCHMARK.md](BENCHMARK.md#m052z-native-scalar-set-operation-fragments).
 - [x] M052a Lower compiled logical stages into a lazy, versioned immutable
   `SQLDataflowPlan` with defensive snapshots. M052b adds caller-supplied
   executable fragment composition. See

@@ -90,6 +90,13 @@ func sqlAutoNativeDataflowEligible(query *sqlQuery, resolver SQLSourceResolver, 
 	return validateNativeSQLDataflowQuery(query) == nil
 }
 
+func sqlAutoNativeUnionBranchEligible(query *sqlQuery, resolver SQLSourceResolver, options SQLQueryOptions) bool {
+	if options.MaxIntermediateRows > 0 || options.OperatorMemoryTracker != nil || options.RequireSourceFrontier || options.AsOfFrontier != nil || options.FinalSourceOptions != nil || options.SnapshotToken != "" || options.PlanSnapshot != nil || options.ConditionCache != nil {
+		return false
+	}
+	return sqlAutoNativeDataflowEligible(query, resolver, options)
+}
+
 func sqlAutoNativeAggregateDistinctEligible(query *sqlQuery, resolver SQLSourceResolver, options SQLQueryOptions) bool {
 	if !sqlAutoNativeDataflowBaseEligible(query, resolver, options) {
 		return false

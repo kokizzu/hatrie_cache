@@ -26827,3 +26827,31 @@ commit-ch048-dictionary:
 
 push-ch048-dictionary:
 	bash scripts/push-ch048-dictionary.sh
+
+.PHONY: test-m052-union-native
+test-m052-union-native:
+	bash ./scripts/test-m052-union-native.sh
+
+.PHONY: benchmark-m052-union-native
+benchmark-m052-union-native:
+	bash ./scripts/benchmark-m052-union-native.sh
+
+.PHONY: verify-go-temp-cache
+verify-go-temp-cache:
+	bash ./scripts/verify-go-temp-cache.sh
+
+.PHONY: format-m052-union-native
+format-m052-union-native:
+	bash ./scripts/format-m052-union-native.sh
+
+.PHONY: stage-m052-union-native
+stage-m052-union-native:
+	bash ./scripts/stage-m052-union-native.sh
+
+.PHONY: commit-m052-union-native
+commit-m052-union-native:
+	bash ./scripts/commit-m052-union-native.sh
+
+.PHONY: push-m052-union-native
+push-m052-union-native:
+	bash ./scripts/push-m052-union-native.sh

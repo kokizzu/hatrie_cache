@@ -21946,6 +21946,25 @@ fallback:
 21873843 25419638 173432
 ```
 
+## M052z Native Scalar Set-Operation Fragments
+
+`make benchmark-m052-union-native` compares the existing general executor with
+automatic native execution composed across two scalar `UNION ALL` branches.
+Samples are `-benchmem` on Linux/amd64, AMD Ryzen 9 5950X, with 4,096 input
+rows.
+
+| Path | ns/op | B/op | allocs/op | Relative |
+| --- | ---: | ---: | ---: | --- |
+| Pre-change automatic path (general executor) | 5,900,937 | 6,114,250 | 49,192 | control before implementation |
+| Final general-executor control | 5,732,191 | 6,114,274 | 49,192 | 1.00x |
+| Final automatic native branches | 3,838,696 | 2,134,967 | 32,790 | 1.50x faster; 65.1% less heap; 33.3% fewer allocations |
+
+The final native path is 1.54x faster, uses 2.86x less heap, and performs 1.50x
+fewer allocations than the pre-change automatic path. The implementation is
+restricted to eligible scalar branches; unsupported options and richer query
+shapes retain the established executor. Raw output is documented in
+[M052_NATIVE_UNION.md](M052_NATIVE_UNION.md).
+
 ## TT-017 opt-in persistent-store run-level Bloom filters
 
 This benchmark compares the existing no-filter path with native LevelDB and

@@ -217,6 +217,11 @@ records a separate implementation boundary.
 - [ ] M037e Generic keyed differential reduction was benchmarked and rolled back because the arbitrary callback path was about 7.97x slower, 6.36x larger in transient bytes, and 5.67x more allocation-heavy than the existing specialized reducer; see [BENCHMARK.md](BENCHMARK.md#rejected-generic-keyed-differential-reduction).
 - [ ] M038 Generic multiset duplicate preservation across all operators.
 - [ ] M052 Lowering SQL plans into reusable dataflow fragments.
+- [x] M052ac Native scalar set-operation fragments compose eligible `UNION`,
+  `INTERSECT`, and `EXCEPT` branches through the existing native dataflow
+  runtime while preserving conservative fallback boundaries. See
+  [M052_NATIVE_UNION.md](M052_NATIVE_UNION.md) and
+  [BENCHMARK.md](BENCHMARK.md#m052z-native-scalar-set-operation-fragments).
 - [ ] M064 Recursive dataflow maintenance.
 - [-] M064e Generic recursive fixpoint scheduler evaluated and rolled back: the post-change median was 1.05x slower, used 1.27x more transient bytes, and 1.12x more allocations than the existing traversal baseline. See [BENCHMARK.md](BENCHMARK.md#m064-recursive-fixpoint-evaluation-rejected).
 - [x] M064a Append-only incremental transitive reachability with cycle-safe positive deltas; arbitrary deletes and updates remain rebuild-only. See [INCREMENTAL_RECURSIVE_REACHABILITY.md](INCREMENTAL_RECURSIVE_REACHABILITY.md).
@@ -251,6 +256,16 @@ codec for reusable `SQLDataflowPlan` values. JSON remains an explicit fallback
 and the decoder accepts both formats. Full operator semantics and planner
 fragment sharing remain open. See [M052_DATAFLOW_PLAN_CODEC.md](M052_DATAFLOW_PLAN_CODEC.md)
 and [BENCHMARK.md](BENCHMARK.md#m052ab-compact-sql-dataflow-plan-codec).
+
+### M052ac: Native scalar set-operation fragments
+
+Adopted. Eligible top-level scalar set-operation branches now share the
+automatic native scan/filter/project runtime; duplicate-sensitive set assembly,
+spill handling, and conservative fallback behavior remain unchanged. The
+  measured path is 1.50x faster with 65.1% lower bytes/op and 33.3% fewer
+allocations than the final general-executor control. See
+[M052_NATIVE_UNION.md](M052_NATIVE_UNION.md) and
+[BENCHMARK.md](BENCHMARK.md#m052z-native-scalar-set-operation-fragments).
 
 ### M049: Concurrent compiled-plan miss coalescing
 
