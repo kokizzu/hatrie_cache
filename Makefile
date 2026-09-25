@@ -27165,3 +27165,22 @@ race-tt012-space-store:
 .PHONY: vet-tt012-space-store
 vet-tt012-space-store:
 	bash ./scripts/vet-tt012-space-store.sh
+.PHONY: test-tt007-snapshot-wal-join
+test-tt007-snapshot-wal-join:
+	bash ./scripts/test-tt007-snapshot-wal-join.sh
+
+.PHONY: format-tt007-snapshot-wal-join
+format-tt007-snapshot-wal-join:
+	bash ./scripts/format-tt007-snapshot-wal-join.sh
+
+.PHONY: benchmark-tt007-snapshot-wal-join
+benchmark-tt007-snapshot-wal-join:
+	bash ./scripts/benchmark-tt007-snapshot-wal-join.sh
+
+.PHONY: race-tt007-snapshot-wal-join
+race-tt007-snapshot-wal-join:
+	bash ./scripts/race-tt007-snapshot-wal-join.sh
+
+.PHONY: vet-tt007-snapshot-wal-join
+vet-tt007-snapshot-wal-join:
+	bash ./scripts/vet-tt007-snapshot-wal-join.sh

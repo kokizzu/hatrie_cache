@@ -851,10 +851,16 @@ var PersistentStoreBloomFilterBitsPerKey = core.PersistentStoreBloomFilterBitsPe
 var PersistentStoreDiskReserveBytes = core.PersistentStoreDiskReserveBytes
 var PrepareSQLQuery = core.PrepareSQLQuery
 var PrepareSQLQueryWithSchemaVersion = core.PrepareSQLQueryWithSchemaVersion
+
+type CommandJournalJoinOptions = core.CommandJournalJoinOptions
+type CommandJournalJoinResult = core.CommandJournalJoinResult
+
 var PullCommandJournal = core.PullCommandJournal
 var PullCommandJournalCheckpoint = core.PullCommandJournalCheckpoint
 var PullCommandJournalRecovery = core.PullCommandJournalRecovery
 var PullCommandJournalSnapshot = core.PullCommandJournalSnapshot
+var ErrCommandJournalJoinIncomplete = core.ErrCommandJournalJoinIncomplete
+var JoinCommandJournalSnapshot = core.JoinCommandJournalSnapshot
 var QuerySQLTimeSeries = core.QuerySQLTimeSeries
 var ReadMonitoringMemoryReport = core.ReadMonitoringMemoryReport
 var ReadMonitoringSchedulerReport = core.ReadMonitoringSchedulerReport

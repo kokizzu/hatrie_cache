@@ -37683,6 +37683,32 @@ B/op, and 70 allocs/op. Raw capped samples were
 B/op, and 71 allocs/op. See
 [TT015_READ_WORKER_TUNING.md](TT015_READ_WORKER_TUNING.md).
 <a id="tt-008-incremental-snapshot-chains"></a>
+## TT-007: Snapshot-plus-WAL Join
+
+`make benchmark-tt007-snapshot-wal-join` compared the new composed
+`JoinCommandJournalSnapshot` operation with the equivalent manual snapshot
+download, replacement, and journal-pull sequence. The benchmark used one
+post-snapshot WAL mutation, an in-process HTTP source, `Limit=16`, and
+`MaxBatches=4` on Linux/amd64 (AMD Ryzen 9 5950X, Go 1.26.6):
+
+| Path | Median time | Median bytes | Median allocs |
+| --- | ---: | ---: | ---: |
+| Composed join | 7.376 ms/op | 315,810 B/op | 763 allocs/op |
+| Manual sequence | 7.991 ms/op | 316,625 B/op | 719 allocs/op |
+
+The composed operation was about 7.7% faster in this run, with 0.3% lower
+bytes/op and 6.1% more allocations/op. The result is host-load sensitive, so
+the five raw samples below are retained instead of treating this as a general
+transport optimization. See [TT007_SNAPSHOT_WAL_JOIN.md](TT007_SNAPSHOT_WAL_JOIN.md).
+
+Raw five-run samples, in `ns/op`, `B/op`, and `allocs/op`:
+
+```text
+composed: 7022178/313586/743, 7012426/315810/768, 14560482/319439/772, 11566592/313983/733, 7375859/318405/763
+manual:   7535747/315064/692, 7327584/319119/755, 7990574/319187/719, 9818496/316625/745, 14018603/306812/561
+```
+
+<a id="tt-008-incremental-snapshot-chains"></a>
 ## TT-008: Incremental Snapshot Chains
 
 The existing content-addressed incremental backup path was verified together

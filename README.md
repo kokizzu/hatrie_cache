@@ -11,6 +11,7 @@ security guidance before exposing it on a network.
 - Clean finished generic Go build temp directories with `make cleanup-go-build-preview` followed by `make cleanup-go-build`; active Hatrie worktrees are never selected.
 - Read immutable backup parts without restoring them: [C240_READ_ONLY_BACKUP_ATTACHMENT.md](C240_READ_ONLY_BACKUP_ATTACHMENT.md), including object-store streaming and local Pebble checkpoint access.
 - Opt-in Tarantool-style health-aware failover route caching with generation fencing: [TT003_FAILOVER_ROUTE_CACHE.md](TT003_FAILOVER_ROUTE_CACHE.md), with lookup measurements in [BENCHMARK.md](BENCHMARK.md#tt-003-failover-route-cache).
+- Snapshot-plus-WAL node joining with bounded catch-up and completion fencing: [TT007_SNAPSHOT_WAL_JOIN.md](TT007_SNAPSHOT_WAL_JOIN.md), with measurements in [BENCHMARK.md](BENCHMARK.md#tt-007-snapshot-plus-wal-join).
 - New to the cache commands and value types: [DATA_STRUCTURE.md](DATA_STRUCTURE.md)
 - ClickHouse-style SQL RowBinary streaming export and bounded bulk import: [CH050_SQL_ROW_BINARY_STREAM.md](CH050_SQL_ROW_BINARY_STREAM.md)
 - Opt-in ClickHouse-style typed columnar SQL block streaming with projection decoding: [CH046_NATIVE_WIRE_PROTOCOL.md](CH046_NATIVE_WIRE_PROTOCOL.md)
