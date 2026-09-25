@@ -26980,3 +26980,11 @@ commit-tt024-text-index-catalog:
 	bash ./scripts/commit-tt024-text-index-catalog.sh
 push-tt024-text-index-catalog:
 	bash ./scripts/push-tt024-text-index-catalog.sh
+
+.PHONY: stage-hatrie-tmp-metadata-plan-fix commit-hatrie-tmp-metadata-plan-fix push-hatrie-tmp-metadata-plan-fix
+stage-hatrie-tmp-metadata-plan-fix:
+	bash ./scripts/stage-hatrie-tmp-metadata-plan-fix.sh
+commit-hatrie-tmp-metadata-plan-fix:
+	bash ./scripts/commit-hatrie-tmp-metadata-plan-fix.sh
+push-hatrie-tmp-metadata-plan-fix:
+	bash ./scripts/push-hatrie-tmp-metadata-plan-fix.sh

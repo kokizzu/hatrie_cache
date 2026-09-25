@@ -13,6 +13,7 @@ if [[ "$mode" == clean-metadata ]]; then
     "$tmp_root/.hatrie-cache-tmp-audit.plan" \
     "$tmp_root/hatrie-cache-tmp-audit.plan" \
     "$tmp_root/hatrie-cache-tmp-cleanup.plan" \
+    "$tmp_root/hatrie-cache-test-tmp.plan" \
     "$PWD/.hatrie-tmp-cleanup.plan"; do
     if [[ -e "$metadata" ]]; then
       rm -f -- "$metadata"
