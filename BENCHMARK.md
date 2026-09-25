@@ -36472,6 +36472,32 @@ The existing ownership registry and ordinary replication defaults are
 unchanged; callers opt into snapshot persistence or transfer explicitly. See
 [C153C_PARTITION_OWNERSHIP_SNAPSHOT.md](C153C_PARTITION_OWNERSHIP_SNAPSHOT.md).
 
+<a id="c154f-schema-migration-barrier-snapshot"></a>
+### C154f schema migration barrier snapshot
+
+Command: `make benchmark-c154f-schema-barrier-snapshot`.
+
+The fixture contains 32 barriers with four dependencies and mixed prepared,
+committed, and aborted states. Medians below are from five 200-ms samples on
+the same AMD Ryzen 9 5950X host. JSON restore unmarshals and rebuilds the same
+registry maps as binary restore.
+
+| Operation | JSON baseline | Binary snapshot | Improvement |
+| --- | ---: | ---: | ---: |
+| Snapshot encode | 16,144 ns/op, 13,119 B/op, 58 allocs/op, 5,659 wire bytes | 7,852 ns/op, 2,560 B/op, 2 allocs/op, 1,852 wire bytes | 2.06x faster, 5.12x lower allocation bytes, 29x fewer allocs, 3.06x smaller wire payload |
+| Full registry restore | 90,742 ns/op, 34,960 B/op, 554 allocs/op, 5,659 wire bytes | 18,070 ns/op, 24,232 B/op, 368 allocs/op, 1,852 wire bytes | 5.02x faster, 1.44x lower allocation bytes, 1.51x fewer allocs, 3.06x smaller wire payload |
+
+Raw samples:
+
+```text
+JSON snapshot ns/op: 16042, 16187, 16036, 16363, 16144
+Binary snapshot ns/op: 7616, 7633, 7852, 7973, 8064
+JSON restore ns/op: 92299, 90577, 89853, 90742, 91006
+Binary restore ns/op: 18070, 17803, 18481, 17886, 18246
+```
+
+Details: `C154F_SCHEMA_MIGRATION_BARRIER_SNAPSHOT.md`.
+
 <a id="t047f-participant-reconciliation"></a>
 ## T047f Participant Reconciliation
 

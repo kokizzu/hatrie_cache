@@ -27511,3 +27511,33 @@ commit-c153c-ownership-snapshot:
 push-c153c-ownership-snapshot:
 
 	bash scripts/push-c153c-ownership-snapshot.sh
+.PHONY: test-c154f-schema-barrier-snapshot benchmark-c154f-schema-barrier-baseline format-c154f-schema-barrier-snapshot benchmark-c154f-schema-barrier-snapshot test-c154f-schema-barrier-package race-c154f-schema-barrier-snapshot vet-c154f-schema-barrier-snapshot stage-c154f-schema-barrier-snapshot commit-c154f-schema-barrier-snapshot push-c154f-schema-barrier-snapshot
+test-c154f-schema-barrier-snapshot:
+	bash scripts/test-c154f-schema-barrier-snapshot.sh
+
+benchmark-c154f-schema-barrier-baseline:
+	bash scripts/benchmark-c154f-schema-barrier-baseline.sh
+
+format-c154f-schema-barrier-snapshot:
+	bash scripts/format-c154f-schema-barrier-snapshot.sh
+
+benchmark-c154f-schema-barrier-snapshot:
+	bash scripts/benchmark-c154f-schema-barrier-snapshot.sh
+
+test-c154f-schema-barrier-package:
+	bash scripts/test-c154f-schema-barrier-package.sh
+
+race-c154f-schema-barrier-snapshot:
+	bash scripts/race-c154f-schema-barrier-snapshot.sh
+
+vet-c154f-schema-barrier-snapshot:
+	bash scripts/vet-c154f-schema-barrier-snapshot.sh
+
+stage-c154f-schema-barrier-snapshot:
+	bash scripts/stage-c154f-schema-barrier-snapshot.sh
+
+commit-c154f-schema-barrier-snapshot:
+	bash scripts/commit-c154f-schema-barrier-snapshot.sh
+
+push-c154f-schema-barrier-snapshot:
+	bash scripts/push-c154f-schema-barrier-snapshot.sh
