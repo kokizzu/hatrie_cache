@@ -27471,3 +27471,43 @@ commit-t047-reconcile:
 push-t047-reconcile:
 
 	bash scripts/push-t047-reconcile.sh
+
+test-c153c-ownership-snapshot:
+
+	bash scripts/test-c153c-ownership-snapshot.sh
+
+benchmark-c153c-ownership-baseline:
+
+	bash scripts/benchmark-c153c-ownership-baseline.sh
+
+format-c153c-ownership-snapshot:
+
+	bash scripts/format-c153c-ownership-snapshot.sh
+
+benchmark-c153c-ownership-snapshot:
+
+	bash scripts/benchmark-c153c-ownership-snapshot.sh
+
+test-c153c-ownership-package:
+
+	bash scripts/test-c153c-ownership-package.sh
+
+race-c153c-ownership-snapshot:
+
+	bash scripts/race-c153c-ownership-snapshot.sh
+
+vet-c153c-ownership-snapshot:
+
+	bash scripts/vet-c153c-ownership-snapshot.sh
+
+stage-c153c-ownership-snapshot:
+
+	bash scripts/stage-c153c-ownership-snapshot.sh
+
+commit-c153c-ownership-snapshot:
+
+	bash scripts/commit-c153c-ownership-snapshot.sh
+
+push-c153c-ownership-snapshot:
+
+	bash scripts/push-c153c-ownership-snapshot.sh

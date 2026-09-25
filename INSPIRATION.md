@@ -255,7 +255,7 @@ name.
   `hat/hatReplication` with eventual, bounded-staleness, and read-after-write
   replica selection while preserving the legacy selector default.
 - [x] C152 Leader election independent from query workers (see LEADER_ELECTION.md).
-- [ ] C153 Metadata consensus for partition ownership.
+- [ ] C153 Metadata consensus for partition ownership. Quorum admission and validated ownership metadata are implemented; durable snapshot/restore is now available as an opt-in caller-owned primitive, while transport, authentication, and automatic control-plane integration remain open.
 - [x] C153a Consensus-bound, retry-safe topology commit admission with
   fingerprint compare-and-swap, strict-majority vote evaluation, and fencing
   monotonicity; transport and vote authentication remain caller-owned. See
@@ -264,6 +264,7 @@ name.
   primary, replica order, topology fingerprint, and fencing token; transport
   and vote authentication remain caller-owned. See
   [PARTITION_OWNERSHIP_CONSENSUS.md](PARTITION_OWNERSHIP_CONSENSUS.md).
+- [x] C153c CRC-protected bounded binary partition-ownership snapshots with atomic restore, migration-state validation, and no change to the routing hot path. See [C153C_PARTITION_OWNERSHIP_SNAPSHOT.md](C153C_PARTITION_OWNERSHIP_SNAPSHOT.md).
 - [ ] C154 Rolling schema changes across replicas.
 - [x] C154b Atomic catalog DDL batches. `hatSchema.SpaceCatalog.ApplyAtomic` validates ordered named-space upserts and deletes before publishing one catalog state, leaving failed batches invisible; row/data-plane coordination remains caller-owned. See [TT030_TRANSACTIONAL_DDL.md](TT030_TRANSACTIONAL_DDL.md).
 - [x] C154a Conservative rolling-schema compatibility preflight over validated

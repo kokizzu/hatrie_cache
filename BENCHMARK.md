@@ -36427,6 +36427,51 @@ is bounded and paid only when the caller snapshots or restores reconciliation
 state. The default write path does not construct this state machine. See
 [T047_PARTICIPANT_STATE.md](T047_PARTICIPANT_STATE.md).
 
+<a id="c153c-partition-ownership-snapshots"></a>
+## C153c Partition Ownership Snapshots
+
+Commands: `make benchmark-c153c-ownership-baseline` and
+`make benchmark-c153c-ownership-snapshot`.
+
+The fixture contains 256 partitions alternating between two owners. The JSON
+reference represents the pre-change caller-owned backup path; the binary path
+is deterministic, CRC-protected, bounded, and atomic on restore. Five samples
+ran on the AMD Ryzen 9 5950X with `-benchmem`.
+
+| Operation | JSON reference median | Binary median | Improvement |
+| --- | ---: | ---: | ---: |
+| Encode | 54,094 ns/op, 46,031 B/op, 3 allocs | 4,390 ns/op, 9,472 B/op, 1 alloc | 12.32x faster, 4.86x lower bytes, 3x fewer allocs |
+| Restore | 350,285 ns/op, 41,792 B/op, 271 allocs | 9,561 ns/op, 25,392 B/op, 259 allocs | 36.64x faster, 1.65x lower bytes, 12 fewer allocs |
+
+Raw post-change output:
+
+```text
+BenchmarkC153cOwnershipJSONSnapshotBaseline: 52433 ns/op 45983 B/op 3 allocs/op
+BenchmarkC153cOwnershipJSONSnapshotBaseline: 56643 ns/op 46063 B/op 3 allocs/op
+BenchmarkC153cOwnershipJSONSnapshotBaseline: 52976 ns/op 46036 B/op 3 allocs/op
+BenchmarkC153cOwnershipJSONSnapshotBaseline: 54094 ns/op 45985 B/op 3 allocs/op
+BenchmarkC153cOwnershipJSONSnapshotBaseline: 54992 ns/op 46040 B/op 3 allocs/op
+BenchmarkC153cOwnershipBinarySnapshot: 4634 ns/op 9472 B/op 1 allocs/op
+BenchmarkC153cOwnershipBinarySnapshot: 4390 ns/op 9472 B/op 1 allocs/op
+BenchmarkC153cOwnershipBinarySnapshot: 4381 ns/op 9472 B/op 1 allocs/op
+BenchmarkC153cOwnershipBinarySnapshot: 4383 ns/op 9472 B/op 1 allocs/op
+BenchmarkC153cOwnershipBinarySnapshot: 4399 ns/op 9472 B/op 1 allocs/op
+BenchmarkC153cOwnershipJSONRestoreBaseline: 355111 ns/op 41792 B/op 271 allocs/op
+BenchmarkC153cOwnershipJSONRestoreBaseline: 347029 ns/op 41792 B/op 271 allocs/op
+BenchmarkC153cOwnershipJSONRestoreBaseline: 347543 ns/op 41792 B/op 271 allocs/op
+BenchmarkC153cOwnershipJSONRestoreBaseline: 350285 ns/op 41792 B/op 271 allocs/op
+BenchmarkC153cOwnershipJSONRestoreBaseline: 354522 ns/op 41792 B/op 271 allocs/op
+BenchmarkC153cOwnershipBinaryRestore: 9561 ns/op 25392 B/op 259 allocs/op
+BenchmarkC153cOwnershipBinaryRestore: 9398 ns/op 25392 B/op 259 allocs/op
+BenchmarkC153cOwnershipBinaryRestore: 9637 ns/op 25392 B/op 259 allocs/op
+BenchmarkC153cOwnershipBinaryRestore: 9596 ns/op 25392 B/op 259 allocs/op
+BenchmarkC153cOwnershipBinaryRestore: 9537 ns/op 25392 B/op 259 allocs/op
+```
+
+The existing ownership registry and ordinary replication defaults are
+unchanged; callers opt into snapshot persistence or transfer explicitly. See
+[C153C_PARTITION_OWNERSHIP_SNAPSHOT.md](C153C_PARTITION_OWNERSHIP_SNAPSHOT.md).
+
 <a id="t047f-participant-reconciliation"></a>
 ## T047f Participant Reconciliation
 
