@@ -37149,3 +37149,20 @@ lock syscall to each mutation transition.
 The lease is therefore a correctness/coordination feature, not a throughput
 optimization. It is supported on local Unix filesystems and reports an
 explicit unsupported error on other platforms.
+
+## MZ-004: Per-Frontier Compaction Policy
+
+Command: `make benchmark-mz004-compaction-policy` on Linux/amd64, AMD Ryzen 9
+5950X, five samples per benchmark, `-benchtime=10000x`.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Default scheduler | 807 | 224 | 4 | 1.00x |
+| `MaxOutstanding: 1` | 1,605 | 424 | 8 | 1.99x |
+
+The opt-in policy bounds one frontier's waiting/running compactions and makes
+blocked submissions cancellable; it is a fairness and memory-pressure control,
+not a raw throughput optimization. The default scheduler remains unchanged.
+The configured path costs about 200 additional bytes and four allocations per
+submission in this fixture. See [MZ004_COMPACTION_POLICY.md](MZ004_COMPACTION_POLICY.md)
+for the API and tradeoff notes.

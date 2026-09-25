@@ -26688,3 +26688,38 @@ commit-mz003-resume-checkpoint:
 .PHONY: push-mz003-resume-checkpoint
 push-mz003-resume-checkpoint:
 	bash ./scripts/push-mz003-resume-checkpoint.sh
+.PHONY: test-mz004-compaction-policy
+test-mz004-compaction-policy:
+	bash ./scripts/test-mz004-compaction-policy.sh
+.PHONY: benchmark-mz004-compaction-policy
+benchmark-mz004-compaction-policy:
+	bash ./scripts/benchmark-mz004-compaction-policy.sh
+.PHONY: format-mz004-compaction-policy
+format-mz004-compaction-policy:
+	bash ./scripts/format-mz004-compaction-policy.sh
+.PHONY: test-mz004-compaction-policy-package
+test-mz004-compaction-policy-package:
+	bash ./scripts/test-mz004-compaction-policy-package.sh
+
+.PHONY: race-mz004-compaction-policy
+race-mz004-compaction-policy:
+	bash ./scripts/race-mz004-compaction-policy.sh
+
+.PHONY: vet-mz004-compaction-policy
+vet-mz004-compaction-policy:
+	bash ./scripts/vet-mz004-compaction-policy.sh
+
+.PHONY: stage-mz004-compaction-policy
+stage-mz004-compaction-policy:
+	bash ./scripts/stage-mz004-compaction-policy.sh
+
+.PHONY: commit-mz004-compaction-policy
+commit-mz004-compaction-policy:
+	bash ./scripts/commit-mz004-compaction-policy.sh
+
+.PHONY: push-mz004-compaction-policy
+push-mz004-compaction-policy:
+	bash ./scripts/push-mz004-compaction-policy.sh
+.PHONY: test-mz004-repository
+test-mz004-repository:
+	bash ./scripts/test-mz004-repository.sh
