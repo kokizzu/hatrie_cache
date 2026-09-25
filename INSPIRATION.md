@@ -1108,3 +1108,10 @@ predicates are extracted once before fan-out; adapters may exclude a shard only
 when they can prove it cannot match. Unsupported or unavailable metadata keeps
 the existing fan-out, and an all-pruned query still returns the correct empty
 SQL shape. See [CH035_REMOTE_SHARD_PRUNING.md](CH035_REMOTE_SHARD_PRUNING.md).
+
+- [x] M052aa Automatic safe native equality hash joins. One plain `INNER`
+  equality join over ordinary `CACHE`/`KEYS` row resolvers uses the existing
+  typed hash index plus native scalar filtering/projection by default;
+  specialized, indexed, spillable, frontier-aware, and richer shapes retain
+  the established executor. See
+  [M052AA_NATIVE_HASH_JOIN.md](M052AA_NATIVE_HASH_JOIN.md).

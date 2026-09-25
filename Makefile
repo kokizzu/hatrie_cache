@@ -27541,3 +27541,29 @@ commit-c154f-schema-barrier-snapshot:
 
 push-c154f-schema-barrier-snapshot:
 	bash scripts/push-c154f-schema-barrier-snapshot.sh
+
+.PHONY: test-m052aa-native-join test-m052aa-native-join-package race-m052aa-native-join vet-m052aa-native-join benchmark-m052aa-native-join-baseline benchmark-m052aa-native-join
+format-m052aa-native-join:
+	bash scripts/format-m052aa-native-join.sh
+test-m052aa-native-join:
+	bash scripts/test-m052aa-native-join.sh
+test-m052aa-native-join-package:
+	bash scripts/test-m052aa-native-join-package.sh
+race-m052aa-native-join:
+	bash scripts/race-m052aa-native-join.sh
+vet-m052aa-native-join:
+	bash scripts/vet-m052aa-native-join.sh
+benchmark-m052aa-native-join-baseline:
+	bash scripts/benchmark-m052aa-native-join-baseline.sh
+benchmark-m052aa-native-join:
+	bash scripts/benchmark-m052aa-native-join.sh
+stage-m052aa-native-join-plan:
+	bash scripts/stage-m052aa-native-join.sh plan
+stage-m052aa-native-join-rollback:
+	bash scripts/stage-m052aa-native-join.sh rollback
+stage-m052aa-native-join:
+	bash scripts/stage-m052aa-native-join.sh apply
+commit-m052aa-native-join:
+	bash scripts/commit-m052aa-native-join.sh
+push-m052aa-native-join:
+	bash scripts/push-m052aa-native-join.sh

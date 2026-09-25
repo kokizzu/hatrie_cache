@@ -38007,3 +38007,33 @@ retained benchmark allocation fell from 131,648 to 66,112 B/op (**1.99x
 lower**), and allocations fell from 5 to 4 (**1.25x fewer**). The direct
 control is not a user-visible speed claim; it excludes snapshot transfer,
 validation, readiness, and promotion safety checks.
+
+<a id="m052aa-automatic-native-equality-hash-join"></a>
+## M052aa: Automatic Native Equality Hash Join
+
+`make benchmark-m052aa-native-join` compares the existing materialized hash
+join with the new automatic native equality-join batch path. The fixture has
+4,096 left rows, 256 right rows, 128 integer keys, and 8,192 matching output
+rows. Linux/amd64, AMD Ryzen 9 5950X, five samples per path:
+
+```text
+fallback:
+8818422/14338236/70711, 8330547/14338191/70711, 8149555/14338191/70711,
+8265485/14338194/70711, 8550700/14338191/70711
+native:
+5477993/7870949/57618, 5475030/7870950/57618, 5512240/7870954/57618,
+5445242/7870949/57618, 5829956/7870951/57618
+```
+
+Values are `ns/op`, `B/op`, and `allocs/op`:
+
+| Path | Median time | Median bytes | Median allocs | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Existing hash-join fallback | 8.331 ms/op | 14,338,191 B/op | 70,711 | 1.00x |
+| Automatic native equality join | 5.478 ms/op | 7,870,950 B/op | 57,618 | **1.52x faster; 1.82x lower bytes; 1.23x fewer allocations** |
+
+The feature is deliberately fail-closed: one plain `INNER` field equality is
+eligible, while indexed, streaming, columnar, spillable, frontier-aware,
+typed-source, and richer query shapes keep their established execution path.
+`DisableNativeDataflow` remains the explicit fallback switch. See
+[M052AA_NATIVE_HASH_JOIN.md](M052AA_NATIVE_HASH_JOIN.md).

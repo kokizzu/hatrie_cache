@@ -7,10 +7,10 @@ import (
 )
 
 // executeSQLAutoNativeDataflow selects the native batch runtime for narrow
-// scalar, aggregate/distinct, and ordered Top-N shapes over ordinary row
-// resolvers. Resolvers with columnar, streaming, lookup, index, or ordered
-// contracts retain their specialized paths, and callers can force the general
-// executor with the DisableNativeDataflow option.
+// scalar, equality-join, aggregate/distinct, and ordered Top-N shapes over
+// ordinary row resolvers. Resolvers with columnar, streaming, lookup, index,
+// or ordered contracts retain their specialized paths, and callers can force
+// the general executor with the DisableNativeDataflow option.
 func executeSQLAutoNativeDataflow(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, options SQLQueryOptions, control *sqlExecutionControl, recordPlan bool) (SQLQueryResult, bool, error) {
 	detail, eligible := sqlAutoNativeDataflowPlanDetail(query, resolver, options)
 	if !eligible {
@@ -29,12 +29,29 @@ func executeSQLAutoNativeDataflow(ctx context.Context, query *sqlQuery, resolver
 	if len(rows) > control.maxRows {
 		return SQLQueryResult{}, true, fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
 	}
+	joinPlan, isJoin := nativeSQLDataflowJoinPlanFor(query)
+	var rightRows []SQLRow
+	if isJoin {
+		join := query.joins[0]
+		rightRows, err = resolveSQLSourceContext(ctx, resolver, join.source.kind, join.source.key)
+		if err != nil {
+			return SQLQueryResult{}, true, err
+		}
+		if len(rightRows) > control.maxRows {
+			return SQLQueryResult{}, true, fmt.Errorf("SQL source %q exceeds the %d row limit", join.source.alias, control.maxRows)
+		}
+	}
 	started := time.Now()
 	nativeContext := control.ctx
 	if control.yieldEvery > 0 {
 		nativeContext = control.executionContext()
 	}
-	resultRows, err := executeNativeSQLDataflow(nativeContext, query, rows)
+	var resultRows []SQLRow
+	if isJoin {
+		resultRows, err = executeNativeSQLDataflowJoin(nativeContext, query, rows, rightRows, joinPlan, control.maxRows, control)
+	} else {
+		resultRows, err = executeNativeSQLDataflow(nativeContext, query, rows)
+	}
 	if err != nil {
 		return SQLQueryResult{}, true, err
 	}
@@ -45,6 +62,9 @@ func executeSQLAutoNativeDataflow(ctx context.Context, query *sqlQuery, resolver
 		return SQLQueryResult{}, true, fmt.Errorf("SQL result exceeds the %d byte limit", options.MaxResultBytes)
 	}
 	inputRows := len(rows)
+	if isJoin {
+		inputRows += len(rightRows)
+	}
 	outputRows := len(resultRows)
 	elapsed := time.Since(started).Nanoseconds()
 	result := SQLQueryResult{
@@ -180,6 +200,9 @@ func sqlAutoNativeGroupedOrderedEligible(query *sqlQuery, resolver SQLSourceReso
 }
 
 func sqlAutoNativeDataflowPlanDetail(query *sqlQuery, resolver SQLSourceResolver, options SQLQueryOptions) (string, bool) {
+	if sqlAutoNativeJoinEligible(query, resolver, options) {
+		return "automatic equality hash join batch execution", true
+	}
 	if sqlAutoNativeDataflowEligible(query, resolver, options) {
 		return "automatic scalar batch execution", true
 	}
