@@ -11,13 +11,15 @@ import (
 // SQLSession owns temporary SQL sources and named result snapshots for one
 // caller. It is safe for concurrent use and never mutates its base resolver.
 type SQLSession struct {
-	mu             sync.RWMutex
-	source         SourceResolver
-	tables         map[string][]Row
-	results        map[string][]Row
-	views          map[string]sqlSessionView
-	projections    *MaterializedViews
-	catalogVersion uint64
+	mu                  sync.RWMutex
+	source              SourceResolver
+	tables              map[string][]Row
+	results             map[string][]Row
+	views               map[string]sqlSessionView
+	projections         *MaterializedViews
+	projectionStore     SQLProjectionDefinitionStore
+	projectionMu        sync.Mutex
+	catalogVersion      uint64
 	transactionSettings atomic.Pointer[SQLSessionTransactionSettings]
 }
 
@@ -37,6 +39,92 @@ func NewSQLSession(source SourceResolver) *SQLSession {
 	settings := SQLSessionTransactionSettings{}
 	session.transactionSettings.Store(&settings)
 	return session
+}
+
+// SQLSessionOptions configures optional durable projection metadata. The
+// default NewSQLSession constructor remains entirely in-memory.
+type SQLSessionOptions struct {
+	ProjectionDefinitionStore SQLProjectionDefinitionStore
+	AutoRestoreProjections    bool
+}
+
+// NewSQLSessionWithOptions creates a session with optional durable projection
+// metadata. AutoRestoreProjections rebuilds stored definitions against the
+// supplied source before returning.
+func NewSQLSessionWithOptions(source SourceResolver, options SQLSessionOptions) (*SQLSession, error) {
+	session := NewSQLSession(source)
+	session.SetProjectionDefinitionStore(options.ProjectionDefinitionStore)
+	if options.AutoRestoreProjections {
+		if options.ProjectionDefinitionStore == nil {
+			return nil, fmt.Errorf("auto-restored SQL projections require a definition store")
+		}
+		if err := session.RestoreProjections(context.Background()); err != nil {
+			return nil, err
+		}
+	}
+	return session, nil
+}
+
+// SetProjectionDefinitionStore enables or disables durable projection
+// definition persistence for subsequent projection DDL.
+func (session *SQLSession) SetProjectionDefinitionStore(store SQLProjectionDefinitionStore) {
+	if session == nil {
+		return
+	}
+	session.projectionMu.Lock()
+	defer session.projectionMu.Unlock()
+	session.mu.Lock()
+	session.projectionStore = store
+	session.mu.Unlock()
+}
+
+func (session *SQLSession) projectionDefinitionStore() SQLProjectionDefinitionStore {
+	if session == nil {
+		return nil
+	}
+	session.mu.RLock()
+	store := session.projectionStore
+	session.mu.RUnlock()
+	return store
+}
+
+// RestoreProjections rebuilds all definitions held by the configured store.
+// The operation is explicit unless AutoRestoreProjections is enabled.
+func (session *SQLSession) RestoreProjections(ctx context.Context) error {
+	if session == nil {
+		return ErrSQLSessionNil
+	}
+	if err := session.ensureSessionMutationAllowed(); err != nil {
+		return err
+	}
+	session.projectionMu.Lock()
+	defer session.projectionMu.Unlock()
+	store := session.projectionDefinitionStore()
+	if store == nil {
+		return fmt.Errorf("SQL projection definition store is not configured")
+	}
+	definitions, err := store.LoadSQLProjectionDefinitions(ctx)
+	if err != nil {
+		return err
+	}
+	projections := session.projectionCatalog()
+	for _, definition := range definitions {
+		if _, exists := projections.Get(definition.Name); exists {
+			return fmt.Errorf("SQL projection %q already exists during restore", definition.Name)
+		}
+		if _, err := projections.Create(ctx, definition, session, QueryOptions{}); err != nil {
+			return fmt.Errorf("restore SQL projection %q: %w", definition.Name, err)
+		}
+	}
+	return nil
+}
+
+func (session *SQLSession) persistProjectionDefinitions(ctx context.Context) error {
+	store := session.projectionDefinitionStore()
+	if store == nil {
+		return nil
+	}
+	return store.SaveSQLProjectionDefinitions(ctx, session.projectionCatalog().Definitions())
 }
 
 func (session *SQLSession) CreateTemporaryTable(name string, rows []Row) error {
@@ -135,6 +223,8 @@ func (session *SQLSession) CreateProjection(ctx context.Context, name, source st
 	if err := session.ensureSessionMutationAllowed(); err != nil {
 		return err
 	}
+	session.projectionMu.Lock()
+	defer session.projectionMu.Unlock()
 	key, err := sessionObjectName(name)
 	if err != nil {
 		return err
@@ -168,7 +258,14 @@ func (session *SQLSession) CreateProjection(ctx context.Context, name, source st
 		Query:        query,
 		Dependencies: dependencies,
 	}, session, projectionOptions)
-	return err
+	if err != nil {
+		return err
+	}
+	if err := session.persistProjectionDefinitions(ctx); err != nil {
+		_ = projections.Drop(key)
+		return fmt.Errorf("persist SQL projection %q: %w", name, err)
+	}
+	return nil
 }
 
 // DropProjection removes one session-local materialized projection.
@@ -179,11 +276,32 @@ func (session *SQLSession) DropProjection(name string) error {
 	if err := session.ensureSessionMutationAllowed(); err != nil {
 		return err
 	}
+	session.projectionMu.Lock()
+	defer session.projectionMu.Unlock()
 	key, err := sessionObjectName(name)
 	if err != nil {
 		return err
 	}
-	return session.projectionCatalog().Drop(key)
+	projections := session.projectionCatalog()
+	store := session.projectionDefinitionStore()
+	if store == nil {
+		return projections.Drop(key)
+	}
+	definitions := projections.Definitions()
+	filtered := make([]MaterializedViewDefinition, 0, len(definitions))
+	for _, definition := range definitions {
+		if definition.Name != key {
+			filtered = append(filtered, definition)
+		}
+	}
+	if err := store.SaveSQLProjectionDefinitions(context.Background(), filtered); err != nil {
+		return fmt.Errorf("persist dropped SQL projection %q: %w", name, err)
+	}
+	if err := projections.Drop(key); err != nil {
+		_ = store.SaveSQLProjectionDefinitions(context.Background(), definitions)
+		return err
+	}
+	return nil
 }
 
 // RefreshProjection rebuilds one projection after its source versions advance.
@@ -196,6 +314,8 @@ func (session *SQLSession) RefreshProjection(ctx context.Context, name string, o
 	if err := session.ensureSessionMutationAllowed(); err != nil {
 		return err
 	}
+	session.projectionMu.Lock()
+	defer session.projectionMu.Unlock()
 	key, err := sessionObjectName(name)
 	if err != nil {
 		return err

@@ -202,6 +202,27 @@ func (views *MaterializedViews) Get(name string) (MaterializedView, bool) {
 	return cloneMaterializedView(view.snapshot), true
 }
 
+// Definitions returns a deterministic copy of the definitions currently held
+// by the registry. Snapshots are intentionally excluded; callers can persist
+// definitions and rebuild rows against a fresh source version.
+func (views *MaterializedViews) Definitions() []MaterializedViewDefinition {
+	if views == nil {
+		return nil
+	}
+	views.mu.RLock()
+	definitions := make([]MaterializedViewDefinition, 0, len(views.views))
+	for _, view := range views.views {
+		definition := view.definition
+		definition.Dependencies = append([]string(nil), definition.Dependencies...)
+		definitions = append(definitions, definition)
+	}
+	views.mu.RUnlock()
+	sort.Slice(definitions, func(left, right int) bool {
+		return definitions[left].Name < definitions[right].Name
+	})
+	return definitions
+}
+
 // Drop removes one named materialized view and its retained storage accounting.
 // The operation is idempotent only for nil registries; callers receive an error
 // when the requested view does not exist.

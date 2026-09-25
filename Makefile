@@ -26723,3 +26723,47 @@ push-mz004-compaction-policy:
 .PHONY: test-mz004-repository
 test-mz004-repository:
 	bash ./scripts/test-mz004-repository.sh
+
+.PHONY: test-ch011-projection-persistence
+test-ch011-projection-persistence:
+	bash ./scripts/test-ch011-projection-persistence.sh
+
+.PHONY: benchmark-ch011-projection-persistence
+benchmark-ch011-projection-persistence:
+	bash ./scripts/benchmark-ch011-projection-persistence.sh
+
+.PHONY: benchmark-ch011-projection-query
+benchmark-ch011-projection-query:
+	bash ./scripts/benchmark-ch011-projection-query.sh
+
+.PHONY: benchmark-ch011-projection-store
+benchmark-ch011-projection-store:
+	bash ./scripts/benchmark-ch011-projection-store.sh
+
+.PHONY: format-ch011-projection-persistence
+format-ch011-projection-persistence:
+	bash ./scripts/format-ch011-projection-persistence.sh
+
+.PHONY: test-ch011-projection-persistence-package
+test-ch011-projection-persistence-package:
+	bash ./scripts/test-ch011-projection-persistence-package.sh
+
+.PHONY: race-ch011-projection-persistence
+race-ch011-projection-persistence:
+	bash ./scripts/race-ch011-projection-persistence.sh
+
+.PHONY: vet-ch011-projection-persistence
+vet-ch011-projection-persistence:
+	bash ./scripts/vet-ch011-projection-persistence.sh
+
+.PHONY: stage-ch011-projection-persistence
+stage-ch011-projection-persistence:
+	bash ./scripts/stage-ch011-projection-persistence.sh
+
+.PHONY: commit-ch011-projection-persistence
+commit-ch011-projection-persistence:
+	bash ./scripts/commit-ch011-projection-persistence.sh
+
+.PHONY: push-ch011-projection-persistence
+push-ch011-projection-persistence:
+	bash ./scripts/push-ch011-projection-persistence.sh

@@ -31662,6 +31662,30 @@ refresh. The feature trades snapshot storage and explicit refresh maintenance
 for much lower work on matching reads; source-version mismatch never serves a
 stale snapshot.
 
+## CH-011: Durable Projection Metadata
+
+Command:
+
+```text
+make benchmark-ch011-projection-persistence
+```
+
+This compares the existing query path before and after the opt-in durable
+definition store, then measures the file-backed save and load operations. Five
+`-benchtime=100x` samples were collected on Linux/amd64 with an AMD Ryzen 9
+5950X.
+
+| Path | Before median ns/op | After median ns/op | After B/op | After allocs/op | Relative result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Full scan and sort | 7,026,994 | 6,945,210 | 5,219,842 | 28,718 | 0.99x time |
+| Exact projection hit | 15,389 | 15,092 | 15,888 | 80 | 0.98x time |
+| Durable definition save | n/a | 916,552 | 2,252 | 25 | new opt-in DDL cost |
+| Durable definition load | n/a | 10,271 | 1,648 | 34 | new opt-in restore cost |
+
+The default `NewSQLSession` path remains in-memory. The file store persists
+only definitions and rebuilds rows against current source versions; it does
+not add work to a projection hit. See [CH011_DURABLE_PROJECTIONS.md](CH011_DURABLE_PROJECTIONS.md).
+
 ## CH-012 Projection Advisor Cost
 
 Command:
