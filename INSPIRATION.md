@@ -763,6 +763,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 ### Partitioning And Sharding
 
 - [-] T070 Automatic vshard-style routers - deferred in favor of explicit regional partitioning.
+- [x] TT-034 Cooperative task cancellation. `hatFiber.Scheduler` exposes a stable scheduler-owned context plus explicit requested/complete drain state; `Close` cancels ready, waiting, and running fibers without starting a goroutine, while `Drain` consumes canceled queue entries and leaves terminal IDs caller-owned. See [TT034_TASK_CANCELLATION.md](TT034_TASK_CANCELLATION.md).
 - [-] T071 Storage replica sets behind stateless routers - deferred with automatic sharding.
 - [-] T072 Virtual buckets - deferred until backup and movement semantics are specified.
 - [-] T073 Automatic bucket rebalancing - deferred until operator controls are complete.

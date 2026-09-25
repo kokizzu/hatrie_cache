@@ -137,6 +137,9 @@ type Scheduler struct {
 	tenantQuotas  map[string]TenantQuota
 	tenantFibers  map[string]int
 	hasStepQuotas bool
+	lifecycle     context.Context
+	cancel        context.CancelFunc
+	drainState    DrainState
 }
 
 // New creates a bounded scheduler with preallocated slot and queue storage.
@@ -160,6 +163,8 @@ func New(options Options) (*Scheduler, error) {
 		tenantQuotas:  tenantQuotas,
 		hasStepQuotas: hasStepQuotas,
 	}
+	scheduler.lifecycle, scheduler.cancel = context.WithCancel(context.Background())
+	scheduler.drainState = DrainStateOpen
 	for tenant, quota := range tenantQuotas {
 		if quota.MaxFibers > 0 {
 			if scheduler.tenantFibers == nil {
@@ -309,6 +314,14 @@ func (scheduler *Scheduler) Run(ctx context.Context, maxSteps int) (RunStats, er
 		scheduler.current = 0
 		stats.Steps++
 		recordTenantStep(scheduler, slot.tenant, tenantSteps)
+		if stepErr == nil && slot.status == StatusCancelled {
+			slot.status = StatusCancelled
+			slot.err = context.Canceled
+			slot.function = nil
+			scheduler.clearFiberLocals(fiberIndex(identifier))
+			stats.Cancelled++
+			continue
+		}
 		switch {
 		case stepErr != nil:
 			slot.status = StatusFailed
@@ -375,6 +388,14 @@ func (scheduler *Scheduler) runWithoutStepQuotas(ctx context.Context, maxSteps i
 		step, stepErr := slot.function(ctx)
 		scheduler.current = 0
 		stats.Steps++
+		if stepErr == nil && slot.status == StatusCancelled {
+			slot.status = StatusCancelled
+			slot.err = context.Canceled
+			slot.function = nil
+			scheduler.clearFiberLocals(fiberIndex(identifier))
+			stats.Cancelled++
+			continue
+		}
 		switch {
 		case stepErr != nil:
 			slot.status = StatusFailed
@@ -544,7 +565,11 @@ func (scheduler *Scheduler) Pending() int {
 // Close prevents new fibers and marks all ready fibers cancelled. Call Run or
 // Reap on the returned IDs to consume terminal state and release slots.
 func (scheduler *Scheduler) Close() {
-	if scheduler == nil || scheduler.closed {
+	if scheduler == nil {
+		return
+	}
+	scheduler.requestCancellation()
+	if scheduler.closed {
 		return
 	}
 	scheduler.closed = true

@@ -27184,3 +27184,22 @@ race-tt007-snapshot-wal-join:
 .PHONY: vet-tt007-snapshot-wal-join
 vet-tt007-snapshot-wal-join:
 	bash ./scripts/vet-tt007-snapshot-wal-join.sh
+.PHONY: test-tt034-task-cancellation
+test-tt034-task-cancellation:
+	bash ./scripts/test-tt034-task-cancellation.sh
+
+.PHONY: benchmark-tt034-task-cancellation
+benchmark-tt034-task-cancellation:
+	bash ./scripts/benchmark-tt034-task-cancellation.sh
+
+.PHONY: format-tt034-task-cancellation
+format-tt034-task-cancellation:
+	bash ./scripts/format-tt034-task-cancellation.sh
+
+.PHONY: race-tt034-task-cancellation
+race-tt034-task-cancellation:
+	bash ./scripts/race-tt034-task-cancellation.sh
+
+.PHONY: vet-tt034-task-cancellation
+vet-tt034-task-cancellation:
+	bash ./scripts/vet-tt034-task-cancellation.sh

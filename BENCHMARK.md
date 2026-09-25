@@ -37682,6 +37682,25 @@ B/op, and 70 allocs/op. Raw capped samples were
 22,962/22,662/24,301/22,308/24,212 ns/op, 5,188/5,189/5,188/5,189/5,191
 B/op, and 71 allocs/op. See
 [TT015_READ_WORKER_TUNING.md](TT015_READ_WORKER_TUNING.md).
+## TT-034: Cooperative Task Cancellation
+
+`make benchmark-tt034-task-cancellation` compared the existing 256-fiber,
+eight-step scheduler path before and after adding the scheduler-owned
+cancellation token and drain state. Measurements ran five times on Linux/amd64
+with an AMD Ryzen 9 5950X:
+
+| Version | Median time | Median bytes | Median allocs |
+| --- | ---: | ---: | ---: |
+| Baseline | 22.384 us/op | 0 B/op | 0 allocs/op |
+| Final | 22.620 us/op | 0 B/op | 0 allocs/op |
+
+The first implementation called `context.Err()` after every callback and was
+removed after measuring 23.878 us/op, 6.7% slower than baseline. The final
+implementation uses a direct slot-state check only for callback-triggered
+shutdown; its 1.1% median difference is within the five-run spread and adds no
+allocation. Raw samples and lifecycle semantics are in
+[TT034_TASK_CANCELLATION.md](TT034_TASK_CANCELLATION.md).
+
 <a id="tt-008-incremental-snapshot-chains"></a>
 ## TT-007: Snapshot-plus-WAL Join
 
