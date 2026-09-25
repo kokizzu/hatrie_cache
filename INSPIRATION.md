@@ -315,6 +315,7 @@ Materialize's Timely/Differential Dataflow runtime.
 ### Dataflow, Arrangements, And Incremental Results
 
 - [x] M001 Incremental data-parallel dataflow for supported table paths.
+- [x] M001a Durable persist shards. `hatPipeline.DurablePersistShard` stores a bounded versioned opaque payload with generation/frontier fencing and hydrates it without rereading the source; see [MZ001_DURABLE_PERSIST_SHARDS.md](MZ001_DURABLE_PERSIST_SHARDS.md).
 - [x] M002 Generic `(data,time,diff)` multiset representation. `DifferentialMultiset[T]` stores comparable data and timestamps with signed diffs, immediate zero consolidation, and overflow-safe updates; see [DIFFERENTIAL_MULTISET.md](DIFFERENTIAL_MULTISET.md).
 - [x] M002a Generic differential multiset keyed by comparable data and time with zero-consolidation and overflow checks.
 - [x] M002a Exported differential row batch representation.

@@ -37599,3 +37599,18 @@ row has a 38-byte key. Results are medians of five 100 ms samples.
 Warm paths reuse the cached key-layout fingerprint. A physical layout change
 rehashes once; v1 restore compatibility is retained. See
 [CH005_COMPACT_DELETE_BITMAP.md](CH005_COMPACT_DELETE_BITMAP.md).
+
+## MZ-001: Durable Persist Shards
+
+The fixture compares replaying 4,096 source rows with hydrating one 128 KiB
+opaque materialized shard payload. Results are medians of five 100 ms samples
+on the AMD Ryzen 9 5950X Linux/amd64 host.
+
+| Path | Median ns/op | B/op | allocs/op | Relative to source replay |
+| --- | ---: | ---: | ---: | --- |
+| Source replay baseline | 252,340 | 491,888 | 4,114 | 1.00x |
+| Durable shard marshal | 37,581 | 270,360 | 3 | 6.71x faster; 1.82x lower bytes; 1,371x fewer allocs |
+| Durable shard hydrate | 52,913 | 401,537 | 6 | 4.77x faster; 1.23x lower bytes; 686x fewer allocs |
+
+Raw samples, the opaque-payload limitation, and the API contract are in
+[MZ001_DURABLE_PERSIST_SHARDS.md](MZ001_DURABLE_PERSIST_SHARDS.md).

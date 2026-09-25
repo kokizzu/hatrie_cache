@@ -27072,3 +27072,21 @@ race-ch005-compact-patch:
 	bash ./scripts/race-ch005-compact-patch.sh
 test-ch005-compact-hat:
 	bash ./scripts/test-ch005-compact-hat.sh
+.PHONY: benchmark-mz001-baseline
+benchmark-mz001-baseline:
+	bash ./scripts/benchmark-mz001-baseline.sh
+.PHONY: benchmark-mz001-persist-shard
+benchmark-mz001-persist-shard:
+	bash ./scripts/benchmark-mz001-persist-shard.sh
+.PHONY: test-mz001-persist-shard
+test-mz001-persist-shard:
+	bash ./scripts/test-mz001-persist-shard.sh
+.PHONY: format-mz001-persist-shard
+format-mz001-persist-shard:
+	bash ./scripts/format-mz001-persist-shard.sh
+.PHONY: test-mz001-persist-package
+test-mz001-persist-package:
+	bash ./scripts/test-mz001-persist-package.sh
+.PHONY: race-mz001-persist-shard
+race-mz001-persist-shard:
+	bash ./scripts/race-mz001-persist-shard.sh
