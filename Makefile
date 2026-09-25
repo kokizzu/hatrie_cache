@@ -27250,3 +27250,39 @@ commit-mz023-index-placement:
 .PHONY: push-mz023-index-placement
 push-mz023-index-placement:
 	bash ./scripts/push-mz023-index-placement.sh
+
+.PHONY: test-tt001-automatic-rebalance
+test-tt001-automatic-rebalance:
+	bash ./scripts/test-tt001-automatic-rebalance.sh
+
+.PHONY: format-tt001-automatic-rebalance
+format-tt001-automatic-rebalance:
+	bash ./scripts/format-tt001-automatic-rebalance.sh
+
+.PHONY: benchmark-tt001-automatic-rebalance
+benchmark-tt001-automatic-rebalance:
+	bash ./scripts/benchmark-tt001-automatic-rebalance.sh
+
+.PHONY: test-tt001-package
+test-tt001-package:
+	bash ./scripts/test-tt001-package.sh
+
+.PHONY: race-tt001-automatic-rebalance
+race-tt001-automatic-rebalance:
+	bash ./scripts/race-tt001-automatic-rebalance.sh
+
+.PHONY: vet-tt001-automatic-rebalance
+vet-tt001-automatic-rebalance:
+	bash ./scripts/vet-tt001-automatic-rebalance.sh
+
+.PHONY: compile-tt001-all
+compile-tt001-all:
+	bash ./scripts/compile-tt001-all.sh
+
+.PHONY: commit-tt001-automatic-rebalance
+commit-tt001-automatic-rebalance:
+	bash ./scripts/commit-tt001-automatic-rebalance.sh
+
+.PHONY: push-tt001-automatic-rebalance
+push-tt001-automatic-rebalance:
+	bash ./scripts/push-tt001-automatic-rebalance.sh

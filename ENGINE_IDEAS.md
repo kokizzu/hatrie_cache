@@ -138,7 +138,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 
 | ID | Candidate not yet complete here | Current gap and likely value | Initial risk |
 | --- | --- | --- | --- |
-| TT-001 | Automatic vshard bucket rebalancing | Partition plans exist, but no automatic data movement and ownership convergence. | High |
+| TT-001 | Automatic vshard bucket rebalancing | Partially adopted: `hatTopology.PlanAutomaticBucketRebalance` deterministically balances virtual-shard primaries, excludes maintenance nodes by default, preserves replica counts, and emits existing bucket migration plans; transport, data movement, and ownership publication remain caller-owned. See [TT001_AUTOMATIC_BUCKET_REBALANCE.md](TT001_AUTOMATIC_BUCKET_REBALANCE.md). | High |
 | TT-002 | Bucket ownership consensus | Partition ownership is not committed through a consensus-backed metadata log. | High |
 | TT-003 | Router failover route cache | Adopted as opt-in `hatReplication.FailoverRouteCache` with generation-fenced replacements, stable key routing, atomic lock-free lookups, bounded failure cooldowns, and explicit success/invalidation reporting; dialing, retry, and health inference remain caller-owned. See [TT003_FAILOVER_ROUTE_CACHE.md](TT003_FAILOVER_ROUTE_CACHE.md). | Medium |
 | TT-004 | Synchronous batch replication quorum | Single writes and batches do not provide rollback-free cluster-wide quorum commit. | High |
