@@ -22048,3 +22048,12 @@ measure-mu47-payload:
 
 verify-mu47:
 	@bash scripts/verify-mu47.sh
+.PHONY: cleanup-hatrie-tmp-commit cleanup-hatrie-tmp-push
+
+cleanup-hatrie-tmp-commit:
+
+	bash scripts/commit-cleanup-hatrie-tmp.sh
+
+cleanup-hatrie-tmp-push:
+
+	bash scripts/push-cleanup-hatrie-tmp.sh
