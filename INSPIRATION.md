@@ -706,6 +706,8 @@ explicit regional partitioning and simple backups over automatic sharding.
   1.25x slower with 1.45x more heap, and a current 256-entry plain-string
   lane was 1.74x slower with 1.21x more heap than serial replay; see the
   rejected results in [BENCHMARK.md](BENCHMARK.md#rejected-recovery-time-parallel-replay).
+  A later 16,384-entry all-counter lane was also rejected at 1.69x slower and
+  4.27x more heap; see [BENCHMARK.md](BENCHMARK.md#rejected-t042-counter-parallel-replay).
 - [x] T042a Recovery replay mutation fast path - scalar durable mutations avoid constructing public command responses; unsupported commands keep the existing dispatcher (see [JOURNAL_REPLAY.md](JOURNAL_REPLAY.md)).
 - [x] T042b Single-pass ordinary journal replay metadata. The journal caches its validated tail and compaction boundary during open, checkpoint, and compaction, so default replay avoids rescanning the same metadata; progress-enabled replay keeps its counting scan.
 - [x] T043 Recovery replay progress and ETA metrics.

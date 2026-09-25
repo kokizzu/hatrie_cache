@@ -37459,3 +37459,40 @@ not a raw throughput optimization. The default scheduler remains unchanged.
 The configured path costs about 200 additional bytes and four allocations per
 submission in this fixture. See [MZ004_COMPACTION_POLICY.md](MZ004_COMPACTION_POLICY.md)
 for the API and tradeoff notes.
+
+<a id="rejected-t042-counter-parallel-replay"></a>
+## Rejected T042: Counter-Journal Parallel Replay
+
+The test-first prototype partitioned a 16,384-entry journal by key and replayed
+`SETINT`/`INC` entries with bounded workers while preserving per-key order. The
+correctness tests passed, but the performance gate rejected the change and the
+implementation was rolled back. The default serial replay path was never
+changed.
+
+The temporary benchmark used five `-benchtime=1x` samples per path. Medians:
+
+| Path | ns/op | B/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Serial replay | 28,428,173 | 12,602,463 | 196,663 | Baseline |
+| Parallel prototype | 47,881,357 | 53,818,408 | 196,827 | 1.69x slower, 4.27x more heap, 1.001x allocations |
+
+Raw samples:
+
+```text
+serial:
+40 28872699 ns/op 12602800 B/op 196664 allocs/op
+43 27616461 ns/op 12602463 B/op 196663 allocs/op
+42 28428173 ns/op 12602474 B/op 196663 allocs/op
+43 27747899 ns/op 12602421 B/op 196663 allocs/op
+40 28639792 ns/op 12602353 B/op 196663 allocs/op
+
+parallel prototype:
+1 46224692 ns/op 53823568 B/op 196841 allocs/op
+1 51618308 ns/op 53821072 B/op 196833 allocs/op
+1 47881357 ns/op 53818408 B/op 196827 allocs/op
+1 46934181 ns/op 53815992 B/op 196825 allocs/op
+1 48901904 ns/op 53815216 B/op 196821 allocs/op
+```
+
+The benchmark and implementation targets were temporary and were removed with
+the rollback; this section is the permanent rejection record.

@@ -207,6 +207,9 @@ or intentionally deferred, and `[-]` rejected or rolled back.
 - [x] T040 Configurable WAL retention policy with disk budget.
 - [x] T041 WAL segment compression and independent verification.
 - [ ] T042 Recovery-time parallel replay. A bounded single-key parallel replay
+  remains unchecked: the latest 16,384-entry all-counter prototype was 1.69x
+  slower and used 4.27x more heap than serial replay; see
+  [BENCHMARK.md](BENCHMARK.md#rejected-t042-counter-parallel-replay).
 - [x] T042a Recovery replay mutation fast path - scalar durable mutations avoid constructing public command responses; unsupported commands keep the existing dispatcher (see [JOURNAL_REPLAY.md](JOURNAL_REPLAY.md)).
 - [x] T043 Recovery replay progress and ETA metrics.
 - [x] T044 Recovery point selection by logical sequence.
@@ -258,6 +261,9 @@ records a separate implementation boundary.
 - [x] M065aa Batched same-position mutable rank updates validate all payload-only updates before replacing retained rows in deterministic key order, avoiding a repeated affected-partition rebuild while preserving the existing fallback for structural mutations. See [INCREMENTAL_RANK_WINDOW.md](INCREMENTAL_RANK_WINDOW.md#batched-same-position-mutable-updates) and [BENCHMARK.md](BENCHMARK.md#m065aa-batched-mutable-rank-arrangement-fast-path).
 - [ ] M090 Independent compute and storage scaling.
 - [ ] T042 Recovery-time parallel replay. A bounded single-key parallel replay
+  remains unchecked: the latest 16,384-entry all-counter prototype was 1.69x
+  slower and used 4.27x more heap than serial replay; see
+  [BENCHMARK.md](BENCHMARK.md#rejected-t042-counter-parallel-replay).
 - [ ] T047 Synchronous replication with an explicit quorum. The public single-command path is now opt-in through `MonitoringOptions.WriteQuorum` / `CacheGRPCOptions.WriteQuorum`; atomic `BATCH` quorum semantics are implemented, while end-to-end transport wiring, durable participant state, and reconciliation remain open.
 - [x] T047e Transport-neutral two-phase cluster write commit with a prepare barrier and explicit indeterminate commit outcome; see [T047_CLUSTER_WRITE_COMMIT.md](T047_CLUSTER_WRITE_COMMIT.md).
 - [x] T047f Bounded durable participant phase state for two-phase writes. `ClusterWriteCommitParticipant` provides idempotent prepare/commit/abort transitions, deterministic bounded `HCP1` snapshots, strict restore validation, and atomic replacement; transport wiring, application-data durability, and reconciliation policy remain caller-owned. See [T047_PARTICIPANT_STATE.md](T047_PARTICIPANT_STATE.md).
