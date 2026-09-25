@@ -37517,3 +37517,19 @@ slice lost its reusable head capacity. Reusing a queue head reduced the result
 to 392 B/op and six allocations. Correctness tests and the race test passed.
 See [MZ036_FIXPOINT_SCHEDULER.md](MZ036_FIXPOINT_SCHEDULER.md) for raw samples,
 API semantics, bounds, and workload limitations.
+
+## CH-033: Distributed SQL Query Fan-out
+
+See [CH033_DISTRIBUTED_QUERY.md](CH033_DISTRIBUTED_QUERY.md) for the API,
+correctness constraints, raw samples, and workload limitations.
+
+The measured fixture used eight independent resolvers, one row per shard, a
+1 ms resolver delay, `GOMAXPROCS=8`, five samples, and `-benchmem` on an AMD
+Ryzen 9 5950X. The new bounded fan-out path reduced wall time by 7.27x, at
+the cost of 1.14x bytes/op and 1.20x allocations/op. It is opt-in because
+those coordinator costs are not justified for cheap local single-node reads.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative wall time |
+| --- | ---: | ---: | ---: | ---: |
+| Sequential baseline | 8,576,363 | 32,305 | 126 | 1.00x |
+| Bounded fan-out | 1,180,500 | 36,954 | 151 | 7.27x faster |

@@ -60,7 +60,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-030 | Query complexity limits | Partially adopted: SQL options now also provide opt-in `MaxExecutionSteps` enforcement at cooperative executor checks and exclude bounded queries from result caching; per-expression accounting and true CPU-cycle quotas remain future work. | Medium |
 | CH-031 | Persistent query log | Implemented as an opt-in privacy-safe newline-delimited JSON log attached to `SQLQueryManager`; terminal status survives process restart without retaining SQL text, sources, parameters, or cancellation reasons. | Low |
 | CH-032 | Query profiler samples | Adopted as an opt-in bounded `hatSql` API keyed by query ID, with configurable sampling, CPU/blocking/row/byte fields, deterministic snapshots, and no default executor overhead. | Done |
-| CH-033 | Distributed query fan-out | One query cannot plan and merge reads from multiple independent nodes. | High |
+| CH-033 | Distributed query fan-out | Implemented as an opt-in `hatSql.ExecuteSQLDistributedQuery` primitive with bounded fan-out, deterministic shard-order concatenation, caller-provided global merge, cancellation, and row bounds. Automatic topology discovery and retry policy remain out of scope. | High |
 | CH-034 | Parallel replicas | No coordinated replica reads that divide ranges and merge ordered results. | High |
 | CH-035 | Remote shard pruning | No shard-level predicate routing before distributed execution. | High |
 | CH-036 | `ASOF JOIN` | Partially adopted: constrained `ASOF [LEFT] JOIN` with one equality and one temporal inequality, keyed right-side buckets, and binary search. | High |

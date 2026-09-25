@@ -393,3 +393,11 @@ checked same-position delta updates for `COUNT` and `SUM(int64)`. The existing
 append-only constructor and default behavior remain unchanged. Automatic SQL
 planner selection, arbitrary late-data arrangements, and distributed frontier
 coordination remain open.
+## CH-033 implementation update
+
+The distributed query fan-out candidate is implemented in `hat/hatSql` as an
+opt-in bounded coordinator. It does not discover topology or invent retry
+semantics; callers provide shard resolvers and a custom merge when global
+`ORDER BY`, `GROUP BY`, or `LIMIT` semantics are required. Measurement and
+tradeoffs are recorded in [CH033_DISTRIBUTED_QUERY.md](CH033_DISTRIBUTED_QUERY.md)
+and [BENCHMARK.md](BENCHMARK.md).

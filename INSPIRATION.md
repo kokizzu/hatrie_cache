@@ -1067,3 +1067,10 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   invalid-value batches retain the existing rebuild/error path. See
   [INCREMENTAL_MUTABLE_RANGE_WINDOW.md](INCREMENTAL_MUTABLE_RANGE_WINDOW.md)
   and [BENCHMARK.md](BENCHMARK.md#m065af-batched-mutable-range-aggregate-fast-path).
+## CH-033 Distributed Query Fan-out
+
+ClickHouse-inspired distributed query fan-out is now available as the opt-in
+`hatSql.ExecuteSQLDistributedQuery` primitive. It executes one read query over
+caller-selected independent resolvers with bounded concurrency, deterministic
+shard-order results, cancellation, and an optional custom merge for global
+ordering or aggregation. See [CH033_DISTRIBUTED_QUERY.md](CH033_DISTRIBUTED_QUERY.md).
