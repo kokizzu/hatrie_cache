@@ -37533,3 +37533,20 @@ those coordinator costs are not justified for cheap local single-node reads.
 | --- | ---: | ---: | ---: | ---: |
 | Sequential baseline | 8,576,363 | 32,305 | 126 | 1.00x |
 | Bounded fan-out | 1,180,500 | 36,954 | 151 | 7.27x faster |
+
+## CH-034: Parallel Replica Range Reads
+
+See [CH034_PARALLEL_REPLICA_RANGES.md](CH034_PARALLEL_REPLICA_RANGES.md) for
+the API, retry behavior, limits, raw samples, and workload limitations.
+
+The fixture used 32 independent ranges, a 1 ms read delay per range, four
+replicas, `MaxConcurrency=8`, `GOMAXPROCS=8`, five samples, and `-benchmem` on
+an AMD Ryzen 9 5950X. The default path keeps `RecordAttempts` disabled.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative wall time |
+| --- | ---: | ---: | ---: | ---: |
+| Serial one-replica baseline | 33,901,239 | 2,690 | 1 | 1.00x |
+| Bounded parallel ranges | 4,297,946 | 8,218 | 30 | 7.89x faster |
+
+The candidate is an opt-in latency optimization. It uses about 3.05x bytes and
+30x allocations in this fixture, so a cheap local scan should remain serial.

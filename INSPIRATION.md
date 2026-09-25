@@ -1074,3 +1074,12 @@ ClickHouse-inspired distributed query fan-out is now available as the opt-in
 caller-selected independent resolvers with bounded concurrency, deterministic
 shard-order results, cancellation, and an optional custom merge for global
 ordering or aggregation. See [CH033_DISTRIBUTED_QUERY.md](CH033_DISTRIBUTED_QUERY.md).
+
+## CH-034 Parallel Replica Range Reads
+
+ClickHouse-inspired parallel replica range reads are now available through
+the opt-in `hatReplication.ExecuteParallelReplicaRangeRead` coordinator. It
+assigns independent ranges across replicas with bounded concurrency, retries a
+failed range, preserves input order, and returns no partial result. Range
+discovery and SQL planner integration remain caller-owned. See
+[CH034_PARALLEL_REPLICA_RANGES.md](CH034_PARALLEL_REPLICA_RANGES.md).

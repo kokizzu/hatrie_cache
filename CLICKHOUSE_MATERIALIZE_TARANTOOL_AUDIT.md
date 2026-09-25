@@ -401,3 +401,14 @@ semantics; callers provide shard resolvers and a custom merge when global
 `ORDER BY`, `GROUP BY`, or `LIMIT` semantics are required. Measurement and
 tradeoffs are recorded in [CH033_DISTRIBUTED_QUERY.md](CH033_DISTRIBUTED_QUERY.md)
 and [BENCHMARK.md](BENCHMARK.md).
+
+## CH-034 implementation update
+
+The parallel-replica candidate is implemented as the opt-in
+`hatReplication.ExecuteParallelReplicaRangeRead` coordinator. It divides
+caller-supplied ranges across replicas, bounds concurrent reads, retries a
+failed range on another replica, preserves range order, and cancels without
+returning partial results. SQL range discovery, health policy, and planner
+wiring remain caller-owned. See
+[CH034_PARALLEL_REPLICA_RANGES.md](CH034_PARALLEL_REPLICA_RANGES.md) and
+[BENCHMARK.md](BENCHMARK.md).
