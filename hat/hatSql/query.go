@@ -191,6 +191,8 @@ const MaxSQLQueryThreads = 256
 // MaxSQLOperatorYieldEvery bounds the opt-in cooperative fuel quantum.
 const MaxSQLOperatorYieldEvery = 1 << 20
 
+var ErrSQLExecutionStepsExceeded = fmt.Errorf("SQL execution step budget exceeded")
+
 // SQLQueryOptions bounds one query. Zero uses the safe default or disables an
 // optional byte/work budget; Timeout derives a deadline from ctx.
 type SQLQueryOptions struct {
@@ -232,6 +234,10 @@ type SQLQueryOptions struct {
 	// a total query-work limit; custom functions must still return to the query
 	// executor for the next check.
 	OperatorYieldEvery int
+	// MaxExecutionSteps bounds the number of cooperative execution checks for
+	// one query. Zero keeps the existing unbounded behavior. This is an
+	// opt-in CPU/work proxy, not a wall-clock duration limit.
+	MaxExecutionSteps int
 	// Quota optionally applies a caller-owned rolling quota registry. Nil keeps
 	// the existing unmetered path.
 	Quota *SQLQuotaRegistry
@@ -8215,18 +8221,20 @@ func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]
 }
 
 type sqlExecutionControl struct {
-	ctx            context.Context
-	maxRows        int
-	options        SQLQueryOptions
-	parameters     []interface{}
-	joinWork       int
-	sources        map[string][]SQLRow
-	arena          sqlExecutionArena
-	spillQuota     *sqlSpillQuota
-	operatorMemory *SQLOperatorMemoryTracker
-	yieldEvery     uint64
-	yieldFuel      atomic.Uint64
-	yields         atomic.Uint64
+	ctx               context.Context
+	maxRows           int
+	options           SQLQueryOptions
+	parameters        []interface{}
+	joinWork          int
+	sources           map[string][]SQLRow
+	arena             sqlExecutionArena
+	spillQuota        *sqlSpillQuota
+	operatorMemory    *SQLOperatorMemoryTracker
+	yieldEvery        uint64
+	yieldFuel         atomic.Uint64
+	yields            atomic.Uint64
+	maxExecutionSteps uint64
+	executionSteps    uint64
 }
 
 // sqlExecutionControlContext preserves the normal context contract while
@@ -8285,7 +8293,7 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if options.MaxRows < 0 || options.MaxIntermediateRows < 0 || options.MaxJoinWork < 0 || options.MaxJoinBytes < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxGroupMergeBytes < 0 || options.MaxGroupKeys < 0 || options.MaxSetBytes < 0 || options.MaxSpillBytes < 0 || options.MaxQuerySpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 || options.Workers < 0 || options.OperatorYieldEvery < 0 {
+	if options.MaxRows < 0 || options.MaxIntermediateRows < 0 || options.MaxJoinWork < 0 || options.MaxJoinBytes < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxGroupMergeBytes < 0 || options.MaxGroupKeys < 0 || options.MaxSetBytes < 0 || options.MaxSpillBytes < 0 || options.MaxQuerySpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 || options.Workers < 0 || options.OperatorYieldEvery < 0 || options.MaxExecutionSteps < 0 {
 		return nil, func() {}, fmt.Errorf("SQL query budgets cannot be negative")
 	}
 	if options.OperatorYieldEvery > MaxSQLOperatorYieldEvery {
@@ -8298,7 +8306,7 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 		return nil, func() {}, fmt.Errorf("unsupported SQL collation %q", options.Collation)
 	}
 	newControl := func(controlContext context.Context) *sqlExecutionControl {
-		control := &sqlExecutionControl{ctx: controlContext, maxRows: sqlQueryMaxRows(options), options: options, sources: map[string][]SQLRow{}, operatorMemory: options.OperatorMemoryTracker}
+		control := &sqlExecutionControl{ctx: controlContext, maxRows: sqlQueryMaxRows(options), options: options, sources: map[string][]SQLRow{}, operatorMemory: options.OperatorMemoryTracker, maxExecutionSteps: uint64(options.MaxExecutionSteps)}
 		if options.MaxQuerySpillBytes > 0 {
 			control.spillQuota = newSQLSpillQuota(options.MaxQuerySpillBytes)
 		}
@@ -8344,6 +8352,12 @@ func (control *sqlExecutionControl) check() error {
 	}
 	if err := control.ctx.Err(); err != nil {
 		return err
+	}
+	if control.maxExecutionSteps > 0 {
+		control.executionSteps++
+		if control.executionSteps > control.maxExecutionSteps {
+			return fmt.Errorf("%w: %d checks, maximum %d", ErrSQLExecutionStepsExceeded, control.executionSteps, control.maxExecutionSteps)
+		}
 	}
 	control.maybeYield()
 	return nil

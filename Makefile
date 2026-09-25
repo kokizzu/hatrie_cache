@@ -26504,3 +26504,30 @@ commit-mz003-snapshot-progress:
 .PHONY: push-mz003-snapshot-progress
 push-mz003-snapshot-progress:
 	@bash scripts/push-mz003-snapshot-progress.sh
+.PHONY: test-ch030-execution-steps
+test-ch030-execution-steps:
+	@bash scripts/test-ch030-execution-steps.sh
+.PHONY: benchmark-ch030-execution-steps-baseline
+benchmark-ch030-execution-steps-baseline:
+	@bash scripts/benchmark-ch030-execution-steps-baseline.sh
+
+.PHONY: benchmark-ch030-execution-steps
+benchmark-ch030-execution-steps:
+	@bash scripts/benchmark-ch030-execution-steps.sh
+.PHONY: format-ch030-execution-steps
+format-ch030-execution-steps:
+	@bash scripts/format-ch030-execution-steps.sh
+.PHONY: verify-ch030-execution-steps
+verify-ch030-execution-steps:
+	@bash scripts/verify-ch030-execution-steps.sh
+.PHONY: stage-ch030-execution-steps
+stage-ch030-execution-steps:
+	@bash scripts/stage-ch030-execution-steps.sh
+
+.PHONY: commit-ch030-execution-steps
+commit-ch030-execution-steps:
+	@bash scripts/commit-ch030-execution-steps.sh
+
+.PHONY: push-ch030-execution-steps
+push-ch030-execution-steps:
+	@bash scripts/push-ch030-execution-steps.sh
