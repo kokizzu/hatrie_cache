@@ -7,9 +7,10 @@ import (
 
 // SQLIndexDefinition identifies one configured index for a use report.
 type SQLIndexDefinition struct {
-	Key   string
-	Field string
-	Kind  string
+	Key     string
+	Field   string
+	Kind    string
+	Cluster string
 }
 
 // SQLIndexUseReport combines observed execution use with configured index

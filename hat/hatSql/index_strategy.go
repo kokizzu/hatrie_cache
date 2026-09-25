@@ -19,6 +19,8 @@ const (
 	SQLIndexStrategyReasonFieldMismatch     = "field_mismatch"
 	SQLIndexStrategyReasonKindMismatch      = "kind_mismatch"
 	SQLIndexStrategyReasonForbidden         = "forbidden"
+	SQLIndexStrategyReasonClusterMismatch   = "cluster_mismatch"
+	SQLIndexStrategyReasonClusterRequired   = "cluster_required"
 )
 
 // SQLIndexStrategyCandidate describes one configured physical index option.
@@ -71,6 +73,7 @@ func ExplainSQLIndexStrategy(source, field string, hint SQLIndexHint, candidates
 	}
 	hintKind := strings.ToUpper(strings.TrimSpace(hint.Kind))
 	decision.RequestedKind = hintKind
+	requestedCluster := strings.TrimSpace(hint.Cluster)
 	if hint.Mode != "" && hint.Source != "" && !strings.EqualFold(strings.TrimSpace(source), strings.TrimSpace(hint.Source)) {
 		decision.Reason = "source_mismatch"
 		return decision, nil
@@ -111,6 +114,15 @@ func ExplainSQLIndexStrategy(source, field string, hint SQLIndexHint, candidates
 		report := &reports[index]
 		if !strings.EqualFold(strings.TrimSpace(report.Field), field) {
 			report.Reason = SQLIndexStrategyReasonFieldMismatch
+			continue
+		}
+		candidateCluster := report.Cluster
+		if requestedCluster == "" && candidateCluster != "" {
+			report.Reason = SQLIndexStrategyReasonClusterRequired
+			continue
+		}
+		if requestedCluster != "" && candidateCluster != "" && !strings.EqualFold(strings.TrimSpace(candidateCluster), requestedCluster) {
+			report.Reason = SQLIndexStrategyReasonClusterMismatch
 			continue
 		}
 		if !report.Available {

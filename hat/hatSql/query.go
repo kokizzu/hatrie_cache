@@ -884,6 +884,7 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 	if err = validateSQLSourceFrontierRequirement(ctx, query, resolver, options); err != nil {
 		return result, err
 	}
+	options.IndexHint = sqlIndexHintWithComputeCluster(options.IndexHint, options.ComputeCluster)
 	if err = options.IndexHint.validate(); err != nil {
 		return result, err
 	}
@@ -969,7 +970,7 @@ func executeSQLQueryUncached(ctx context.Context, source string, query *sqlQuery
 		}
 	}
 	var metrics *sqlExecutionMetrics
-	if observation.observer != nil || observation.recorder != nil || options.AdaptivePlanner != nil || options.IndexHint.Mode != "" || options.IndexAdvisor != nil || options.IndexUseRecorder != nil {
+	if observation.observer != nil || observation.recorder != nil || options.AdaptivePlanner != nil || options.IndexHint.Mode != "" || options.IndexAdvisor != nil || options.IndexUseRecorder != nil || strings.TrimSpace(options.ComputeCluster) != "" {
 		metrics = &sqlExecutionMetrics{adaptive: options.AdaptivePlanner, indexHint: options.IndexHint}
 	}
 	recordNativePlan := observation.observer != nil || observation.recorder != nil
@@ -1115,6 +1116,7 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 	if err := validateSQLSourceFrontierRequirement(ctx, query, resolver, options); err != nil {
 		return err
 	}
+	options.IndexHint = sqlIndexHintWithComputeCluster(options.IndexHint, options.ComputeCluster)
 	if err := options.IndexHint.validate(); err != nil {
 		return err
 	}
@@ -5513,7 +5515,7 @@ func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceR
 	}
 	query.limit = fetch
 	var metrics *sqlExecutionMetrics
-	if observation.observer != nil || observation.recorder != nil || options.IndexHint.Mode != "" {
+	if observation.observer != nil || observation.recorder != nil || options.IndexHint.Mode != "" || strings.TrimSpace(options.ComputeCluster) != "" {
 		metrics = &sqlExecutionMetrics{indexHint: options.IndexHint}
 	}
 	result, err = executeSQLQueryWithMetrics(query, resolver, nil, metrics, control)
@@ -14353,23 +14355,23 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 	var err error
 	if left.kind == "field" && left.qualifier == source.alias && right.kind == "literal" {
 		if hint.allowsField(source, left.name) {
-			rows, indexed, err = resolveSQLIndexedComparison(source, left.name, condition.op, right.value, resolver)
+			rows, indexed, err = resolveSQLIndexedComparison(source, left.name, condition.op, right.value, resolver, hint.Cluster)
 		}
 	} else if right.kind == "field" && right.qualifier == source.alias && left.kind == "literal" {
 		if hint.allowsField(source, right.name) {
-			rows, indexed, err = resolveSQLIndexedComparison(source, right.name, sqlReverseComparison(condition.op), left.value, resolver)
+			rows, indexed, err = resolveSQLIndexedComparison(source, right.name, sqlReverseComparison(condition.op), left.value, resolver, hint.Cluster)
 		}
 	} else if path, ok := sqlJSONPathIndexField(left, source.alias); ok && right.kind == "literal" {
-		rows, indexed, err = resolveSQLIndexedComparison(source, path, condition.op, right.value, resolver)
+		rows, indexed, err = resolveSQLIndexedComparison(source, path, condition.op, right.value, resolver, hint.Cluster)
 	} else if path, ok := sqlJSONPathIndexField(right, source.alias); ok && left.kind == "literal" {
-		rows, indexed, err = resolveSQLIndexedComparison(source, path, sqlReverseComparison(condition.op), left.value, resolver)
+		rows, indexed, err = resolveSQLIndexedComparison(source, path, sqlReverseComparison(condition.op), left.value, resolver, hint.Cluster)
 	} else if field, ok := sqlLowerIndexField(left, source.alias); ok && right.kind == "literal" && condition.op == "=" {
 		if hint.allowsField(source, field) {
-			rows, indexed, err = resolveSQLIndexedComparison(source, field, condition.op, right.value, resolver)
+			rows, indexed, err = resolveSQLIndexedComparison(source, field, condition.op, right.value, resolver, hint.Cluster)
 		}
 	} else if field, ok := sqlLowerIndexField(right, source.alias); ok && left.kind == "literal" && condition.op == "=" {
 		if hint.allowsField(source, field) {
-			rows, indexed, err = resolveSQLIndexedComparison(source, field, condition.op, left.value, resolver)
+			rows, indexed, err = resolveSQLIndexedComparison(source, field, condition.op, left.value, resolver, hint.Cluster)
 		}
 	} else {
 		return nil, false, nil
@@ -14908,7 +14910,7 @@ func sqlIndexDiagnosticEquality(source sqlSource, condition sqlExpr) (string, in
 	return "", nil, false
 }
 
-func resolveSQLIndexedComparison(source sqlSource, field, operator string, value interface{}, resolver SQLSourceResolver) ([]SQLRow, bool, error) {
+func resolveSQLIndexedComparison(source sqlSource, field, operator string, value interface{}, resolver SQLSourceResolver, cluster string) ([]SQLRow, bool, error) {
 	if operator == "=" {
 		if source.kind == "EXTERNAL" {
 			lookup, ok := resolver.(LookupSourceResolver)
@@ -14917,11 +14919,21 @@ func resolveSQLIndexedComparison(source sqlSource, field, operator string, value
 			}
 			return lookup.ResolveSQLLookupSource(source.kind, source.key, field, value)
 		}
+		if cluster = strings.TrimSpace(cluster); cluster != "" {
+			if indexed, ok := resolver.(ClusterIndexedSourceResolver); ok {
+				return indexed.ResolveSQLIndexedSourceInCluster(source.kind, source.key, field, cluster, value)
+			}
+		}
 		indexed, ok := resolver.(SQLIndexedSourceResolver)
 		if !ok {
 			return nil, false, nil
 		}
 		return indexed.ResolveSQLIndexedSource(source.kind, source.key, field, value)
+	}
+	if cluster = strings.TrimSpace(cluster); cluster != "" {
+		if indexed, ok := resolver.(ClusterRangeIndexedSourceResolver); ok {
+			return indexed.ResolveSQLIndexedRangeSourceInCluster(source.kind, source.key, field, operator, cluster, value)
+		}
 	}
 	indexed, ok := resolver.(SQLRangeIndexedSourceResolver)
 	if !ok {

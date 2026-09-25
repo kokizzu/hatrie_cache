@@ -1387,12 +1387,27 @@ type IndexedSourceResolver interface {
 	ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]Row, bool, error)
 }
 
+// ClusterIndexedSourceResolver optionally resolves an equality predicate
+// through an index assigned to the requested compute cluster. Returning
+// available=false lets the executor fall back to a correct source scan.
+// Resolvers that do not implement this opt-in contract retain the legacy
+// index path even when SQLQueryOptions.ComputeCluster is set.
+type ClusterIndexedSourceResolver interface {
+	ResolveSQLIndexedSourceInCluster(name, key, field, cluster string, value interface{}) ([]Row, bool, error)
+}
+
 // StrategyIndexedSourceResolver optionally resolves an equality predicate
 // through one named physical index strategy. It is consulted only when a
 // SQLIndexHint requests FORCE with a non-empty Kind; legacy resolvers continue
 // to use IndexedSourceResolver for ordinary hints.
 type StrategyIndexedSourceResolver interface {
 	ResolveSQLIndexedSourceWithStrategy(name, key, field, strategy string, value interface{}) ([]Row, bool, error)
+}
+
+// ClusterStrategyIndexedSourceResolver is the cluster-aware form of
+// StrategyIndexedSourceResolver for a named equality index.
+type ClusterStrategyIndexedSourceResolver interface {
+	ResolveSQLIndexedSourceWithStrategyInCluster(name, key, field, strategy, cluster string, value interface{}) ([]Row, bool, error)
 }
 
 // GeoIndexedSourceResolver optionally resolves GEO_WITHIN_* predicates through
@@ -1438,6 +1453,12 @@ type RangeIndexedSourceResolver interface {
 	ResolveSQLIndexedRangeSource(name, key, field, operator string, value interface{}) ([]Row, bool, error)
 }
 
+// ClusterRangeIndexedSourceResolver optionally resolves a range predicate
+// through an index assigned to the requested compute cluster.
+type ClusterRangeIndexedSourceResolver interface {
+	ResolveSQLIndexedRangeSourceInCluster(name, key, field, operator, cluster string, value interface{}) ([]Row, bool, error)
+}
+
 // TemporalValidityIndexedSourceResolver optionally resolves a literal VALID_AT
 // predicate through an interval index. Implementations may return candidates;
 // the SQL executor evaluates VALID_AT again before publishing rows.
@@ -1450,6 +1471,12 @@ type TemporalValidityIndexedSourceResolver interface {
 // kind-specific FORCE hint for non-equality predicates.
 type StrategyRangeIndexedSourceResolver interface {
 	ResolveSQLIndexedRangeSourceWithStrategy(name, key, field, strategy, operator string, value interface{}) ([]Row, bool, error)
+}
+
+// ClusterStrategyRangeIndexedSourceResolver is the cluster-aware form of
+// StrategyRangeIndexedSourceResolver for a named range index.
+type ClusterStrategyRangeIndexedSourceResolver interface {
+	ResolveSQLIndexedRangeSourceWithStrategyInCluster(name, key, field, strategy, cluster, operator string, value interface{}) ([]Row, bool, error)
 }
 
 // PrefixIndexedSourceResolver optionally resolves a simple binary-collation

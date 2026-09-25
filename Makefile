@@ -27223,3 +27223,30 @@ race-ch002-physical-part-pruning:
 .PHONY: vet-ch002-physical-part-pruning
 vet-ch002-physical-part-pruning:
 	bash ./scripts/vet-ch002-physical-part-pruning.sh
+.PHONY: test-mz023-index-placement
+test-mz023-index-placement:
+	bash ./scripts/test-mz023-index-placement.sh
+.PHONY: test-mz023-package
+test-mz023-package:
+	bash ./scripts/test-mz023-package.sh
+.PHONY: compile-mz023-all
+compile-mz023-all:
+	bash ./scripts/compile-mz023-all.sh
+.PHONY: format-mz023-index-placement
+format-mz023-index-placement:
+	bash ./scripts/format-mz023-index-placement.sh
+.PHONY: benchmark-mz023-index-placement
+benchmark-mz023-index-placement:
+	bash ./scripts/benchmark-mz023-index-placement.sh
+.PHONY: race-mz023-index-placement
+race-mz023-index-placement:
+	bash ./scripts/race-mz023-index-placement.sh
+.PHONY: vet-mz023-index-placement
+vet-mz023-index-placement:
+	bash ./scripts/vet-mz023-index-placement.sh
+.PHONY: commit-mz023-index-placement
+commit-mz023-index-placement:
+	bash ./scripts/commit-mz023-index-placement.sh
+.PHONY: push-mz023-index-placement
+push-mz023-index-placement:
+	bash ./scripts/push-mz023-index-placement.sh

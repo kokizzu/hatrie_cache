@@ -25,6 +25,10 @@ const (
 type SQLIndexHint struct {
 	Source string
 	Field  string
+	// Cluster is the optional compute cluster where the index must be served.
+	// SQLQueryOptions.ComputeCluster fills it for query execution; direct
+	// ExplainSQLIndexStrategy callers may set it explicitly.
+	Cluster string
 	// Kind optionally names one physical index strategy for FORCE or FORBID.
 	// It is matched case-insensitively and remains empty for legacy hints.
 	Kind string
@@ -36,6 +40,13 @@ type IndexHint = SQLIndexHint
 
 // IndexHintMode is the package-native name for SQLIndexHintMode.
 type IndexHintMode = SQLIndexHintMode
+
+func sqlIndexHintWithComputeCluster(hint SQLIndexHint, cluster string) SQLIndexHint {
+	if strings.TrimSpace(hint.Cluster) == "" {
+		hint.Cluster = strings.TrimSpace(cluster)
+	}
+	return hint
+}
 
 func (hint SQLIndexHint) validate() error {
 	if hint.Mode == "" && hint.Source == "" && hint.Field == "" && hint.Kind == "" {
@@ -77,7 +88,13 @@ func sqlIndexHintAllowsFields(hint SQLIndexHint, source sqlSource, fields []stri
 }
 
 func sqlIndexHintForSource(metrics *sqlExecutionMetrics, source sqlSource) SQLIndexHint {
-	if metrics == nil || !metrics.indexHint.applies(source) {
+	if metrics == nil {
+		return SQLIndexHint{}
+	}
+	if strings.TrimSpace(metrics.indexHint.Cluster) != "" && strings.TrimSpace(metrics.indexHint.Source) == "" && strings.TrimSpace(metrics.indexHint.Field) == "" {
+		return metrics.indexHint
+	}
+	if !metrics.indexHint.applies(source) {
 		return SQLIndexHint{}
 	}
 	return metrics.indexHint
@@ -115,20 +132,44 @@ func resolveSQLForcedIndex(source sqlSource, condition sqlExpr, resolver SQLSour
 	if strings.TrimSpace(hint.Kind) != "" {
 		strategy := strings.ToUpper(strings.TrimSpace(hint.Kind))
 		if operator == "=" {
-			indexed, ok := resolver.(StrategyIndexedSourceResolver)
+			var ok bool
+			if cluster := strings.TrimSpace(hint.Cluster); cluster != "" {
+				if clustered, clusteredOK := resolver.(ClusterStrategyIndexedSourceResolver); clusteredOK {
+					rows, available, err = clustered.ResolveSQLIndexedSourceWithStrategyInCluster(source.kind, source.key, hint.Field, strategy, cluster, value)
+					ok = true
+				}
+			}
+			if !ok {
+				var indexed StrategyIndexedSourceResolver
+				indexed, ok = resolver.(StrategyIndexedSourceResolver)
+				if ok {
+					rows, available, err = indexed.ResolveSQLIndexedSourceWithStrategy(source.kind, source.key, hint.Field, strategy, value)
+				}
+			}
 			if !ok {
 				return nil, false, fmt.Errorf("%w: resolver does not support strategy %q", ErrSQLIndexStrategyHintUnsupported, hint.Kind)
 			}
-			rows, available, err = indexed.ResolveSQLIndexedSourceWithStrategy(source.kind, source.key, hint.Field, strategy, value)
 		} else {
-			indexed, ok := resolver.(StrategyRangeIndexedSourceResolver)
+			var ok bool
+			if cluster := strings.TrimSpace(hint.Cluster); cluster != "" {
+				if clustered, clusteredOK := resolver.(ClusterStrategyRangeIndexedSourceResolver); clusteredOK {
+					rows, available, err = clustered.ResolveSQLIndexedRangeSourceWithStrategyInCluster(source.kind, source.key, hint.Field, strategy, cluster, operator, value)
+					ok = true
+				}
+			}
+			if !ok {
+				var indexed StrategyRangeIndexedSourceResolver
+				indexed, ok = resolver.(StrategyRangeIndexedSourceResolver)
+				if ok {
+					rows, available, err = indexed.ResolveSQLIndexedRangeSourceWithStrategy(source.kind, source.key, hint.Field, strategy, operator, value)
+				}
+			}
 			if !ok {
 				return nil, false, fmt.Errorf("%w: resolver does not support strategy %q for range predicates", ErrSQLIndexStrategyHintUnsupported, hint.Kind)
 			}
-			rows, available, err = indexed.ResolveSQLIndexedRangeSourceWithStrategy(source.kind, source.key, hint.Field, strategy, operator, value)
 		}
 	} else {
-		rows, available, err = resolveSQLIndexedComparison(source, hint.Field, operator, value, resolver)
+		rows, available, err = resolveSQLIndexedComparison(source, hint.Field, operator, value, resolver, hint.Cluster)
 	}
 	if err != nil {
 		return nil, false, err
