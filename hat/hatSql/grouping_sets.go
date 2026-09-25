@@ -198,19 +198,29 @@ func sqlRewriteGroupingIdentifierExpr(expr *sqlExpr, groupingSet, dimensions []s
 	if expr == nil {
 		return nil
 	}
-	if expr.kind == "func" && strings.EqualFold(expr.name, "GROUPING") {
-		if len(expr.args) != 1 {
-			return fmt.Errorf("GROUPING expects exactly one grouping expression")
+	if expr.kind == "func" {
+		switch {
+		case strings.EqualFold(expr.name, "GROUPING"):
+			if len(expr.args) != 1 {
+				return fmt.Errorf("GROUPING expects exactly one grouping expression")
+			}
+			if !sqlGroupingSetContains(dimensions, expr.args[0]) {
+				return fmt.Errorf("GROUPING argument must be a grouping expression")
+			}
+			value := int64(0)
+			if !sqlGroupingSetContains(groupingSet, expr.args[0]) {
+				value = 1
+			}
+			*expr = sqlExpr{kind: "literal", value: value}
+			return nil
+		case strings.EqualFold(expr.name, "GROUPING_ID"):
+			value, err := sqlGroupingIDValue(expr.args, groupingSet, dimensions)
+			if err != nil {
+				return err
+			}
+			*expr = sqlExpr{kind: "literal", value: value}
+			return nil
 		}
-		if !sqlGroupingSetContains(dimensions, expr.args[0]) {
-			return fmt.Errorf("GROUPING argument must be a grouping expression")
-		}
-		value := int64(0)
-		if !sqlGroupingSetContains(groupingSet, expr.args[0]) {
-			value = 1
-		}
-		*expr = sqlExpr{kind: "literal", value: value}
-		return nil
 	}
 	if err := sqlRewriteGroupingIdentifierExpr(expr.left, groupingSet, dimensions); err != nil {
 		return err
@@ -249,8 +259,27 @@ func sqlRewriteGroupingIdentifierExpr(expr *sqlExpr, groupingSet, dimensions []s
 	return nil
 }
 
+func sqlGroupingIDValue(arguments, groupingSet, dimensions []sqlExpr) (int64, error) {
+	if len(arguments) == 0 {
+		return 0, fmt.Errorf("GROUPING_ID expects at least one grouping expression")
+	}
+	if len(arguments) > 63 {
+		return 0, fmt.Errorf("GROUPING_ID supports at most 63 grouping expressions")
+	}
+	value := int64(0)
+	for index, argument := range arguments {
+		if !sqlGroupingSetContains(dimensions, argument) {
+			return 0, fmt.Errorf("GROUPING_ID argument must be a grouping expression")
+		}
+		if !sqlGroupingSetContains(groupingSet, argument) {
+			value |= int64(1) << uint(len(arguments)-index-1)
+		}
+	}
+	return value, nil
+}
+
 func sqlExprHasGroupingIdentifier(expr sqlExpr) bool {
-	if expr.kind == "func" && strings.EqualFold(expr.name, "GROUPING") {
+	if expr.kind == "func" && (strings.EqualFold(expr.name, "GROUPING") || strings.EqualFold(expr.name, "GROUPING_ID")) {
 		return true
 	}
 	if expr.left != nil && sqlExprHasGroupingIdentifier(*expr.left) || expr.right != nil && sqlExprHasGroupingIdentifier(*expr.right) {

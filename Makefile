@@ -27395,3 +27395,39 @@ commit-mz021-replica-hot-handoff:
 push-mz021-replica-hot-handoff:
 
 	bash ./scripts/push-mz021-replica-hot-handoff.sh
+
+test-ch041-grouping-id:
+
+	bash ./scripts/test-ch041-grouping-id.sh
+
+benchmark-ch041-grouping-id:
+
+	bash ./scripts/benchmark-ch041-grouping-id.sh
+
+format-ch041-grouping-id:
+
+	bash ./scripts/format-ch041-grouping-id.sh
+
+test-ch041-grouping-id-package:
+
+	bash ./scripts/test-ch041-grouping-id-package.sh
+
+race-ch041-grouping-id:
+
+	bash ./scripts/race-ch041-grouping-id.sh
+
+vet-ch041-grouping-id:
+
+	bash ./scripts/vet-ch041-grouping-id.sh
+
+stage-ch041-grouping-id:
+
+	bash ./scripts/stage-ch041-grouping-id.sh
+
+commit-ch041-grouping-id:
+
+	bash ./scripts/commit-ch041-grouping-id.sh
+
+push-ch041-grouping-id:
+
+	bash ./scripts/push-ch041-grouping-id.sh

@@ -13,7 +13,10 @@ This lowers parse/plan construction cost. Simple aggregate projections now also
 use a native one-pass grouping executor that scans the filtered input once and
 keeps compact aggregate state for every grouping set. Queries with richer
 semantics retain the branch-per-set executor. Multi-argument `GROUPING_ID`
-remains separate follow-up work.
+is also supported: its arguments are validated against the grouping
+dimensions and folded into the standard high-bit-first integer mask. The
+native one-pass executor computes the same mask without creating a branch
+expression for each argument.
 
 ## Measurement
 
@@ -50,3 +53,19 @@ tracking, and richer projections fall back to the existing executor.
 
 The raw samples and benchmark command are recorded in
 [BENCHMARK.md](BENCHMARK.md#ch-041-native-one-pass-grouping-sets).
+
+## Multi-argument `GROUPING_ID`
+
+`GROUPING_ID(a, b, ...)` is available in `SELECT`, `HAVING`, `ORDER BY`, and
+`LIMIT BY` expressions for `CUBE`, `ROLLUP`, and `GROUPING SETS`. Each argument
+must exactly match one of the grouping dimensions. A missing dimension sets its
+bit; the first argument is the high-order bit, matching standard SQL behavior.
+
+The focused benchmark compares one derived bitmask made from two existing
+`GROUPING` calls with the native two-argument form. Both return one bitmask
+column over the same four-row, two-dimensional `CUBE` query.
+
+| Path | Time | Bytes/op | Allocs/op | Result |
+| --- | ---: | ---: | ---: | ---: |
+| Derived `GROUPING` arithmetic | 68.779 us | 59,759 | 504 | 1.00x |
+| Native `GROUPING_ID` | 45.748 us | 53,973 | 343 | 1.50x faster, 9.7% less memory, 31.9% fewer allocations |

@@ -10,14 +10,16 @@ const (
 	sqlGroupingSetsProjectionLiteral = iota
 	sqlGroupingSetsProjectionDimension
 	sqlGroupingSetsProjectionGrouping
+	sqlGroupingSetsProjectionGroupingID
 	sqlGroupingSetsProjectionAggregate
 )
 
 type sqlGroupingSetsOnePassProjection struct {
-	kind      int
-	dimension int
-	literal   interface{}
-	aggregate sqlOrderedAggregate
+	kind       int
+	dimension  int
+	dimensions []int
+	literal    interface{}
+	aggregate  sqlOrderedAggregate
 }
 
 type sqlGroupingSetsOnePassState struct {
@@ -91,6 +93,21 @@ func sqlGroupingSetsOnePassProjections(query *sqlQuery) ([]sqlGroupingSetsOnePas
 					return nil, false
 				}
 				projections[index] = sqlGroupingSetsOnePassProjection{kind: sqlGroupingSetsProjectionGrouping, dimension: dimension}
+				continue
+			}
+			if strings.EqualFold(expression.name, "GROUPING_ID") {
+				if len(expression.args) == 0 || len(expression.args) > 63 {
+					return nil, false
+				}
+				dimensions := make([]int, len(expression.args))
+				for argumentIndex, argument := range expression.args {
+					dimension := sqlGroupingSetsOnePassDimensionIndex(query.groupingDimensions, argument)
+					if dimension < 0 {
+						return nil, false
+					}
+					dimensions[argumentIndex] = dimension
+				}
+				projections[index] = sqlGroupingSetsOnePassProjection{kind: sqlGroupingSetsProjectionGroupingID, dimensions: dimensions}
 				continue
 			}
 			aggregate, ok := sqlGroupingSetsOnePassAggregate(expression)
@@ -225,6 +242,14 @@ func executeSQLGroupingSetsOnePass(q *sqlQuery, rows []sqlExecRow, control *sqlE
 					} else {
 						row[columns[projectionIndex]] = int64(1)
 					}
+				case sqlGroupingSetsProjectionGroupingID:
+					value := int64(0)
+					for argumentIndex, dimension := range projection.dimensions {
+						if !sqlGroupingSetsOnePassContains(groupingSet, q.groupingDimensions, dimension) {
+							value |= int64(1) << uint(len(projection.dimensions)-argumentIndex-1)
+						}
+					}
+					row[columns[projectionIndex]] = value
 				case sqlGroupingSetsProjectionAggregate:
 					row[columns[projectionIndex]] = state.aggregates[projectionIndex].value()
 				}
