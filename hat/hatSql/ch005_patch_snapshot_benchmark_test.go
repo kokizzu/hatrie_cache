@@ -35,6 +35,19 @@ func BenchmarkCH005PatchState(b *testing.B) {
 			}
 		}
 	})
+	b.Run("MarshalWithManifest", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ReportMetric(float64(len(encoded)), "snapshot_bytes/op")
+		var snapshot []byte
+		b.ResetTimer()
+		for index := 0; index < b.N; index++ {
+			snapshot, _, err = source.MarshalPatchStateWithManifest()
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+		_ = snapshot
+	})
 }
 
 func ch005BenchmarkPatchTable(b *testing.B) *TypedTable {

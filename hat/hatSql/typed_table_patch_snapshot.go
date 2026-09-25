@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"hash/crc32"
 	"math/bits"
+
+	"hatrie_cache/hat/hatMerkle"
 )
 
 const (
@@ -91,6 +93,53 @@ func (table *TypedTable) MarshalPatchState() ([]byte, error) {
 		encoded = appendUint64(encoded, word)
 	}
 	return appendUint32(encoded, crc32.ChecksumIEEE(encoded)), nil
+}
+
+// MarshalPatchStateWithManifest returns one delete snapshot together with
+// immutable-part metadata that identifies the exact bytes. Counts are read
+// from that same snapshot so concurrent table mutations cannot produce a
+// descriptor for a different bitmap.
+func (table *TypedTable) MarshalPatchStateWithManifest() ([]byte, hatMerkle.PartDeleteBitmap, error) {
+	encoded, err := table.MarshalPatchState()
+	if err != nil {
+		return nil, hatMerkle.PartDeleteBitmap{}, err
+	}
+	rowCount, deletedCount, err := typedTablePatchStateCounts(encoded)
+	if err != nil {
+		return nil, hatMerkle.PartDeleteBitmap{}, err
+	}
+	bitmap, err := hatMerkle.BuildPartDeleteBitmap(encoded, uint64(rowCount), uint64(deletedCount))
+	if err != nil {
+		return nil, hatMerkle.PartDeleteBitmap{}, err
+	}
+	return encoded, bitmap, nil
+}
+
+func typedTablePatchStateCounts(encoded []byte) (uint32, uint32, error) {
+	if len(encoded) < 4 {
+		return 0, 0, fmt.Errorf("%w: snapshot is truncated", ErrTypedTablePatchStateInvalid)
+	}
+	payload := encoded[:len(encoded)-4]
+	position := 0
+	if len(payload) < len(typedTablePatchStateMagic)+4 ||
+		!bytes.Equal(payload[:len(typedTablePatchStateMagic)], []byte(typedTablePatchStateMagic)) {
+		return 0, 0, fmt.Errorf("%w: snapshot header is invalid", ErrTypedTablePatchStateInvalid)
+	}
+	position += len(typedTablePatchStateMagic) + 4
+	tableNameLength, ok := readTypedTablePatchStateUint32(payload, &position)
+	if !ok || uint64(tableNameLength) > uint64(len(payload)-position) {
+		return 0, 0, fmt.Errorf("%w: table name is truncated", ErrTypedTablePatchStateInvalid)
+	}
+	position += int(tableNameLength)
+	rowCount, ok := readTypedTablePatchStateUint32(payload, &position)
+	if !ok {
+		return 0, 0, fmt.Errorf("%w: row count is truncated", ErrTypedTablePatchStateInvalid)
+	}
+	deletedCount, ok := readTypedTablePatchStateUint32(payload, &position)
+	if !ok {
+		return 0, 0, fmt.Errorf("%w: deleted row count is truncated", ErrTypedTablePatchStateInvalid)
+	}
+	return rowCount, deletedCount, nil
 }
 
 // RestorePatchState validates and atomically installs a logical-delete

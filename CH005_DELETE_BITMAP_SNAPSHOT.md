@@ -34,8 +34,10 @@ allocations are admitted.
 The key list makes a bitmap safe to restore against a different process: a
 bitmap position is never applied to a different physical key order. Restore
 compares encoded key bytes directly while holding the table lock, avoiding one
-allocation per key. The remaining typed-table state and immutable stored-part
-manifest integration are still caller-owned and remain future work.
+allocation per key. The immutable stored-part manifest binding is now
+available through `hatMerkle.PartDeleteBitmap` and
+`PartManifest.DeleteBitmap`; automatic part discovery and cross-process storage
+orchestration remain caller-owned.
 
 ## Measurement
 
@@ -54,3 +56,30 @@ run on an AMD Ryzen 9 5950X Linux/amd64 host.
 The before values are the first implementation's key-string parsing path. The
 final path compares encoded key bytes directly. Raw samples are in
 [BENCHMARK.md](BENCHMARK.md#ch-005-delete-bitmap-state-snapshots).
+
+## Immutable-part manifest binding
+
+`TypedTable.MarshalPatchStateWithManifest` returns the exact serialized bitmap
+and a `hatMerkle.PartDeleteBitmap` containing the physical row count, deleted
+row count, and SHA-256 snapshot checksum. Attach that descriptor to an
+immutable `hatMerkle.PartManifest` without copying bitmap bytes into the part
+catalog:
+
+```go
+snapshot, bitmap, err := table.MarshalPatchStateWithManifest()
+if err != nil {
+	return err
+}
+manifest := hatMerkle.PartManifest{
+	Checksum:     hatMerkle.ChecksumPart(partBytes),
+	DeleteBitmap: &bitmap,
+}
+if err := bitmap.Verify(snapshot); err != nil {
+	return err
+}
+```
+
+`PartCatalog` persists this optional metadata in checkpoint format version 2
+and continues to restore version-1 checkpoints. The bitmap payload remains a
+separate bounded snapshot, so catalog restore does not allocate or retain row
+data. A nil descriptor preserves the legacy manifest and checkpoint path.

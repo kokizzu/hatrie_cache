@@ -37032,3 +37032,71 @@ Each sample schedules and drains 64 single-worker tasks.
 The opt-in freshness/reclaimable-space policy adds about 3.3% control-plane
 time with no measured allocation or memory increase. Details and raw samples:
 [CH025_COMPACTION_PRIORITY.md](CH025_COMPACTION_PRIORITY.md).
+
+<a id="ch-005-delete-bitmap-manifest-binding"></a>
+## CH-005 Delete Bitmap Manifest Binding
+
+`make benchmark-ch005-delete-bitmap` measures the immutable-part catalog
+checkpoint with and without an optional delete-bitmap descriptor, plus the
+typed-table helper that hashes one patch snapshot for that descriptor. Samples
+ran on Linux/amd64 with an AMD Ryzen 9 5950X, five samples per benchmark, and
+`-benchmem`.
+
+| Path | Median ns/op | B/op | Allocs/op | Wire bytes | Relative |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Catalog, no bitmap (current control) | 314.9 | 400 | 5 | 111 | 1.00x |
+| Catalog, bitmap metadata | 380.4 | 592 | 6 | 167 | 0.83x CPU; +56 wire bytes |
+| Typed-table `Marshal` | 23,369 | 32,768 | 1 | 32,768 | 1.00x |
+| Typed-table `MarshalWithManifest` | 39,414 | 32,768 | 1 | 32,768 | 0.59x CPU |
+
+The no-bitmap path keeps the existing 400 B/op and 5 allocations/op. The
+version-2 format adds one presence byte per catalog entry, while an enabled
+descriptor adds 56 bytes for row counts and the SHA-256 snapshot checksum. The
+SQL helper does not allocate another snapshot; its extra cost is the checksum
+hash, measured at about 1.69x CPU in this fixture. This is a durability and
+integrity feature, not a query-speed optimization.
+
+Raw pre-change catalog output:
+
+```text
+BenchmarkCH005PartCatalogWithoutDeleteBitmap-32 833833 2102 ns/op 400 B/op 5 allocs/op
+BenchmarkCH005PartCatalogWithoutDeleteBitmap-32 3219735 485.8 ns/op 400 B/op 5 allocs/op
+BenchmarkCH005PartCatalogWithoutDeleteBitmap-32 3223922 424.2 ns/op 400 B/op 5 allocs/op
+BenchmarkCH005PartCatalogWithoutDeleteBitmap-32 3094939 350.5 ns/op 400 B/op 5 allocs/op
+BenchmarkCH005PartCatalogWithoutDeleteBitmap-32 3654145 317.5 ns/op 400 B/op 5 allocs/op
+```
+
+Raw final catalog output:
+
+```text
+BenchmarkCH005PartCatalogWithoutDeleteBitmap-32 3648873 326.6 ns/op 111.0 checkpoint_bytes/op 400 B/op 5 allocs/op
+BenchmarkCH005PartCatalogWithoutDeleteBitmap-32 3933351 314.9 ns/op 111.0 checkpoint_bytes/op 400 B/op 5 allocs/op
+BenchmarkCH005PartCatalogWithoutDeleteBitmap-32 3875755 309.7 ns/op 111.0 checkpoint_bytes/op 400 B/op 5 allocs/op
+BenchmarkCH005PartCatalogWithoutDeleteBitmap-32 3894178 308.7 ns/op 111.0 checkpoint_bytes/op 400 B/op 5 allocs/op
+BenchmarkCH005PartCatalogWithoutDeleteBitmap-32 3704674 339.7 ns/op 111.0 checkpoint_bytes/op 400 B/op 5 allocs/op
+BenchmarkCH005PartCatalogWithDeleteBitmap-32 2957829 394.0 ns/op 167.0 checkpoint_bytes/op 592 B/op 6 allocs/op
+BenchmarkCH005PartCatalogWithDeleteBitmap-32 3127252 376.8 ns/op 167.0 checkpoint_bytes/op 592 B/op 6 allocs/op
+BenchmarkCH005PartCatalogWithDeleteBitmap-32 3145520 380.4 ns/op 167.0 checkpoint_bytes/op 592 B/op 6 allocs/op
+BenchmarkCH005PartCatalogWithDeleteBitmap-32 3107646 388.0 ns/op 167.0 checkpoint_bytes/op 592 B/op 6 allocs/op
+BenchmarkCH005PartCatalogWithDeleteBitmap-32 3139422 378.6 ns/op 167.0 checkpoint_bytes/op 592 B/op 6 allocs/op
+```
+
+Raw final typed-table output:
+
+```text
+BenchmarkCH005PatchState/Marshal-32 49792 23001 ns/op 32768 B/op 1 allocs/op
+BenchmarkCH005PatchState/Marshal-32 52986 23369 ns/op 32768 B/op 1 allocs/op
+BenchmarkCH005PatchState/Marshal-32 45790 24538 ns/op 32768 B/op 1 allocs/op
+BenchmarkCH005PatchState/Marshal-32 48855 23725 ns/op 32768 B/op 1 allocs/op
+BenchmarkCH005PatchState/Marshal-32 51876 23111 ns/op 32768 B/op 1 allocs/op
+BenchmarkCH005PatchState/MarshalWithManifest-32 30298 39556 ns/op 32768 B/op 1 allocs/op
+BenchmarkCH005PatchState/MarshalWithManifest-32 29874 40000 ns/op 32768 B/op 1 allocs/op
+BenchmarkCH005PatchState/MarshalWithManifest-32 30310 39049 ns/op 32768 B/op 1 allocs/op
+BenchmarkCH005PatchState/MarshalWithManifest-32 30968 39095 ns/op 32768 B/op 1 allocs/op
+BenchmarkCH005PatchState/MarshalWithManifest-32 30315 39414 ns/op 32768 B/op 1 allocs/op
+```
+
+The enabled metadata path is opt-in; nil metadata preserves the legacy
+checkpoint semantics. Version-1 checkpoints remain readable. Reproduce with
+`make benchmark-ch005-delete-bitmap-baseline` before the feature revision and
+`make benchmark-ch005-delete-bitmap` after it.

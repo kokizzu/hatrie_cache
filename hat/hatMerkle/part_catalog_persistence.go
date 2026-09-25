@@ -12,7 +12,8 @@ import (
 )
 
 const (
-	partCatalogPersistenceVersion        uint16 = 1
+	partCatalogPersistenceVersion        uint16 = 2
+	partCatalogPersistenceLegacyVersion  uint16 = 1
 	partCatalogPersistenceHeaderBytes           = 16
 	partCatalogPersistenceMaxBytes              = 64 << 20
 	partCatalogPersistenceMaxEntries            = 100_000
@@ -43,8 +44,15 @@ func (catalog *PartCatalog) MarshalBinary() ([]byte, error) {
 	if len(active)+len(quarantined) > partCatalogPersistenceMaxEntries {
 		return nil, partCatalogPersistenceError("entry count exceeds %d", partCatalogPersistenceMaxEntries)
 	}
+	capacity := 32 + (len(active)+len(quarantined))*96
+	for _, entry := range active {
+		capacity += partCatalogPersistenceEntryCapacity(entry)
+	}
+	for _, entry := range quarantined {
+		capacity += partCatalogPersistenceEntryCapacity(entry)
+	}
 	encoder := partCatalogPersistenceEncoder{
-		data: make([]byte, 0, 32+len(active)*96+len(quarantined)*96),
+		data: make([]byte, 0, capacity),
 	}
 	if err := encoder.putUint64(generation); err != nil {
 		return nil, err
@@ -68,6 +76,13 @@ func (catalog *PartCatalog) MarshalBinary() ([]byte, error) {
 	return wrapPartCatalogPersistencePayload(encoder.data)
 }
 
+func partCatalogPersistenceEntryCapacity(entry PartCatalogEntry) int {
+	if entry.Manifest.DeleteBitmap != nil {
+		return 1 + 16 + partChecksumWireBytes
+	}
+	return 0
+}
+
 // RestorePartCatalog constructs a catalog from a validated binary checkpoint.
 // The supplied options control the new catalog's future capacity; the
 // checkpoint itself is never allowed to exceed the persistence bounds.
@@ -75,7 +90,7 @@ func RestorePartCatalog(data []byte, options PartCatalogOptions) (*PartCatalog, 
 	if len(data) < partCatalogPersistenceHeaderBytes || len(data) > partCatalogPersistenceMaxBytes {
 		return nil, partCatalogPersistenceError("checkpoint size is outside bounds")
 	}
-	payload, err := unwrapPartCatalogPersistencePayload(data)
+	payload, version, err := unwrapPartCatalogPersistencePayload(data)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +120,7 @@ func RestorePartCatalog(data []byte, options PartCatalogOptions) (*PartCatalog, 
 	active := make(map[string]PartCatalogEntry, activeCount)
 	quarantined := make(map[string]PartCatalogEntry, quarantinedCount)
 	for index := 0; index < activeCount; index++ {
-		entry, err := decoder.entry(generation)
+		entry, err := decoder.entry(generation, version >= partCatalogPersistenceVersion)
 		if err != nil {
 			return nil, err
 		}
@@ -115,7 +130,7 @@ func RestorePartCatalog(data []byte, options PartCatalogOptions) (*PartCatalog, 
 		active[entry.Name] = entry
 	}
 	for index := 0; index < quarantinedCount; index++ {
-		entry, err := decoder.entry(generation)
+		entry, err := decoder.entry(generation, version >= partCatalogPersistenceVersion)
 		if err != nil {
 			return nil, err
 		}
@@ -261,7 +276,19 @@ func (encoder *partCatalogPersistenceEncoder) putEntry(entry PartCatalogEntry) e
 			return err
 		}
 	}
-	return nil
+	if entry.Manifest.DeleteBitmap == nil {
+		return encoder.putByte(0)
+	}
+	if err := encoder.putByte(1); err != nil {
+		return err
+	}
+	if err := encoder.putUint64(entry.Manifest.DeleteBitmap.RowCount); err != nil {
+		return err
+	}
+	if err := encoder.putUint64(entry.Manifest.DeleteBitmap.DeletedCount); err != nil {
+		return err
+	}
+	return encoder.putChecksum(entry.Manifest.DeleteBitmap.Snapshot)
 }
 
 func (encoder *partCatalogPersistenceEncoder) putChecksum(checksum PartChecksum) error {
@@ -291,6 +318,10 @@ func (encoder *partCatalogPersistenceEncoder) putUint32(value uint32) error {
 	var data [4]byte
 	binary.LittleEndian.PutUint32(data[:], value)
 	return encoder.putBytes(data[:])
+}
+
+func (encoder *partCatalogPersistenceEncoder) putByte(value byte) error {
+	return encoder.putBytes([]byte{value})
 }
 
 func (encoder *partCatalogPersistenceEncoder) putBytes(data []byte) error {
@@ -329,6 +360,14 @@ func (decoder *partCatalogPersistenceDecoder) uint32() (uint32, error) {
 		return 0, err
 	}
 	return binary.LittleEndian.Uint32(data), nil
+}
+
+func (decoder *partCatalogPersistenceDecoder) byte() (byte, error) {
+	data, err := decoder.bytes(1)
+	if err != nil {
+		return 0, err
+	}
+	return data[0], nil
 }
 
 func (decoder *partCatalogPersistenceDecoder) count() (int, error) {
@@ -372,7 +411,7 @@ func (decoder *partCatalogPersistenceDecoder) checksum() (PartChecksum, error) {
 	return checksum, nil
 }
 
-func (decoder *partCatalogPersistenceDecoder) entry(catalogGeneration uint64) (PartCatalogEntry, error) {
+func (decoder *partCatalogPersistenceDecoder) entry(catalogGeneration uint64, includeDeleteBitmap bool) (PartCatalogEntry, error) {
 	name, err := decoder.string()
 	if err != nil {
 		return PartCatalogEntry{}, err
@@ -426,6 +465,31 @@ func (decoder *partCatalogPersistenceDecoder) entry(catalogGeneration uint64) (P
 			Checksum: columnChecksum,
 		}
 	}
+	if includeDeleteBitmap {
+		present, err := decoder.byte()
+		if err != nil {
+			return PartCatalogEntry{}, err
+		}
+		if present > 1 {
+			return PartCatalogEntry{}, partCatalogPersistenceError("delete bitmap flag is invalid")
+		}
+		if present == 1 {
+			rowCount, err := decoder.uint64()
+			if err != nil {
+				return PartCatalogEntry{}, err
+			}
+			deletedCount, err := decoder.uint64()
+			if err != nil {
+				return PartCatalogEntry{}, err
+			}
+			snapshot, err := decoder.checksum()
+			if err != nil {
+				return PartCatalogEntry{}, err
+			}
+			bitmap := PartDeleteBitmap{RowCount: rowCount, DeletedCount: deletedCount, Snapshot: snapshot}
+			entry.Manifest.DeleteBitmap = &bitmap
+		}
+	}
 	if generation == 0 || generation > catalogGeneration {
 		return PartCatalogEntry{}, partCatalogPersistenceError("entry generation is outside catalog generation")
 	}
@@ -451,6 +515,11 @@ func validatePartCatalogPersistenceEntry(entry PartCatalogEntry) error {
 	}
 	if len(entry.Manifest.Columns) > partCatalogPersistenceMaxColumns {
 		return partCatalogPersistenceError("column count exceeds %d", partCatalogPersistenceMaxColumns)
+	}
+	if entry.Manifest.DeleteBitmap != nil {
+		if err := entry.Manifest.DeleteBitmap.Validate(); err != nil {
+			return err
+		}
 	}
 	partSize := entry.Manifest.Checksum.Size
 	for index, column := range entry.Manifest.Columns {
@@ -496,25 +565,26 @@ func wrapPartCatalogPersistencePayload(payload []byte) ([]byte, error) {
 	return data, nil
 }
 
-func unwrapPartCatalogPersistencePayload(data []byte) ([]byte, error) {
+func unwrapPartCatalogPersistencePayload(data []byte) ([]byte, uint16, error) {
 	if string(data[:4]) != string(partCatalogPersistenceMagic[:]) {
-		return nil, partCatalogPersistenceError("magic is invalid")
+		return nil, 0, partCatalogPersistenceError("magic is invalid")
 	}
-	if binary.LittleEndian.Uint16(data[4:6]) != partCatalogPersistenceVersion {
-		return nil, partCatalogPersistenceError("version is unsupported")
+	version := binary.LittleEndian.Uint16(data[4:6])
+	if version != partCatalogPersistenceLegacyVersion && version != partCatalogPersistenceVersion {
+		return nil, 0, partCatalogPersistenceError("version is unsupported")
 	}
 	if binary.LittleEndian.Uint16(data[6:8]) != 0 {
-		return nil, partCatalogPersistenceError("flags are unsupported")
+		return nil, 0, partCatalogPersistenceError("flags are unsupported")
 	}
 	payloadLength := binary.LittleEndian.Uint32(data[8:12])
 	if uint64(payloadLength) != uint64(len(data)-partCatalogPersistenceHeaderBytes) {
-		return nil, partCatalogPersistenceError("payload length does not match file length")
+		return nil, 0, partCatalogPersistenceError("payload length does not match file length")
 	}
 	payload := data[partCatalogPersistenceHeaderBytes:]
 	if crc32.Checksum(payload, partCatalogPersistenceCRC32CTable) != binary.LittleEndian.Uint32(data[12:16]) {
-		return nil, partCatalogPersistenceError("payload checksum mismatch")
+		return nil, 0, partCatalogPersistenceError("payload checksum mismatch")
 	}
-	return payload, nil
+	return payload, version, nil
 }
 
 func partCatalogPersistenceError(format string, arguments ...any) error {

@@ -309,6 +309,11 @@ func normalizePartCatalogEntry(entry PartCatalogEntry) (PartCatalogEntry, error)
 	if err != nil {
 		return PartCatalogEntry{}, err
 	}
+	if entry.Manifest.DeleteBitmap != nil {
+		if err := entry.Manifest.DeleteBitmap.Validate(); err != nil {
+			return PartCatalogEntry{}, err
+		}
+	}
 	entry.Name = name
 	return entry, nil
 }
@@ -324,6 +329,10 @@ func normalizePartCatalogName(name string) (string, error) {
 func clonePartCatalogEntry(entry PartCatalogEntry) PartCatalogEntry {
 	if entry.Manifest.Columns != nil {
 		entry.Manifest.Columns = append([]PartColumnChecksum(nil), entry.Manifest.Columns...)
+	}
+	if entry.Manifest.DeleteBitmap != nil {
+		bitmap := *entry.Manifest.DeleteBitmap
+		entry.Manifest.DeleteBitmap = &bitmap
 	}
 	return entry
 }

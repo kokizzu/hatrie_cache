@@ -26620,3 +26620,34 @@ commit-ch025-priority:
 
 push-ch025-priority:
 	bash ./scripts/push-ch025-priority.sh
+
+.PHONY: test-ch005-delete-bitmap
+test-ch005-delete-bitmap:
+	bash ./scripts/test-ch005-delete-bitmap.sh
+.PHONY: benchmark-ch005-delete-bitmap-baseline
+benchmark-ch005-delete-bitmap-baseline:
+	bash ./scripts/benchmark-ch005-delete-bitmap-baseline.sh
+.PHONY: format-ch005-delete-bitmap
+format-ch005-delete-bitmap:
+	bash ./scripts/format-ch005-delete-bitmap.sh
+.PHONY: test-ch005-delete-bitmap-package
+test-ch005-delete-bitmap-package:
+	bash ./scripts/test-ch005-delete-bitmap-package.sh
+.PHONY: benchmark-ch005-delete-bitmap
+benchmark-ch005-delete-bitmap:
+	bash ./scripts/benchmark-ch005-delete-bitmap.sh
+.PHONY: race-ch005-delete-bitmap
+race-ch005-delete-bitmap:
+	bash ./scripts/race-ch005-delete-bitmap.sh
+.PHONY: vet-ch005-delete-bitmap
+vet-ch005-delete-bitmap:
+	bash ./scripts/vet-ch005-delete-bitmap.sh
+.PHONY: stage-ch005-delete-bitmap
+stage-ch005-delete-bitmap:
+	bash ./scripts/stage-ch005-delete-bitmap.sh
+.PHONY: commit-ch005-delete-bitmap
+commit-ch005-delete-bitmap:
+	bash ./scripts/commit-ch005-delete-bitmap.sh
+.PHONY: push-ch005-delete-bitmap
+push-ch005-delete-bitmap:
+	bash ./scripts/push-ch005-delete-bitmap.sh

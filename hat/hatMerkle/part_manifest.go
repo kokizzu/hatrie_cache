@@ -33,8 +33,9 @@ type PartColumnChecksum struct {
 // A cache can compare manifests with Equal before reusing an entry, then call
 // Validate when bytes have entered or may have changed in local storage.
 type PartManifest struct {
-	Checksum PartChecksum
-	Columns  []PartColumnChecksum
+	Checksum     PartChecksum
+	Columns      []PartColumnChecksum
+	DeleteBitmap *PartDeleteBitmap
 }
 
 // BuildPartManifest computes a whole-part checksum and independent checksums
@@ -68,6 +69,9 @@ func (manifest PartManifest) Equal(other PartManifest) bool {
 	if manifest.Checksum != other.Checksum || len(manifest.Columns) != len(other.Columns) {
 		return false
 	}
+	if !equalPartDeleteBitmap(manifest.DeleteBitmap, other.DeleteBitmap) {
+		return false
+	}
 	for index, column := range manifest.Columns {
 		if column != other.Columns[index] {
 			return false
@@ -80,6 +84,11 @@ func (manifest PartManifest) Equal(other PartManifest) bool {
 // bytes are reused. The whole-part check catches changes outside the recorded
 // columns; the column checks identify a corrupted or mismatched column.
 func (manifest PartManifest) Validate(data []byte) error {
+	if manifest.DeleteBitmap != nil {
+		if err := manifest.DeleteBitmap.Validate(); err != nil {
+			return err
+		}
+	}
 	if err := validatePartColumnChecksums(len(data), manifest.Columns); err != nil {
 		return err
 	}
@@ -94,6 +103,13 @@ func (manifest PartManifest) Validate(data []byte) error {
 		}
 	}
 	return nil
+}
+
+func equalPartDeleteBitmap(left, right *PartDeleteBitmap) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
 }
 
 func validatePartColumnRanges(dataSize int, columns []PartColumnRange) error {
