@@ -3,6 +3,7 @@ package hatSql
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -168,6 +169,51 @@ func TestSQLMutationDependencyQueueClosedOperations(t *testing.T) {
 	}
 	if err := queue.Add(SQLMutationTask{ID: "load"}); !errors.Is(err, ErrSQLMutationDependencyQueueClosed) {
 		t.Fatalf("Add() after close error = %v, want closed", err)
+	}
+}
+
+func TestSQLMutationDependencyQueueExclusiveLease(t *testing.T) {
+	const helperEnvironment = "HATRIE_SQL_MUTATION_QUEUE_LEASE_HELPER"
+	if os.Getenv(helperEnvironment) == "1" {
+		path := os.Getenv("HATRIE_SQL_MUTATION_QUEUE_LEASE_PATH")
+		queue, err := OpenSQLMutationDependencyQueueWithOptions(path, 4, SQLMutationDependencyQueueOptions{ExclusiveLease: true})
+		if !errors.Is(err, ErrSQLMutationDependencyQueueLeaseHeld) {
+			t.Fatalf("child lease acquisition error = %v, want ErrSQLMutationDependencyQueueLeaseHeld", err)
+		}
+		if queue != nil {
+			t.Fatal("child lease acquisition returned a queue while lease was held")
+		}
+		return
+	}
+
+	path := filepath.Join(t.TempDir(), "mutations.log")
+	options := SQLMutationDependencyQueueOptions{ExclusiveLease: true}
+	queue, err := OpenSQLMutationDependencyQueueWithOptions(path, 4, options)
+	if errors.Is(err, ErrSQLMutationDependencyQueueLeaseUnsupported) {
+		t.Skipf("exclusive queue leases are unsupported: %v", err)
+	}
+	if err != nil {
+		t.Fatalf("open leased queue error = %v", err)
+	}
+
+	child := exec.Command(os.Args[0], "-test.run=^TestSQLMutationDependencyQueueExclusiveLease$", "-test.count=1")
+	child.Env = append(os.Environ(),
+		helperEnvironment+"=1",
+		"HATRIE_SQL_MUTATION_QUEUE_LEASE_PATH="+path,
+	)
+	if output, err := child.CombinedOutput(); err != nil {
+		t.Fatalf("child lease contention error = %v, output = %s", err, output)
+	}
+
+	if err := queue.Close(); err != nil {
+		t.Fatalf("close leased queue error = %v", err)
+	}
+	reopened, err := OpenSQLMutationDependencyQueueWithOptions(path, 4, options)
+	if err != nil {
+		t.Fatalf("reopen leased queue after release error = %v", err)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatalf("close reopened leased queue error = %v", err)
 	}
 }
 

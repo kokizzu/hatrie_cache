@@ -26651,3 +26651,14 @@ commit-ch005-delete-bitmap:
 .PHONY: push-ch005-delete-bitmap
 push-ch005-delete-bitmap:
 	bash ./scripts/push-ch005-delete-bitmap.sh
+.PHONY: test-ch006-durable-queue-package
+test-ch006-durable-queue-package:
+	bash ./scripts/test-ch006-durable-queue-package.sh
+
+.PHONY: race-ch006-durable-queue
+race-ch006-durable-queue:
+	bash ./scripts/race-ch006-durable-queue.sh
+
+.PHONY: vet-ch006-durable-queue
+vet-ch006-durable-queue:
+	bash ./scripts/vet-ch006-durable-queue.sh

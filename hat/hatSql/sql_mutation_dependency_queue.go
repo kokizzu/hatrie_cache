@@ -39,7 +39,20 @@ var (
 	ErrSQLMutationDependencyQueuePath = errors.New("SQL mutation dependency queue path is invalid")
 	// ErrSQLMutationDependencyQueueCorrupt reports invalid durable bytes.
 	ErrSQLMutationDependencyQueueCorrupt = errors.New("SQL mutation dependency queue log is corrupt")
+	// ErrSQLMutationDependencyQueueLeaseHeld reports another process owning the optional lease.
+	ErrSQLMutationDependencyQueueLeaseHeld = errors.New("SQL mutation dependency queue lease is held")
+	// ErrSQLMutationDependencyQueueLeaseUnsupported reports a platform without advisory file locks.
+	ErrSQLMutationDependencyQueueLeaseUnsupported = errors.New("SQL mutation dependency queue leases are unsupported on this platform")
 )
+
+// SQLMutationDependencyQueueOptions controls optional queue coordination.
+// The zero value preserves the original single-process queue behavior.
+type SQLMutationDependencyQueueOptions struct {
+	// ExclusiveLease acquires a non-blocking process-lifetime lease on
+	// path+".lock". It prevents multiple processes from replaying or appending
+	// the same journal concurrently. The lease is local-filesystem scoped.
+	ExclusiveLease bool
+}
 
 // SQLMutationDependencyQueue is a durable, dependency-aware mutation queue.
 // Every successful transition is written to a CRC-protected binary log and
@@ -52,6 +65,7 @@ type SQLMutationDependencyQueue struct {
 	mu           sync.Mutex
 	path         string
 	file         *os.File
+	leaseFile    *os.File
 	graph        *SQLMutationDependencyGraph
 	nextSequence uint64
 	closed       bool
@@ -60,6 +74,12 @@ type SQLMutationDependencyQueue struct {
 // OpenSQLMutationDependencyQueue opens or creates a queue log with mode 0600.
 // A zero maxTasks uses DefaultSQLMutationDependencyGraphMaxTasks.
 func OpenSQLMutationDependencyQueue(path string, maxTasks int) (*SQLMutationDependencyQueue, error) {
+	return OpenSQLMutationDependencyQueueWithOptions(path, maxTasks, SQLMutationDependencyQueueOptions{})
+}
+
+// OpenSQLMutationDependencyQueueWithOptions opens a queue with optional
+// process-level exclusion. The lock file is stable across journal compaction.
+func OpenSQLMutationDependencyQueueWithOptions(path string, maxTasks int, options SQLMutationDependencyQueueOptions) (*SQLMutationDependencyQueue, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return nil, ErrSQLMutationDependencyQueuePath
@@ -68,14 +88,35 @@ func OpenSQLMutationDependencyQueue(path string, maxTasks int) (*SQLMutationDepe
 	if err != nil {
 		return nil, err
 	}
+	var leaseFile *os.File
+	if options.ExclusiveLease {
+		leasePath := path + ".lock"
+		leaseFile, err = os.OpenFile(leasePath, os.O_RDWR|os.O_CREATE, 0o600)
+		if err != nil {
+			return nil, fmt.Errorf("open mutation dependency queue lease: %w", err)
+		}
+		if !sqlMutationDependencyQueueLeaseSupported() {
+			_ = leaseFile.Close()
+			return nil, ErrSQLMutationDependencyQueueLeaseUnsupported
+		}
+		if err := lockSQLMutationDependencyQueueLease(leaseFile); err != nil {
+			_ = leaseFile.Close()
+			if sqlMutationDependencyQueueLeaseHeld(err) {
+				return nil, fmt.Errorf("%w: %s", ErrSQLMutationDependencyQueueLeaseHeld, leasePath)
+			}
+			return nil, fmt.Errorf("acquire mutation dependency queue lease: %w", err)
+		}
+	}
 	file, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0o600)
 	if err != nil {
+		_ = releaseSQLMutationDependencyQueueLease(leaseFile)
 		return nil, fmt.Errorf("open mutation dependency queue: %w", err)
 	}
-	queue := &SQLMutationDependencyQueue{path: path, file: file, graph: graph}
+	queue := &SQLMutationDependencyQueue{path: path, file: file, leaseFile: leaseFile, graph: graph}
 	sequence, replayErr := replaySQLMutationDependencyQueue(file, graph)
 	if replayErr != nil {
 		_ = file.Close()
+		_ = releaseSQLMutationDependencyQueueLease(leaseFile)
 		return nil, replayErr
 	}
 	queue.nextSequence = sequence
@@ -338,10 +379,9 @@ func (queue *SQLMutationDependencyQueue) Close() error {
 	queue.closed = true
 	syncErr := queue.file.Sync()
 	closeErr := queue.file.Close()
-	if syncErr != nil {
-		return syncErr
-	}
-	return closeErr
+	leaseErr := releaseSQLMutationDependencyQueueLease(queue.leaseFile)
+	queue.leaseFile = nil
+	return errors.Join(syncErr, closeErr, leaseErr)
 }
 
 func (queue *SQLMutationDependencyQueue) ensureOpenLocked() error {
@@ -352,6 +392,13 @@ func (queue *SQLMutationDependencyQueue) ensureOpenLocked() error {
 		return ErrSQLMutationDependencyQueueClosed
 	}
 	return nil
+}
+
+func releaseSQLMutationDependencyQueueLease(file *os.File) error {
+	if file == nil {
+		return nil
+	}
+	return errors.Join(unlockSQLMutationDependencyQueueLease(file), file.Close())
 }
 
 func (queue *SQLMutationDependencyQueue) appendAndApplyLocked(operation byte, payload []byte, apply func() error) error {

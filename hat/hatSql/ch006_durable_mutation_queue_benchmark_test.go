@@ -54,6 +54,37 @@ func BenchmarkSQLMutationDependencyQueueOpenReplay(b *testing.B) {
 	}
 }
 
+func BenchmarkSQLMutationDependencyQueueOpenReplayExclusiveLease(b *testing.B) {
+	path := filepath.Join(b.TempDir(), "mutations.log")
+	options := SQLMutationDependencyQueueOptions{ExclusiveLease: true}
+	queue, err := OpenSQLMutationDependencyQueueWithOptions(path, 512, options)
+	if err != nil {
+		b.Fatal(err)
+	}
+	for index := 0; index < 256; index++ {
+		if err := queue.Add(SQLMutationTask{ID: mutationDependencyBenchmarkID(index)}); err != nil {
+			b.Fatal(err)
+		}
+	}
+	if err := queue.Close(); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		queue, err := OpenSQLMutationDependencyQueueWithOptions(path, 512, options)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(queue.Snapshot()) != 256 {
+			b.Fatal("replayed exclusive queue has unexpected task count")
+		}
+		if err := queue.Close(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func newSQLMutationDependencyQueueBenchmarkFixture(b *testing.B, taskCount int) *SQLMutationDependencyQueue {
 	b.Helper()
 	path := filepath.Join(b.TempDir(), "mutations.log")

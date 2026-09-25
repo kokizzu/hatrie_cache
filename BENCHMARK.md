@@ -37100,3 +37100,20 @@ The enabled metadata path is opt-in; nil metadata preserves the legacy
 checkpoint semantics. Version-1 checkpoints remain readable. Reproduce with
 `make benchmark-ch005-delete-bitmap-baseline` before the feature revision and
 `make benchmark-ch005-delete-bitmap` after it.
+## CH-006: Optional Cross-Process Mutation Queue Lease
+
+Command: `make benchmark-ch006-durable-queue`.
+
+The existing default queue path remains unchanged. The opt-in lease adds one
+stable `.lock` file acquisition at open and release at close; it does not add a
+lock syscall to each mutation transition.
+
+| Benchmark | Median ns/op | B/op | allocs/op | Notes |
+| --- | ---: | ---: | ---: | --- |
+| Default open/replay (256 tasks) | 1,315,875 | 131,544 | 1,584 | Existing path |
+| Exclusive-lease open/replay (256 tasks) | 1,241,615 | 131,885 | 1,588 | Opt-in local `flock` |
+| Lease delta | inconclusive in this run | +341 | +4 | CPU samples overlap; no default-path cost |
+
+The lease is therefore a correctness/coordination feature, not a throughput
+optimization. It is supported on local Unix filesystems and reports an
+explicit unsupported error on other platforms.

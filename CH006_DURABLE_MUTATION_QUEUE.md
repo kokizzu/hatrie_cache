@@ -80,7 +80,28 @@ path. Restart replay of 256 added tasks measured a median 1,073,066 ns/op,
 
 Use the in-memory graph for throughput-first scheduling and the durable queue
 when restart safety is worth the sync cost. Automatic SQL mutation integration,
-replication, and cross-process lease ownership remain future work.
+replication, and automatic SQL mutation wiring remain future work.
+
+## Optional cross-process lease
+
+The default constructor remains single-process compatible. When more than one
+process may open the same journal, opt into a non-blocking local-filesystem
+lease:
+
+```go
+queue, err := hatSql.OpenSQLMutationDependencyQueueWithOptions(
+    "/var/lib/app/mutations.log",
+    4096,
+    hatSql.SQLMutationDependencyQueueOptions{ExclusiveLease: true},
+)
+```
+
+The queue holds an advisory exclusive lock on
+`/var/lib/app/mutations.log.lock` until `Close` or process exit. A competing
+open returns `ErrSQLMutationDependencyQueueLeaseHeld`; the lock is stable while
+`Compact` replaces the journal. This is local-filesystem process exclusion,
+not a network lease, timeout, or fencing-token protocol, so distributed
+ownership and automatic SQL `ALTER`/`DELETE` scheduling remain future work.
 
 See [BENCHMARK.md](BENCHMARK.md#ch-006-durable-mutation-dependency-queue) for
 raw samples and the exact command.
