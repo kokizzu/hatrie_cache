@@ -26558,3 +26558,29 @@ commit-ch021-tiered-read:
 
 push-ch021-tiered-read:
 	@bash scripts/push-ch021-tiered-read.sh
+.PHONY: benchmark-ch020-registry test-ch020-registry format-ch020-registry
+benchmark-ch020-registry:
+	@bash scripts/benchmark-ch020-registry.sh
+
+test-ch020-registry:
+	@bash scripts/test-ch020-registry.sh
+
+format-ch020-registry:
+	@bash scripts/format-ch020-registry.sh
+.PHONY: race-ch020-registry vet-ch020-registry
+
+race-ch020-registry:
+	bash ./scripts/race-ch020-registry.sh
+
+vet-ch020-registry:
+	bash ./scripts/vet-ch020-registry.sh
+.PHONY: stage-ch020-registry commit-ch020-registry push-ch020-registry
+
+stage-ch020-registry:
+	bash ./scripts/stage-ch020-registry.sh
+
+commit-ch020-registry:
+	bash ./scripts/commit-ch020-registry.sh
+
+push-ch020-registry:
+	bash ./scripts/push-ch020-registry.sh
