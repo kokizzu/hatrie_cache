@@ -249,6 +249,7 @@ name.
 - [x] C148a Immutable-part length and SHA-256 checksums.
 - [x] C149 Replication queue introspection. `ReplicationResult.Queue` exposes `QueueStats` with depth, capacity, attempts, acknowledgements, failures, dead letters, pause state, and vector-clock state; monitoring also exports the queue health metrics.
 - [x] C150 Replica lag thresholds for read routing. `ReadReplicaPolicy` enforces required frontiers and maximum lag before deterministic candidate selection; see [REPLICA_LAG_ROUTING.md](REPLICA_LAG_ROUTING.md).
+- [x] C151a Remote shard pruning. `hatSql.SQLDistributedQueryShardPruner` routes bound literal partition predicates before distributed fan-out, retains shards when metadata is unavailable, and preserves empty aggregate shape when every shard is excluded; see [CH035_REMOTE_SHARD_PRUNING.md](CH035_REMOTE_SHARD_PRUNING.md).
 - [x] C151 Read-after-write consistency levels. Implemented in
   `hat/hatReplication` with eventual, bounded-staleness, and read-after-write
   replica selection while preserving the legacy selector default.
@@ -1083,3 +1084,12 @@ assigns independent ranges across replicas with bounded concurrency, retries a
 failed range, preserves input order, and returns no partial result. Range
 discovery and SQL planner integration remain caller-owned. See
 [CH034_PARALLEL_REPLICA_RANGES.md](CH034_PARALLEL_REPLICA_RANGES.md).
+
+## CH-035 Remote Shard Pruning
+
+ClickHouse-inspired remote shard pruning is available through the opt-in
+`hatSql.SQLDistributedQueryShardPruner` contract. Bound literal partition
+predicates are extracted once before fan-out; adapters may exclude a shard only
+when they can prove it cannot match. Unsupported or unavailable metadata keeps
+the existing fan-out, and an all-pruned query still returns the correct empty
+SQL shape. See [CH035_REMOTE_SHARD_PRUNING.md](CH035_REMOTE_SHARD_PRUNING.md).

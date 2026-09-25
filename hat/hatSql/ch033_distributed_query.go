@@ -75,6 +75,13 @@ func ExecuteSQLDistributedQuery(ctx context.Context, source string, shards []SQL
 	if err != nil {
 		return SQLQueryResult{}, err
 	}
+	normalized, err = pruneSQLDistributedQueryShards(source, parameters, normalized)
+	if err != nil {
+		return SQLQueryResult{}, err
+	}
+	if len(normalized) == 0 {
+		return executeSQLDistributedQueryWithNoSelectedShards(ctx, source, parameters, queryOptions, options, maxRows)
+	}
 	if len(normalized) == 1 {
 		result, err := ExecuteSQLQueryParameters(ctx, source, normalized[0].Resolver, parameters, queryOptions)
 		if err != nil {

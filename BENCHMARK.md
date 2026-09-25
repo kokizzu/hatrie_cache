@@ -37550,3 +37550,17 @@ an AMD Ryzen 9 5950X. The default path keeps `RecordAttempts` disabled.
 
 The candidate is an opt-in latency optimization. It uses about 3.05x bytes and
 30x allocations in this fixture, so a cheap local scan should remain serial.
+## CH-035: Remote shard pruning
+
+This benchmark measures ClickHouse-inspired shard routing before distributed
+fan-out. It uses eight shards, a 1 ms delay per remote read,
+`MaxConcurrency=2`, `GOMAXPROCS=8`, five samples, and `-benchmem` on an AMD
+Ryzen 9 5950X Linux/amd64 host.
+
+| Workload | Median ns/op | Median B/op | Median allocs/op | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| All eight shards | 4,574,994 | 48,981 | 197 | control |
+| Seven shards pruned | 1,096,408 | 10,894 | 39 | 4.17x faster; 4.50x lower bytes; 5.05x fewer allocations |
+
+Raw samples and the no-pruner regression check are in
+[CH035_REMOTE_SHARD_PRUNING.md](CH035_REMOTE_SHARD_PRUNING.md).

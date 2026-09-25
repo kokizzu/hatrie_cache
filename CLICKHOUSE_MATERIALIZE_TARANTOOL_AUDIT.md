@@ -412,3 +412,12 @@ returning partial results. SQL range discovery, health policy, and planner
 wiring remain caller-owned. See
 [CH034_PARALLEL_REPLICA_RANGES.md](CH034_PARALLEL_REPLICA_RANGES.md) and
 [BENCHMARK.md](BENCHMARK.md).
+## CH-035 implementation update
+
+Remote shard pruning is implemented as the opt-in
+`hatSql.SQLDistributedQueryShardPruner` contract. The coordinator extracts
+bound literal partition predicates before distributed execution and asks each
+adapter whether it can contain a matching row. Unavailable metadata falls back
+to the original fan-out; unsafe exclusion is therefore impossible unless an
+adapter violates its contract. See [CH035_REMOTE_SHARD_PRUNING.md](CH035_REMOTE_SHARD_PRUNING.md)
+and [BENCHMARK.md](BENCHMARK.md).
