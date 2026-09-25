@@ -37019,3 +37019,16 @@ BenchmarkMZ045ArrangementMetadataCache-32       100 2399 ns/op 2768 B/op 17 allo
 BenchmarkMZ045ArrangementMetadataCache-32       100 1955 ns/op 2768 B/op 17 allocs/op
 BenchmarkMZ045ArrangementMetadataCache-32       100 2094 ns/op 2768 B/op 17 allocs/op
 ```
+## CH-025: Compaction-Pool Priority Policy
+
+Command: `make benchmark-ch025-priority` on AMD Ryzen 9 5950X, linux/amd64.
+Each sample schedules and drains 64 single-worker tasks.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative |
+| --- | ---: | ---: | ---: | ---: |
+| Explicit priority baseline | 43,353 | 29,448 | 97 | 1.00x |
+| Signal-based policy | 44,798 | 29,448 | 97 | 1.03x |
+
+The opt-in freshness/reclaimable-space policy adds about 3.3% control-plane
+time with no measured allocation or memory increase. Details and raw samples:
+[CH025_COMPACTION_PRIORITY.md](CH025_COMPACTION_PRIORITY.md).

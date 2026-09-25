@@ -26584,3 +26584,39 @@ commit-ch020-registry:
 
 push-ch020-registry:
 	bash ./scripts/push-ch020-registry.sh
+.PHONY: benchmark-ch025-priority-baseline
+
+benchmark-ch025-priority-baseline:
+	bash ./scripts/benchmark-ch025-priority-baseline.sh
+.PHONY: benchmark-ch025-priority
+
+benchmark-ch025-priority:
+	bash ./scripts/benchmark-ch025-priority.sh
+.PHONY: test-ch025-priority
+
+test-ch025-priority:
+	bash ./scripts/test-ch025-priority.sh
+.PHONY: format-ch025-priority
+
+format-ch025-priority:
+	bash ./scripts/format-ch025-priority.sh
+.PHONY: race-ch025-priority test-ch025-package vet-ch025-priority
+
+race-ch025-priority:
+	bash ./scripts/race-ch025-priority.sh
+
+test-ch025-package:
+	bash ./scripts/test-ch025-package.sh
+
+vet-ch025-priority:
+	bash ./scripts/vet-ch025-priority.sh
+.PHONY: stage-ch025-priority commit-ch025-priority push-ch025-priority
+
+stage-ch025-priority:
+	bash ./scripts/stage-ch025-priority.sh
+
+commit-ch025-priority:
+	bash ./scripts/commit-ch025-priority.sh
+
+push-ch025-priority:
+	bash ./scripts/push-ch025-priority.sh

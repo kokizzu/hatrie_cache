@@ -46,6 +46,7 @@ type CompactionSchedulerOptions struct {
 	MaxConcurrent       int
 	MaxIOBytesPerSecond uint64
 	SelectionPolicy     CompactionSelectionPolicy
+	PriorityPolicy      *CompactionPriorityPolicy
 }
 
 // CompactionRun summarizes one drain of the currently queued compaction jobs.
@@ -80,20 +81,22 @@ type CompactionScheduler struct {
 	runMu sync.Mutex
 	mu    sync.Mutex
 
-	maxConcurrent   int
-	selectionPolicy CompactionSelectionPolicy
-	pending         map[string]compactionPendingTask
-	priorityPending map[string]compactionPriorityTask
-	running         map[string]struct{}
-	now             func() time.Time
-	oldestPending   time.Time
-	oldestRunning   time.Time
-	scheduled       uint64
-	completed       uint64
-	failed          uint64
-	pendingBytes    uint64
-	runningBytes    uint64
-	ioState         *compactionSchedulerIOState
+	maxConcurrent         int
+	selectionPolicy       CompactionSelectionPolicy
+	priorityPolicy        CompactionPriorityPolicy
+	priorityPolicyEnabled bool
+	pending               map[string]compactionPendingTask
+	priorityPending       map[string]compactionPriorityTask
+	running               map[string]struct{}
+	now                   func() time.Time
+	oldestPending         time.Time
+	oldestRunning         time.Time
+	scheduled             uint64
+	completed             uint64
+	failed                uint64
+	pendingBytes          uint64
+	runningBytes          uint64
+	ioState               *compactionSchedulerIOState
 }
 
 // NewCompactionScheduler validates and creates a compaction scheduler. A zero
@@ -102,17 +105,44 @@ func NewCompactionScheduler(options CompactionSchedulerOptions) (*CompactionSche
 	if options.MaxConcurrent < 0 || options.SelectionPolicy > CompactionSelectionTimeAware {
 		return nil, ErrCompactionSchedulerOptionsInvalid
 	}
+	var priorityPolicy CompactionPriorityPolicy
+	priorityPolicyEnabled := false
+	if options.PriorityPolicy != nil {
+		if err := options.PriorityPolicy.validate(); err != nil {
+			return nil, err
+		}
+		priorityPolicy = *options.PriorityPolicy
+		priorityPolicyEnabled = true
+	}
 	if options.MaxConcurrent == 0 {
 		options.MaxConcurrent = DefaultCompactionSchedulerMaxConcurrent
 	}
 	return &CompactionScheduler{
-		maxConcurrent:   options.MaxConcurrent,
-		selectionPolicy: options.SelectionPolicy,
-		pending:         make(map[string]compactionPendingTask),
-		running:         make(map[string]struct{}),
-		now:             time.Now,
-		ioState:         newCompactionSchedulerIOState(options.MaxIOBytesPerSecond),
+		maxConcurrent:         options.MaxConcurrent,
+		selectionPolicy:       options.SelectionPolicy,
+		priorityPolicy:        priorityPolicy,
+		priorityPolicyEnabled: priorityPolicyEnabled,
+		pending:               make(map[string]compactionPendingTask),
+		running:               make(map[string]struct{}),
+		now:                   time.Now,
+		ioState:               newCompactionSchedulerIOState(options.MaxIOBytesPerSecond),
 	}, nil
+}
+
+// ScheduleWithPriorityMetrics derives an explicit priority from freshness and
+// reclaimable-space metrics. It is available only when PriorityPolicy was
+// configured at construction time.
+func (scheduler *CompactionScheduler) ScheduleWithPriorityMetrics(name string, metrics CompactionPriorityMetrics, run func(context.Context) error) (bool, error) {
+	if scheduler == nil {
+		return false, ErrCompactionSchedulerNil
+	}
+	if !scheduler.priorityPolicyEnabled {
+		return false, ErrCompactionPriorityPolicyDisabled
+	}
+	if metrics.FreshnessLag < 0 {
+		return false, ErrCompactionPriorityMetricsInvalid
+	}
+	return scheduler.ScheduleWithPriority(name, scheduler.priorityPolicy.Priority(metrics), run)
 }
 
 // Schedule requests one default-priority compaction for name. Duplicate
