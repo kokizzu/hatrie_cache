@@ -26531,3 +26531,30 @@ commit-ch030-execution-steps:
 .PHONY: push-ch030-execution-steps
 push-ch030-execution-steps:
 	@bash scripts/push-ch030-execution-steps.sh
+.PHONY: benchmark-ch021-tiered-read
+benchmark-ch021-tiered-read:
+	@bash scripts/benchmark-ch021-tiered-read.sh
+.PHONY: test-ch021-tiered-read test-ch021-package
+test-ch021-tiered-read:
+	@bash scripts/test-ch021-tiered-read.sh
+
+test-ch021-package:
+	@bash scripts/test-ch021-package.sh
+.PHONY: format-ch021-tiered-read
+format-ch021-tiered-read:
+	@bash scripts/format-ch021-tiered-read.sh
+.PHONY: race-ch021-tiered-read vet-ch021-tiered-read
+race-ch021-tiered-read:
+	@bash scripts/race-ch021-tiered-read.sh
+
+vet-ch021-tiered-read:
+	@bash scripts/vet-ch021-tiered-read.sh
+.PHONY: stage-ch021-tiered-read commit-ch021-tiered-read push-ch021-tiered-read
+stage-ch021-tiered-read:
+	@bash scripts/stage-ch021-tiered-read.sh
+
+commit-ch021-tiered-read:
+	@bash scripts/commit-ch021-tiered-read.sh
+
+push-ch021-tiered-read:
+	@bash scripts/push-ch021-tiered-read.sh
