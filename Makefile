@@ -27146,3 +27146,6 @@ test-mz001-persist-package:
 .PHONY: race-mz001-persist-shard
 race-mz001-persist-shard:
 	bash ./scripts/race-mz001-persist-shard.sh
+.PHONY: benchmark-tt008-chain
+benchmark-tt008-chain:
+	bash ./scripts/benchmark-tt008-chain.sh

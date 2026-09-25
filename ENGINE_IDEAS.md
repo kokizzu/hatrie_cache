@@ -145,7 +145,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-005 | Raft configuration state | No consensus-backed configuration and membership state machine. | High |
 | TT-006 | Hot-standby WAL catch-up | No read-only standby that continuously replays and can be promoted without restore. | High |
 | TT-007 | Snapshot-plus-WAL join | A joining node cannot hydrate from a snapshot and then apply a bounded WAL delta automatically. | High |
-| TT-008 | Incremental snapshot chains | Snapshots are not content-addressed deltas with a verified parent chain. | Medium |
+| TT-008 | Incremental snapshot chains | Adopted as opt-in `ModePebbleIncremental` content-addressed backups with durable `BackupManifestCatalog` parent validation, `PlanBackupChain`, and safe `PlanBackupRetention`; default snapshot/checkpoint modes remain unchanged. See [TT008_INCREMENTAL_SNAPSHOT_CHAINS.md](TT008_INCREMENTAL_SNAPSHOT_CHAINS.md) and [BENCHMARK.md](BENCHMARK.md#tt-008-incremental-snapshot-chains). | Medium |
 | TT-009 | Backup manifest checksums | Implemented: backup manifests record per-file sizes and SHA-256 hashes, and restore/doctor verification checks them before publication. | Low |
 | TT-010 | Selective space backup | Partially adopted: snapshot bundles accept explicit logical key-prefix scope and record it in the manifest; Pebble checkpoint and incremental repository backups remain full-store only. | Medium |
 | TT-011 | Point-in-time incremental restore | Implemented as an opt-in snapshot-bundle restore through an exact committed journal sequence; default `MaxJournalSequence=0` preserves complete restore behavior. | Medium |

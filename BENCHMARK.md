@@ -37682,3 +37682,50 @@ B/op, and 70 allocs/op. Raw capped samples were
 22,962/22,662/24,301/22,308/24,212 ns/op, 5,188/5,189/5,188/5,189/5,191
 B/op, and 71 allocs/op. See
 [TT015_READ_WORKER_TUNING.md](TT015_READ_WORKER_TUNING.md).
+<a id="tt-008-incremental-snapshot-chains"></a>
+## TT-008: Incremental Snapshot Chains
+
+The existing content-addressed incremental backup path was verified together
+with its parent-chain catalog. The backup fixture contains 32 distinct 32 KiB
+files (1 MiB total) and uses an in-memory object store. Chain planning uses
+128 manifests. Values are five-sample medians on Linux amd64, AMD Ryzen 9
+5950X.
+
+### Raw samples
+
+```text
+PlanBackupChain: 110031 115780 111144 109901 106611 ns/op; 194746 194745 194748 194745 194744 B/op; 397 allocs/op
+BackupManifestCatalogAppend: 763098 739314 696670 741213 701357 ns/op; 3934 3579 3624 3694 3656 B/op; 20 allocs/op
+BackupManifestCatalogLoad: 273069 270790 275162 330347 298750 ns/op; 150593 150592 150593 150593 150592 B/op; 870 allocs/op
+PathFull: 2135005 1977981 1977435 1978877 2009742 ns/op; 1048576 payload bytes/op; 32 payload puts/op; 2719414 2719990 2719062 2719001 2721120 B/op; 1614 1614 1613 1613 1615 allocs/op
+ContentAddressedUnchanged: 1261101 1247453 1257648 1256788 1251922 ns/op; 0 payload bytes/op; 0 payload puts/op; 112096 112418 112470 112718 112502 B/op; 1182 allocs/op
+ContentAddressedNew: 2999742 3048079 2955171 2979599 2914453 ns/op; 1048576 payload bytes/op; 32 payload puts/op; 2774594 2775883 2774160 2776058 2775668 B/op; 2192 2193 2192 2193 2193 allocs/op
+```
+
+### Median comparison
+
+| Workload | ns/op | B/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Plan 128-manifest chain | 110,031 | 194,745 | 397 | Verified parent/order/retention planning |
+| Catalog append | 739,314 | 3,656 | 20 | Durable chain metadata cost |
+| Catalog load | 275,162 | 150,593 | 870 | Reload and validate chain metadata |
+| 1 MiB path-layout backup | 1,978,877 | 2,719,414 | 1,614 | 1.00x control |
+| 1 MiB content-addressed unchanged | 1,251,922 | 112,470 | 1,182 | 1.58x faster; 24.18x lower heap; 1.37x fewer allocations; zero payload writes |
+| 1 MiB content-addressed new | 2,979,599 | 2,775,668 | 2,193 | 1.51x slower; 1.02x higher heap; 1.36x more allocations; same payload writes |
+
+Unchanged content is the intended win: hashing and manifest work remain, but
+the payload is not uploaded again. New content pays the content-addressing and
+hashing overhead, so this mode is explicitly opt-in. The first backup is full,
+and retained history consumes object-store space.
+
+Commands:
+
+```text
+make test-backup-catalog-c203
+make test-ch022-incremental-part-backup-c203
+make race-backup-catalog-c203
+make vet-backup-catalog-c203
+make benchmark-backup-catalog-c203
+make benchmark-ch022-incremental-part-backup-c203
+make benchmark-tt008-chain
+```
