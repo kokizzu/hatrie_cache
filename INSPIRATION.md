@@ -728,13 +728,14 @@ explicit regional partitioning and simple backups over automatic sharding.
 
 ### Replication And Topology
 
-- [ ] T047 Synchronous replication with an explicit quorum. The public single-command path and atomic `BATCH` quorum semantics are implemented and tested through opt-in `MonitoringOptions.WriteQuorum` / `CacheGRPCOptions.WriteQuorum`; end-to-end transport wiring, durable participant state, and reconciliation remain open.
+- [ ] T047 Synchronous replication with an explicit quorum. The public single-command path and atomic `BATCH` quorum semantics are implemented and tested through opt-in `MonitoringOptions.WriteQuorum` / `CacheGRPCOptions.WriteQuorum`; transport wiring and coordinator-owned durability remain open, while participant snapshots and batch reconciliation are available as caller-owned primitives.
 - [x] T047a Quorum fast acknowledgement. `hatReplication.ExecuteWriteQuorumUntilSatisfied` returns once a required quorum is available or impossible, cancels pending context-aware callbacks, and leaves the existing wait-for-all API and default replication behavior unchanged; see [WRITE_QUORUM.md](WRITE_QUORUM.md).
 - [x] T047d Atomic public `BATCH` write quorum. Eligible all-write batches validate direct quorum before mutation, preserve local atomic commit semantics when remote acknowledgements are insufficient, and send one grouped `INTERNALBATCHV2` per target; rollback-free cluster-wide commit remains open. See [WRITE_QUORUM.md](WRITE_QUORUM.md).
 - [x] T047c Public HTTP and unary gRPC single-write commands enforce an opt-in direct write quorum at the shared command executor; `0` remains the default and asynchronous replication is rejected before mutation when quorum is enabled. See [WRITE_QUORUM.md](WRITE_QUORUM.md).
 - [x] T047b HTTPReplicator exposes an opt-in direct ReplicateCommandWithQuorum API that counts the local result and remote acknowledgements without changing the asynchronous default.
 - [x] T047a Explicit write-quorum decision helper with validation and acknowledgement reporting.
 - [x] T047e Opt-in transport-neutral two-phase cluster write commit. All participants prepare before any commit callback, prepare failures abort successful reservations, and commit-phase failures return an explicit indeterminate outcome without rollback; transport, durable participant state, and reconciliation remain caller-owned. See [T047_CLUSTER_WRITE_COMMIT.md](T047_CLUSTER_WRITE_COMMIT.md).
+- [x] T047f Ordered atomic participant reconciliation. `ClusterWriteCommitParticipant.PreparedRecords` exposes canonical prepared state and `Reconcile` applies validated commit/abort decisions in one lock-protected batch with idempotent terminal repeats and no mutation on validation failure. See [T047_PARTICIPANT_RECONCILIATION.md](T047_PARTICIPANT_RECONCILIATION.md).
 - [x] T048 Replication sets and peer topology.
 - [x] T049 Vector-clock exposure for every replica - replication queue results expose an immutable observational `vector_clock` containing the local sequence and all current topology members' acknowledged sequences; it does not change quorum or conflict semantics.
 - [x] T050 LSN or journal sequence exposure.

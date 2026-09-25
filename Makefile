@@ -27431,3 +27431,43 @@ commit-ch041-grouping-id:
 push-ch041-grouping-id:
 
 	bash ./scripts/push-ch041-grouping-id.sh
+
+benchmark-t047-reconcile-baseline:
+
+	bash scripts/benchmark-t047-reconcile-baseline.sh
+
+test-t047-reconcile:
+
+	bash scripts/test-t047-reconcile.sh
+
+format-t047-reconcile:
+
+	bash scripts/format-t047-reconcile.sh
+
+benchmark-t047-reconcile:
+
+	bash scripts/benchmark-t047-reconcile.sh
+
+test-t047-reconcile-package:
+
+	bash scripts/test-t047-reconcile-package.sh
+
+race-t047-reconcile:
+
+	bash scripts/race-t047-reconcile.sh
+
+vet-t047-reconcile:
+
+	bash scripts/vet-t047-reconcile.sh
+
+stage-t047-reconcile:
+
+	bash scripts/stage-t047-reconcile.sh
+
+commit-t047-reconcile:
+
+	bash scripts/commit-t047-reconcile.sh
+
+push-t047-reconcile:
+
+	bash scripts/push-t047-reconcile.sh

@@ -36427,6 +36427,41 @@ is bounded and paid only when the caller snapshots or restores reconciliation
 state. The default write path does not construct this state machine. See
 [T047_PARTICIPANT_STATE.md](T047_PARTICIPANT_STATE.md).
 
+<a id="t047f-participant-reconciliation"></a>
+## T047f Participant Reconciliation
+
+Command: `make benchmark-t047-reconcile`.
+
+This paired benchmark reconciles 32 prepared transactions after restoring the
+same prepared snapshot. The existing path calls `Status` and `Commit` once per
+transaction; the new path validates and applies one ordered `Reconcile` batch.
+Five samples ran on the AMD Ryzen 9 5950X with `-benchmem`.
+
+| Path | Median ns/op | Bytes/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: |
+| Per-record `Status` + `Commit` | 3,705 | 0 | 0 | 1.00x |
+| Batch `Reconcile` | 3,418 | 0 | 0 | 1.08x faster |
+
+Raw output:
+
+```text
+BenchmarkTU047ParticipantStatusLoop: 3705 ns/op 0 B/op 0 allocs/op
+BenchmarkTU047ParticipantStatusLoop: 3713 ns/op 0 B/op 0 allocs/op
+BenchmarkTU047ParticipantStatusLoop: 3719 ns/op 0 B/op 0 allocs/op
+BenchmarkTU047ParticipantStatusLoop: 3676 ns/op 0 B/op 0 allocs/op
+BenchmarkTU047ParticipantStatusLoop: 3686 ns/op 0 B/op 0 allocs/op
+BenchmarkTU047ParticipantBatchReconcile: 3415 ns/op 0 B/op 0 allocs/op
+BenchmarkTU047ParticipantBatchReconcile: 3450 ns/op 0 B/op 0 allocs/op
+BenchmarkTU047ParticipantBatchReconcile: 3423 ns/op 0 B/op 0 allocs/op
+BenchmarkTU047ParticipantBatchReconcile: 3389 ns/op 0 B/op 0 allocs/op
+BenchmarkTU047ParticipantBatchReconcile: 3418 ns/op 0 B/op 0 allocs/op
+```
+
+The batch path removes repeated lock/unlock cycles without adding retained or
+transient allocations for canonical ordered input. It remains transport-
+neutral and caller-owned; ordinary asynchronous replication is unchanged. See
+[T047_PARTICIPANT_RECONCILIATION.md](T047_PARTICIPANT_RECONCILIATION.md).
+
 <a id="c154e-durable-rolling-schema-checkpoint"></a>
 ## C154e Durable Rolling-Schema Checkpoint
 
