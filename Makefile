@@ -26855,3 +26855,23 @@ commit-m052-union-native:
 .PHONY: push-m052-union-native
 push-m052-union-native:
 	bash ./scripts/push-m052-union-native.sh
+
+.PHONY: audit-tmp-hatrie-builds
+audit-tmp-hatrie-builds:
+	bash ./scripts/audit-tmp-hatrie-builds.sh preview
+
+.PHONY: cleanup-tmp-hatrie-builds
+cleanup-tmp-hatrie-builds:
+	bash ./scripts/audit-tmp-hatrie-builds.sh clean
+
+.PHONY: stage-tmp-hatrie-cleanup
+stage-tmp-hatrie-cleanup:
+	bash ./scripts/stage-tmp-hatrie-cleanup.sh
+
+.PHONY: commit-tmp-hatrie-cleanup
+commit-tmp-hatrie-cleanup:
+	bash ./scripts/commit-tmp-hatrie-cleanup.sh
+
+.PHONY: push-tmp-hatrie-cleanup
+push-tmp-hatrie-cleanup:
+	bash ./scripts/push-tmp-hatrie-cleanup.sh
