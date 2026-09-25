@@ -9,16 +9,35 @@ import (
 )
 
 var (
-	ErrSpaceCatalogInvalid      = errors.New("hatSchema: space catalog definition is invalid")
-	ErrSpaceCatalogNameRequired = errors.New("hatSchema: space catalog space name is required")
-	ErrSpaceCatalogNil          = errors.New("hatSchema: space catalog is nil")
-	ErrSpaceCatalogLimit        = errors.New("hatSchema: space catalog limit exceeded")
+	ErrSpaceCatalogInvalid       = errors.New("hatSchema: space catalog definition is invalid")
+	ErrSpaceCatalogNameRequired  = errors.New("hatSchema: space catalog space name is required")
+	ErrSpaceCatalogNil           = errors.New("hatSchema: space catalog is nil")
+	ErrSpaceCatalogLimit         = errors.New("hatSchema: space catalog limit exceeded")
+	ErrSpaceCatalogChangeInvalid = errors.New("hatSchema: space catalog change is invalid")
 )
 
 const (
 	MaxSpaceCatalogSpaces  = 4096
 	MaxSpaceCatalogIndexes = 256
+	MaxSpaceCatalogChanges = MaxSpaceCatalogSpaces * 2
 )
+
+// SpaceCatalogChangeKind identifies one atomic catalog mutation.
+type SpaceCatalogChangeKind string
+
+const (
+	SpaceCatalogChangeUpsert SpaceCatalogChangeKind = "upsert"
+	SpaceCatalogChangeDelete SpaceCatalogChangeKind = "delete"
+)
+
+// SpaceCatalogChange describes one ordered mutation in ApplyAtomic. Upsert
+// uses Definition; delete uses Name. Changes are staged in order and become
+// visible together only after every change validates successfully.
+type SpaceCatalogChange struct {
+	Kind       SpaceCatalogChangeKind
+	Name       string
+	Definition SpaceDefinition
+}
 
 // IndexKind identifies the access structure declared for a named space.
 type IndexKind string
@@ -94,6 +113,52 @@ func (catalog *SpaceCatalog) Upsert(definition SpaceDefinition) error {
 		return fmt.Errorf("%w: maximum spaces %d exceeded", ErrSpaceCatalogLimit, MaxSpaceCatalogSpaces)
 	}
 	catalog.spaces[normalized.Name] = normalized
+	return nil
+}
+
+// ApplyAtomic validates and publishes an ordered batch of space upserts and
+// deletes as one catalog state. A failed change leaves the current catalog
+// untouched. Delete of a missing space is intentionally idempotent, matching
+// the existing Delete method's behavior.
+func (catalog *SpaceCatalog) ApplyAtomic(changes []SpaceCatalogChange) error {
+	if catalog == nil {
+		return ErrSpaceCatalogNil
+	}
+	if len(changes) > MaxSpaceCatalogChanges {
+		return fmt.Errorf("%w: maximum changes %d exceeded", ErrSpaceCatalogLimit, MaxSpaceCatalogChanges)
+	}
+	catalog.mu.Lock()
+	defer catalog.mu.Unlock()
+	capacity := len(catalog.spaces) + len(changes)
+	if len(catalog.spaces) == 0 {
+		capacity = 0
+	}
+	next := make(map[string]SpaceDefinition, capacity)
+	for name, definition := range catalog.spaces {
+		next[name] = cloneSpaceDefinition(definition)
+	}
+	for _, change := range changes {
+		switch change.Kind {
+		case SpaceCatalogChangeUpsert:
+			definition, err := normalizeSpaceDefinition(change.Definition)
+			if err != nil {
+				return err
+			}
+			next[definition.Name] = definition
+		case SpaceCatalogChangeDelete:
+			name := strings.TrimSpace(change.Name)
+			if name == "" {
+				return ErrSpaceCatalogNameRequired
+			}
+			delete(next, name)
+		default:
+			return fmt.Errorf("%w: %q", ErrSpaceCatalogChangeInvalid, change.Kind)
+		}
+	}
+	if len(next) > MaxSpaceCatalogSpaces {
+		return fmt.Errorf("%w: maximum spaces %d exceeded", ErrSpaceCatalogLimit, MaxSpaceCatalogSpaces)
+	}
+	catalog.spaces = next
 	return nil
 }
 

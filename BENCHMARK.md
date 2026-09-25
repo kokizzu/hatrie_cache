@@ -37564,3 +37564,18 @@ Ryzen 9 5950X Linux/amd64 host.
 
 Raw samples and the no-pruner regression check are in
 [CH035_REMOTE_SHARD_PRUNING.md](CH035_REMOTE_SHARD_PRUNING.md).
+
+## TT-030: Atomic Catalog DDL Batches
+
+This compares eight prebuilt named-space mutations followed by a catalog
+snapshot. The atomic path stages the full batch and publishes once; the
+sequential path calls the existing `Upsert` method eight times.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Existing sequential `Upsert` x8 | 3,324 | 3,784 | 31 | 1.00x |
+| `ApplyAtomic` x8 | 3,172 | 3,832 | 32 | 1.05x faster; 1.01x bytes; 1.03x allocations |
+
+The one-allocation/48-byte staging cost is the measured tradeoff for atomic
+catalog publication. See [TT030_TRANSACTIONAL_DDL.md](TT030_TRANSACTIONAL_DDL.md)
+for raw samples and scope.

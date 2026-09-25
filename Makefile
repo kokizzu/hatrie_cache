@@ -27043,3 +27043,16 @@ commit-mz035-multiset:
 
 push-mz035-multiset:
 	bash ./scripts/push-mz035-multiset.sh
+.PHONY: test-tt030-transactional-ddl format-tt030-transactional-ddl benchmark-tt030-transactional-ddl test-tt030-package race-tt030 test-tt030-consumers
+test-tt030-transactional-ddl:
+	bash ./scripts/test-tt030-transactional-ddl.sh
+format-tt030-transactional-ddl:
+	bash ./scripts/format-tt030-transactional-ddl.sh
+benchmark-tt030-transactional-ddl:
+	bash ./scripts/benchmark-tt030-transactional-ddl.sh
+test-tt030-package:
+	bash ./scripts/test-tt030-package.sh
+race-tt030:
+	bash ./scripts/race-tt030.sh
+test-tt030-consumers:
+	bash ./scripts/test-tt030-consumers.sh

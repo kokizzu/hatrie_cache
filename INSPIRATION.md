@@ -264,6 +264,7 @@ name.
   and vote authentication remain caller-owned. See
   [PARTITION_OWNERSHIP_CONSENSUS.md](PARTITION_OWNERSHIP_CONSENSUS.md).
 - [ ] C154 Rolling schema changes across replicas.
+- [x] C154b Atomic catalog DDL batches. `hatSchema.SpaceCatalog.ApplyAtomic` validates ordered named-space upserts and deletes before publishing one catalog state, leaving failed batches invisible; row/data-plane coordination remains caller-owned. See [TT030_TRANSACTIONAL_DDL.md](TT030_TRANSACTIONAL_DDL.md).
 - [x] C154a Conservative rolling-schema compatibility preflight over validated
   schemas; exact replication fingerprint enforcement remains unchanged. See
   [SCHEMA_COMPATIBILITY.md](SCHEMA_COMPATIBILITY.md).
