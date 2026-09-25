@@ -1,3 +1,19 @@
+.PHONY: audit-tmp-hatrie-all
+audit-tmp-hatrie-all:
+	bash ./scripts/audit-tmp-hatrie-all.sh $(or $(MODE),preview)
+
+.PHONY: cleanup-tmp-hatrie-all
+cleanup-tmp-hatrie-all:
+	bash ./scripts/audit-tmp-hatrie-all.sh apply
+
+.PHONY: commit-tmp-cleanup
+commit-tmp-cleanup:
+	bash ./scripts/commit-tmp-cleanup.sh
+
+.PHONY: push-tmp-cleanup
+push-tmp-cleanup:
+	bash ./scripts/push-tmp-cleanup.sh
+
 .PHONY: verify-ch029-dictionary-join-c203
 .PHONY: test-tt020
 test-tt020:
