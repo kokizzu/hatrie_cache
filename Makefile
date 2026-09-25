@@ -27286,3 +27286,39 @@ commit-tt001-automatic-rebalance:
 .PHONY: push-tt001-automatic-rebalance
 push-tt001-automatic-rebalance:
 	bash ./scripts/push-tt001-automatic-rebalance.sh
+
+.PHONY: test-tt005-raft-configuration
+test-tt005-raft-configuration:
+	bash ./scripts/test-tt005-raft-configuration.sh
+
+.PHONY: format-tt005-raft-configuration
+format-tt005-raft-configuration:
+	bash ./scripts/format-tt005-raft-configuration.sh
+
+.PHONY: benchmark-tt005-raft-configuration
+benchmark-tt005-raft-configuration:
+	bash ./scripts/benchmark-tt005-raft-configuration.sh
+
+.PHONY: test-tt005-package
+test-tt005-package:
+	bash ./scripts/test-tt005-package.sh
+
+.PHONY: race-tt005-raft-configuration
+race-tt005-raft-configuration:
+	bash ./scripts/race-tt005-raft-configuration.sh
+
+.PHONY: vet-tt005-raft-configuration
+vet-tt005-raft-configuration:
+	bash ./scripts/vet-tt005-raft-configuration.sh
+
+.PHONY: compile-tt005-all
+compile-tt005-all:
+	bash ./scripts/compile-tt005-all.sh
+
+.PHONY: commit-tt005-raft-configuration
+commit-tt005-raft-configuration:
+	bash ./scripts/commit-tt005-raft-configuration.sh
+
+.PHONY: push-tt005-raft-configuration
+push-tt005-raft-configuration:
+	bash ./scripts/push-tt005-raft-configuration.sh
