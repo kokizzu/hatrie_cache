@@ -84,6 +84,55 @@ BenchmarkM064RecursiveFixpoint-32  1820213 ns/op  1671297 B/op 163 allocs/op
 BenchmarkM064RecursiveFixpoint-32  1794713 ns/op  1671295 B/op 163 allocs/op
 ```
 
+<a id="tt-024-external-text-index-catalog-hook"></a>
+## TT-024 External Text Index Catalog Hook
+
+This benchmark measures the opt-in `TextIndexCatalog` wrapper against direct
+`HTI1` marshal/restore on the same 256-row, 3,266-byte text-index frame. The
+catalog is an in-memory test double: `PutTextIndex` copies the frame and
+`GetTextIndex` returns a defensive copy. Five samples per case used
+`-benchmem`, `-benchtime=200ms`, and `-count=5` on Linux/amd64 with an AMD
+Ryzen 9 5950X.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Direct HTI1 marshal | 49,909 | 22,408 | 259 | Baseline |
+| Persist through catalog | 53,941 | 22,409 | 259 | 1.08x CPU, same allocation profile |
+| Direct HTI1 restore | 68,768 | 56,132 | 1,347 | Baseline |
+| Restore through catalog | 72,460 | 59,595 | 1,348 | 1.05x CPU, +3,463 B/op, +1 alloc |
+
+The frame stayed at 3,266 bytes in every case. This is an integration-cost
+measurement, not a claim that an external durable backend is faster than a
+direct in-process call. The extra restore bytes come from the test double's
+defensive frame copy; network, disk, replication, and backend buffering are
+not included. Because the feature is caller-owned and opt-in, there is no
+default-path cost.
+
+Raw output:
+
+```text
+BenchmarkTT024TextIndexCatalogPersist-32  4413 52709 ns/op 3266 frame-bytes 22409 B/op 259 allocs/op
+BenchmarkTT024TextIndexCatalogPersist-32  4364 54477 ns/op 3266 frame-bytes 22408 B/op 259 allocs/op
+BenchmarkTT024TextIndexCatalogPersist-32  4677 55746 ns/op 3266 frame-bytes 22409 B/op 259 allocs/op
+BenchmarkTT024TextIndexCatalogPersist-32  4323 50737 ns/op 3266 frame-bytes 22409 B/op 259 allocs/op
+BenchmarkTT024TextIndexCatalogPersist-32  4699 53941 ns/op 3266 frame-bytes 22409 B/op 259 allocs/op
+BenchmarkTT024TextIndexMarshalDirect-32  4852 49569 ns/op 3266 frame-bytes 22408 B/op 259 allocs/op
+BenchmarkTT024TextIndexMarshalDirect-32  4542 53175 ns/op 3266 frame-bytes 22408 B/op 259 allocs/op
+BenchmarkTT024TextIndexMarshalDirect-32  4916 49736 ns/op 3266 frame-bytes 22408 B/op 259 allocs/op
+BenchmarkTT024TextIndexMarshalDirect-32  4766 52560 ns/op 3266 frame-bytes 22409 B/op 259 allocs/op
+BenchmarkTT024TextIndexMarshalDirect-32  4356 49909 ns/op 3266 frame-bytes 22408 B/op 259 allocs/op
+BenchmarkTT024TextIndexCatalogRestore-32  3484 73012 ns/op 3266 frame-bytes 59595 B/op 1348 allocs/op
+BenchmarkTT024TextIndexCatalogRestore-32  3478 72460 ns/op 3266 frame-bytes 59595 B/op 1348 allocs/op
+BenchmarkTT024TextIndexCatalogRestore-32  3110 71861 ns/op 3266 frame-bytes 59596 B/op 1348 allocs/op
+BenchmarkTT024TextIndexCatalogRestore-32  3156 72658 ns/op 3266 frame-bytes 59597 B/op 1348 allocs/op
+BenchmarkTT024TextIndexCatalogRestore-32  3172 69388 ns/op 3266 frame-bytes 59594 B/op 1348 allocs/op
+BenchmarkTT024TextIndexRestoreDirect-32  3205 66758 ns/op 3266 frame-bytes 56132 B/op 1347 allocs/op
+BenchmarkTT024TextIndexRestoreDirect-32  2991 68573 ns/op 3266 frame-bytes 56132 B/op 1347 allocs/op
+BenchmarkTT024TextIndexRestoreDirect-32  3574 68768 ns/op 3266 frame-bytes 56133 B/op 1347 allocs/op
+BenchmarkTT024TextIndexRestoreDirect-32  3093 70896 ns/op 3266 frame-bytes 56132 B/op 1347 allocs/op
+BenchmarkTT024TextIndexRestoreDirect-32  3008 71256 ns/op 3266 frame-bytes 56132 B/op 1347 allocs/op
+```
+
 | Path | Median ns/op | B/op | Allocs/op | Relative result |
 | --- | ---: | ---: | ---: | ---: |
 | Existing traversal | 1,731,338 | 1,313,673 | 145 | 1.00x |

@@ -26962,3 +26962,21 @@ commit-clean-hatrie-tmp-metadata:
 	bash ./scripts/commit-clean-hatrie-tmp-metadata.sh
 push-clean-hatrie-tmp-metadata:
 	bash ./scripts/push-clean-hatrie-tmp-metadata.sh
+
+.PHONY: test-tt024-text-index-catalog benchmark-tt024-text-index-catalog format-tt024-text-index-catalog race-tt024-text-index-catalog vet-tt024-text-index-catalog
+test-tt024-text-index-catalog:
+	bash ./scripts/test-tt024-text-index-catalog.sh
+benchmark-tt024-text-index-catalog:
+	bash ./scripts/benchmark-tt024-text-index-catalog.sh
+format-tt024-text-index-catalog:
+	bash ./scripts/format-tt024-text-index-catalog.sh
+race-tt024-text-index-catalog:
+	bash ./scripts/race-tt024-text-index-catalog.sh
+vet-tt024-text-index-catalog:
+	bash ./scripts/vet-tt024-text-index-catalog.sh
+stage-tt024-text-index-catalog:
+	bash ./scripts/stage-tt024-text-index-catalog.sh
+commit-tt024-text-index-catalog:
+	bash ./scripts/commit-tt024-text-index-catalog.sh
+push-tt024-text-index-catalog:
+	bash ./scripts/push-tt024-text-index-catalog.sh
