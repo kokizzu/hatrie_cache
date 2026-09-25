@@ -707,6 +707,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T037 Incremental WAL/journal backup.
 - [x] T037a Verified incremental snapshot chains. Content-addressed Pebble manifests link to a durable parent catalog, chain planning rejects unsafe ancestry and storage mismatches, and retention protects objects referenced by kept manifests. See [TT008_INCREMENTAL_SNAPSHOT_CHAINS.md](TT008_INCREMENTAL_SNAPSHOT_CHAINS.md).
 - [x] T037b Added per-space storage-engine selection. `PersistentSpaceStoreSet` lets independent logical spaces choose Pebble or LevelDB with deterministic lookup and safe coordinated lifecycle management. See [TT012_PER_SPACE_STORAGE.md](TT012_PER_SPACE_STORAGE.md).
+- [x] MZ016 reconciled existing schema-evolution support. Safe additive rolling changes, bounded source-version admission/rollback, and coordinated activation are already implemented; destructive live drops remain rejected by design. See [MU02_CONNECTOR_SCHEMA_EVOLUTION.md](MU02_CONNECTOR_SCHEMA_EVOLUTION.md).
 - [x] T038 Backup checksums and manifest validation.
 - [x] T039 Restore validation across all supported data types.
 - [x] T040 Configurable WAL retention policy with disk budget.
