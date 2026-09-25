@@ -26662,3 +26662,12 @@ race-ch006-durable-queue:
 .PHONY: vet-ch006-durable-queue
 vet-ch006-durable-queue:
 	bash ./scripts/vet-ch006-durable-queue.sh
+.PHONY: audit-hatrie-tmp-deep clean-hatrie-tmp-deep
+audit-hatrie-tmp-deep:
+	bash ./scripts/audit-hatrie-tmp-deep.sh preview
+
+clean-hatrie-tmp-deep:
+	bash ./scripts/audit-hatrie-tmp-deep.sh apply
+.PHONY: remove-local-hatrie-plan
+remove-local-hatrie-plan:
+	bash ./scripts/remove-local-hatrie-plan.sh
