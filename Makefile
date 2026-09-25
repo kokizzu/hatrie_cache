@@ -26952,3 +26952,13 @@ commit-mz010-subscription-transport:
 	bash ./scripts/commit-mz010-subscription-transport.sh
 push-mz010-subscription-transport:
 	bash ./scripts/push-mz010-subscription-transport.sh
+
+.PHONY: clean-hatrie-tmp-metadata stage-clean-hatrie-tmp-metadata commit-clean-hatrie-tmp-metadata push-clean-hatrie-tmp-metadata
+clean-hatrie-tmp-metadata:
+	bash ./scripts/audit-hatrie-tmp.sh clean-metadata
+stage-clean-hatrie-tmp-metadata:
+	bash ./scripts/stage-clean-hatrie-tmp-metadata.sh
+commit-clean-hatrie-tmp-metadata:
+	bash ./scripts/commit-clean-hatrie-tmp-metadata.sh
+push-clean-hatrie-tmp-metadata:
+	bash ./scripts/push-clean-hatrie-tmp-metadata.sh
