@@ -53,5 +53,25 @@ per benchmark iteration.
 The observed 5% difference is within normal short benchmark variance; the
 important result is identical allocations and bytes. The scheduler hot-path
 benchmark remained allocation-identical after moving admission to the
-controller. Raw samples and the scheduler before/after run are recorded in
-`BENCHMARK.md`.
+controller.
+
+Raw controller samples, in order, were:
+
+| Path | ns/op samples | B/op samples | allocs/op |
+| --- | --- | --- | --- |
+| Budget off | 35,527; 35,290; 34,994; 33,068; 35,414 | 36,122; 36,120; 36,120; 36,120; 36,120 | 183; 183; 183; 183; 183 |
+| Budget on | 34,190; 35,539; 33,641; 32,333; 31,763 | 36,120; 36,120; 36,120; 36,120; 36,120 | 183; 183; 183; 183; 183 |
+
+The scheduler zero-estimate comparison, run before and after moving admission
+to the controller, was:
+
+| Benchmark | Before ns/op | After ns/op | Before/after B/op |
+| --- | ---: | ---: | ---: |
+| 1 task | 275.4 | 282.8 | 40 / 40 |
+| 4 tasks | 2,447 | 2,514 | 680 / 680 |
+| 64 tasks | 18,046 | 18,087 | 3,465 / 3,465 |
+| Stats | 13.42 | 13.38 | 0 / 0 |
+| Run | 26,103 | 25,922 | 17,576 / 17,576 |
+
+The separate short runs are within ordinary benchmark noise; no scheduler
+allocation regression was observed.

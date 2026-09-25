@@ -37635,3 +37635,8 @@ next request without changing queue state. See
 
 The existing scheduler hot-path comparison remained within benchmark noise
 after this feature was moved out of `CompactionScheduler`.
+
+Raw controller samples were 35,527/35,290/34,994/33,068/35,414 ns/op with
+the budget off and 34,190/35,539/33,641/32,333/31,763 ns/op with it on. Both
+paths measured 36,120 B/op and 183 allocs/op in every sample except the first
+off sample, which measured 36,122 B/op.
