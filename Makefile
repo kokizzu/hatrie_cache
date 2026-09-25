@@ -27357,3 +27357,41 @@ commit-tt006-hot-standby:
 .PHONY: push-tt006-hot-standby
 push-tt006-hot-standby:
 	bash ./scripts/push-tt006-hot-standby.sh
+
+.PHONY: test-mz021-replica-hot-handoff format-mz021-replica-hot-handoff benchmark-mz021-replica-hot-handoff test-mz021-package race-mz021-replica-hot-handoff vet-mz021-replica-hot-handoff verify-mz021-docs commit-mz021-replica-hot-handoff push-mz021-replica-hot-handoff
+
+test-mz021-replica-hot-handoff:
+
+	bash ./scripts/test-mz021-replica-hot-handoff.sh
+
+format-mz021-replica-hot-handoff:
+
+	bash ./scripts/format-mz021-replica-hot-handoff.sh
+
+benchmark-mz021-replica-hot-handoff:
+
+	bash ./scripts/benchmark-mz021-replica-hot-handoff.sh
+
+test-mz021-package:
+
+	bash ./scripts/test-mz021-package.sh
+
+race-mz021-replica-hot-handoff:
+
+	bash ./scripts/race-mz021-replica-hot-handoff.sh
+
+vet-mz021-replica-hot-handoff:
+
+	bash ./scripts/vet-mz021-replica-hot-handoff.sh
+
+verify-mz021-docs:
+
+	bash ./scripts/verify-mz021-docs.sh
+
+commit-mz021-replica-hot-handoff:
+
+	bash ./scripts/commit-mz021-replica-hot-handoff.sh
+
+push-mz021-replica-hot-handoff:
+
+	bash ./scripts/push-mz021-replica-hot-handoff.sh

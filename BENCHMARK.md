@@ -37850,3 +37850,23 @@ The control is not an equivalent replica implementation. The feature is
 opt-in, so ordinary command execution has no new hot-standby work unless a
 caller starts a runner. Full interpretation and adapter guidance are in
 [TT006_HOT_STANDBY_WAL.md](TT006_HOT_STANDBY_WAL.md).
+
+### MZ-021 Replica Hot Handoff
+
+Command: `make benchmark-mz021-replica-hot-handoff` (five samples per case,
+AMD Ryzen 9 5950X, Linux/amd64). The warm-tail case includes a 64 KiB
+snapshot, validation, one delta, readiness, and lifecycle accounting. The
+direct control only calls the target's delta callback, so it is a lower-bound
+control rather than an equivalent replica implementation.
+
+| Case | Raw ns/op samples | B/op | allocs/op |
+| --- | --- | ---: | ---: |
+| Warm tail before redundant-copy removal | 22304, 19934, 18943, 20813, 20444 | 131648 | 5 |
+| Warm tail after redundant-copy removal | 11196, 10090, 9024, 8506, 8167 | 66112 | 4 |
+| Direct tail callback control | 1.798, 1.796, 1.720, 1.669, 1.785 | 0 | 0 |
+
+The warm-tail median improved from 20,444 to 9,024 ns/op (**2.27x faster**),
+retained benchmark allocation fell from 131,648 to 66,112 B/op (**1.99x
+lower**), and allocations fell from 5 to 4 (**1.25x fewer**). The direct
+control is not a user-visible speed claim; it excludes snapshot transfer,
+validation, readiness, and promotion safety checks.
