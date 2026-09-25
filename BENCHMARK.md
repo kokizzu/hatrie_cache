@@ -32969,6 +32969,7 @@ and remains within the expected benchmark noise. Statistics are cached until
 row or index mutation, and the full predicate is rechecked after every index
 probe. Raw samples and API details are in [TR030_INDEX_STATS.md](TR030_INDEX_STATS.md).
 
+<a id="tt-019-covering-secondary-indexes"></a>
 <a id="tr-024-covering-materialized-indexes"></a>
 ## TR-024: Covering Materialized Indexes
 
@@ -33000,6 +33001,24 @@ The benchmark was run with:
 make benchmark-tr024-covering-index-baseline
 make benchmark-tr024-covering-index
 ```
+
+### Latest re-verification
+
+The same Makefile benchmark was rerun after the feature was already present.
+The current five-sample control median is lower than the historical run, so
+the comparison below uses the control and covering samples from that one run.
+
+| Path | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| Indexed full-row control | 541,162; 557,703; 518,327; 508,295; 517,832 | 567,138; 567,124; 567,126; 567,127; 567,125 | 1,909; 1,909; 1,909; 1,909; 1,909 |
+| Covering index | 162,713; 156,888; 155,839; 150,352; 159,570 | 284,131; 284,133; 284,133; 284,130; 284,132 | 1,283; 1,283; 1,283; 1,283; 1,283 |
+
+The latest medians are `518,327 ns/op`, `567,125 B/op`, and `1,909`
+allocations for the control versus `156,888 ns/op`, `284,132 B/op`, and
+`1,283` allocations for the covering path: `3.30x` faster, `2.00x` lower
+transient bytes, and `1.49x` fewer allocations. The query-path figures do not
+include the covering index's retained projected maps; that resident-memory
+tradeoff is why the feature remains opt-in.
 
 <a id="mz-044-costed-sql-explain"></a>
 ## MZ-044: Costed SQL EXPLAIN

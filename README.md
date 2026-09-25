@@ -35,6 +35,7 @@ security guidance before exposing it on a network.
 - Explain-time materialized projection selection with freshness rejection reasons and logical I/O estimates: [C237_PROJECTION_EXPLAIN.md](C237_PROJECTION_EXPLAIN.md), with measurements in [BENCHMARK.md](BENCHMARK.md#c237-projection-selection-explain)
 - Opt-in cost-based projection recommendations comparing observed query savings with caller-supplied build and refresh costs: [CH012_PROJECTION_ADVISOR_COST.md](CH012_PROJECTION_ADVISOR_COST.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-012-projection-advisor-cost)
 - SQL index-advisor observations and covering-index recommendations: [SQL_INDEX_ADVISOR.md](SQL_INDEX_ADVISOR.md)
+- Opt-in covering materialized secondary indexes that avoid primary-row materialization for covered equality projections: [TR024_COVERING_INDEX.md](TR024_COVERING_INDEX.md), with measurements in [BENCHMARK.md](BENCHMARK.md#tt-019-covering-secondary-indexes)
 - SQL index rebuild progress and cooperative retry: [SQL_INDEX_REBUILD_PROGRESS.md](SQL_INDEX_REBUILD_PROGRESS.md)
 - Opt-in background SQL index rebuild worker: [SQL_INDEX_REBUILD_PROGRESS.md](SQL_INDEX_REBUILD_PROGRESS.md)
 - Opt-in SQL multikey array membership indexes: [SQL_MULTIKEY_INDEX.md](SQL_MULTIKEY_INDEX.md)

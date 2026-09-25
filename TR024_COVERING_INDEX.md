@@ -71,10 +71,11 @@ same Linux/amd64 host were:
 
 | Path | ns/op | B/op | allocs/op |
 | --- | ---: | ---: | ---: |
-| Existing indexed full-row path | 628,489 | 566,737 | 1,909 |
-| Covering index path | 207,092 | 283,745 | 1,283 |
-| Covering improvement | 3.03x faster | 2.00x lower | 1.49x fewer |
+| Existing indexed full-row path | 518,327 | 567,125 | 1,909 |
+| Covering index path | 156,888 | 284,132 | 1,283 |
+| Covering improvement | 3.30x faster | 2.00x lower | 1.49x fewer |
 
 `B/op` is transient query allocation, not retained index memory. The retained
 projected maps are the explicit space-for-query-cost tradeoff described above.
-Raw samples and the pre-change baseline are in [BENCHMARK.md](BENCHMARK.md#tr-024-covering-materialized-indexes).
+Raw samples, the pre-change baseline, and the latest re-verification are in
+[BENCHMARK.md](BENCHMARK.md#tt-019-covering-secondary-indexes).
