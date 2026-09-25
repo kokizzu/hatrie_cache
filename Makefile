@@ -27016,3 +27016,30 @@ commit-ch041-one-pass:
 .PHONY: push-ch041-one-pass
 push-ch041-one-pass:
 	bash ./scripts/push-ch041-one-pass.sh
+
+benchmark-mz035-multiset-before:
+	bash ./scripts/benchmark-mz035-multiset-before.sh
+
+benchmark-mz035-multiset-after:
+	bash ./scripts/benchmark-mz035-multiset-after.sh
+
+race-mz035-multiset:
+	bash ./scripts/race-mz035-multiset.sh
+
+vet-mz035-multiset:
+	bash ./scripts/vet-mz035-multiset.sh
+
+test-mz035-multiset:
+	bash ./scripts/test-mz035-multiset.sh
+
+format-mz035-multiset:
+	bash ./scripts/format-mz035-multiset.sh
+
+stage-mz035-multiset:
+	bash ./scripts/stage-mz035-multiset.sh
+
+commit-mz035-multiset:
+	bash ./scripts/commit-mz035-multiset.sh
+
+push-mz035-multiset:
+	bash ./scripts/push-mz035-multiset.sh

@@ -31983,6 +31983,42 @@ bytes/op in this workload. The no-hint path remains unchanged. Locality is an
 advisory planning signal only; it does not move data, create shards, or alter
 ordinary reads and writes. See [MZ035_ARRANGEMENT_LOCALITY.md](MZ035_ARRANGEMENT_LOCALITY.md).
 
+<a id="mz-035-incremental-multiset"></a>
+## MZ-035 Incremental Multiset
+
+Command:
+
+```text
+make benchmark-mz035-multiset-after
+```
+
+This compares exact incremental signed-multiplicity maintenance with
+rebuilding the same 1,024-row, 256-key differential fixture through
+`ConsolidateDifferentialRows` after each single-key update. Each result is the
+median of five benchmark samples on an AMD Ryzen 9 5950X.
+
+| Path | ns/op | B/op | allocs/op | Improvement |
+|---|---:|---:|---:|---:|
+| Rebuild with `ConsolidateDifferentialRows` | 109,115 | 217,551 | 520 | 1.0x |
+| `IncrementalMultiset.Apply` | 90.96 | 48 | 1 | 1,199x faster, 4,532x less heap, 520x fewer allocations |
+
+The incremental path keeps exact counts and row identity in memory, so its
+tradeoff is retained state plus caller-owned synchronization. It is opt-in and
+does not alter existing SQL plans. Raw output:
+
+```text
+BenchmarkMZ035RebuildMultisetBaseline-32  10537  108349 ns/op  217549 B/op  520 allocs/op
+BenchmarkMZ035RebuildMultisetBaseline-32  10000  109115 ns/op  217551 B/op  520 allocs/op
+BenchmarkMZ035RebuildMultisetBaseline-32   9896  111472 ns/op  217552 B/op  520 allocs/op
+BenchmarkMZ035RebuildMultisetBaseline-32   9492  106915 ns/op  217554 B/op  520 allocs/op
+BenchmarkMZ035RebuildMultisetBaseline-32   9264  110300 ns/op  217555 B/op  520 allocs/op
+BenchmarkMZ035IncrementalMultisetApply-32 13035183  90.42 ns/op  48 B/op  1 allocs/op
+BenchmarkMZ035IncrementalMultisetApply-32 12776481  90.67 ns/op  48 B/op  1 allocs/op
+BenchmarkMZ035IncrementalMultisetApply-32 12726207  91.93 ns/op  48 B/op  1 allocs/op
+BenchmarkMZ035IncrementalMultisetApply-32 12179284  91.15 ns/op  48 B/op  1 allocs/op
+BenchmarkMZ035IncrementalMultisetApply-32 13084552  90.96 ns/op  48 B/op  1 allocs/op
+```
+
 Raw output:
 
 ```text
