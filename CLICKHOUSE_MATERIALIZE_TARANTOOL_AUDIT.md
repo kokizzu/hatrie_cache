@@ -35,6 +35,15 @@ or intentionally deferred, and `[-]` rejected or rolled back.
   open. See [MZ010_SUBSCRIPTION_KEYRING.md](MZ010_SUBSCRIPTION_KEYRING.md) and
   [BENCHMARK.md](BENCHMARK.md#mz-010-subscription-wire-keyring).
 
+### CH012d Durable Projection Advisor History
+
+- [x] CH012d adds an importable `SQLProjectionAdvisorStore` and bounded
+  `FileSQLProjectionAdvisorStore`. `SPA1` snapshots validate recommendation
+  shape, use CRC32 and atomic owner-only replacement, and cold-start cleanly
+  when absent; automatic planner wiring and projection creation remain open.
+  See [CH012_PROJECTION_ADVISOR_PERSISTENCE.md](CH012_PROJECTION_ADVISOR_PERSISTENCE.md)
+  and [BENCHMARK.md](BENCHMARK.md#ch-012-projection-advisor-persistence).
+
 ## ClickHouse (50 ideas)
 - [x] C001 Column-oriented storage for analytical values - local columnar tables cover the compatible case.
 - [x] C002 Read only referenced columns - SQL projection pruning is present.

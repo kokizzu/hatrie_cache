@@ -31759,6 +31759,28 @@ analysis is only paid when `CostBasedRecommendations` is called. See
 [CH012_PROJECTION_ADVISOR_COST.md](CH012_PROJECTION_ADVISOR_COST.md) for the
 model and correctness coverage.
 
+## CH-012 Projection Advisor Persistence
+
+Command:
+
+```text
+make benchmark-ch012-projection-advisor-persistence
+```
+
+This measures the bounded `SPA1` snapshot codec over 32 recommendations on
+Linux amd64 with an AMD Ryzen 9 5950X and `-benchtime=200ms`. It excludes
+filesystem write, `fsync`, and rename latency; those costs depend on the
+storage device and occur only during explicit persistence calls.
+
+| Path | ns/op | B/op | Allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Encode | 51,042 | 41,575 | 583 | 1.00x |
+| Decode | 133,748 | 29,928 | 1,006 | 2.62x encode |
+
+The resulting frame is 8,284 bytes for this fixture. See
+[CH012_PROJECTION_ADVISOR_PERSISTENCE.md](CH012_PROJECTION_ADVISOR_PERSISTENCE.md)
+for format limits, safety behavior, and correctness coverage.
+
 <a id="mz-024-automatic-arrangement-key-selection"></a>
 ## MZ-024 Automatic Arrangement Key Selection
 

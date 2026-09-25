@@ -727,13 +727,16 @@ notifications, and cross-node coordination remain caller-owned. See
 ## CH-012: Projection Advisor Cost Model
 
 CH-012 is partially adopted through the opt-in
-`SQLProjectionAdvisor.CostBasedRecommendations` API. It combines bounded
-observed average query latency with caller-supplied expected query volume,
-projection-hit latency, initial build cost, and refresh cost. Saturating
-arithmetic prevents duration overflow, while automatic forecasting, planner
-wiring, and persistent workload history remain caller-owned. See
-[CH012_PROJECTION_ADVISOR_COST.md](CH012_PROJECTION_ADVISOR_COST.md) and
-[BENCHMARK.md](BENCHMARK.md#ch-012-projection-advisor-cost).
+`SQLProjectionAdvisor.CostBasedRecommendations` API and
+`FileSQLProjectionAdvisorStore`. The advisor combines bounded observed average
+query latency with caller-supplied expected query volume, projection-hit
+latency, initial build cost, and refresh cost; the store adds bounded,
+checksummed, atomic history persistence. Saturating arithmetic prevents
+duration overflow, while automatic forecasting and planner wiring remain
+caller-owned. See
+[CH012_PROJECTION_ADVISOR_COST.md](CH012_PROJECTION_ADVISOR_COST.md),
+[CH012_PROJECTION_ADVISOR_PERSISTENCE.md](CH012_PROJECTION_ADVISOR_PERSISTENCE.md),
+and [BENCHMARK.md](BENCHMARK.md#ch-012-projection-advisor-persistence).
 
 ## MZ-024: Automatic Arrangement Key Selection
 

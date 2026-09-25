@@ -26907,3 +26907,23 @@ commit-mz010-subscription-keyring:
 .PHONY: push-mz010-subscription-keyring
 push-mz010-subscription-keyring:
 	bash ./scripts/push-mz010-subscription-keyring.sh
+
+.PHONY: test-ch012-projection-advisor-persistence benchmark-ch012-projection-advisor-persistence format-ch012-projection-advisor-persistence race-ch012-projection-advisor-persistence vet-ch012-projection-advisor-persistence measure-ch012-projection-advisor-persistence stage-ch012-projection-advisor-persistence commit-ch012-projection-advisor-persistence push-ch012-projection-advisor-persistence
+test-ch012-projection-advisor-persistence:
+	bash ./scripts/test-ch012-projection-advisor-persistence.sh
+benchmark-ch012-projection-advisor-persistence:
+	bash ./scripts/benchmark-ch012-projection-advisor-persistence.sh
+format-ch012-projection-advisor-persistence:
+	bash ./scripts/format-ch012-projection-advisor-persistence.sh
+race-ch012-projection-advisor-persistence:
+	bash ./scripts/race-ch012-projection-advisor-persistence.sh
+vet-ch012-projection-advisor-persistence:
+	bash ./scripts/vet-ch012-projection-advisor-persistence.sh
+measure-ch012-projection-advisor-persistence:
+	bash ./scripts/measure-ch012-projection-advisor-persistence.sh
+stage-ch012-projection-advisor-persistence:
+	bash ./scripts/stage-ch012-projection-advisor-persistence.sh
+commit-ch012-projection-advisor-persistence:
+	bash ./scripts/commit-ch012-projection-advisor-persistence.sh
+push-ch012-projection-advisor-persistence:
+	bash ./scripts/push-ch012-projection-advisor-persistence.sh
