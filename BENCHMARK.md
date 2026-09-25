@@ -37836,3 +37836,17 @@ make race-ch002-physical-part-pruning
 make vet-ch002-physical-part-pruning
 make benchmark-ch002-physical-part-pruning
 ```
+## TT-006 Hot-Standby WAL Catch-Up
+
+`make benchmark-tt006-hot-standby` (five samples, Linux/amd64, AMD Ryzen 9
+5950X, 64 one-record batches):
+
+| Path | Time | Memory | Allocations | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `HotStandby` replay/status loop | 11.820-12.243 us/op | 14,720 B/op | 69 allocs/op | Opt-in safety and failover path |
+| Raw contiguous-loop control | 20.25-22.20 ns/op | 0 B/op | 0 allocs/op | Lower bound; no callbacks, locks, context, or status |
+
+The control is not an equivalent replica implementation. The feature is
+opt-in, so ordinary command execution has no new hot-standby work unless a
+caller starts a runner. Full interpretation and adapter guidance are in
+[TT006_HOT_STANDBY_WAL.md](TT006_HOT_STANDBY_WAL.md).

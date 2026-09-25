@@ -27322,3 +27322,38 @@ commit-tt005-raft-configuration:
 .PHONY: push-tt005-raft-configuration
 push-tt005-raft-configuration:
 	bash ./scripts/push-tt005-raft-configuration.sh
+.PHONY: test-tt006-hot-standby
+test-tt006-hot-standby:
+	bash ./scripts/test-tt006-hot-standby.sh
+
+.PHONY: format-tt006-hot-standby
+format-tt006-hot-standby:
+	bash ./scripts/format-tt006-hot-standby.sh
+
+.PHONY: benchmark-tt006-hot-standby
+benchmark-tt006-hot-standby:
+	bash ./scripts/benchmark-tt006-hot-standby.sh
+
+.PHONY: test-tt006-package
+test-tt006-package:
+	bash ./scripts/test-tt006-package.sh
+
+.PHONY: race-tt006-hot-standby
+race-tt006-hot-standby:
+	bash ./scripts/race-tt006-hot-standby.sh
+
+.PHONY: vet-tt006-hot-standby
+vet-tt006-hot-standby:
+	bash ./scripts/vet-tt006-hot-standby.sh
+
+.PHONY: compile-tt006-all
+compile-tt006-all:
+	bash ./scripts/compile-tt006-all.sh
+
+.PHONY: commit-tt006-hot-standby
+commit-tt006-hot-standby:
+	bash ./scripts/commit-tt006-hot-standby.sh
+
+.PHONY: push-tt006-hot-standby
+push-tt006-hot-standby:
+	bash ./scripts/push-tt006-hot-standby.sh
