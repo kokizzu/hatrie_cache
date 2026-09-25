@@ -37579,3 +37579,23 @@ sequential path calls the existing `Upsert` method eight times.
 The one-allocation/48-byte staging cost is the measured tradeoff for atomic
 catalog publication. See [TT030_TRANSACTIONAL_DDL.md](TT030_TRANSACTIONAL_DDL.md)
 for raw samples and scope.
+<a id="ch-005-compact-delete-bitmap-snapshots"></a>
+## CH-005 Compact Delete-Bitmap Snapshots
+
+`make benchmark-ch005-compact-patch` compares the previous v1 key-list
+snapshot with the v2 fingerprint snapshot on an AMD Ryzen 9 5950X Linux/amd64
+host. The fixture contains 4,096 physical rows and 820 logical deletes; each
+row has a 38-byte key. Results are medians of five 100 ms samples.
+
+| Path | Snapshot bytes | ns/op | B/op | allocs/op | Relative |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Legacy v1 key list, marshal | 172,589 | 57,864 | 180,224 | 1 | 1.00x |
+| Compact v2, warm marshal | 573 | 2,411 | 640 | 1 | 23.99x faster; 301.20x smaller |
+| Compact v2, cold marshal after layout change | 573 | 126,734 | 640 | 1 | 2.19x slower; 301.20x smaller |
+| Legacy v1 key list, restore | 172,589 | 36,835 | 528 | 2 | 1.00x |
+| Compact v2, warm restore | 573 | 303 | 528 | 2 | 121.57x faster; 301.20x smaller |
+| Compact v2, cold restore after layout change | 573 | 125,665 | 528 | 2 | 3.41x slower; 301.20x smaller |
+
+Warm paths reuse the cached key-layout fingerprint. A physical layout change
+rehashes once; v1 restore compatibility is retained. See
+[CH005_COMPACT_DELETE_BITMAP.md](CH005_COMPACT_DELETE_BITMAP.md).

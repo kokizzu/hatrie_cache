@@ -135,6 +135,9 @@ func (table *TypedTable) AppendColumnar(keys []string, batch ColumnarBatch) ([]T
 		}
 		changes[row] = table.appendChangeLocked(change)
 	}
+	if len(changes) > 0 {
+		table.patchStateKeyLayoutGeneration++
+	}
 	if newBasePart {
 		table.recordStorageEventLocked(TypedTableStorageEventBasePartCreated, 0, len(table.keys), 0, 0, 0)
 	}

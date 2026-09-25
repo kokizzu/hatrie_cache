@@ -493,6 +493,7 @@ type TypedTable struct {
 	generatedOrder       []int
 	columnar             typedTableColumnarCache
 	patchParts           *typedTablePatchState
+	patchStateKeyLayoutGeneration uint64
 	storageEvents        *typedTableStorageEventLog
 	mvcc                 *typedTableMVCCState
 	ttl                  *typedTableTTLState
@@ -774,6 +775,7 @@ func (table *TypedTable) Upsert(key string, values []TypedTableValue) (TypedTabl
 		index = len(table.keys)
 		table.positions[key] = index
 		table.keys = append(table.keys, key)
+		table.patchStateKeyLayoutGeneration++
 		if table.patchParts != nil {
 			table.patchParts.deleted.ensure(index + 1)
 		}
@@ -850,6 +852,7 @@ func (table *TypedTable) deleteIndexLocked(index int) TypedTableChange {
 	}
 	delete(table.positions, change.Key)
 	table.keys = table.keys[:last]
+	table.patchStateKeyLayoutGeneration++
 	for column := range table.columns {
 		table.columns[column].truncate(last)
 	}

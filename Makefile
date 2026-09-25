@@ -27056,3 +27056,19 @@ race-tt030:
 	bash ./scripts/race-tt030.sh
 test-tt030-consumers:
 	bash ./scripts/test-tt030-consumers.sh
+.PHONY: benchmark-ch005-compact-patch
+benchmark-ch005-compact-patch:
+	bash ./scripts/benchmark-ch005-compact-patch.sh
+.PHONY: test-ch005-compact-patch
+test-ch005-compact-patch:
+	bash ./scripts/test-ch005-compact-patch.sh
+.PHONY: format-ch005-compact-patch
+format-ch005-compact-patch:
+	bash ./scripts/format-ch005-compact-patch.sh
+.PHONY: test-ch005-compact-package race-ch005-compact-patch test-ch005-compact-hat
+test-ch005-compact-package:
+	bash ./scripts/test-ch005-compact-package.sh
+race-ch005-compact-patch:
+	bash ./scripts/race-ch005-compact-patch.sh
+test-ch005-compact-hat:
+	bash ./scripts/test-ch005-compact-hat.sh

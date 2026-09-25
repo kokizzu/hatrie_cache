@@ -8,12 +8,19 @@ import (
 	"hash/crc32"
 	"math/bits"
 
+	"github.com/cespare/xxhash/v2"
 	"hatrie_cache/hat/hatMerkle"
 )
 
 const (
-	typedTablePatchStateMagic   = "HTDP1"
-	typedTablePatchStateVersion = byte(1)
+	// Version 2 replaces the serialized physical key list with a deterministic
+	// 128-bit key-order fingerprint. Version 1 remains readable for upgrades.
+	typedTablePatchStateMagic          = "HTDP1"
+	typedTablePatchStateVersion        = byte(2)
+	typedTablePatchStateLegacyVersion  = byte(1)
+	typedTablePatchStateKeyDigestBytes = 16
+	typedTablePatchStateKeyDigestSeedA = 0x9e3779b185ebca87
+	typedTablePatchStateKeyDigestSeedB = 0xc2b2ae3d27d4eb4f
 
 	// MaxTypedTablePatchStateBytes bounds encoded logical-delete snapshots
 	// before they can allocate memory during restore.
@@ -59,14 +66,15 @@ func (table *TypedTable) MarshalPatchState() ([]byte, error) {
 
 	size := len(typedTablePatchStateMagic) + 4 + 4 + 4 + 4 + 4 + len(table.schema.Name) + 4
 	for index, key := range table.keys {
-		if len(key) > int(^uint32(0)) || !addTypedTablePatchStateSize(&size, 4+len(key)) {
+		if len(key) > int(^uint32(0)) {
 			return nil, fmt.Errorf("%w: key %d exceeds snapshot limit", ErrTypedTablePatchStateInvalid, index)
 		}
 	}
-	if wordCount > (MaxTypedTablePatchStateBytes-size-4)/8 || !addTypedTablePatchStateSize(&size, wordCount*8) {
+	if !addTypedTablePatchStateSize(&size, typedTablePatchStateKeyDigestBytes) ||
+		!addTypedTablePatchStateSize(&size, wordCount*8) {
 		return nil, fmt.Errorf("%w: snapshot exceeds %d bytes", ErrTypedTablePatchStateInvalid, MaxTypedTablePatchStateBytes)
 	}
-	if size > MaxTypedTablePatchStateBytes-4 {
+	if size > MaxTypedTablePatchStateBytes {
 		return nil, fmt.Errorf("%w: snapshot exceeds %d bytes", ErrTypedTablePatchStateInvalid, MaxTypedTablePatchStateBytes)
 	}
 
@@ -78,10 +86,8 @@ func (table *TypedTable) MarshalPatchState() ([]byte, error) {
 	encoded = appendUint32(encoded, uint32(rowCount))
 	encoded = appendUint32(encoded, uint32(deletedCount))
 	encoded = appendUint32(encoded, uint32(wordCount))
-	for _, key := range table.keys {
-		encoded = appendUint32(encoded, uint32(len(key)))
-		encoded = append(encoded, key...)
-	}
+	keyDigest := table.typedTablePatchStateKeyDigestLocked()
+	encoded = append(encoded, keyDigest[:]...)
 	for index := 0; index < wordCount; index++ {
 		word := uint64(0)
 		if index < len(table.patchParts.deleted.words) {
@@ -169,9 +175,10 @@ func (table *TypedTable) RestorePatchState(encoded []byte) error {
 		return fmt.Errorf("%w: magic mismatch", ErrTypedTablePatchStateInvalid)
 	}
 	position += len(typedTablePatchStateMagic)
-	if position+4 > len(payload) || payload[position] != typedTablePatchStateVersion {
+	if position+4 > len(payload) || (payload[position] != typedTablePatchStateVersion && payload[position] != typedTablePatchStateLegacyVersion) {
 		return fmt.Errorf("%w: unsupported version", ErrTypedTablePatchStateInvalid)
 	}
+	version := payload[position]
 	position += 4
 	tableName, ok := readTypedTablePatchStateString(payload, &position)
 	if !ok {
@@ -193,8 +200,11 @@ func (table *TypedTable) RestorePatchState(encoded []byte) error {
 	if uint64(wordCount) != expectedWords || uint64(deletedCount) > uint64(rowCount) {
 		return fmt.Errorf("%w: bitmap dimensions are invalid", ErrTypedTablePatchStateInvalid)
 	}
-	if uint64(rowCount) > uint64(len(payload)-position)/4 {
+	if version == typedTablePatchStateLegacyVersion && uint64(rowCount) > uint64(len(payload)-position)/4 {
 		return fmt.Errorf("%w: row count exceeds encoded keys", ErrTypedTablePatchStateInvalid)
+	}
+	if version == typedTablePatchStateVersion && len(payload)-position < typedTablePatchStateKeyDigestBytes {
+		return fmt.Errorf("%w: key digest is truncated", ErrTypedTablePatchStateInvalid)
 	}
 	table.mu.Lock()
 	defer table.mu.Unlock()
@@ -204,9 +214,19 @@ func (table *TypedTable) RestorePatchState(encoded []byte) error {
 	if table.schema.Name != tableName || len(table.keys) != int(rowCount) {
 		return fmt.Errorf("%w: schema or row count mismatch", ErrTypedTablePatchStateInvalid)
 	}
-	for index, key := range table.keys {
-		if !readTypedTablePatchStateKey(payload, &position, key) {
-			return fmt.Errorf("%w: physical key order mismatch at row %d", ErrTypedTablePatchStateInvalid, index)
+	if version == typedTablePatchStateLegacyVersion {
+		for index, key := range table.keys {
+			if !readTypedTablePatchStateKey(payload, &position, key) {
+				return fmt.Errorf("%w: physical key order mismatch at row %d", ErrTypedTablePatchStateInvalid, index)
+			}
+		}
+	} else {
+		var expectedDigest [typedTablePatchStateKeyDigestBytes]byte
+		copy(expectedDigest[:], payload[position:position+typedTablePatchStateKeyDigestBytes])
+		position += typedTablePatchStateKeyDigestBytes
+		actualDigest := table.typedTablePatchStateKeyDigestLocked()
+		if !bytes.Equal(expectedDigest[:], actualDigest[:]) {
+			return fmt.Errorf("%w: physical key digest mismatch", ErrTypedTablePatchStateInvalid)
 		}
 	}
 	if uint64(wordCount) > uint64(len(payload)-position)/8 {
@@ -240,6 +260,41 @@ func addTypedTablePatchStateSize(size *int, extra int) bool {
 	}
 	*size += extra
 	return true
+}
+
+func typedTablePatchStateKeyDigest(keys []string) [typedTablePatchStateKeyDigestBytes]byte {
+	// The fingerprint is for compact layout identity, not authentication. The
+	// enclosing snapshot CRC still detects accidental corruption.
+	left := xxhash.NewWithSeed(typedTablePatchStateKeyDigestSeedA)
+	right := xxhash.NewWithSeed(typedTablePatchStateKeyDigestSeedB)
+	var length [4]byte
+	for _, key := range keys {
+		binary.LittleEndian.PutUint32(length[:], uint32(len(key)))
+		_, _ = left.Write(length[:])
+		_, _ = right.Write(length[:])
+		_, _ = left.WriteString(key)
+		_, _ = right.WriteString(key)
+	}
+	var result [typedTablePatchStateKeyDigestBytes]byte
+	binary.LittleEndian.PutUint64(result[:8], left.Sum64())
+	binary.LittleEndian.PutUint64(result[8:], right.Sum64())
+	return result
+}
+
+func (table *TypedTable) typedTablePatchStateKeyDigestLocked() [typedTablePatchStateKeyDigestBytes]byte {
+	state := table.patchParts
+	if state == nil {
+		return typedTablePatchStateKeyDigest(table.keys)
+	}
+	state.keyDigestMu.Lock()
+	defer state.keyDigestMu.Unlock()
+	if state.keyDigestValid && state.keyDigestGen == table.patchStateKeyLayoutGeneration {
+		return state.keyDigest
+	}
+	state.keyDigest = typedTablePatchStateKeyDigest(table.keys)
+	state.keyDigestGen = table.patchStateKeyLayoutGeneration
+	state.keyDigestValid = true
+	return state.keyDigest
 }
 
 func readTypedTablePatchStateUint32(encoded []byte, position *int) (uint32, bool) {

@@ -2,6 +2,7 @@ package hatSql
 
 import (
 	"errors"
+	"sync"
 	"time"
 )
 
@@ -22,6 +23,10 @@ type typedTablePatchState struct {
 	deletedCount   int
 	mergeThreshold int
 	mergeScheduled bool
+	keyDigestMu    sync.Mutex
+	keyDigest      [typedTablePatchStateKeyDigestBytes]byte
+	keyDigestGen   uint64
+	keyDigestValid bool
 }
 
 func normalizeTypedTablePatchOptions(options TypedTablePatchOptions) TypedTablePatchOptions {
@@ -122,6 +127,7 @@ func (table *TypedTable) compactTypedTablePatchPartsLocked() {
 		write++
 	}
 	table.keys = table.keys[:write]
+	table.patchStateKeyLayoutGeneration++
 	state.deleted.truncate(write)
 	state.deletedCount = 0
 	for column := range table.columns {
