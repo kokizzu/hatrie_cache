@@ -27,7 +27,13 @@ or intentionally deferred, and `[-]` rejected or rolled back.
 - [x] MZ010b adds an importable `SUBSCRIBE`/`TAIL` statement envelope with
   snapshot and differential modes. It delegates query validation, dependency
   discovery, and execution to the existing bounded subscription APIs; transport
-  and signed wire envelopes remain open.
+  integration remains open.
+- [x] MZ010c adds an importable bounded `SQLSubscriptionWireKeyring` for
+  HMAC-authenticated subscription frames. It seals with an active key, accepts
+  four previous keys during rotation, preserves the existing `HSE1` wire
+  format, and keeps active-key reads lock-free; cross-process transport remains
+  open. See [MZ010_SUBSCRIPTION_KEYRING.md](MZ010_SUBSCRIPTION_KEYRING.md) and
+  [BENCHMARK.md](BENCHMARK.md#mz-010-subscription-wire-keyring).
 
 ## ClickHouse (50 ideas)
 - [x] C001 Column-oriented storage for analytical values - local columnar tables cover the compatible case.

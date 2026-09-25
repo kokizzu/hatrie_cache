@@ -26875,3 +26875,35 @@ commit-tmp-hatrie-cleanup:
 .PHONY: push-tmp-hatrie-cleanup
 push-tmp-hatrie-cleanup:
 	bash ./scripts/push-tmp-hatrie-cleanup.sh
+
+.PHONY: test-mz010-subscription-keyring
+test-mz010-subscription-keyring:
+	bash ./scripts/test-mz010-subscription-keyring.sh
+
+.PHONY: benchmark-mz010-subscription-keyring
+benchmark-mz010-subscription-keyring:
+	bash ./scripts/benchmark-mz010-subscription-keyring.sh
+
+.PHONY: format-mz010-subscription-keyring
+format-mz010-subscription-keyring:
+	bash ./scripts/format-mz010-subscription-keyring.sh
+
+.PHONY: race-mz010-subscription-keyring
+race-mz010-subscription-keyring:
+	bash ./scripts/race-mz010-subscription-keyring.sh
+
+.PHONY: vet-mz010-subscription-keyring
+vet-mz010-subscription-keyring:
+	bash ./scripts/vet-mz010-subscription-keyring.sh
+
+.PHONY: stage-mz010-subscription-keyring
+stage-mz010-subscription-keyring:
+	bash ./scripts/stage-mz010-subscription-keyring.sh
+
+.PHONY: commit-mz010-subscription-keyring
+commit-mz010-subscription-keyring:
+	bash ./scripts/commit-mz010-subscription-keyring.sh
+
+.PHONY: push-mz010-subscription-keyring
+push-mz010-subscription-keyring:
+	bash ./scripts/push-mz010-subscription-keyring.sh

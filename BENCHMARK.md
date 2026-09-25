@@ -36874,6 +36874,23 @@ The exact command used was:
 ```sh
 make benchmark-mz010-subscription-envelope
 ```
+## MZ-010 Subscription Wire Keyring
+
+`make benchmark-mz010-subscription-keyring` compares the existing direct HMAC
+open path with the bounded active-key and previous-key rotation paths. Samples
+use 200 ms per benchmark on Linux/amd64, AMD Ryzen 9 5950X.
+
+| Path | ns/op | B/op | allocs/op | Tradeoff |
+| --- | ---: | ---: | ---: | --- |
+| Direct envelope open | 680.7 | 592 | 8 | Existing control |
+| Keyring, active key | 678.5 | 592 | 8 | Within CPU noise; no heap/alloc overhead |
+| Keyring, previous key | 1,330 | 1,104 | 14 | 1.95x CPU; +512 B/op; +6 allocs during rotation grace |
+
+The keyring does not change `HSE1` wire bytes. It is bounded to four previous
+keys and is intended for credential rotation, not as a default throughput
+optimization. Details and API examples are in
+[MZ010_SUBSCRIPTION_KEYRING.md](MZ010_SUBSCRIPTION_KEYRING.md).
+
 ## TT-024 Materialized positional text index
 
 This benchmark compares the ordinary full-scan phrase query with the warm
