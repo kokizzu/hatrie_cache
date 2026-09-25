@@ -2,6 +2,7 @@ package hatCache
 
 import (
 	"errors"
+	"io"
 	"os"
 	"time"
 
@@ -9,6 +10,10 @@ import (
 )
 
 func (ht *HatTrie) loadSnapshotStaged(path string) (SnapshotMetadata, error) {
+	return ht.loadSnapshotStagedWithProgress(path, nil)
+}
+
+func (ht *HatTrie) loadSnapshotStagedWithProgress(path string, progress SnapshotRestoreProgressFunc) (SnapshotMetadata, error) {
 	if ht == nil {
 		return SnapshotMetadata{}, ErrNilHatTrie
 	}
@@ -20,6 +25,20 @@ func (ht *HatTrie) loadSnapshotStaged(path string) (SnapshotMetadata, error) {
 		return SnapshotMetadata{}, err
 	}
 	defer file.Close()
+	var reader io.Reader = file
+	var progressReader *snapshotRestoreProgressReader
+	if progress != nil {
+		info, err := file.Stat()
+		if err != nil {
+			return SnapshotMetadata{}, err
+		}
+		progressReader = &snapshotRestoreProgressReader{
+			reader:     file,
+			callback:   progress,
+			totalBytes: info.Size(),
+		}
+		reader = progressReader
+	}
 
 	stage, err := newSnapshotRestoreStage(ht)
 	if err != nil {
@@ -38,7 +57,7 @@ func (ht *HatTrie) loadSnapshotStaged(path string) (SnapshotMetadata, error) {
 	}
 
 	now := ht.currentTime()
-	metadata, err := scanSnapshotIntoRestoreStage(file, stage, now)
+	metadata, err := scanSnapshotIntoRestoreStage(reader, stage, now, progressReader)
 	if err != nil {
 		return SnapshotMetadata{}, err
 	}
@@ -116,12 +135,17 @@ func newSnapshotRestoreTrie(target *HatTrie) (*HatTrie, error) {
 	return stage, nil
 }
 
-func scanSnapshotIntoRestoreStage(file *os.File, stage *HatTrie, now time.Time) (snapshotFileMetadata, error) {
+func scanSnapshotIntoRestoreStage(reader io.Reader, stage *HatTrie, now time.Time, progress *snapshotRestoreProgressReader) (snapshotFileMetadata, error) {
 	set := stage.localPartitionSet()
 	if set == nil {
 		stage.mu.Lock()
 		defer stage.mu.Unlock()
-		return scanSnapshotFileReader(file, func(entry snapshotEntry) error {
+		return scanSnapshotFileReader(reader, func(entry snapshotEntry) error {
+			if progress != nil {
+				if err := progress.reportEntry(); err != nil {
+					return err
+				}
+			}
 			operation, active, err := validateSnapshotLoadEntry(entry, now, true)
 			if err != nil || !active {
 				return err
@@ -142,7 +166,12 @@ func scanSnapshotIntoRestoreStage(file *os.File, stage *HatTrie, now time.Time) 
 		_, err := child.applySnapshotOperationAtLocked(operation, now)
 		return err
 	})
-	metadata, scanErr := scanSnapshotFileReader(file, func(entry snapshotEntry) error {
+	metadata, scanErr := scanSnapshotFileReader(reader, func(entry snapshotEntry) error {
+		if progress != nil {
+			if err := progress.reportEntry(); err != nil {
+				return err
+			}
+		}
 		operation, active, err := validateSnapshotLoadEntry(entry, now, true)
 		if err != nil || !active {
 			return err

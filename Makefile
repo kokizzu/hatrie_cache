@@ -26478,3 +26478,29 @@ commit-mz006-antichain:
 .PHONY: push-mz006-antichain
 push-mz006-antichain:
 	@bash scripts/push-mz006-antichain.sh
+.PHONY: test-mz003-snapshot-progress
+test-mz003-snapshot-progress:
+	@bash scripts/test-mz003-snapshot-progress.sh
+.PHONY: benchmark-mz003-snapshot-progress-baseline
+benchmark-mz003-snapshot-progress-baseline:
+	@bash scripts/benchmark-mz003-snapshot-progress-baseline.sh
+.PHONY: format-mz003-snapshot-progress
+format-mz003-snapshot-progress:
+	@bash scripts/format-mz003-snapshot-progress.sh
+.PHONY: benchmark-mz003-snapshot-progress
+benchmark-mz003-snapshot-progress:
+	@bash scripts/benchmark-mz003-snapshot-progress.sh
+.PHONY: verify-mz003-snapshot-progress
+verify-mz003-snapshot-progress:
+	@bash scripts/verify-mz003-snapshot-progress.sh
+.PHONY: stage-mz003-snapshot-progress
+stage-mz003-snapshot-progress:
+	@bash scripts/stage-mz003-snapshot-progress.sh
+
+.PHONY: commit-mz003-snapshot-progress
+commit-mz003-snapshot-progress:
+	@bash scripts/commit-mz003-snapshot-progress.sh
+
+.PHONY: push-mz003-snapshot-progress
+push-mz003-snapshot-progress:
+	@bash scripts/push-mz003-snapshot-progress.sh
