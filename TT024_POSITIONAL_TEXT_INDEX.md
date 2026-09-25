@@ -99,3 +99,49 @@ this fixture; the index remains opt-in so workloads that cannot justify that
 cost keep the old path.
 
 Raw benchmark output is recorded in `BENCHMARK.md`.
+
+## SQL OR-union planning
+
+The SQL planner can use one positional index lookup for an `OR` whose leaves
+are `CONTAINS_PHRASE` or `CONTAINS_PROXIMITY` predicates on the same indexed
+text field. The union implementation deduplicates rows and emits them in
+source order. The SQL executor still evaluates the complete boolean
+expression on every candidate, so the index remains a narrowing optimization
+and does not change query semantics.
+
+Resolvers that do not implement the optional union interface, `OR` predicates
+on different fields, and mixed boolean expressions keep the existing full-scan
+fallback. A single phrase or proximity predicate keeps the original posting-
+list path and does not allocate the union bitmap.
+
+The Hatrie and `MaterializedSource` adapters implement this optimization. The
+optional resolver contract is:
+
+```go
+type SQLTextProximityUnionIndexedSourceResolver interface {
+	ResolveSQLTextProximityUnionSource(
+		name, key, field string,
+		queries []SQLTextProximityQuery,
+	) ([]Row, bool, error)
+}
+```
+
+For a 20,000-row fixture with 40 matching rows, `make
+benchmark-tt024-text-union` measured the following on Linux/amd64 with an AMD
+Ryzen 9 5950X. Each case used five samples and 100 benchmark iterations:
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Final-run full scan | 46,497,726 | 30,647,904 | 420,139 | baseline for this run |
+| Indexed same-field positional OR union | 71,603 | 83,872 | 527 | 649x faster, 365x lower B/op, 797x fewer allocs |
+
+The pre-change fallback run measured 45,914,775 ns/op, 30,647,890 B/op, and
+420,139 allocations/op because the union resolver was unavailable. CPU varies
+between runs, so the relative result uses the same-run full scan; the indexed
+union was still approximately 641x faster than the pre-change fallback, with
+the same approximately 365x lower timed allocation volume and 797x fewer
+allocations.
+
+The index-build and index-maintenance costs are unchanged. The union path
+only pays the additional row-mark bitmap for a true multi-leaf union, and the
+bitmap is sized to the indexed rows rather than the source row count.

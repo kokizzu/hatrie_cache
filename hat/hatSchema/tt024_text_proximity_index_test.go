@@ -54,6 +54,38 @@ func TestTT024TextIndexIsOptInAndPreservesSQLPhraseSemantics(t *testing.T) {
 	assertTT024IDs(t, proximity.Rows, []int64{1, 3})
 }
 
+func TestTT024TextIndexUnionAdapterDeduplicatesAndPreservesSourceOrder(t *testing.T) {
+	source := NewMaterializedSource([]DerivedColumn{{Name: "id"}, {Name: "body"}})
+	for _, row := range []Row{
+		{"id": int64(1), "body": "fast cache"},
+		{"id": int64(2), "body": "slow cache"},
+		{"id": int64(3), "body": "fast cache and slow cache"},
+		{"id": int64(4), "body": "unrelated"},
+	} {
+		if _, err := source.Insert(row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := source.BuildTextIndex("body"); err != nil {
+		t.Fatal(err)
+	}
+	adapter := SQLResolverAdapter{Sources: map[string]*MaterializedSource{"docs": source}}
+	rows, available, err := adapter.ResolveSQLTextProximityUnionSource("CACHE", "docs", "body", []hatSql.SQLTextProximityQuery{
+		{Query: "fast cache"},
+		{Query: "slow cache"},
+	})
+	if err != nil || !available {
+		t.Fatalf("ResolveSQLTextProximityUnionSource() availability/error = %t/%v", available, err)
+	}
+	assertTT024IDs(t, rows, []int64{1, 2, 3})
+
+	result, err := hatSql.ExecuteSQLQueryContext(context.Background(), "FROM CACHE('docs') AS doc WHERE CONTAINS_PHRASE(doc.body, 'fast cache') OR CONTAINS_PHRASE(doc.body, 'slow cache') SELECT doc.id ORDER BY doc.id", adapter, hatSql.SQLQueryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertTT024IDs(t, result.Rows, []int64{1, 2, 3})
+}
+
 func TestTT024TextIndexMaintainsInsertAndUpsert(t *testing.T) {
 	source := NewMaterializedSource([]DerivedColumn{{Name: "id", Indexed: true}, {Name: "body"}})
 	if _, err := source.BuildUniqueIndex("id"); err != nil {

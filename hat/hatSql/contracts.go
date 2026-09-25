@@ -1472,6 +1472,24 @@ type TextProximityIndexedSourceResolver interface {
 	ResolveSQLTextProximitySource(name, key, field, query string, maxGap int) ([]Row, bool, error)
 }
 
+// SQLTextProximityQuery describes one ordered phrase or proximity predicate
+// for a text-index union. MaxGap is the number of intervening tokens allowed
+// between adjacent query tokens; zero means an exact phrase.
+type SQLTextProximityQuery struct {
+	Query     string
+	MaxGap    int
+	Proximity bool
+}
+
+// TextProximityUnionIndexedSourceResolver optionally resolves an OR of
+// ordered phrase or proximity predicates against one positional text index.
+// Implementations must deduplicate rows and return them in source order. The
+// SQL executor still evaluates the complete OR expression before publishing
+// results, so conservative candidates remain correct.
+type TextProximityUnionIndexedSourceResolver interface {
+	ResolveSQLTextProximityUnionSource(name, key, field string, queries []SQLTextProximityQuery) ([]Row, bool, error)
+}
+
 // ExternalSourceResolver supplies a named, imported external table. It is
 // used only by EXTERNAL('name') sources and never receives a filesystem path.
 type ExternalSourceResolver interface {

@@ -26099,6 +26099,37 @@ commit-ch005-adaptive-delete-bitmap:
 push-ch005-adaptive-delete-bitmap:
 	bash scripts/push-ch005-adaptive-delete-bitmap.sh
 .PHONY: test-tt024-text-index
+.PHONY: test-tt024-text-union test-tt024-text-union-package format-tt024-text-union benchmark-tt024-text-union race-tt024-text-union vet-tt024-text-union
+
+test-tt024-text-union:
+	bash scripts/test-tt024-text-union.sh
+
+test-tt024-text-union-package:
+	bash scripts/test-tt024-text-union-package.sh
+
+format-tt024-text-union:
+	bash scripts/format-tt024-text-union.sh
+
+benchmark-tt024-text-union:
+	bash scripts/benchmark-tt024-text-union.sh
+
+race-tt024-text-union:
+	bash scripts/race-tt024-text-union.sh
+
+vet-tt024-text-union:
+	bash scripts/vet-tt024-text-union.sh
+
+.PHONY: stage-tt024-text-union commit-tt024-text-union push-tt024-text-union
+
+stage-tt024-text-union:
+	bash scripts/stage-tt024-text-union.sh
+
+commit-tt024-text-union:
+	bash scripts/commit-tt024-text-union.sh
+
+push-tt024-text-union:
+	bash scripts/push-tt024-text-union.sh
+
 test-tt024-text-index:
 	bash scripts/test-tt024-text-index.sh
 

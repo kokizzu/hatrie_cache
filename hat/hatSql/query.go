@@ -14415,6 +14415,9 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 			}
 		}
 	}
+	if rows, indexed, err := resolveSQLTextProximityUnionIndexedSource(source, condition, resolver, metrics, hint); indexed || err != nil {
+		return rows, indexed, err
+	}
 	if condition.op == "AND" {
 		if rows, indexed, err := resolveSQLMostSelectiveIndexedConjunct(source, condition, resolver, metrics); indexed || err != nil {
 			return rows, indexed, err

@@ -36862,6 +36862,42 @@ BenchmarkTT024TextIndexBuild-32   100  33393692 ns/op  26255546 B/op 260258 allo
 BenchmarkTT024TextIndexBuild-32   100  32566476 ns/op  26255541 B/op 260258 allocs/op
 BenchmarkTT024TextIndexBuild-32   100  32911228 ns/op  26255594 B/op 260258 allocs/op
 ```
+<a id="tt-024-text-index-or-union"></a>
+## TT-024 Positional Text Index OR Union
+
+This benchmark compares the final full-scan path with the same-field
+positional-index union used for an `OR` of phrase/proximity predicates. The
+20,000-row fixture returns 40 rows. Five samples ran with `-benchmem` on
+Linux/amd64 and an AMD Ryzen 9 5950X; each sample used 100 benchmark
+iterations.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Final-run full scan | 46,497,726 | 30,647,904 | 420,139 | Baseline for this run |
+| Indexed same-field positional OR union | 71,603 | 83,872 | 527 | 649x faster, 365x lower B/op, 797x fewer allocs |
+
+The pre-change resolver-unavailable fallback measured 45,914,775 ns/op,
+30,647,890 B/op, and 420,139 allocations/op. CPU varied between runs, so the
+table uses the same-run scan as its ratio baseline; the indexed union was still
+approximately 590x faster than the pre-change fallback. Unsupported unions
+continue to use the full scan, and a single phrase/proximity predicate keeps
+the existing posting-list path without the union bitmap.
+
+Raw output:
+
+```text
+BenchmarkTT024TextPhraseUnion/scan-32          100  47343487 ns/op  30648086 B/op 420139 allocs/op
+BenchmarkTT024TextPhraseUnion/scan-32          100  46559785 ns/op  30647908 B/op 420139 allocs/op
+BenchmarkTT024TextPhraseUnion/scan-32          100  45769840 ns/op  30647902 B/op 420139 allocs/op
+BenchmarkTT024TextPhraseUnion/scan-32          100  46828698 ns/op  30647904 B/op 420139 allocs/op
+BenchmarkTT024TextPhraseUnion/scan-32          100  46497726 ns/op  30647900 B/op 420139 allocs/op
+BenchmarkTT024TextPhraseUnion/indexed_union-32 100     81814 ns/op     83872 B/op    527 allocs/op
+BenchmarkTT024TextPhraseUnion/indexed_union-32 100     71603 ns/op     83872 B/op    527 allocs/op
+BenchmarkTT024TextPhraseUnion/indexed_union-32 100     87102 ns/op     83872 B/op    527 allocs/op
+BenchmarkTT024TextPhraseUnion/indexed_union-32 100     66088 ns/op     83872 B/op    527 allocs/op
+BenchmarkTT024TextPhraseUnion/indexed_union-32 100     69110 ns/op     83873 B/op    527 allocs/op
+```
+
 <a id="tt-021-materializedsource-spatial-index"></a>
 ## TT-021 MaterializedSource Spatial Index
 

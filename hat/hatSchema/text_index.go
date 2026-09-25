@@ -118,6 +118,34 @@ func (source *MaterializedSource) lookupText(field, query string, maxGap int) ([
 	return rows, true
 }
 
+func (source *MaterializedSource) lookupTextUnion(field string, queries []hatSql.SQLTextProximityQuery) ([]Row, bool) {
+	if source == nil {
+		return nil, false
+	}
+	field = strings.TrimSpace(field)
+	source.mu.RLock()
+	defer source.mu.RUnlock()
+	index := source.textIndexes[field]
+	if index == nil {
+		return nil, false
+	}
+	matched := make([]bool, len(source.rows))
+	for _, query := range queries {
+		for _, position := range index.matchingRows(query.Query, query.MaxGap) {
+			if position >= 0 && position < len(matched) {
+				matched[position] = true
+			}
+		}
+	}
+	rows := make([]Row, 0)
+	for position, rowMatched := range matched {
+		if rowMatched {
+			rows = append(rows, cloneRow(source.rows[position]))
+		}
+	}
+	return rows, true
+}
+
 func (source *MaterializedSource) addTextIndexesForInsertLocked(row Row, position int) {
 	for field, index := range source.textIndexes {
 		if index != nil {
