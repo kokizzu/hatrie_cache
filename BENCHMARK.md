@@ -37614,3 +37614,24 @@ on the AMD Ryzen 9 5950X Linux/amd64 host.
 
 Raw samples, the opaque-payload limitation, and the API contract are in
 [MZ001_DURABLE_PERSIST_SHARDS.md](MZ001_DURABLE_PERSIST_SHARDS.md).
+
+## TT-014: Compaction Backpressure
+
+The controller fixture submits 64 distinct 1 KiB compaction jobs to a fresh
+controller per iteration. Five samples used `-benchtime=100ms` and `-benchmem`
+on an AMD Ryzen 9 5950X Linux/amd64 host.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative |
+| --- | ---: | ---: | ---: | --- |
+| `MaxPendingBytes=0` | 35,290 | 36,120 | 183 | 1.00x |
+| `MaxPendingBytes=64 KiB` | 33,641 | 36,120 | 183 | 0.95x observed |
+
+The enabled path has the same allocation and byte counts; the small observed
+CPU difference is within short-run variance. The functional win is bounded
+pending plus running maintenance work: in the regression fixture a 60-byte
+running job plus a 40-byte queued job admits exactly 100 bytes and rejects the
+next request without changing queue state. See
+[TT014_COMPACTION_BACKPRESSURE.md](TT014_COMPACTION_BACKPRESSURE.md).
+
+The existing scheduler hot-path comparison remained within benchmark noise
+after this feature was moved out of `CompactionScheduler`.

@@ -15,6 +15,9 @@ var (
 	ErrCompactionControllerOptionsInvalid = errors.New("hatriecache: compaction controller options are invalid")
 	// ErrCompactionControllerQueueFull reports that the active-job bound is full.
 	ErrCompactionControllerQueueFull = errors.New("hatriecache: compaction controller queue is full")
+	// ErrCompactionControllerBackpressure reports that an estimated job would
+	// exceed the configured pending-byte budget.
+	ErrCompactionControllerBackpressure = errors.New("hatriecache: compaction controller backpressure")
 	// ErrCompactionRequestInvalid reports an empty target or missing callback.
 	ErrCompactionRequestInvalid = errors.New("hatriecache: compaction request is invalid")
 	// ErrCompactionControllerScheduleRejected reports an internal scheduler mismatch.
@@ -34,6 +37,7 @@ const (
 type CompactionControllerOptions struct {
 	SchedulerOptions CompactionSchedulerOptions
 	MaxPending       int
+	MaxPendingBytes  uint64
 	HistoryCapacity  int
 }
 
@@ -78,10 +82,12 @@ type compactionControllerJob struct {
 type CompactionController struct {
 	scheduler       *CompactionScheduler
 	maxPending      int
+	maxPendingBytes uint64
 	historyCapacity int
 	mu              sync.Mutex
 	nextID          uint64
 	active          int
+	activeBytes     uint64
 	jobs            map[uint64]*compactionControllerJob
 	targetIDs       map[string]uint64
 	order           []uint64
@@ -106,6 +112,7 @@ func NewCompactionController(options CompactionControllerOptions) (*CompactionCo
 	return &CompactionController{
 		scheduler:       scheduler,
 		maxPending:      options.MaxPending,
+		maxPendingBytes: options.MaxPendingBytes,
 		historyCapacity: options.HistoryCapacity,
 		jobs:            make(map[uint64]*compactionControllerJob),
 		targetIDs:       make(map[string]uint64),
@@ -134,6 +141,9 @@ func (controller *CompactionController) Submit(request CompactionRequest) (Compa
 	if controller.active >= controller.maxPending {
 		return CompactionJob{}, false, ErrCompactionControllerQueueFull
 	}
+	if !controller.admitBytesLocked(request.EstimatedBytes) {
+		return CompactionJob{}, false, ErrCompactionControllerBackpressure
+	}
 	controller.nextID++
 	job := &compactionControllerJob{
 		CompactionJob: CompactionJob{
@@ -148,6 +158,7 @@ func (controller *CompactionController) Submit(request CompactionRequest) (Compa
 	controller.targetIDs[target] = job.ID
 	controller.order = append(controller.order, job.ID)
 	controller.active++
+	controller.activeBytes = saturatingCompactionBytes(controller.activeBytes, request.EstimatedBytes)
 	queued, err := controller.scheduler.ScheduleWithPriorityAndIO(target, request.Priority, request.EstimatedBytes, func(ctx context.Context) error {
 		controller.start(job.ID)
 		err := request.Run(ctx)
@@ -246,6 +257,7 @@ func (controller *CompactionController) finish(id uint64, runErr error) {
 	if controller.active > 0 {
 		controller.active--
 	}
+	controller.activeBytes = subtractCompactionBytes(controller.activeBytes, job.EstimatedBytes)
 	controller.pruneHistoryLocked()
 }
 
@@ -259,6 +271,7 @@ func (controller *CompactionController) removeActiveLocked(id uint64) {
 	if controller.active > 0 {
 		controller.active--
 	}
+	controller.activeBytes = subtractCompactionBytes(controller.activeBytes, job.EstimatedBytes)
 	for index, current := range controller.order {
 		if current == id {
 			controller.order = append(controller.order[:index], controller.order[index+1:]...)
@@ -300,4 +313,14 @@ func compactControllerError(err error) string {
 		return message
 	}
 	return message[:maxCompactionControllerErrorBytes]
+}
+
+// admitBytesLocked enforces the optional pending-plus-running estimate budget.
+// Zero disables the check, and zero-estimate jobs do not consume budget.
+// The caller must hold controller.mu.
+func (controller *CompactionController) admitBytesLocked(additional uint64) bool {
+	if controller.maxPendingBytes == 0 || additional == 0 {
+		return true
+	}
+	return controller.activeBytes <= controller.maxPendingBytes && additional <= controller.maxPendingBytes-controller.activeBytes
 }

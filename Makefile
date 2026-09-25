@@ -14,6 +14,30 @@ commit-tmp-cleanup:
 push-tmp-cleanup:
 	bash ./scripts/push-tmp-cleanup.sh
 
+.PHONY: benchmark-tt014-baseline
+benchmark-tt014-baseline:
+	bash ./scripts/benchmark-tt014-baseline.sh
+
+.PHONY: test-tt014-compaction-throttle
+test-tt014-compaction-throttle:
+	bash ./scripts/test-tt014-compaction-throttle.sh
+
+.PHONY: format-tt014-compaction-throttle
+format-tt014-compaction-throttle:
+	bash ./scripts/format-tt014-compaction-throttle.sh
+
+.PHONY: test-tt014-compaction-package
+test-tt014-compaction-package:
+	bash ./scripts/test-tt014-compaction-package.sh
+
+.PHONY: race-tt014-compaction-throttle
+race-tt014-compaction-throttle:
+	bash ./scripts/race-tt014-compaction-throttle.sh
+
+.PHONY: benchmark-tt014-compaction-throttle
+benchmark-tt014-compaction-throttle:
+	bash ./scripts/benchmark-tt014-compaction-throttle.sh
+
 .PHONY: verify-ch029-dictionary-join-c203
 .PHONY: test-tt020
 test-tt020:

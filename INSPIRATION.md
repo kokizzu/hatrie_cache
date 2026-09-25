@@ -670,6 +670,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T011 Multikey indexes over array fields. `CreateSQLJSONMultikeyIndex` builds deduplicated element postings for `ARRAY_CONTAINS`; candidates are rechecked by the executor, mixed JSON types preserve existing SQL equality, and non-binary collation falls back to a scan. See [SQL_MULTIKEY_INDEX.md](SQL_MULTIKEY_INDEX.md).
 - [x] T012 Partial equality indexes.
 - [x] T013 Covering indexes and borrowed postings.
+- [x] T014a Vinyl-style pending-plus-running compaction byte admission is available as opt-in `CompactionControllerOptions.MaxPendingBytes`; adaptive disk/latency feedback remains deferred. See [TT014_COMPACTION_BACKPRESSURE.md](TT014_COMPACTION_BACKPRESSURE.md).
 - [x] T014 Equality index iterators.
 - [x] T015 Ordered range iterators. `OrderedIndex.Range` returns an allocation-free iterator over inclusive bounds.
 - [x] T016 Partial-key search. Composite ordered keys can express a prefix range with smallest/largest suffix bounds; the iterator uses binary-searched bounds and a bounded immutable subslice.
