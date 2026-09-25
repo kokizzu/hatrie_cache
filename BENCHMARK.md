@@ -22494,6 +22494,48 @@ Raw 16-set `CUBE` samples, after:
 The full report and limitations are in
 [CH041_GROUPING_PLAN_SHARING.md](CH041_GROUPING_PLAN_SHARING.md).
 
+## CH-041 native one-pass grouping sets
+
+This compares the same four-row, four-dimension `CUBE` query with five
+`-benchmem` samples on an AMD Ryzen 9 5950X. The expanded `UNION ALL` executor
+is the forced control; the native executor is automatic for eligible simple
+aggregate projections.
+
+| Executor | Median ns/op | Median B/op | Median allocs/op | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Expanded `UNION ALL` branches | 610,765 | 310,191 | 6,577 | baseline |
+| Native one-pass grouping | 206,758 | 184,539 | 2,173 | 2.95x faster, 40.5% less allocated memory, 3.03x fewer allocations |
+
+Command:
+
+```text
+make benchmark-ch041-one-pass
+```
+
+Raw native one-pass samples:
+
+```text
+207591 ns/op 184542 B/op 2173 allocs/op
+206758 ns/op 184536 B/op 2173 allocs/op
+199649 ns/op 184537 B/op 2173 allocs/op
+204741 ns/op 184539 B/op 2173 allocs/op
+215590 ns/op 184540 B/op 2173 allocs/op
+```
+
+Raw expanded `UNION ALL` samples:
+
+```text
+627839 ns/op 310191 B/op 6577 allocs/op
+611474 ns/op 310199 B/op 6577 allocs/op
+610765 ns/op 310196 B/op 6577 allocs/op
+581854 ns/op 310181 B/op 6577 allocs/op
+576790 ns/op 310182 B/op 6577 allocs/op
+```
+
+The native path is deliberately conservative. Joins, CTEs, `HAVING`,
+`ORDER BY`, `LIMIT`, windows, `DISTINCT`, samples, custom functions, configured
+group-memory tracking, and richer projections use the existing fallback.
+
 ## CH-041 grouping identifiers
 
 The workload uses three input rows and the same six-row `GROUPING SETS` result

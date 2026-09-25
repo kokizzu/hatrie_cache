@@ -105,6 +105,7 @@ func sqlExpandGroupingSets(query *sqlQuery) error {
 		return fmt.Errorf("GROUPING SETS, ROLLUP, and CUBE cannot be combined with set operations")
 	}
 	template := cloneSQLGroupingSetTemplate(query)
+	query.groupingSetsTemplate = template
 	for index, groupingSet := range query.groupingSets {
 		branch := query
 		if index != 0 {
@@ -153,6 +154,7 @@ func cloneSQLGroupingSetBranch(source *sqlQuery) *sqlQuery {
 	query.groupBy = cloneSQLExprs(source.groupBy)
 	query.groupingSets = nil
 	query.groupingDimensions = nil
+	query.groupingSetsTemplate = nil
 	query.having = cloneSQLExpr(source.having)
 	query.orderBy = cloneSQLOrders(source.orderBy)
 	if source.limitBy != nil {

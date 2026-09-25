@@ -26988,3 +26988,31 @@ commit-hatrie-tmp-metadata-plan-fix:
 	bash ./scripts/commit-hatrie-tmp-metadata-plan-fix.sh
 push-hatrie-tmp-metadata-plan-fix:
 	bash ./scripts/push-hatrie-tmp-metadata-plan-fix.sh
+
+.PHONY: test-ch041-one-pass
+test-ch041-one-pass:
+	bash ./scripts/test-ch041-one-pass.sh
+
+.PHONY: format-ch041-one-pass
+format-ch041-one-pass:
+	bash ./scripts/format-ch041-one-pass.sh
+
+.PHONY: test-ch041-one-pass-results
+test-ch041-one-pass-results:
+	bash ./scripts/test-ch041-one-pass-results.sh
+
+.PHONY: benchmark-ch041-one-pass
+benchmark-ch041-one-pass:
+	bash ./scripts/benchmark-ch041-one-pass.sh
+
+.PHONY: stage-ch041-one-pass
+stage-ch041-one-pass:
+	bash ./scripts/stage-ch041-one-pass.sh
+
+.PHONY: commit-ch041-one-pass
+commit-ch041-one-pass:
+	bash ./scripts/commit-ch041-one-pass.sh
+
+.PHONY: push-ch041-one-pass
+push-ch041-one-pass:
+	bash ./scripts/push-ch041-one-pass.sh

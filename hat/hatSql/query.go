@@ -6006,34 +6006,35 @@ func sqlQueryOutputsTie(order []sqlOrder, left, right sqlQueryOutput) bool {
 }
 
 type sqlQuery struct {
-	cacheKey           string
-	cacheVolatile      bool
-	indexHint          SQLIndexHint
-	maxThreads         int
-	ctes               []sqlCTE
-	selects            []sqlSelectItem
-	from               *sqlSource
-	joins              []sqlJoin
-	where              sqlExpr
-	prewhere           sqlExpr
-	groupBy            []sqlExpr
-	groupingSets       [][]sqlExpr
-	groupingDimensions []sqlExpr
-	having             sqlExpr
-	qualify            sqlExpr
-	orderBy            []sqlOrder
-	windows            map[string]sqlWindow
-	sample             *sqlTableSample
-	limitBy            *sqlLimitBy
-	limit              int
-	limitWithTies      bool
-	offset             int
-	distinct           bool
-	unions             []sqlUnion
-	explain            bool
-	explainCost        bool
-	pipeline           bool
-	analyze            bool
+	cacheKey             string
+	cacheVolatile        bool
+	indexHint            SQLIndexHint
+	maxThreads           int
+	ctes                 []sqlCTE
+	selects              []sqlSelectItem
+	from                 *sqlSource
+	joins                []sqlJoin
+	where                sqlExpr
+	prewhere             sqlExpr
+	groupBy              []sqlExpr
+	groupingSets         [][]sqlExpr
+	groupingDimensions   []sqlExpr
+	groupingSetsTemplate *sqlQuery
+	having               sqlExpr
+	qualify              sqlExpr
+	orderBy              []sqlOrder
+	windows              map[string]sqlWindow
+	sample               *sqlTableSample
+	limitBy              *sqlLimitBy
+	limit                int
+	limitWithTies        bool
+	offset               int
+	distinct             bool
+	unions               []sqlUnion
+	explain              bool
+	explainCost          bool
+	pipeline             bool
+	analyze              bool
 }
 
 type sqlLimitBy struct {
@@ -11639,6 +11640,11 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 	if q != nil && q.prewhere.kind != "" && !sqlPrewhereStreamable(q, resolver) {
 		q = sqlQueryWithCombinedPrewhere(q)
 	}
+	groupingSetsOnePass := false
+	if outer == nil && q != nil && q.groupingSetsTemplate != nil && control != nil && control.options.MaxGroupBytes == 0 && control.operatorMemory == nil && sqlGroupingSetsOnePassEligible(q.groupingSetsTemplate) {
+		q = q.groupingSetsTemplate
+		groupingSetsOnePass = true
+	}
 	if err := control.check(); err != nil {
 		return SQLQueryResult{}, err
 	}
@@ -12346,6 +12352,11 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		if metrics != nil {
 			metrics.recordBytes("FILTER", sqlExplainExpression(q.where), inputRows, len(rows), inputBytes, sqlExecRowsBytes(rows), started)
 			metrics.recordIndexMatched(sqlExplainExpression(q.where), len(rows))
+		}
+	}
+	if groupingSetsOnePass {
+		if result, handled, err := executeSQLGroupingSetsOnePass(q, rows, control, metrics); handled {
+			return result, err
 		}
 	}
 	if indexOrdered && !sqlQueryHasWithFill(q) {

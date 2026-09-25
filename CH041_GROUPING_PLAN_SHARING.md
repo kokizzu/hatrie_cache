@@ -9,10 +9,11 @@ execution-plan descriptors. It deep-copies only branch-local rewrite state:
 `SELECT`, `GROUP BY`, `HAVING`, `ORDER BY`, and `LIMIT BY` expressions. The
 existing full query clone remains available for unrelated query cloning.
 
-This lowers parse/plan construction cost without changing the execution model:
-the current implementation still executes one aggregate branch per grouping
-set. Native one-pass grouping, shared aggregate state, and multi-argument
-`GROUPING_ID` remain separate follow-up work.
+This lowers parse/plan construction cost. Simple aggregate projections now also
+use a native one-pass grouping executor that scans the filtered input once and
+keeps compact aggregate state for every grouping set. Queries with richer
+semantics retain the branch-per-set executor. Multi-argument `GROUPING_ID`
+remains separate follow-up work.
 
 ## Measurement
 
@@ -29,3 +30,23 @@ The end-to-end result is modest because aggregate result materialization still
 dominates this small workload. The change is retained because the plan-builder
 win is large and there was no correctness, memory-retention, or allocation
 regression in the complete query benchmark.
+
+## Native one-pass execution
+
+The same four-row, four-dimension `CUBE` workload was measured with five
+`-benchmem` samples on the same host. The expanded `UNION ALL` path was forced
+as the control; the one-pass path is automatic for eligible queries.
+
+| Executor | Median ns/op | Median B/op | Median allocs/op | Result |
+| --- | ---: | ---: | ---: | --- |
+| Expanded `UNION ALL` branches | 610,765 | 310,191 | 6,577 | baseline |
+| Native one-pass grouping | 206,758 | 184,539 | 2,173 | 2.95x faster, 40.5% less allocated memory, 3.03x fewer allocations |
+
+Eligibility is deliberately conservative: simple `COUNT`, `SUM`, `AVG`,
+`MIN`, and `MAX` projections, grouping dimensions, `GROUPING(expr)`, and
+ordinary filtering are supported. Joins, CTEs, `HAVING`, `ORDER BY`, `LIMIT`,
+windows, `DISTINCT`, samples, custom functions, configured group-memory
+tracking, and richer projections fall back to the existing executor.
+
+The raw samples and benchmark command are recorded in
+[BENCHMARK.md](BENCHMARK.md#ch-041-native-one-pass-grouping-sets).

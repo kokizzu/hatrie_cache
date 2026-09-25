@@ -32,6 +32,22 @@ func TestSQLRollupCubeAndGroupingSets(t *testing.T) {
 	}
 }
 
+func TestSQLGroupingSetsUsesOnePassPlan(t *testing.T) {
+	result, err := hatSql.ExecuteSQLQuery(`FROM VALUES ('east', 'book', 2), ('east', 'pen', 3), ('west', 'book', 5) AS src(region, product, amount) SELECT src.region, src.product, GROUPING(src.region) AS region_grouped, SUM(src.amount) AS total GROUP BY CUBE(src.region, src.product)`, nil)
+	if err != nil {
+		t.Fatalf("CUBE with GROUPING error = %v", err)
+	}
+	if len(result.Rows) != 8 {
+		t.Fatalf("CUBE with GROUPING rows = %d, want 8", len(result.Rows))
+	}
+	for _, row := range result.Rows {
+		if row["region"] == nil && row["product"] == nil && row["region_grouped"] == int64(1) {
+			return
+		}
+	}
+	t.Fatalf("CUBE with GROUPING rows = %#v, want grand-total GROUPING(region)=1", result.Rows)
+}
+
 func sqlGroupingRowExists(rows []hatSql.Row, region, product interface{}, total int64) bool {
 	for _, row := range rows {
 		value, ok := hatSql.Number(row["total"])
