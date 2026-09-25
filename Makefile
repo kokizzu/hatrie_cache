@@ -27149,3 +27149,19 @@ race-mz001-persist-shard:
 .PHONY: benchmark-tt008-chain
 benchmark-tt008-chain:
 	bash ./scripts/benchmark-tt008-chain.sh
+.PHONY: test-tt012-space-store
+test-tt012-space-store:
+	bash ./scripts/test-tt012-space-store.sh
+.PHONY: format-tt012-space-store
+format-tt012-space-store:
+	bash ./scripts/format-tt012-space-store.sh
+.PHONY: benchmark-tt012-space-store
+benchmark-tt012-space-store:
+	bash ./scripts/benchmark-tt012-space-store.sh
+.PHONY: race-tt012-space-store
+race-tt012-space-store:
+	bash ./scripts/race-tt012-space-store.sh
+
+.PHONY: vet-tt012-space-store
+vet-tt012-space-store:
+	bash ./scripts/vet-tt012-space-store.sh

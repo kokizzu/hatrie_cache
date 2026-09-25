@@ -37729,3 +37729,37 @@ make benchmark-backup-catalog-c203
 make benchmark-ch022-incremental-part-backup-c203
 make benchmark-tt008-chain
 ```
+<a id="tt-012-per-space-storage-engines"></a>
+## TT-012: Per-Space Storage Engines
+
+This benchmark measures the coordination cost of the new named-space registry
+against the direct map lookup it replaces. Four stores are opened during setup;
+setup and close are outside the timed region. Values are five-sample medians on
+Linux amd64, AMD Ryzen 9 5950X.
+
+### Raw samples
+
+```text
+Registry: 14.43 14.75 14.48 14.28 14.60 ns/op; 0 B/op; 0 allocs/op
+DirectMap: 8.202 8.128 7.955 7.994 7.951 ns/op; 0 B/op; 0 allocs/op
+```
+
+### Median comparison
+
+| Lookup | ns/op | B/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| `PersistentSpaceStoreSet.Store` | 14.48 | 0 | 0 | 1.81x direct-map time; +6.49 ns |
+| Direct map lookup | 7.99 | 0 | 0 | 1.00x baseline |
+
+This is an API and isolation feature, not a hot-path speed optimization. Keep
+the returned `PersistentStore` after resolving a space so the registry cost is
+paid once per request or worker.
+
+Commands:
+
+```text
+make test-tt012-space-store
+make race-tt012-space-store
+make vet-tt012-space-store
+make benchmark-tt012-space-store
+```
