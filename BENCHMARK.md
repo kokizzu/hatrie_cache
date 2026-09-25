@@ -36913,6 +36913,25 @@ keys and is intended for credential rotation, not as a default throughput
 optimization. Details and API examples are in
 [MZ010_SUBSCRIPTION_KEYRING.md](MZ010_SUBSCRIPTION_KEYRING.md).
 
+## MZ-010 Cross-Process Framed Transport
+
+This benchmark measures the opt-in `SQLSubscriptionWireTransport` framing
+layer over a deterministic in-memory `net.Conn`. It compares the transport
+with the direct active-key envelope-open control. Results are from an AMD
+Ryzen 9 5950X, `linux/amd64`, with `-benchtime=200ms`; kernel, TLS, and real
+network latency are excluded.
+
+| Path | ns/op | B/op | allocs/op | Relative to direct active-key open |
+| --- | ---: | ---: | ---: | --- |
+| Direct active-key envelope open | 678.5 | 592 | 8 | 1.00x CPU, 1.00x bytes, 1.00x allocs |
+| Transport send | 678.6 | 668 | 9 | 1.00x CPU, +76 B, +1 alloc |
+| Transport receive | 762.8 | 744 | 11 | 1.12x CPU, +152 B, +3 allocs |
+
+The framing layer therefore adds a small bounded cost, with the receive side
+paying the larger cost for length parsing, frame buffering, and envelope open.
+The direct codec remains available for callers that already own framing.
+Details are in [MZ010_CROSS_PROCESS_TRANSPORT.md](MZ010_CROSS_PROCESS_TRANSPORT.md).
+
 ## TT-024 Materialized positional text index
 
 This benchmark compares the ordinary full-scan phrase query with the warm

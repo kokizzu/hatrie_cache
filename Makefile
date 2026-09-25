@@ -26935,3 +26935,20 @@ commit-ledger-corrections:
 	bash ./scripts/commit-ledger-corrections.sh
 push-ledger-corrections:
 	bash ./scripts/push-ledger-corrections.sh
+.PHONY: test-mz010-subscription-transport benchmark-mz010-subscription-transport format-mz010-subscription-transport race-mz010-subscription-transport vet-mz010-subscription-transport stage-mz010-subscription-transport commit-mz010-subscription-transport push-mz010-subscription-transport
+test-mz010-subscription-transport:
+	bash ./scripts/test-mz010-subscription-transport.sh
+benchmark-mz010-subscription-transport:
+	bash ./scripts/benchmark-mz010-subscription-transport.sh
+format-mz010-subscription-transport:
+	bash ./scripts/format-mz010-subscription-transport.sh
+race-mz010-subscription-transport:
+	bash ./scripts/race-mz010-subscription-transport.sh
+vet-mz010-subscription-transport:
+	bash ./scripts/vet-mz010-subscription-transport.sh
+stage-mz010-subscription-transport:
+	bash ./scripts/stage-mz010-subscription-transport.sh
+commit-mz010-subscription-transport:
+	bash ./scripts/commit-mz010-subscription-transport.sh
+push-mz010-subscription-transport:
+	bash ./scripts/push-mz010-subscription-transport.sh
