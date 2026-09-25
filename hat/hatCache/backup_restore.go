@@ -86,6 +86,11 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 	if err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
+	if options.Resume {
+		if err := ensureRestoreResumeCheckpoint(destination, bundlePath, manifest, options); err != nil {
+			return BackupBundleRestoreReport{}, err
+		}
+	}
 	if !options.Resume {
 		defer destination.Cleanup()
 	}
@@ -118,6 +123,11 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 		verificationManifest.JournalSequence = restoredJournalSequence
 		verificationManifest.Consistency = nil
 	}
+	if options.Resume {
+		if err := updateRestoreResumeCheckpoint(destination, restoreResumePhaseMaterialized); err != nil {
+			return BackupBundleRestoreReport{}, err
+		}
+	}
 	var doctor BackupDoctorReport
 	switch mode {
 	case BackupModeSnapshot:
@@ -131,8 +141,18 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 	if err := syncRestoreTree(destination.StagingPath()); err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
+	if options.Resume {
+		if err := updateRestoreResumeCheckpoint(destination, restoreResumePhaseVerified); err != nil {
+			return BackupBundleRestoreReport{}, err
+		}
+	}
 	if err := publishRestoreDestination(destination, options.Overwrite); err != nil {
 		return BackupBundleRestoreReport{}, err
+	}
+	if options.Resume {
+		if err := clearRestoreResumeCheckpoint(destination); err != nil {
+			return BackupBundleRestoreReport{}, err
+		}
 	}
 	snapshotPath := ""
 	if manifest.Snapshot != "" {
@@ -195,11 +215,21 @@ func RestoreBackupRepository(repositoryPath string, backupID string, dataDir str
 	if err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
+	if options.Resume {
+		if err := ensureRestoreResumeCheckpoint(destination, repositoryPath, manifest, options); err != nil {
+			return BackupBundleRestoreReport{}, err
+		}
+	}
 	if !options.Resume {
 		defer destination.Cleanup()
 	}
 	if _, err := materializeBackupRepositoryWithConcurrency(repositoryPath, manifest.BackupID, destination.StagingPath(), options.Resume, options.MaxPartConcurrency); err != nil {
 		return BackupBundleRestoreReport{}, err
+	}
+	if options.Resume {
+		if err := updateRestoreResumeCheckpoint(destination, restoreResumePhaseMaterialized); err != nil {
+			return BackupBundleRestoreReport{}, err
+		}
 	}
 	doctor, err := verifyPebbleBackupRoot(repositoryPath, "repository", manifest, destination.StagingPath())
 	if err != nil {
@@ -208,8 +238,18 @@ func RestoreBackupRepository(repositoryPath string, backupID string, dataDir str
 	if err := syncRestoreTree(destination.StagingPath()); err != nil {
 		return BackupBundleRestoreReport{}, err
 	}
+	if options.Resume {
+		if err := updateRestoreResumeCheckpoint(destination, restoreResumePhaseVerified); err != nil {
+			return BackupBundleRestoreReport{}, err
+		}
+	}
 	if err := publishRestoreDestination(destination, options.Overwrite); err != nil {
 		return BackupBundleRestoreReport{}, err
+	}
+	if options.Resume {
+		if err := clearRestoreResumeCheckpoint(destination); err != nil {
+			return BackupBundleRestoreReport{}, err
+		}
 	}
 	storePath := filepath.Join(dataDir, filepath.FromSlash(manifest.Store))
 	journalPath := ""

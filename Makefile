@@ -26671,3 +26671,20 @@ clean-hatrie-tmp-deep:
 .PHONY: remove-local-hatrie-plan
 remove-local-hatrie-plan:
 	bash ./scripts/remove-local-hatrie-plan.sh
+.PHONY: format-mz003-resume-checkpoint
+format-mz003-resume-checkpoint:
+	bash ./scripts/format-mz003-resume-checkpoint.sh
+.PHONY: benchmark-mz003-resume-checkpoint
+benchmark-mz003-resume-checkpoint:
+	bash ./scripts/benchmark-mz003-resume-checkpoint.sh
+.PHONY: stage-mz003-resume-checkpoint
+stage-mz003-resume-checkpoint:
+	bash ./scripts/stage-mz003-resume-checkpoint.sh
+
+.PHONY: commit-mz003-resume-checkpoint
+commit-mz003-resume-checkpoint:
+	bash ./scripts/commit-mz003-resume-checkpoint.sh
+
+.PHONY: push-mz003-resume-checkpoint
+push-mz003-resume-checkpoint:
+	bash ./scripts/push-mz003-resume-checkpoint.sh

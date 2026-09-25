@@ -23388,6 +23388,38 @@ not a general allocation optimization. The default remains disabled so normal
 successful restores keep their existing resource profile. See
 [RESTORE_RESUME.md](RESTORE_RESUME.md).
 
+<a id="mz-003-durable-restore-resume-checkpoints"></a>
+## MZ-003 Durable Restore-Resume Checkpoints
+
+Command: `make benchmark-mz003-resume-checkpoint`.
+
+This measures the complete high-level snapshot restore path, including
+verification, filesystem synchronization, publication, and (for the resume
+variant) the source-bound durable checkpoint sidecar. The fixture is a small
+binary snapshot. Five fixed ten-iteration samples use `-benchmem -benchtime=10x
+-count=5` on Linux amd64 with an AMD Ryzen 9 5950X.
+
+### Raw Samples
+
+| Workload | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| Fresh restore | 4,599,784; 4,924,309; 4,247,016; 5,354,152; 3,366,941 | 273,064; 271,267; 269,552; 271,304; 272,999 | 261; 259; 257; 259; 261 |
+| Resume + durable checkpoint | 8,112,020; 7,815,607; 11,365,485; 7,968,690; 8,012,567 | 292,528; 290,230; 290,412; 290,374; 290,228 | 403; 401; 402; 401; 401 |
+
+### Median Comparison
+
+| Workload | Median ns/op | Median B/op | Median allocs/op | Relative to fresh |
+| --- | ---: | ---: | ---: | --- |
+| Fresh restore | 4,599,784 | 271,304 | 259 | `1.00x` baseline |
+| Resume + durable checkpoint | 8,012,567 | 290,374 | 401 | `1.74x` slower, `1.07x` higher bytes, `1.55x` more allocations |
+
+The added durability cost is isolated to `Resume: true`; the default restore
+path does not create or sync checkpoint metadata. The benefit is operational:
+an interrupted restore retains a source-bound, phase-marked checkpoint and a
+retry from a different restore plan is rejected instead of silently reusing
+foreign staging state. The sidecar is removed only after successful atomic
+publication.
+
 <a id="tt-041-sql-index-rebuild-checkpoints"></a>
 ## TT-041 SQL Index Rebuild Checkpoints
 

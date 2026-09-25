@@ -1,6 +1,8 @@
 package hatCache
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -55,6 +57,10 @@ func TestRestoreBackupBundleResumePublishesSnapshot(t *testing.T) {
 	checkpoint := filepath.Join(filepath.Dir(restoreDir), "."+filepath.Base(restoreDir)+".restore-resume")
 	if _, err := os.Stat(checkpoint); !os.IsNotExist(err) {
 		t.Fatalf("resume checkpoint stat error = %v, want absent after publish", err)
+	}
+	checkpointMetadata := restoreResumeCheckpointPath(restoreDir)
+	if _, err := os.Stat(checkpointMetadata); !os.IsNotExist(err) {
+		t.Fatalf("durable resume checkpoint stat error = %v, want absent after publish", err)
 	}
 
 	restored := newTestTrie(t)
@@ -134,6 +140,87 @@ func TestRestoreBackupBundleResumeRetainsUnsafeCheckpoint(t *testing.T) {
 	}
 	if _, err := os.Stat(destination.StagingPath()); err != nil {
 		t.Fatalf("resume checkpoint was not retained: %v", err)
+	}
+}
+
+func TestRestoreBackupBundleResumePersistsDurableCheckpointOnFailure(t *testing.T) {
+	source := newTestTrie(t)
+	source.UpsertString("resume:durable", "value")
+	bundlePath := filepath.Join(t.TempDir(), "durable.tar.gz")
+	if _, err := CreateBackupBundle(bundlePath, source, nil, BackupBundleOptions{
+		Mode:           BackupModeSnapshot,
+		SnapshotFormat: SnapshotFormatBinary,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	restoreDir := filepath.Join(t.TempDir(), "restored")
+	destination, err := prepareRestoreDestinationWithResume(bundlePath, restoreDir, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "outside"), filepath.Join(destination.StagingPath(), "unsafe-link")); err != nil {
+		t.Skipf("symlink creation unavailable: %v", err)
+	}
+	if _, err := RestoreBackupBundle(bundlePath, restoreDir, BackupBundleRestoreOptions{Resume: true}); err == nil {
+		t.Fatal("RestoreBackupBundle accepted a symlinked resume staging directory")
+	}
+
+	checkpointPath := restoreResumeCheckpointPath(restoreDir)
+	checkpointBytes, err := os.ReadFile(checkpointPath)
+	if err != nil {
+		t.Fatalf("durable resume checkpoint was not retained: %v", err)
+	}
+	var checkpoint struct {
+		Version    int    `json:"version"`
+		Source     string `json:"source"`
+		Target     string `json:"target"`
+		PlanDigest string `json:"plan_digest"`
+		Phase      string `json:"phase"`
+	}
+	if err := json.Unmarshal(checkpointBytes, &checkpoint); err != nil {
+		t.Fatalf("decode durable resume checkpoint: %v", err)
+	}
+	if checkpoint.Version < 1 || checkpoint.Source != bundlePath || checkpoint.Target != restoreDir || checkpoint.PlanDigest == "" || checkpoint.Phase == "" {
+		t.Fatalf("durable resume checkpoint = %#v, want source-bound progress", checkpoint)
+	}
+}
+
+func TestRestoreBackupBundleResumeRejectsMismatchedCheckpoint(t *testing.T) {
+	firstSource := newTestTrie(t)
+	firstSource.UpsertString("resume:mismatch", "first")
+	firstBundle := filepath.Join(t.TempDir(), "first.tar.gz")
+	if _, err := CreateBackupBundle(firstBundle, firstSource, nil, BackupBundleOptions{
+		Mode:           BackupModeSnapshot,
+		SnapshotFormat: SnapshotFormatBinary,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	restoreDir := filepath.Join(t.TempDir(), "restored")
+	destination, err := prepareRestoreDestinationWithResume(firstBundle, restoreDir, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "outside"), filepath.Join(destination.StagingPath(), "unsafe-link")); err != nil {
+		t.Skipf("symlink creation unavailable: %v", err)
+	}
+	if _, err := RestoreBackupBundle(firstBundle, restoreDir, BackupBundleRestoreOptions{Resume: true}); err == nil {
+		t.Fatal("first restore unexpectedly succeeded")
+	}
+
+	secondSource := newTestTrie(t)
+	secondSource.UpsertString("resume:mismatch", "second")
+	secondBundle := filepath.Join(t.TempDir(), "second.tar.gz")
+	if _, err := CreateBackupBundle(secondBundle, secondSource, nil, BackupBundleOptions{
+		Mode:           BackupModeSnapshot,
+		SnapshotFormat: SnapshotFormatBinary,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = RestoreBackupBundle(secondBundle, restoreDir, BackupBundleRestoreOptions{Resume: true})
+	if !errors.Is(err, ErrRestoreResumeCheckpointMismatch) {
+		t.Fatalf("mismatched resume checkpoint error = %v, want %v", err, ErrRestoreResumeCheckpointMismatch)
 	}
 }
 

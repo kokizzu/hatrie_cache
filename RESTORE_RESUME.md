@@ -35,6 +35,14 @@ stale files from the checkpoint, and streams every declared payload. A payload
 is reused only when its existing size and SHA-256 match the current declaration;
 otherwise it is rewritten through a temporary file and atomically renamed.
 
+Resume also writes `.DATA_DIR.restore-resume.checkpoint` beside the staging
+directory. The sidecar is atomically replaced and synchronously flushed after
+the prepared, materialized, and verified phases. It records the absolute source
+and target plus a digest of the restore plan. A retry from another source,
+target, manifest, partition selection, or point-in-time limit is rejected with
+`ErrRestoreResumeCheckpointMismatch`; start over by removing the abandoned
+staging directory and sidecar after stopping restore attempts.
+
 The archive is still read from beginning to end because tar payloads are
 sequential and every byte must be checked. Resume primarily avoids rewriting
 payloads completed before an interruption. Once semantic verification,
@@ -65,6 +73,9 @@ it is not a universal throughput optimization. It trades those checks for
 avoided file writes after interruption. The focused 2,048-key binary snapshot
 benchmark measured fresh extraction at a median 853,533 ns/op, 82,551 B/op,
 and 82 allocations; repeated checkpoint extraction measured 834,838 ns/op,
-118,491 B/op, and 112 allocations. Archive bytes read are unchanged. Results
-are host and filesystem dependent; use resume for recoverability, not as a
-general speed setting.
+118,491 B/op, and 112 allocations. Archive bytes read are unchanged. A full
+high-level restore benchmark on the same host measured a fresh restore at
+4,599,784 ns/op, 271,304 B/op, and 259 allocations, versus 8,012,567 ns/op,
+290,374 B/op, and 401 allocations with durable resume checkpoints. The
+checkpoint path is intentionally opt-in and should be used for recoverability,
+not as a general speed setting.
