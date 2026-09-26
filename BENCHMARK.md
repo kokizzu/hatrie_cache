@@ -38578,3 +38578,28 @@ reservation is 29,181 ns/op, 11,949 B/op, and 172 allocations: about 570x the
 latency of the in-process baseline. This is expected transport overhead for a
 new cross-process capability; the RPC is opt-in and the local/default path is
 unchanged.
+
+## T047i Coordinator-Owned Durable Write State
+
+Raw `make benchmark-t047i-coordinator-durability` results (`-benchtime=1s`,
+`-count=3`, Linux/amd64, AMD Ryzen 9 5950X):
+
+```text
+BenchmarkT047iClusterWriteCommitDirect-32               442782       2389 ns/op    1264 B/op  19 allocs/op
+BenchmarkT047iClusterWriteCommitDirect-32               493826       2342 ns/op    1264 B/op  19 allocs/op
+BenchmarkT047iClusterWriteCommitDirect-32               472081       2399 ns/op    1264 B/op  19 allocs/op
+BenchmarkT047iClusterWriteCommitMemoryStateStore-32     247760       4790 ns/op    4144 B/op  39 allocs/op
+BenchmarkT047iClusterWriteCommitMemoryStateStore-32     227168       4686 ns/op    4144 B/op  39 allocs/op
+BenchmarkT047iClusterWriteCommitMemoryStateStore-32     245670       4661 ns/op    4144 B/op  39 allocs/op
+BenchmarkT047iClusterWriteCommitFileStoreSaveLoad-32       650    1579395 ns/op    3579 B/op  35 allocs/op
+BenchmarkT047iClusterWriteCommitFileStoreSaveLoad-32       870    1434641 ns/op    3583 B/op  35 allocs/op
+BenchmarkT047iClusterWriteCommitFileStoreSaveLoad-32       831    1442261 ns/op    3579 B/op  35 allocs/op
+BenchmarkT047iClusterWriteCommitFileStateStore-32          210    9335651 ns/op   12399 B/op 123 allocs/op
+BenchmarkT047iClusterWriteCommitFileStateStore-32          186    5784702 ns/op   12399 B/op 123 allocs/op
+BenchmarkT047iClusterWriteCommitFileStateStore-32          210    5701395 ns/op   12399 B/op 123 allocs/op
+```
+
+The default direct path is unchanged. Durable execution is intentionally
+opt-in; its roughly 2,421x latency cost versus direct execution buys
+coordinator recovery boundaries and should only be enabled where that recovery
+guarantee is required. See [T047I_COORDINATOR_DURABILITY.md](T047I_COORDINATOR_DURABILITY.md).

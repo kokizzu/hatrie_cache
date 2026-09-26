@@ -28126,3 +28126,34 @@ push-m033c-global-timestamp-grpc:
 
 deliver-m033c-global-timestamp-grpc:
 	@bash ./scripts/deliver-m033c-global-timestamp-grpc.sh deliver
+.PHONY: test-t047i-coordinator-durability
+test-t047i-coordinator-durability:
+	bash ./scripts/test-t047i-coordinator-durability.sh
+.PHONY: format-t047i-coordinator-durability
+format-t047i-coordinator-durability:
+	bash ./scripts/format-t047i-coordinator-durability.sh
+.PHONY: benchmark-t047i-coordinator-durability
+benchmark-t047i-coordinator-durability:
+	bash ./scripts/benchmark-t047i-coordinator-durability.sh
+.PHONY: race-t047i-coordinator-durability
+race-t047i-coordinator-durability:
+	bash ./scripts/race-t047i-coordinator-durability.sh
+
+.PHONY: test-t047i-package
+test-t047i-package:
+	bash ./scripts/test-t047i-package.sh
+.PHONY: deliver-t047i-coordinator-durability
+deliver-t047i-coordinator-durability:
+	bash ./scripts/deliver-t047i-coordinator-durability.sh deliver
+.PHONY: plan-t047i-coordinator-durability
+plan-t047i-coordinator-durability:
+	bash ./scripts/deliver-t047i-coordinator-durability.sh plan
+.PHONY: stage-t047i-coordinator-durability
+stage-t047i-coordinator-durability:
+	bash ./scripts/deliver-t047i-coordinator-durability.sh stage
+.PHONY: commit-t047i-coordinator-durability
+commit-t047i-coordinator-durability:
+	bash ./scripts/deliver-t047i-coordinator-durability.sh commit
+.PHONY: push-t047i-coordinator-durability
+push-t047i-coordinator-durability:
+	bash ./scripts/deliver-t047i-coordinator-durability.sh push

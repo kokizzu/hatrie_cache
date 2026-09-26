@@ -92,6 +92,18 @@ func ExecuteClusterWriteCommit(
 	commit ClusterWriteCommitCommitFunc,
 	abort ClusterWriteCommitAbortFunc,
 ) (ClusterWriteCommitResult, error) {
+	return executeClusterWriteCommit(ctx, nodes, proposal, prepare, commit, abort, nil)
+}
+
+func executeClusterWriteCommit(
+	ctx context.Context,
+	nodes []string,
+	proposal ClusterWriteCommitProposal,
+	prepare ClusterWriteCommitPrepareFunc,
+	commit ClusterWriteCommitCommitFunc,
+	abort ClusterWriteCommitAbortFunc,
+	stateStore ClusterWriteCommitCoordinatorStateStore,
+) (ClusterWriteCommitResult, error) {
 	proposal.TransactionID = strings.TrimSpace(proposal.TransactionID)
 	result := ClusterWriteCommitResult{Proposal: proposal}
 	if ctx == nil || proposal.TransactionID == "" || prepare == nil || commit == nil || abort == nil {
@@ -104,6 +116,9 @@ func ExecuteClusterWriteCommit(
 	result.Attempts = make([]ClusterWriteCommitAttempt, len(normalizedNodes))
 	for index, node := range normalizedNodes {
 		result.Attempts[index].Node = node
+	}
+	if err := persistClusterWriteCommitCoordinatorSnapshot(ctx, stateStore, proposal, normalizedNodes, result.Attempts, ClusterWriteCommitCoordinatorProposed); err != nil {
+		return result, err
 	}
 	if err := ctx.Err(); err != nil {
 		return result, errors.Join(ErrClusterWriteCommitPrepareFailed, err)
@@ -138,6 +153,9 @@ func ExecuteClusterWriteCommit(
 		prepareErrors = append(prepareErrors, err)
 	}
 	if len(prepareErrors) > 0 || result.PreparedCount != len(result.Attempts) {
+		if err := persistClusterWriteCommitCoordinatorSnapshot(ctx, stateStore, proposal, normalizedNodes, result.Attempts, ClusterWriteCommitCoordinatorAbortStarted); err != nil {
+			prepareErrors = append(prepareErrors, err)
+		}
 		abortErrors := abortClusterWriteCommitPrepared(context.WithoutCancel(ctx), normalizedNodes, proposal, result.Attempts, abort)
 		for index := range result.Attempts {
 			if result.Attempts[index].Aborted {
@@ -147,9 +165,35 @@ func ExecuteClusterWriteCommit(
 		if len(abortErrors) > 0 {
 			prepareErrors = append(prepareErrors, abortErrors...)
 		}
+		abortPhase := ClusterWriteCommitCoordinatorAborted
+		if len(abortErrors) > 0 {
+			abortPhase = ClusterWriteCommitCoordinatorOutcomeUnknown
+		}
+		if err := persistClusterWriteCommitCoordinatorSnapshot(context.WithoutCancel(ctx), stateStore, proposal, normalizedNodes, result.Attempts, abortPhase); err != nil {
+			prepareErrors = append(prepareErrors, err)
+		}
 		return result, errors.Join(append([]error{ErrClusterWriteCommitPrepareFailed}, prepareErrors...)...)
 	}
 	result.Prepared = true
+	if err := persistClusterWriteCommitCoordinatorSnapshot(ctx, stateStore, proposal, normalizedNodes, result.Attempts, ClusterWriteCommitCoordinatorPrepared); err != nil {
+		abortErrors := abortClusterWriteCommitPrepared(context.WithoutCancel(ctx), normalizedNodes, proposal, result.Attempts, abort)
+		for index := range result.Attempts {
+			if result.Attempts[index].Aborted {
+				result.AbortedCount++
+			}
+		}
+		return result, errors.Join(append([]error{err}, abortErrors...)...)
+	}
+
+	if err := persistClusterWriteCommitCoordinatorSnapshot(ctx, stateStore, proposal, normalizedNodes, result.Attempts, ClusterWriteCommitCoordinatorCommitStarted); err != nil {
+		abortErrors := abortClusterWriteCommitPrepared(context.WithoutCancel(ctx), normalizedNodes, proposal, result.Attempts, abort)
+		for index := range result.Attempts {
+			if result.Attempts[index].Aborted {
+				result.AbortedCount++
+			}
+		}
+		return result, errors.Join(append([]error{err}, abortErrors...)...)
+	}
 
 	var commitGroup sync.WaitGroup
 	commitGroup.Add(len(result.Attempts))
@@ -178,9 +222,16 @@ func ExecuteClusterWriteCommit(
 	}
 	if len(commitErrors) > 0 || result.CommittedCount != len(result.Attempts) {
 		result.OutcomeUnknown = true
+		if err := persistClusterWriteCommitCoordinatorSnapshot(context.WithoutCancel(ctx), stateStore, proposal, normalizedNodes, result.Attempts, ClusterWriteCommitCoordinatorOutcomeUnknown); err != nil {
+			commitErrors = append(commitErrors, err)
+		}
 		return result, errors.Join(append([]error{ErrClusterWriteCommitOutcomeUnknown}, commitErrors...)...)
 	}
 	result.Committed = true
+	if err := persistClusterWriteCommitCoordinatorSnapshot(context.WithoutCancel(ctx), stateStore, proposal, normalizedNodes, result.Attempts, ClusterWriteCommitCoordinatorCommitted); err != nil {
+		result.OutcomeUnknown = true
+		return result, errors.Join(ErrClusterWriteCommitOutcomeUnknown, err)
+	}
 	return result, nil
 }
 
