@@ -25,11 +25,14 @@ type IncrementalDistinct struct {
 }
 
 type incrementalDistinctPendingEntry struct {
-	active bool
-	time   uint64
-	row    Row
-	count  uint64
+	active        bool
+	cloneOnCommit bool
+	time          uint64
+	row           Row
+	count         uint64
 }
+
+const incrementalDistinctSmallBatchLimit = 8
 
 // NewIncrementalDistinct creates an empty stateful distinct operator.
 func NewIncrementalDistinct() *IncrementalDistinct {
@@ -54,6 +57,126 @@ func (distinct *IncrementalDistinct) Apply(updates []DifferentialRow) ([]Differe
 	if len(updates) == 1 {
 		return distinct.applySingle(updates[0])
 	}
+	if len(updates) <= incrementalDistinctSmallBatchLimit {
+		return distinct.applySmallBatch(updates)
+	}
+	return distinct.applyGenericBatch(updates)
+}
+
+func (distinct *IncrementalDistinct) applySmallBatch(updates []DifferentialRow) ([]DifferentialRow, error) {
+	if len(updates) > incrementalDistinctSmallBatchLimit {
+		return distinct.applyGenericBatch(updates)
+	}
+	var pending [incrementalDistinctSmallBatchLimit]incrementalDistinctPendingEntry
+	var keys [incrementalDistinctSmallBatchLimit]string
+	var changes [incrementalDistinctSmallBatchLimit]DifferentialRow
+	pendingCount := 0
+	changeCount := 0
+	for index, update := range updates {
+		if update.Key == "" {
+			return nil, fmt.Errorf("incremental distinct update %d: differential row key is required", index)
+		}
+		if update.Diff == 0 {
+			continue
+		}
+
+		pendingIndex := -1
+		for candidate := 0; candidate < pendingCount; candidate++ {
+			if keys[candidate] == update.Key {
+				pendingIndex = candidate
+				break
+			}
+		}
+		if pendingIndex < 0 {
+			pendingIndex = pendingCount
+			keys[pendingIndex] = update.Key
+			if count, exists := distinct.counts[update.Key]; exists {
+				pending[pendingIndex] = incrementalDistinctPendingEntry{
+					active: true,
+					time:   distinct.times[update.Key],
+					row:    distinct.rows[update.Key],
+					count:  count,
+				}
+			}
+			pendingCount++
+		}
+		entry := &pending[pendingIndex]
+		if update.Diff > 0 {
+			wasActive := entry.active
+			if !wasActive {
+				entry.active = true
+				entry.cloneOnCommit = true
+				entry.time = update.Time
+				entry.row = update.Row
+			} else if update.Row != nil && !reflect.DeepEqual(update.Row, entry.row) {
+				return nil, fmt.Errorf("incremental distinct update %d key %q: %w", index, update.Key, ErrIncrementalDistinctRowConflict)
+			}
+			next, ok := incrementalDistinctAddMultiplicity(entry.count, update.Diff)
+			if !ok {
+				return nil, fmt.Errorf("incremental distinct update %d key %q: %w", index, update.Key, ErrIncrementalDistinctOverflow)
+			}
+			entry.count = next
+			if !wasActive {
+				if changeCount == len(changes) {
+					return distinct.applyGenericBatch(updates)
+				}
+				changes[changeCount] = DifferentialRow{
+					Key:  update.Key,
+					Time: update.Time,
+					Diff: 1,
+					Row:  cloneDifferentialRow(entry.row),
+				}
+				changeCount++
+			}
+		} else {
+			if !entry.active {
+				return nil, fmt.Errorf("incremental distinct update %d key %q: %w", index, update.Key, ErrIncrementalDistinctNegativeMultiplicity)
+			}
+			decrement := incrementalDistinctMagnitude(update.Diff)
+			if decrement > entry.count {
+				return nil, fmt.Errorf("incremental distinct update %d key %q: %w", index, update.Key, ErrIncrementalDistinctNegativeMultiplicity)
+			}
+			entry.count -= decrement
+			if entry.count == 0 {
+				if changeCount == len(changes) {
+					return distinct.applyGenericBatch(updates)
+				}
+				changes[changeCount] = DifferentialRow{
+					Key:  update.Key,
+					Time: update.Time,
+					Diff: -1,
+					Row:  cloneDifferentialRow(entry.row),
+				}
+				changeCount++
+				entry.active = false
+			}
+		}
+	}
+
+	for index := 0; index < pendingCount; index++ {
+		key := keys[index]
+		entry := pending[index]
+		if !entry.active {
+			delete(distinct.counts, key)
+			delete(distinct.rows, key)
+			delete(distinct.times, key)
+			continue
+		}
+		distinct.counts[key] = entry.count
+		if entry.cloneOnCommit {
+			distinct.rows[key] = cloneDifferentialRow(entry.row)
+		} else {
+			distinct.rows[key] = entry.row
+		}
+		distinct.times[key] = entry.time
+	}
+	if changeCount == 0 {
+		return nil, nil
+	}
+	return changes[:changeCount], nil
+}
+
+func (distinct *IncrementalDistinct) applyGenericBatch(updates []DifferentialRow) ([]DifferentialRow, error) {
 
 	pending := make(map[string]incrementalDistinctPendingEntry, len(updates))
 	changes := make([]DifferentialRow, 0, len(updates))
