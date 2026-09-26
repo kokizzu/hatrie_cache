@@ -38219,3 +38219,37 @@ BenchmarkC153ePartitionOwnershipVoteWire/unmarshal-32  5095035  238.2 ns/op  136
 BenchmarkC153ePartitionOwnershipVoteWire/unmarshal-32  5017592  235.4 ns/op  136 B/op  8 allocs/op
 BenchmarkC153ePartitionOwnershipVoteWire/unmarshal-32  5073927  240.3 ns/op  136 B/op  8 allocs/op
 ```
+
+<a id="c153f-partition-ownership-consensus-collector"></a>
+## C153f Partition-Ownership Consensus Collector
+
+Command: `make benchmark-c153f-collector`.
+
+This compares the existing serial vote-collection pattern with the opt-in
+bounded concurrent collector over seven voters, all required, and a fixed 50
+microsecond per-voter fetch delay modeling network-bound control-plane work.
+Median of five samples on Linux/amd64, AMD Ryzen 9 5950X:
+
+| Path | Median latency | Median bytes | Median allocs | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Existing serial collection | 7,414,287 ns/op | 2,656 B/op | 14 | 1.00x |
+| Bounded concurrent collector | 1,069,293 ns/op | 11,279 B/op | 107 | **6.93x lower latency; 4.25x more bytes; 7.64x more allocations** |
+
+The feature is opt-in and does not alter the existing evaluator or default
+routing path. The extra allocations are the measured cost of bounded worker
+coordination and are appropriate only when remote quorum latency dominates.
+
+Raw five-sample output from `make benchmark-c153f-collector`:
+
+```text
+BenchmarkPartitionOwnershipConsensusCollectionBaseline-32       160  7412176 ns/op  2656 B/op  14 allocs/op
+BenchmarkPartitionOwnershipConsensusCollectionBaseline-32       160  7414287 ns/op  2656 B/op  14 allocs/op
+BenchmarkPartitionOwnershipConsensusCollectionBaseline-32       162  7406516 ns/op  2656 B/op  14 allocs/op
+BenchmarkPartitionOwnershipConsensusCollectionBaseline-32       162  7415769 ns/op  2656 B/op  14 allocs/op
+BenchmarkPartitionOwnershipConsensusCollectionBaseline-32       162  7419028 ns/op  2656 B/op  14 allocs/op
+BenchmarkPartitionOwnershipConsensusCollection-32              1153  1069293 ns/op 11330 B/op 107 allocs/op
+BenchmarkPartitionOwnershipConsensusCollection-32              1146  1066120 ns/op 11279 B/op 107 allocs/op
+BenchmarkPartitionOwnershipConsensusCollection-32              1137  1054080 ns/op 11297 B/op 107 allocs/op
+BenchmarkPartitionOwnershipConsensusCollection-32              1131  1069328 ns/op 11240 B/op 107 allocs/op
+BenchmarkPartitionOwnershipConsensusCollection-32              1084  1070129 ns/op 11248 B/op 107 allocs/op
+```

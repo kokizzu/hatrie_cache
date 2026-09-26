@@ -275,6 +275,12 @@ name.
   authenticated votes with strict size, canonical-varint, and field validation;
   HTTP/gRPC session wiring remains caller-owned. See
   [C153E_PARTITION_OWNERSHIP_WIRE.md](C153E_PARTITION_OWNERSHIP_WIRE.md).
+- [x] C153f Bounded transport-neutral consensus vote collection. The opt-in
+  `hatTopology.CollectPartitionOwnershipConsensus` helper fans out caller-owned
+  HTTP/gRPC fetchers with bounded concurrency, exact voter identity binding,
+  optional authentication, deterministic failures, and quorum cancellation;
+  transport installation and control-plane ownership remain caller-owned. See
+  [C153F_PARTITION_OWNERSHIP_CONSENSUS_COLLECTOR.md](C153F_PARTITION_OWNERSHIP_CONSENSUS_COLLECTOR.md).
 - [ ] C154 Rolling schema changes across replicas.
 - [x] C154b Atomic catalog DDL batches. `hatSchema.SpaceCatalog.ApplyAtomic` validates ordered named-space upserts and deletes before publishing one catalog state, leaving failed batches invisible; row/data-plane coordination remains caller-owned. See [TT030_TRANSACTIONAL_DDL.md](TT030_TRANSACTIONAL_DDL.md).
 - [x] C154a Conservative rolling-schema compatibility preflight over validated

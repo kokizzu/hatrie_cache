@@ -27739,3 +27739,31 @@ commit-c153e-wire:
 .PHONY: push-c153e-wire
 push-c153e-wire:
 	sh scripts/push-c153e-wire.sh
+
+.PHONY: benchmark-c153f-baseline
+benchmark-c153f-baseline:
+	bash scripts/benchmark-c153f-baseline.sh
+.PHONY: test-c153f-collector
+test-c153f-collector:
+	bash scripts/test-c153f-collector.sh
+.PHONY: benchmark-c153f-collector
+benchmark-c153f-collector:
+	bash scripts/benchmark-c153f-collector.sh
+.PHONY: format-c153f-collector
+format-c153f-collector:
+	bash scripts/format-c153f-collector.sh
+
+.PHONY: race-c153f-collector
+race-c153f-collector:
+	bash scripts/race-c153f-collector.sh
+
+.PHONY: vet-c153f-collector
+vet-c153f-collector:
+	bash scripts/vet-c153f-collector.sh
+
+.PHONY: test-c153f-package
+test-c153f-package:
+	bash scripts/test-c153f-package.sh
+.PHONY: stage-c153f-collector
+stage-c153f-collector:
+	bash scripts/stage-c153f-collector.sh
