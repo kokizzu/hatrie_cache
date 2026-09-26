@@ -15,6 +15,7 @@ security guidance before exposing it on a network.
 - Cooperative scheduler cancellation and explicit drain lifecycle: [TT034_TASK_CANCELLATION.md](TT034_TASK_CANCELLATION.md), with before/after measurements in [BENCHMARK.md](BENCHMARK.md#tt-034-cooperative-task-cancellation).
 - New to the cache commands and value types: [DATA_STRUCTURE.md](DATA_STRUCTURE.md)
 - ClickHouse-style SQL RowBinary streaming export and bounded bulk import: [CH050_SQL_ROW_BINARY_STREAM.md](CH050_SQL_ROW_BINARY_STREAM.md)
+- Opt-in ClickHouse-style `*_OR_NULL` grouped aggregates on the native columnar path: [CH038_OR_NULL_COLUMNAR.md](CH038_OR_NULL_COLUMNAR.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-038-or-null-columnar-aggregates)
 - Opt-in ClickHouse-style typed columnar SQL block streaming with projection decoding: [CH046_NATIVE_WIRE_PROTOCOL.md](CH046_NATIVE_WIRE_PROTOCOL.md)
 - New to the SQL interface: [SQL.md](SQL.md)
 - Opt-in Materialize-style SQL result subscriptions with automatic `CACHE(...)` dependency discovery: [MZ010_SQL_SUBSCRIPTIONS.md](MZ010_SQL_SUBSCRIPTIONS.md), with historical cancellation/checkpoint resume in [M034_HISTORICAL_SUBSCRIPTION_CHECKPOINTS.md](M034_HISTORICAL_SUBSCRIPTION_CHECKPOINTS.md) and measurements in [BENCHMARK.md#m-u34-historical-subscription-checkpoints](BENCHMARK.md#m-u34-historical-subscription-checkpoints)

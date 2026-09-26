@@ -27872,3 +27872,48 @@ commit-ch048-numeric-in:
 push-ch048-numeric-in:
 	bash scripts/push-ch048-numeric-in.sh
 # CH048_NUMERIC_IN_FEATURE_TARGETS_END
+# CH038_OR_NULL_COLUMNAR_FEATURE_TARGETS_BEGIN
+.PHONY: test-ch038-or-null-columnar
+test-ch038-or-null-columnar:
+	bash scripts/test-ch038-or-null-columnar.sh
+
+.PHONY: test-ch038-or-null-columnar-package
+test-ch038-or-null-columnar-package:
+	bash scripts/test-ch038-or-null-columnar-package.sh
+
+.PHONY: benchmark-ch038-or-null-columnar
+benchmark-ch038-or-null-columnar:
+	bash scripts/benchmark-ch038-or-null-columnar.sh
+
+.PHONY: format-ch038-or-null-columnar
+format-ch038-or-null-columnar:
+	bash scripts/format-ch038-or-null-columnar.sh
+
+.PHONY: race-ch038-or-null-columnar
+race-ch038-or-null-columnar:
+	bash scripts/race-ch038-or-null-columnar.sh
+
+.PHONY: vet-ch038-or-null-columnar
+vet-ch038-or-null-columnar:
+	bash scripts/vet-ch038-or-null-columnar.sh
+
+.PHONY: verify-ch038-or-null-columnar-docs
+verify-ch038-or-null-columnar-docs:
+	bash scripts/verify-ch038-or-null-columnar-docs.sh
+
+.PHONY: review-ch038-or-null-columnar
+review-ch038-or-null-columnar:
+	bash scripts/review-ch038-or-null-columnar.sh
+
+.PHONY: stage-ch038-or-null-columnar
+stage-ch038-or-null-columnar:
+	bash scripts/stage-ch038-or-null-columnar.sh
+
+.PHONY: commit-ch038-or-null-columnar
+commit-ch038-or-null-columnar:
+	bash scripts/commit-ch038-or-null-columnar.sh
+
+.PHONY: push-ch038-or-null-columnar
+push-ch038-or-null-columnar:
+	bash scripts/push-ch038-or-null-columnar.sh
+# CH038_OR_NULL_COLUMNAR_FEATURE_TARGETS_END

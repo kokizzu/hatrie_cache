@@ -38354,3 +38354,23 @@ fallback, and the packed `int64`/`float64` literal-`IN` kernel over 4,096 rows:
 The kernel removes 555,015 B/op and 12,032 allocations/op for this workload.
 Unsafe shapes remain on the general evaluator. Raw samples and fallback rules
 are recorded in [CH048_NUMERIC_IN.md](CH048_NUMERIC_IN.md).
+
+<a id="ch-038-or-null-columnar-aggregates"></a>
+## CH-038 OrNull Columnar Aggregates
+
+Command: `make benchmark-ch038-or-null-columnar`.
+
+This measures ClickHouse-style `COUNT_OR_NULL`, `SUM_OR_NULL`, `AVG_OR_NULL`,
+`MIN_OR_NULL`, and `MAX_OR_NULL` grouped over a nullable 4,096-row columnar
+batch. The pre-change run is the general evaluator captured before admission;
+the paired fallback and fast-path runs are post-change measurements.
+
+| Path | Median ns/op | B/op | allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: |
+| Pre-change general evaluator | 3,676,138 | 5,762,310 | 37,360 | 1.00x |
+| Paired row fallback | 2,204,419 | 2,067,728 | 13,032 | 1.00x |
+| Columnar OrNull fast path | 790,218 | 195,517 | 4,783 | **2.79x faster than fallback; 4.65x faster than pre-change** |
+
+The fast path retains about 29.5x less heap and performs about 7.8x fewer
+allocations than the pre-change run. Full raw samples and null semantics are
+recorded in [CH038_OR_NULL_COLUMNAR.md](CH038_OR_NULL_COLUMNAR.md).

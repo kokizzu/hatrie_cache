@@ -455,3 +455,13 @@ adapter whether it can contain a matching row. Unavailable metadata falls back
 to the original fan-out; unsafe exclusion is therefore impossible unless an
 adapter violates its contract. See [CH035_REMOTE_SHARD_PRUNING.md](CH035_REMOTE_SHARD_PRUNING.md)
 and [BENCHMARK.md](BENCHMARK.md).
+
+## CH-038 implementation update
+
+ClickHouse-style `COUNT_OR_NULL`, `SUM_OR_NULL`, `AVG_OR_NULL`, `MIN_OR_NULL`,
+and `MAX_OR_NULL` grouped aggregates now use the existing native columnar
+vector plan when the query shape is eligible. Base-kernel normalization keeps
+the implementation allocation-light while an explicit `orNull` flag preserves
+empty and all-null result semantics. Unsupported shapes still use the general
+evaluator. See [CH038_OR_NULL_COLUMNAR.md](CH038_OR_NULL_COLUMNAR.md) and
+[BENCHMARK.md](BENCHMARK.md#ch-038-or-null-columnar-aggregates).

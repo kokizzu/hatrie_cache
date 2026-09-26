@@ -16903,13 +16903,14 @@ type sqlOrderedGroupProjection struct {
 }
 
 type sqlOrderedAggregate struct {
-	name  string
-	field sqlExpr
-	count int64
-	sum   float64
-	seen  bool
-	min   float64
-	max   float64
+	name   string
+	field  sqlExpr
+	orNull bool
+	count  int64
+	sum    float64
+	seen   bool
+	min    float64
+	max    float64
 }
 
 func sqlSameField(left, right sqlExpr) bool {
@@ -16937,7 +16938,12 @@ func sqlOrderedGroupProjections(q *sqlQuery) ([]sqlOrderedGroupProjection, bool)
 			return nil, false
 		}
 		name := strings.ToUpper(item.expr.name)
-		aggregate := &sqlOrderedAggregate{name: name}
+		orNull := false
+		if base, ok := sqlAggregateOrNullBase(name); ok {
+			name = base
+			orNull = true
+		}
+		aggregate := &sqlOrderedAggregate{name: name, orNull: orNull}
 		switch name {
 		case "COUNT":
 			if len(item.expr.args) == 0 || len(item.expr.args) == 1 && item.expr.args[0].kind == "star" {
@@ -16977,6 +16983,9 @@ func (aggregate *sqlOrderedAggregate) add(row sqlExecRow) error {
 
 func (aggregate *sqlOrderedAggregate) value() interface{} {
 	if aggregate.name == "COUNT" {
+		if aggregate.orNull && aggregate.count == 0 {
+			return nil
+		}
 		return aggregate.count
 	}
 	if !aggregate.seen {

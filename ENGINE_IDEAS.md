@@ -207,3 +207,12 @@ validity, malformed metadata, `NOT IN`, `NULL` list items, unsafe coercions,
 and unsupported expression shapes retain the general evaluator. See
 [CH048_NUMERIC_IN.md](CH048_NUMERIC_IN.md) and
 [BENCHMARK.md](BENCHMARK.md#ch048-numeric-in-predicates).
+
+## CH-038 OrNull columnar aggregates
+
+ClickHouse-style `*_OR_NULL` aggregate combinators now use the existing
+columnar grouped aggregate kernels when the query shape is eligible. The
+normal evaluator remains the fallback for unsupported shapes, and the
+`orNull` result contract preserves `NULL` for empty/all-null aggregate input.
+See [CH038_OR_NULL_COLUMNAR.md](CH038_OR_NULL_COLUMNAR.md) and
+[BENCHMARK.md](BENCHMARK.md#ch-038-or-null-columnar-aggregates).
