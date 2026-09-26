@@ -56,11 +56,26 @@ type SourceResolver interface {
 	ResolveSQLSource(name string, key string) ([]Row, error)
 }
 
+// ProjectedSourceResolver optionally resolves a materialized source with only
+// the fields required by a simple single-source query. The returned boolean
+// reports whether the resolver handled the request; false preserves the
+// ordinary full-row resolver path.
+type ProjectedSourceResolver interface {
+	ResolveSQLProjectedSource(name string, key string, fields []string) ([]Row, bool, error)
+}
+
 // ContextSourceResolver optionally resolves materialized source rows with the
 // query context. It lets remote storage adapters observe cancellation while
 // preserving the legacy SourceResolver contract for existing implementations.
 type ContextSourceResolver interface {
 	ResolveSQLSourceContext(ctx context.Context, name string, key string) ([]Row, error)
+}
+
+// ContextProjectedSourceResolver is the context-aware form of
+// ProjectedSourceResolver. It is checked before ProjectedSourceResolver when
+// both are implemented.
+type ContextProjectedSourceResolver interface {
+	ResolveSQLProjectedSourceContext(ctx context.Context, name string, key string, fields []string) ([]Row, bool, error)
 }
 
 // SourceCardinalityResolver optionally exposes a current row-count estimate

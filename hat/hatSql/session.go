@@ -387,6 +387,32 @@ func (session *SQLSession) ResolveSQLSourceContext(ctx context.Context, name, ke
 	return session.resolveSQLSource(ctx, name, key)
 }
 
+// ResolveSQLProjectedSource forwards the optional row projection contract to
+// the external source after preserving session-local source precedence.
+func (session *SQLSession) ResolveSQLProjectedSource(name, key string, fields []string) ([]Row, bool, error) {
+	if session == nil || session.hasLocalSQLSource(name, key) || session.source == nil {
+		return nil, false, nil
+	}
+	projected, ok := session.source.(ProjectedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return projected.ResolveSQLProjectedSource(name, key, fields)
+}
+
+// ResolveSQLProjectedSourceContext forwards the context-aware row projection
+// contract after preserving session-local source precedence.
+func (session *SQLSession) ResolveSQLProjectedSourceContext(ctx context.Context, name, key string, fields []string) ([]Row, bool, error) {
+	if session == nil || session.hasLocalSQLSource(name, key) || session.source == nil {
+		return nil, false, nil
+	}
+	projected, ok := session.source.(ContextProjectedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return projected.ResolveSQLProjectedSourceContext(ctx, name, key, fields)
+}
+
 func (session *SQLSession) resolveSQLSource(ctx context.Context, name, key string) ([]Row, error) {
 	if strings.EqualFold(name, "CACHE") {
 		session.mu.RLock()

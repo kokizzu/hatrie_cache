@@ -19,7 +19,10 @@ func executeSQLAutoNativeDataflow(ctx context.Context, query *sqlQuery, resolver
 	if control == nil || resolver == nil {
 		return SQLQueryResult{}, false, nil
 	}
-	rows, err := resolveSQLSourceContext(ctx, resolver, query.from.kind, query.from.key)
+	rows, _, projected, err := resolveSQLProjectedSourceRows(query, resolver, control, sqlQueryPartitionPredicates(query))
+	if !projected {
+		rows, err = resolveSQLSourceContext(ctx, resolver, query.from.kind, query.from.key)
+	}
 	if err != nil {
 		return SQLQueryResult{}, true, err
 	}

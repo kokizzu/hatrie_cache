@@ -136,3 +136,20 @@ The resolver-only adapter measurement is recorded in
 [BENCHMARK.md#m090a-resolver-only-sql-compute-adapter](BENCHMARK.md#m090a-resolver-only-sql-compute-adapter).
 The context-aware materialized resolver measurement is recorded in
 [BENCHMARK.md#m090b-context-aware-materialized-source-resolver](BENCHMARK.md#m090b-context-aware-materialized-source-resolver).
+
+## Projected Materialized Sources
+
+M090c adds the optional `hatSql.ProjectedSourceResolver` contract for a
+materialized source that can fetch only selected fields. The SQL executor
+automatically uses it for conservative single-source `SELECT` and `WHERE`
+shapes, and the automatic native scalar dataflow path uses the same hook.
+`ContextProjectedSourceResolver` is preferred when the adapter also needs
+request cancellation.
+
+The field list contains parsed field identifiers only. Joins, aggregates,
+ordering, windows, CTEs, unions, partition-aware resolvers, cached source
+materializations, and unsupported expressions retain the ordinary full-row
+path. Returning `available=false` is the compatibility escape hatch for
+adapters that cannot project a particular source. Existing resolvers do not
+need to change. See [M090C_PROJECTED_SOURCE.md](M090C_PROJECTED_SOURCE.md) for
+the contract, example, and measured transport tradeoff.

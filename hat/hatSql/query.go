@@ -132,7 +132,9 @@ type SQLExplainProjection = ExplainProjection
 type SQLExplainNotice = ExplainNotice
 type SQLQueryStats = QueryStats
 type SQLSourceResolver = SourceResolver
+type SQLProjectedSourceResolver = ProjectedSourceResolver
 type SQLContextSourceResolver = ContextSourceResolver
+type SQLContextProjectedSourceResolver = ContextProjectedSourceResolver
 type SQLHistoricalSourceResolver = HistoricalSourceResolver
 type SQLColumnarBatch = ColumnarBatch
 type SQLColumnarSourceResolver = ColumnarSourceResolver
@@ -11764,7 +11766,17 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			sampled = available
 		}
 		if !indexed && !sampled {
-			base, err = resolveSQLSourceWithPartitionPredicates(*q.from, resolver, ctes, metrics, control, sqlQueryPartitionPredicates(q))
+			predicates := sqlQueryPartitionPredicates(q)
+			var projectedFields []string
+			var projected bool
+			base, projectedFields, projected, err = resolveSQLProjectedSource(q, resolver, control, predicates)
+			if projected {
+				if err == nil {
+					metrics.record("PROJECTED SOURCE SCAN", sqlExplainSource(*q.from)+" fields="+strings.Join(projectedFields, ","), 0, len(base), started)
+				}
+			} else {
+				base, err = resolveSQLSourceWithPartitionPredicates(*q.from, resolver, ctes, metrics, control, predicates)
+			}
 		}
 		if err != nil {
 			return SQLQueryResult{}, err

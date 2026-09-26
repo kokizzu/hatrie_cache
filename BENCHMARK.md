@@ -23334,6 +23334,42 @@ request cancellation and avoid finishing work after a compute caller has
 timed out. Successful payload size and bandwidth are unchanged. Reproduce with
 `make benchmark-m090b`.
 
+<a id="m090c-projected-materialized-sources"></a>
+## M090c Projected Materialized Sources
+
+This benchmark compares a full-row materialized resolver with the optional
+`hatSql.ProjectedSourceResolver` on the same 4,096-row query. The query selects
+`id` and filters on `region`; the source fixture also contains `payload`,
+`metadata`, and `unused` fields. The projection path receives only `id` and
+`region`. Three `-benchmem` samples were collected with
+`make benchmark-m090c-projected-source` on `linux/amd64` with an AMD Ryzen 9
+5950X. `source-bytes/op` is the source payload accounting added by the
+benchmark; it is separate from local executor `B/op`.
+
+### Raw Samples
+
+| Path | ns/op samples | source-bytes/op | B/op samples | allocs/op samples |
+| --- | --- | ---: | --- | --- |
+| Regular full-row resolver | 3,265,122; 3,280,698; 3,163,408 | 535,466 | 4,104,110; 4,104,078; 4,104,078 | 20,512; 20,512; 20,512 |
+| Regular projected resolver | 2,576,344; 2,472,728; 3,278,391 | 56,234 | 4,104,255; 4,104,251; 4,104,266 | 20,516; 20,516; 20,516 |
+| Native full-row resolver | 2,951,618; 2,167,342; 2,195,716 | 535,466 | 2,135,126; 2,135,111; 2,135,112 | 12,309; 12,309; 12,309 |
+| Native projected resolver | 1,800,429; 1,843,344; 1,925,860 | 56,234 | 2,135,190; 2,135,226; 2,135,196 | 12,310; 12,310; 12,310 |
+
+### Median Comparison
+
+| Path | Median ns/op | Median source-bytes/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Regular full-row resolver | 3,265,122 | 535,466 | 4,104,078 | 20,512 | `1.00x` |
+| Regular projected resolver | 2,576,344 | 56,234 | 4,104,255 | 20,516 | `1.27x` faster; `9.52x` lower source payload |
+| Native full-row resolver | 2,195,716 | 535,466 | 2,135,112 | 12,309 | `1.00x` |
+| Native projected resolver | 1,843,344 | 56,234 | 2,135,196 | 12,310 | `1.19x` faster; `9.52x` lower source payload |
+
+The executor heap is effectively unchanged, with four additional regular-path
+allocations and one additional native-path allocation in this fixture. The
+win is primarily reduced remote materialization and transfer work, not a
+local row-map memory reduction. Unsupported query shapes and legacy resolvers
+use the existing full-row path. Reproduce with `make benchmark-m090c-projected-source`.
+
 <a id="mz-019-named-sql-compute-pools"></a>
 ## MZ-019 Named SQL Compute Pools
 

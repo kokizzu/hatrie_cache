@@ -27603,3 +27603,39 @@ commit-m052ad-conditional-aggregate:
 .PHONY: push-m052ad-conditional-aggregate
 push-m052ad-conditional-aggregate:
 	bash scripts/push-m052ad-conditional-aggregate.sh
+
+.PHONY: format-m090c-projected-source
+format-m090c-projected-source:
+	sh scripts/format-m090c-projected-source.sh
+
+.PHONY: test-m090c-projected-source
+test-m090c-projected-source:
+	sh scripts/test-m090c-projected-source.sh
+
+.PHONY: benchmark-m090c-projected-source
+benchmark-m090c-projected-source:
+	sh scripts/benchmark-m090c-projected-source.sh
+
+.PHONY: test-m090c-package
+test-m090c-package:
+	sh scripts/test-m090c-package.sh
+
+.PHONY: race-m090c-package
+race-m090c-package:
+	sh scripts/race-m090c-package.sh
+
+.PHONY: vet-m090c-package
+vet-m090c-package:
+	sh scripts/vet-m090c-package.sh
+
+.PHONY: stage-m090c-projected-source
+stage-m090c-projected-source:
+	sh scripts/stage-m090c-projected-source.sh
+
+.PHONY: commit-m090c-projected-source
+commit-m090c-projected-source:
+	sh scripts/commit-m090c-projected-source.sh
+
+.PHONY: push-m090c-projected-source
+push-m090c-projected-source:
+	sh scripts/push-m090c-projected-source.sh

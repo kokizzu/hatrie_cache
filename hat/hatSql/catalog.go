@@ -109,6 +109,32 @@ func (resolver CatalogResolver) ResolveSQLSourceContext(ctx context.Context, nam
 	return resolver.resolveSQLSource(ctx, name, key)
 }
 
+// ResolveSQLProjectedSource forwards the optional row projection contract to
+// application sources while keeping catalog-owned virtual sources local.
+func (resolver CatalogResolver) ResolveSQLProjectedSource(name, key string, fields []string) ([]Row, bool, error) {
+	if catalogOwnsVirtualSource(name, key) || resolver.Source == nil {
+		return nil, false, nil
+	}
+	projected, ok := resolver.Source.(ProjectedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return projected.ResolveSQLProjectedSource(name, key, fields)
+}
+
+// ResolveSQLProjectedSourceContext forwards the context-aware row projection
+// contract when the application source supports it.
+func (resolver CatalogResolver) ResolveSQLProjectedSourceContext(ctx context.Context, name, key string, fields []string) ([]Row, bool, error) {
+	if catalogOwnsVirtualSource(name, key) || resolver.Source == nil {
+		return nil, false, nil
+	}
+	projected, ok := resolver.Source.(ContextProjectedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return projected.ResolveSQLProjectedSourceContext(ctx, name, key, fields)
+}
+
 func (resolver CatalogResolver) resolveSQLSource(ctx context.Context, name, key string) ([]Row, error) {
 	if strings.EqualFold(name, "CACHE") {
 		switch strings.ToLower(key) {
