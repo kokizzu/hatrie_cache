@@ -216,3 +216,13 @@ normal evaluator remains the fallback for unsupported shapes, and the
 `orNull` result contract preserves `NULL` for empty/all-null aggregate input.
 See [CH038_OR_NULL_COLUMNAR.md](CH038_OR_NULL_COLUMNAR.md) and
 [BENCHMARK.md](BENCHMARK.md#ch-038-or-null-columnar-aggregates).
+
+## CH-037 physical columnar ARRAY JOIN
+
+The SQL executor now lowers one direct `ARRAY JOIN` or `LEFT ARRAY JOIN` over
+a `CACHE(...)` columnar source without creating an intermediate source row
+map. Direct projections use the fast path; filters, grouping, ordering,
+limits, and other wider shapes retain the general evaluator. Empty and NULL
+array behavior is covered by focused tests. See
+[CH037_COLUMNAR_ARRAY_JOIN.md](CH037_COLUMNAR_ARRAY_JOIN.md) and
+[BENCHMARK.md](BENCHMARK.md#ch-037-columnar-array-join).

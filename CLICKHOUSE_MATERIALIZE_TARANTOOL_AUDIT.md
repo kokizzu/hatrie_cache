@@ -465,3 +465,12 @@ the implementation allocation-light while an explicit `orNull` flag preserves
 empty and all-null result semantics. Unsupported shapes still use the general
 evaluator. See [CH038_OR_NULL_COLUMNAR.md](CH038_OR_NULL_COLUMNAR.md) and
 [BENCHMARK.md](BENCHMARK.md#ch-038-or-null-columnar-aggregates).
+
+## CH-037 implementation update
+
+The admitted direct-field `ARRAY JOIN` and `LEFT ARRAY JOIN` shape now uses a
+physical columnar executor that writes projected rows without the generic
+source-row materialization and merge step. Unsupported query shapes retain
+the general evaluator, and focused tests cover inner, left, empty, NULL, and
+fallback behavior. See [CH037_COLUMNAR_ARRAY_JOIN.md](CH037_COLUMNAR_ARRAY_JOIN.md)
+and [BENCHMARK.md](BENCHMARK.md#ch-037-columnar-array-join).

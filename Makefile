@@ -27917,3 +27917,49 @@ commit-ch038-or-null-columnar:
 push-ch038-or-null-columnar:
 	bash scripts/push-ch038-or-null-columnar.sh
 # CH038_OR_NULL_COLUMNAR_FEATURE_TARGETS_END
+# CH037_COLUMNAR_ARRAY_JOIN_FEATURE_TARGETS_BEGIN
+.PHONY: test-ch037-columnar-array-join
+test-ch037-columnar-array-join:
+	bash scripts/test-ch037-columnar-array-join.sh
+
+.PHONY: benchmark-ch037-columnar-array-join
+benchmark-ch037-columnar-array-join:
+	bash scripts/benchmark-ch037-columnar-array-join.sh
+
+.PHONY: format-ch037-columnar-array-join
+format-ch037-columnar-array-join:
+	bash scripts/format-ch037-columnar-array-join.sh
+
+.PHONY: test-ch037-columnar-array-join-package
+test-ch037-columnar-array-join-package:
+	bash scripts/test-ch037-columnar-array-join-package.sh
+
+.PHONY: race-ch037-columnar-array-join
+race-ch037-columnar-array-join:
+	bash scripts/race-ch037-columnar-array-join.sh
+
+.PHONY: vet-ch037-columnar-array-join
+vet-ch037-columnar-array-join:
+	bash scripts/vet-ch037-columnar-array-join.sh
+
+.PHONY: verify-ch037-columnar-array-join-docs
+verify-ch037-columnar-array-join-docs:
+	bash scripts/verify-ch037-columnar-array-join-docs.sh
+
+.PHONY: review-ch037-columnar-array-join
+review-ch037-columnar-array-join:
+	bash scripts/review-ch037-columnar-array-join.sh
+
+.PHONY: stage-ch037-columnar-array-join
+stage-ch037-columnar-array-join:
+	bash scripts/stage-ch037-columnar-array-join.sh
+
+.PHONY: commit-ch037-columnar-array-join
+commit-ch037-columnar-array-join:
+	bash scripts/commit-ch037-columnar-array-join.sh
+
+.PHONY: push-ch037-columnar-array-join
+push-ch037-columnar-array-join:
+	bash scripts/push-ch037-columnar-array-join.sh
+
+# CH037_COLUMNAR_ARRAY_JOIN_FEATURE_TARGETS_END

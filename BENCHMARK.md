@@ -38374,3 +38374,23 @@ the paired fallback and fast-path runs are post-change measurements.
 The fast path retains about 29.5x less heap and performs about 7.8x fewer
 allocations than the pre-change run. Full raw samples and null semantics are
 recorded in [CH038_OR_NULL_COLUMNAR.md](CH038_OR_NULL_COLUMNAR.md).
+
+<a id="ch-037-columnar-array-join"></a>
+## CH-037 Columnar ARRAY JOIN
+
+Command: `make benchmark-ch037-columnar-array-join`.
+
+This measures 2,048 rows with four tags each, producing 8,192 rows. The
+physical columnar path writes projected output rows directly instead of
+materializing and merging a source row for each element. Unsupported query
+shapes continue to use the generic evaluator.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: |
+| Pre-change general evaluator | 10,245,141 | 17,160,481 | 104,523 | 1.00x |
+| Post-change generic fallback | 11,556,052 | 17,160,554 | 104,527 | 1.00x |
+| Columnar ARRAY JOIN path | 1,649,432 | 2,822,848 | 16,400 | **7.01x faster than fallback; 6.21x faster than pre-change** |
+
+The admitted path uses 6.08x fewer allocated bytes and 6.37x fewer
+allocations than the post-change fallback. Raw samples and admission rules
+are recorded in [CH037_COLUMNAR_ARRAY_JOIN.md](CH037_COLUMNAR_ARRAY_JOIN.md).
