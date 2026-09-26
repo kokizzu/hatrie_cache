@@ -98,7 +98,7 @@ func TestAutomaticNativeDataflowTripleGroupMatchesFallback(t *testing.T) {
 func TestCompiledSQLNativeDataflowTripleGroupRejectsUnsupportedShapes(t *testing.T) {
 	queries := []string{
 		"FROM CACHE('items') AS src SELECT src.region AS region, src.tier AS tier, src.channel AS channel, COUNT(*) AS total GROUP BY src.region, src.tier, src.channel HAVING COUNT(*) > 1",
-		"FROM CACHE('items') AS src SELECT src.region AS region, src.tier AS tier, src.channel AS channel, src.value AS value, COUNT(*) AS total GROUP BY src.region, src.tier, src.channel, src.value",
+		"FROM CACHE('items') AS src SELECT src.region AS region, src.tier AS tier, src.channel AS channel, src.value AS value, COUNT(*) AS total GROUP BY src.region, src.tier, src.channel, src.value, src.segment",
 	}
 	for _, source := range queries {
 		compiled, err := CompileSQLQuery(source)

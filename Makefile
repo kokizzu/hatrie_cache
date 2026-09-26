@@ -28287,3 +28287,35 @@ push-m052af-native-triple-grouped-ordered:
 
 deliver-m052af-native-triple-grouped-ordered:
 	@bash scripts/deliver-m052af-native-triple-grouped-ordered.sh deliver
+
+.PHONY: test-m052ag-native-quad-grouped-ordered
+test-m052ag-native-quad-grouped-ordered:
+	@bash scripts/test-m052ag-native-quad-grouped-ordered.sh
+
+.PHONY: format-m052ag-native-quad-grouped-ordered
+format-m052ag-native-quad-grouped-ordered:
+	@bash scripts/format-m052ag-native-quad-grouped-ordered.sh
+
+.PHONY: benchmark-m052ag-native-quad-grouped-ordered
+benchmark-m052ag-native-quad-grouped-ordered:
+	@bash scripts/benchmark-m052ag-native-quad-grouped-ordered.sh
+
+.PHONY: race-m052ag-native-quad-grouped-ordered
+race-m052ag-native-quad-grouped-ordered:
+	@bash scripts/race-m052ag-native-quad-grouped-ordered.sh
+
+.PHONY: plan-m052ag-native-quad-grouped-ordered stage-m052ag-native-quad-grouped-ordered commit-m052ag-native-quad-grouped-ordered push-m052ag-native-quad-grouped-ordered deliver-m052ag-native-quad-grouped-ordered
+plan-m052ag-native-quad-grouped-ordered:
+	@bash scripts/deliver-m052ag-native-quad-grouped-ordered.sh plan
+
+stage-m052ag-native-quad-grouped-ordered:
+	@bash scripts/deliver-m052ag-native-quad-grouped-ordered.sh stage
+
+commit-m052ag-native-quad-grouped-ordered:
+	@bash scripts/deliver-m052ag-native-quad-grouped-ordered.sh commit
+
+push-m052ag-native-quad-grouped-ordered:
+	@bash scripts/deliver-m052ag-native-quad-grouped-ordered.sh push
+
+deliver-m052ag-native-quad-grouped-ordered:
+	@bash scripts/deliver-m052ag-native-quad-grouped-ordered.sh deliver

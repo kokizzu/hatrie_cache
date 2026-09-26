@@ -56,6 +56,10 @@ func validateNativeSQLDataflowQuery(query *sqlQuery) error {
 			if _, ok := nativeSQLDataflowTripleGroupedOrderedPlanFor(query); !ok {
 				return fmt.Errorf("%w: grouped ordered query shape", ErrSQLNativeDataflowUnsupported)
 			}
+		} else if len(query.groupBy) == 4 {
+			if _, ok := nativeSQLDataflowQuadGroupedOrderedPlanFor(query); !ok {
+				return fmt.Errorf("%w: grouped ordered query shape", ErrSQLNativeDataflowUnsupported)
+			}
 		} else if _, ok := nativeSQLDataflowGroupedOrderedPlanFor(query); !ok {
 			return fmt.Errorf("%w: grouped ordered query shape", ErrSQLNativeDataflowUnsupported)
 		}
@@ -87,6 +91,10 @@ func validateNativeSQLDataflowQuery(query *sqlQuery) error {
 			}
 		} else if len(query.groupBy) == 3 {
 			if _, ok := nativeSQLDataflowTripleGroupPlanFor(query); !ok {
+				return fmt.Errorf("%w: grouped query shape", ErrSQLNativeDataflowUnsupported)
+			}
+		} else if len(query.groupBy) == 4 {
+			if _, ok := nativeSQLDataflowQuadGroupPlanFor(query); !ok {
 				return fmt.Errorf("%w: grouped query shape", ErrSQLNativeDataflowUnsupported)
 			}
 		} else if _, ok := nativeSQLDataflowGroupPlanFor(query); !ok {
@@ -511,6 +519,9 @@ func executeNativeSQLDataflow(ctx context.Context, query *sqlQuery, initial []SQ
 	if plan, ok := nativeSQLDataflowTripleGroupedOrderedPlanFor(query); ok {
 		return executeNativeSQLDataflowTripleGroupedOrdered(ctx, query, initial, plan)
 	}
+	if plan, ok := nativeSQLDataflowQuadGroupedOrderedPlanFor(query); ok {
+		return executeNativeSQLDataflowQuadGroupedOrdered(ctx, query, initial, plan)
+	}
 	if plan, ok := nativeSQLDataflowGroupedOrderedPlanFor(query); ok {
 		return executeNativeSQLDataflowGroupedOrdered(ctx, query, initial, plan)
 	}
@@ -522,6 +533,9 @@ func executeNativeSQLDataflow(ctx context.Context, query *sqlQuery, initial []SQ
 			return executeNativeSQLDataflowCompositeDistinct(ctx, query, initial, plan)
 		}
 		return executeNativeSQLDataflowDistinct(ctx, query, initial, plan)
+	}
+	if plan, ok := nativeSQLDataflowQuadGroupPlanFor(query); ok {
+		return executeNativeSQLDataflowQuadGroups(ctx, query, initial, plan)
 	}
 	if plan, ok := nativeSQLDataflowGroupPlanFor(query); ok {
 		return executeNativeSQLDataflowGroups(ctx, query, initial, plan)

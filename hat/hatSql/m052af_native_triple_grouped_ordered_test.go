@@ -97,7 +97,7 @@ func TestAutomaticNativeDataflowTripleGroupedOrderedMatchesFallback(t *testing.T
 func TestCompiledSQLNativeDataflowTripleGroupedOrderedRejectsUnsupportedShapes(t *testing.T) {
 	queries := []string{
 		"FROM CACHE('items') AS src SELECT src.region AS region, src.tier AS tier, src.channel AS channel, COUNT(*) AS total GROUP BY src.region, src.tier, src.channel ORDER BY COUNT(*) DESC LIMIT 1",
-		"FROM CACHE('items') AS src SELECT src.region AS region, src.tier AS tier, src.channel AS channel, src.value AS value, COUNT(*) AS total GROUP BY src.region, src.tier, src.channel, src.value ORDER BY total DESC LIMIT 1",
+		"FROM CACHE('items') AS src SELECT src.region AS region, src.tier AS tier, src.channel AS channel, src.value AS value, COUNT(*) AS total GROUP BY src.region, src.tier, src.channel, src.value, src.segment ORDER BY total DESC LIMIT 1",
 	}
 	for _, source := range queries {
 		compiled, err := CompileSQLQuery(source)

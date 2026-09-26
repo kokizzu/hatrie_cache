@@ -19,11 +19,12 @@ including first-seen group order and explicit rejection of unsupported runtime
 key types. Automatic execution selects the path for ordinary row resolvers;
 `DisableNativeDataflow: true` remains the explicit fallback.
 
-The implementation deliberately remains fail-closed for four or more grouping
-fields and bounded grouped output without the supported ordered Top-N shape.
+The implementation deliberately remains fail-closed for five or more grouping
+fields and bounded grouped output without a supported ordered Top-N shape.
 M052af adds the separate three-field grouped `HAVING` plus finite `ORDER BY`
-path; richer or unsupported ordered expressions still use the established
-executor rather than being silently misclassified.
+path, and M052ag extends that path to four fields; richer or unsupported
+ordered expressions still use the established executor rather than being
+silently misclassified.
 ## Verification
 
 ```text

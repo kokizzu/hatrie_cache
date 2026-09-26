@@ -22,9 +22,11 @@ order for stable ties, aggregate `HAVING` rewrites already supported by the
 two-field path, alias-based order resolution, `NULL` ordering, and bounded
 `LIMIT`/`OFFSET`. `DisableNativeDataflow: true` remains the explicit fallback.
 
-The path is fail-closed for four or more group fields, `WITH TIES`, unselected
+The path is fail-closed for five or more group fields, `WITH TIES`, unselected
 or expression-based order keys, unsupported `HAVING`, and other richer SQL
-shapes. Those queries retain the established materialized executor.
+shapes. Four-field grouped ordered Top-N is handled by the separate M052ag
+path; all other unsupported queries retain the established materialized
+executor.
 
 ## Verification
 

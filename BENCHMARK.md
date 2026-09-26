@@ -38176,8 +38176,8 @@ native:
 | Materialized fallback | 23.010 ms/op | 27,791,267 B/op | 235,425 | 1.00x |
 | Native three-field grouping | 6.070 ms/op | 6,329,904 B/op | 4,708 | **3.79x faster; 4.39x lower bytes; 50.0x fewer allocations** |
 
-The result is an unbounded grouped aggregation optimization only. Four or more
-grouping fields and bounded grouped output without the supported ordered Top-N
+The result is an unbounded grouped aggregation optimization only. Five or more
+grouping fields and bounded grouped output without a supported ordered Top-N
 shape retain the established fallback boundary. M052af adds the supported
 three-field grouped ordered path. See
 [M052AE_NATIVE_TRIPLE_GROUP.md](M052AE_NATIVE_TRIPLE_GROUP.md).
@@ -38230,6 +38230,40 @@ The native plan changes only eligible three-field grouped ordered queries;
 unsupported shapes continue through the fallback and retain the prior default
 semantics. See
 [M052AF_NATIVE_TRIPLE_GROUPED_ORDERED.md](M052AF_NATIVE_TRIPLE_GROUPED_ORDERED.md).
+
+<a id="m052ag-native-four-field-grouped-ordered-top-n"></a>
+## M052ag: Native Four-Field Grouped Ordered Top-N
+
+`make benchmark-m052ag-native-quad-grouped-ordered` compares the materialized
+executor with the four-field fixed-key native grouped Top-N path. The fixture
+has 20,000 rows, four grouping fields, `COUNT(*)`, `SUM(value)`, and a
+`LIMIT 100 OFFSET 25` page. The fallback explicitly sets
+`DisableNativeDataflow: true`. Linux/amd64, AMD Ryzen 9 5950X, five samples per
+path:
+
+```text
+BenchmarkCompiledSQLNativeQuadGroupedOrderedBaseline-32
+30059435 ns/op 30876720 B/op 276975 allocs/op
+29513826 ns/op 30876741 B/op 276975 allocs/op
+29226831 ns/op 30876782 B/op 276975 allocs/op
+28843628 ns/op 30876712 B/op 276975 allocs/op
+29535320 ns/op 30876826 B/op 276975 allocs/op
+BenchmarkCompiledSQLNativeQuadGroupedOrderedNative-32
+7682056 ns/op 7534180 B/op 6379 allocs/op
+7884404 ns/op 7534182 B/op 6379 allocs/op
+7813638 ns/op 7534179 B/op 6379 allocs/op
+7852378 ns/op 7534181 B/op 6379 allocs/op
+7821610 ns/op 7534180 B/op 6379 allocs/op
+```
+
+| Path | Median time | Median bytes | Median allocs | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Materialized fallback | 29.514 ms/op | 30,876,741 B/op | 276,975 | 1.00x |
+| Native four-field grouped Top-N | 7.822 ms/op | 7,534,180 B/op | 6,379 | **3.77x faster; 4.10x lower bytes; 43.42x fewer allocations** |
+
+Five-field groups, `WITH TIES`, unsupported order expressions, and richer SQL
+remain on the established fallback. See
+[M052AG_NATIVE_QUAD_GROUPED_ORDERED.md](M052AG_NATIVE_QUAD_GROUPED_ORDERED.md).
 
 <a id="rejected-t042-independent-setint-parallel-replay"></a>
 ## Rejected T042: Independent-Key Parallel Journal Replay
