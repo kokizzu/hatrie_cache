@@ -8281,6 +8281,7 @@ type sqlExecutionControl struct {
 	parameters        []interface{}
 	joinWork          int
 	sources           map[string][]SQLRow
+	finalSources      map[string][]SQLRow
 	arena             sqlExecutionArena
 	spillQuota        *sqlSpillQuota
 	operatorMemory    *SQLOperatorMemoryTracker
@@ -13897,12 +13898,36 @@ func resolveSQLSourceWithPartitionPredicates(source sqlSource, resolver SQLSourc
 		}
 		cacheKey := source.kind + "\x00" + source.key
 		if control != nil {
+			if source.final {
+				if rows, ok := control.finalSources[cacheKey]; ok {
+					validated, err := validateSQLSourceFieldTypes(source, cloneSQLRows(rows))
+					if err != nil {
+						return nil, err
+					}
+					return validated, nil
+				}
+			}
 			if rows, ok := control.sources[cacheKey]; ok {
 				validated, err := validateSQLSourceFieldTypes(source, cloneSQLRows(rows))
 				if err != nil {
 					return nil, err
 				}
 				return finalizeSQLSourceRows(source, control, validated)
+			}
+		}
+		if source.final {
+			if finalResolver, ok := resolver.(SQLFinalSourceResolver); ok {
+				options, err := resolveSQLFinalOptions(source, control)
+				if err != nil {
+					return nil, err
+				}
+				rows, available, err := finalResolver.ResolveSQLFinalSource(source.kind, source.key, options)
+				if err != nil {
+					return nil, err
+				}
+				if available {
+					return finishSQLFinalSourceRows(source, control, rows)
+				}
 			}
 		}
 		var rows []SQLRow
@@ -14002,6 +14027,21 @@ func finishSQLSourceRows(source sqlSource, control *sqlExecutionControl, rows []
 		return nil, err
 	}
 	return finalizeSQLSourceRows(source, control, validated)
+}
+
+func finishSQLFinalSourceRows(source sqlSource, control *sqlExecutionControl, rows []SQLRow) ([]SQLRow, error) {
+	validated, err := validateSQLSourceFieldTypes(source, rows)
+	if err != nil {
+		return nil, err
+	}
+	if control != nil {
+		cacheKey := source.kind + "\x00" + source.key
+		if control.finalSources == nil {
+			control.finalSources = make(map[string][]SQLRow)
+		}
+		control.finalSources[cacheKey] = cloneSQLRows(validated)
+	}
+	return validated, nil
 }
 
 func resolveSQLSourcePartitions(resolver PartitionedSourceResolver, name, key string) ([]SQLRow, bool, error) {

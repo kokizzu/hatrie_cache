@@ -38430,3 +38430,53 @@ BenchmarkMZ009ValidityPartitionPruningFastPath-32  133785  8037 ns/op  8345 B/op
 BenchmarkMZ009ValidityPartitionPruningFastPath-32  134032  8103 ns/op  8345 B/op  42 allocs/op
 BenchmarkMZ009ValidityPartitionPruningFastPath-32  137786  7983 ns/op  8344 B/op  42 allocs/op
 ```
+<a id="ch-004-final-native-pushdown"></a>
+## CH-004 FINAL Native Pushdown
+
+The focused benchmark compares the existing materialized `FINAL` path with an
+optional `SQLFinalSourceResolver` that returns rows already reconciled by the
+source. It uses 1,024 input rows, 512 logical keys, five samples, and the same
+AMD Ryzen 9 5950X Linux/amd64 host.
+
+Before implementation, the resolver exposed a native method but the engine
+ignored it. Both benchmark variants therefore materialized and reconciled the
+same rows:
+
+```text
+BenchmarkCH004FinalPushdownBaseline-32  1845  649809 ns/op  873501 B/op  4125 allocs/op
+BenchmarkCH004FinalPushdownBaseline-32  1797  574919 ns/op  873501 B/op  4125 allocs/op
+BenchmarkCH004FinalPushdownBaseline-32  2053  584965 ns/op  873501 B/op  4125 allocs/op
+BenchmarkCH004FinalPushdownBaseline-32  1882  597093 ns/op  873501 B/op  4125 allocs/op
+BenchmarkCH004FinalPushdownBaseline-32  2050  615468 ns/op  873501 B/op  4125 allocs/op
+BenchmarkCH004FinalPushdownFastPath-32  1906  629811 ns/op  873501 B/op  4125 allocs/op
+BenchmarkCH004FinalPushdownFastPath-32  1936  602165 ns/op  873501 B/op  4125 allocs/op
+BenchmarkCH004FinalPushdownFastPath-32  1953  593932 ns/op  873501 B/op  4125 allocs/op
+BenchmarkCH004FinalPushdownFastPath-32  1972  612285 ns/op  873501 B/op  4125 allocs/op
+BenchmarkCH004FinalPushdownFastPath-32  1899  570655 ns/op  873501 B/op  4125 allocs/op
+```
+
+After implementation, the materialized fallback remained effectively flat,
+while the native provider avoided generic row reconciliation:
+
+```text
+BenchmarkCH004FinalPushdownBaseline-32  2014  615473 ns/op  873551 B/op  4126 allocs/op
+BenchmarkCH004FinalPushdownBaseline-32  1867  610349 ns/op  873551 B/op  4126 allocs/op
+BenchmarkCH004FinalPushdownBaseline-32  2182  574848 ns/op  873550 B/op  4126 allocs/op
+BenchmarkCH004FinalPushdownBaseline-32  1923  582819 ns/op  873552 B/op  4126 allocs/op
+BenchmarkCH004FinalPushdownBaseline-32  1910  604168 ns/op  873549 B/op  4126 allocs/op
+BenchmarkCH004FinalPushdownFastPath-32  4195  252888 ns/op  447714 B/op  2069 allocs/op
+BenchmarkCH004FinalPushdownFastPath-32  4276  257475 ns/op  447714 B/op  2069 allocs/op
+BenchmarkCH004FinalPushdownFastPath-32  4549  265770 ns/op  447714 B/op  2069 allocs/op
+BenchmarkCH004FinalPushdownFastPath-32  4047  266643 ns/op  447714 B/op  2069 allocs/op
+BenchmarkCH004FinalPushdownFastPath-32  4584  262764 ns/op  447714 B/op  2069 allocs/op
+```
+
+| Path | Median ns/op | B/op | Allocs/op | Latency vs fallback | Bytes vs fallback | Allocs vs fallback |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Before hook, native method ignored | 602,165 | 873,501 | 4,125 | 1.00x | 1.00x | 1.00x |
+| After, materialized fallback | 604,168 | 873,551 | 4,126 | 1.00x | 1.00x | 1.00x |
+| After, native FINAL pushdown | 262,764 | 447,714 | 2,069 | 2.30x faster | 1.95x lower | 1.99x fewer |
+
+The fallback difference is within benchmark noise; the optimization is
+strictly opt-in and normal queries do not allocate its reconciled-source cache.
+Reproduce with `make benchmark-ch004-final`.

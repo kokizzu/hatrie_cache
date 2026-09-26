@@ -70,13 +70,18 @@ incomplete cancellation explicit instead of silently dropping data.
 ## Execution and Resource Behavior
 
 - `FINAL` is opt-in and has no effect on legacy queries.
-- Each marked source is materialized before reconciliation. The result is
-  cloned, so merge output does not mutate the resolver's source maps.
+- Without `SQLFinalSourceResolver`, each marked source is materialized before
+  reconciliation. The result is cloned, so merge output does not mutate the
+  resolver's source maps; a native provider can avoid that materialization.
 - Native scalar, index, columnar, ordered, projection-cache, and result-cache
   shortcuts are bypassed for a query containing `FINAL`; this prevents stale
   or unreconciled rows from bypassing the contract.
 - `ExecuteSQLQueryRows` still invokes the caller's row callback, but only after
   the marked source has been reconciled. It is not a bounded streaming merge.
+- A source may implement `SQLFinalSourceResolver` to reconcile rows in its
+  native representation. The engine validates the returned rows and caches
+  them separately from raw source rows; `available=false` uses the generic
+  materialize-and-merge fallback. See [CH004_FINAL_PUSHDOWN.md](CH004_FINAL_PUSHDOWN.md).
 - Callbacks must be deterministic, read-only, and safe for the source rows.
   They are application code and should validate row types instead of using
   unchecked assertions when input is not trusted.

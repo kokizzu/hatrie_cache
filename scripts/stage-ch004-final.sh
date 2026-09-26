@@ -4,13 +4,15 @@ set -euo pipefail
 git add \
 	ADOPTED_QUERY_ENGINE_IDEAS.md \
 	BENCHMARK.md \
+	CH004_FINAL_PUSHDOWN.md \
 	CH004_FINAL_READ.md \
 	ENGINE_IDEAS.md \
-	Makefile \
 	README.md \
 	hat/hatSql/ch004_final.go \
 	hat/hatSql/ch004_final_benchmark_test.go \
 	hat/hatSql/ch004_final_test.go \
+	hat/hatSql/ch004_final_pushdown_benchmark_test.go \
+	hat/hatSql/ch004_final_pushdown_test.go \
 	hat/hatSql/query.go \
 	scripts/benchmark-ch004-final-baseline.sh \
 	scripts/benchmark-ch004-final-rows.sh \

@@ -43,6 +43,15 @@ type SQLFinalSourceOptionsResolver struct {
 	Resolve SQLFinalSourceOptionsFunc
 }
 
+// SQLFinalSourceResolver optionally performs FINAL reconciliation in the
+// source's native storage representation. It returns available=false when
+// the source cannot serve this contract; the query engine then falls back to
+// materializing rows and applying the same contract itself. Available rows
+// must already satisfy options and remain valid SQL rows for the source.
+type SQLFinalSourceResolver interface {
+	ResolveSQLFinalSource(name, key string, options SQLFinalOptions) ([]Row, bool, error)
+}
+
 func (options SQLFinalOptions) validate() error {
 	if options.Key == nil {
 		return ErrSQLFinalOptionsInvalid
@@ -62,23 +71,35 @@ func (options SQLFinalOptions) validate() error {
 	return nil
 }
 
+func resolveSQLFinalOptions(source sqlSource, control *sqlExecutionControl) (SQLFinalOptions, error) {
+	if control == nil || control.options.FinalSourceOptions == nil || control.options.FinalSourceOptions.Resolve == nil {
+		return SQLFinalOptions{}, ErrSQLFinalOptionsRequired
+	}
+	options, configured, err := control.options.FinalSourceOptions.Resolve(source.kind, source.key)
+	if err != nil {
+		return SQLFinalOptions{}, err
+	}
+	if !configured {
+		return SQLFinalOptions{}, ErrSQLFinalOptionsRequired
+	}
+	if err := options.validate(); err != nil {
+		return SQLFinalOptions{}, err
+	}
+	return options, nil
+}
+
 func finalizeSQLSourceRows(source sqlSource, control *sqlExecutionControl, rows []SQLRow) ([]SQLRow, error) {
 	if !source.final {
 		return rows, nil
 	}
-	if control == nil || control.options.FinalSourceOptions == nil || control.options.FinalSourceOptions.Resolve == nil {
-		return nil, ErrSQLFinalOptionsRequired
-	}
-	options, configured, err := control.options.FinalSourceOptions.Resolve(source.kind, source.key)
+	options, err := resolveSQLFinalOptions(source, control)
 	if err != nil {
 		return nil, err
 	}
-	if !configured {
-		return nil, ErrSQLFinalOptionsRequired
-	}
-	if err := options.validate(); err != nil {
-		return nil, err
-	}
+	return applySQLFinalOptions(options, rows)
+}
+
+func applySQLFinalOptions(options SQLFinalOptions, rows []SQLRow) ([]SQLRow, error) {
 	switch options.Mode {
 	case SQLFinalReplacing:
 		return ReplaceSQLRows(rows, options.Key, options.Version)
