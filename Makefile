@@ -28366,3 +28366,35 @@ deliver-ch039-grouped-approx:
 .PHONY: deliver-t047l-grpc-status
 deliver-t047l-grpc-status:
 	bash ./scripts/deliver-t047l-grpc-status.sh deliver
+.PHONY: test-m038-distinct-fastpath
+test-m038-distinct-fastpath:
+	bash ./scripts/test-m038-distinct-fastpath.sh
+.PHONY: benchmark-m038-distinct-fastpath
+benchmark-m038-distinct-fastpath:
+	bash ./scripts/benchmark-m038-distinct-fastpath.sh
+.PHONY: format-m038-distinct-fastpath
+format-m038-distinct-fastpath:
+	bash ./scripts/format-m038-distinct-fastpath.sh
+.PHONY: race-m038-distinct-fastpath
+race-m038-distinct-fastpath:
+	bash ./scripts/race-m038-distinct-fastpath.sh
+
+.PHONY: test-m038-distinct-package
+test-m038-distinct-package:
+	bash ./scripts/test-m038-distinct-package.sh
+
+.PHONY: vet-m038-distinct-fastpath
+vet-m038-distinct-fastpath:
+	bash ./scripts/vet-m038-distinct-fastpath.sh
+
+.PHONY: status-m038-distinct-fastpath
+status-m038-distinct-fastpath:
+	bash ./scripts/deliver-m038-distinct-fastpath.sh status
+
+.PHONY: stage-m038-distinct-fastpath
+stage-m038-distinct-fastpath:
+	bash ./scripts/deliver-m038-distinct-fastpath.sh stage
+
+.PHONY: deliver-m038-distinct-fastpath
+deliver-m038-distinct-fastpath:
+	bash ./scripts/deliver-m038-distinct-fastpath.sh deliver

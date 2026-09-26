@@ -433,6 +433,10 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M038g Weighted duplicate-preserving differential grouped `MIN`/`MAX`
   maintenance with exact value multiplicity tracking; see
   [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).
+- [x] M038h Differential `DISTINCT` uses a fixed two-entry small-batch
+  accumulator while retaining the map path for larger batches; measured up to
+  1.54x faster with unchanged bytes and allocations. See
+  [M038_DIFFERENTIAL_DISTINCT_SMALL_BATCH_FASTPATH.md](M038_DIFFERENTIAL_DISTINCT_SMALL_BATCH_FASTPATH.md).
 - [x] M038f SQL parser and executor support for duplicate-preserving
   `INTERSECT ALL` and `EXCEPT ALL`, including collation-aware multiplicity and
   left-order output; see [SQL_SET_OPERATIONS.md](SQL_SET_OPERATIONS.md).

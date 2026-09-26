@@ -7,7 +7,7 @@ import (
 
 var (
 	ErrDifferentialDistinctNegativeMultiplicity = errors.New("hatSql: differential distinct multiplicity became negative")
-	ErrDifferentialDistinctOverflow            = errors.New("hatSql: differential distinct multiplicity overflowed")
+	ErrDifferentialDistinctOverflow             = errors.New("hatSql: differential distinct multiplicity overflowed")
 )
 
 // DistinctDifferentialRows maintains set membership from signed differential
@@ -18,6 +18,9 @@ var (
 func DistinctDifferentialRows(rows []DifferentialRow) ([]DifferentialRow, error) {
 	if len(rows) == 0 {
 		return nil, nil
+	}
+	if result, handled, err := smallDifferentialDistinct(rows); handled {
+		return result, err
 	}
 
 	multiplicity := make(map[string]uint64, len(rows))
@@ -48,6 +51,74 @@ func DistinctDifferentialRows(rows []DifferentialRow) ([]DifferentialRow, error)
 		return nil, nil
 	}
 	return emitted, nil
+}
+
+func smallDifferentialDistinct(rows []DifferentialRow) ([]DifferentialRow, bool, error) {
+	if len(rows) > 2 {
+		return nil, false, nil
+	}
+	if len(rows) == 0 {
+		return nil, true, nil
+	}
+
+	type entry struct {
+		key          string
+		multiplicity uint64
+	}
+	var entries [2]entry
+	entryCount := 0
+	var emitted []DifferentialRow
+	for _, update := range rows {
+		if update.Diff == 0 {
+			continue
+		}
+		entryIndex := -1
+		for index := 0; index < entryCount; index++ {
+			if entries[index].key == update.Key {
+				entryIndex = index
+				break
+			}
+		}
+		if entryIndex < 0 {
+			entryIndex = entryCount
+			entries[entryIndex].key = update.Key
+			entryCount++
+		}
+		current := entries[entryIndex].multiplicity
+		next, err := nextDifferentialDistinctMultiplicity(current, update.Diff)
+		if err != nil {
+			return nil, true, fmt.Errorf("key %q: %w", update.Key, err)
+		}
+		if next == 0 {
+			entryCount--
+			entries[entryIndex] = entries[entryCount]
+		} else {
+			entries[entryIndex].multiplicity = next
+		}
+
+		if current == 0 && next > 0 {
+			if emitted == nil {
+				emitted = make([]DifferentialRow, 0, len(rows))
+			}
+			emitted = append(emitted, DifferentialRow{
+				Key:  update.Key,
+				Time: update.Time,
+				Diff: 1,
+				Row:  cloneDifferentialDistinctRow(update.Row),
+			})
+		} else if current > 0 && next == 0 {
+			if emitted == nil {
+				emitted = make([]DifferentialRow, 0, len(rows))
+			}
+			emitted = append(emitted, DifferentialRow{
+				Key:  update.Key,
+				Time: update.Time,
+				Diff: -1,
+				Row:  cloneDifferentialDistinctRow(update.Row),
+			})
+		}
+	}
+	return emitted, true, nil
 }
 
 func nextDifferentialDistinctMultiplicity(current uint64, diff int64) (uint64, error) {

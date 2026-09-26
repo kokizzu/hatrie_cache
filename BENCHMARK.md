@@ -1,5 +1,23 @@
 # Benchmark
 
+## M038h Differential Distinct Small-Batch Fast Path
+
+Command: `make benchmark-m038-distinct-fastpath`
+
+Five `-benchmem` samples on Linux/amd64, AMD Ryzen 9 5950X. The map baseline
+executes the pre-change algorithm on the same input; the slice path is the
+bounded two-entry accumulator. Result ownership remains unchanged, so the
+optimization reduces CPU without changing bytes or allocation counts.
+
+| Workload | Map baseline | Slice path | Improvement |
+| --- | ---: | ---: | ---: |
+| One row with payload | 235.4 ns/op, 384 B/op, 3 allocs/op | 218.0 ns/op, 384 B/op, 3 allocs/op | 1.08x faster |
+| One row with nil payload | 58.66 ns/op, 48 B/op, 1 alloc/op | 39.57 ns/op, 48 B/op, 1 alloc/op | 1.48x faster |
+| Two independent keys | 89.26 ns/op, 80 B/op, 1 alloc/op | 57.79 ns/op, 80 B/op, 1 alloc/op | 1.54x faster |
+
+The map path remains for batches larger than two. Raw samples and correctness
+scope are in [M038_DIFFERENTIAL_DISTINCT_SMALL_BATCH_FASTPATH.md](M038_DIFFERENTIAL_DISTINCT_SMALL_BATCH_FASTPATH.md).
+
 ## MZ-010 SQL Subscription Statement Grammar
 
 Command: `make benchmark-mz010-statement`
