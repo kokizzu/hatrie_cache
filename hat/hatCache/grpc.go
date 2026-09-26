@@ -16,6 +16,7 @@ import (
 	"hatrie_cache/hat/hatAuth"
 	"hatrie_cache/hat/hatCommand"
 	"hatrie_cache/hat/hatGrpc"
+	"hatrie_cache/hat/hatReplication"
 	"hatrie_cache/hat/hatTrace"
 	hatriecachev1 "hatrie_cache/internal/gen/hatriecache/v1"
 )
@@ -61,6 +62,10 @@ type CacheGRPCOptions struct {
 	// the local command result, for single public write commands. Zero keeps the
 	// existing asynchronous or best-effort replication behavior.
 	WriteQuorum int
+	// ClusterWriteCommitParticipant enables the opt-in gRPC prepare/commit/abort
+	// transport for the caller-owned cluster write coordinator. Nil keeps the
+	// phase RPC unavailable and does not alter normal command handling.
+	ClusterWriteCommitParticipant *hatReplication.ClusterWriteCommitParticipant
 	// RequireReplicationSchemaCompatibility rejects missing or mismatched schema
 	// metadata on internal replication. It is disabled by default.
 	RequireReplicationSchemaCompatibility bool

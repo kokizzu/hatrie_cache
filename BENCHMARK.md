@@ -38519,3 +38519,17 @@ The forecast path is opt-in and does not alter normal query execution or the
 legacy cost method. Its added CPU is the cost of per-candidate forecast
 calculation and ranking; direct construction avoids duplicate forecast slices,
 so it introduces no additional heap or allocation cost in this workload.
+## T047h gRPC cluster-write phase transport
+
+`make benchmark-t047-grpc-transport` (`-count=5`, median on AMD Ryzen 9
+5950X, Go 1.26.6):
+
+| Path | Workload | ns/op | B/op | allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| direct baseline | participant `Prepare` + `Commit` | 88.6 | 0 | 0 | 1.00x |
+| opt-in gRPC | two phase RPCs over reused `bufconn` | 61,919 | 24,524 | 348 | 698.8x |
+
+The gRPC number is an in-process transport measurement and excludes external
+network latency. It is retained as a capability addition rather than a speed
+optimization; the endpoint and participant option are disabled by default, so
+the legacy command path has no added work.

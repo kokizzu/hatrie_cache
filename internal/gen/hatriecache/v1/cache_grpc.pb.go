@@ -33,6 +33,7 @@ type CacheServiceClient interface {
 	Snapshot(ctx context.Context, in *SnapshotRequest, opts ...grpc.CallOption) (*CommandResponse, error)
 	Replication(ctx context.Context, in *ReplicationRequest, opts ...grpc.CallOption) (*ReplicationResponse, error)
 	ReplicationStream(ctx context.Context, opts ...grpc.CallOption) (CacheService_ReplicationStreamClient, error)
+	ClusterWriteCommit(ctx context.Context, in *ClusterWriteCommitRequest, opts ...grpc.CallOption) (*ClusterWriteCommitResponse, error)
 	Topology(ctx context.Context, in *TopologyRequest, opts ...grpc.CallOption) (*TopologyResponse, error)
 	UpdateTopology(ctx context.Context, in *UpdateTopologyRequest, opts ...grpc.CallOption) (*TopologyResponse, error)
 	Election(ctx context.Context, in *ElectionRequest, opts ...grpc.CallOption) (*ElectionResponse, error)
@@ -256,6 +257,15 @@ func (x *cacheServiceReplicationStreamClient) Recv() (*ReplicationStreamAck, err
 	return m, nil
 }
 
+func (c *cacheServiceClient) ClusterWriteCommit(ctx context.Context, in *ClusterWriteCommitRequest, opts ...grpc.CallOption) (*ClusterWriteCommitResponse, error) {
+	out := new(ClusterWriteCommitResponse)
+	err := c.cc.Invoke(ctx, "/hatriecache.v1.CacheService/ClusterWriteCommit", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *cacheServiceClient) Topology(ctx context.Context, in *TopologyRequest, opts ...grpc.CallOption) (*TopologyResponse, error) {
 	out := new(TopologyResponse)
 	err := c.cc.Invoke(ctx, "/hatriecache.v1.CacheService/Topology", in, out, opts...)
@@ -307,6 +317,7 @@ type CacheServiceServer interface {
 	Snapshot(context.Context, *SnapshotRequest) (*CommandResponse, error)
 	Replication(context.Context, *ReplicationRequest) (*ReplicationResponse, error)
 	ReplicationStream(CacheService_ReplicationStreamServer) error
+	ClusterWriteCommit(context.Context, *ClusterWriteCommitRequest) (*ClusterWriteCommitResponse, error)
 	Topology(context.Context, *TopologyRequest) (*TopologyResponse, error)
 	UpdateTopology(context.Context, *UpdateTopologyRequest) (*TopologyResponse, error)
 	Election(context.Context, *ElectionRequest) (*ElectionResponse, error)
@@ -350,6 +361,9 @@ func (UnimplementedCacheServiceServer) Replication(context.Context, *Replication
 }
 func (UnimplementedCacheServiceServer) ReplicationStream(CacheService_ReplicationStreamServer) error {
 	return status.Errorf(codes.Unimplemented, "method ReplicationStream not implemented")
+}
+func (UnimplementedCacheServiceServer) ClusterWriteCommit(context.Context, *ClusterWriteCommitRequest) (*ClusterWriteCommitResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ClusterWriteCommit not implemented")
 }
 func (UnimplementedCacheServiceServer) Topology(context.Context, *TopologyRequest) (*TopologyResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Topology not implemented")
@@ -614,6 +628,24 @@ func (x *cacheServiceReplicationStreamServer) Recv() (*ReplicationStreamBatch, e
 	return m, nil
 }
 
+func _CacheService_ClusterWriteCommit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ClusterWriteCommitRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CacheServiceServer).ClusterWriteCommit(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/hatriecache.v1.CacheService/ClusterWriteCommit",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CacheServiceServer).ClusterWriteCommit(ctx, req.(*ClusterWriteCommitRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _CacheService_Topology_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(TopologyRequest)
 	if err := dec(in); err != nil {
@@ -716,6 +748,10 @@ var CacheService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Replication",
 			Handler:    _CacheService_Replication_Handler,
+		},
+		{
+			MethodName: "ClusterWriteCommit",
+			Handler:    _CacheService_ClusterWriteCommit_Handler,
 		},
 		{
 			MethodName: "Topology",

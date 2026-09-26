@@ -28040,3 +28040,33 @@ test-hatsql-package:
 
 test-all-temp-cache:
 	bash scripts/test-all-temp-cache.sh
+
+.PHONY: test-t047-grpc-transport
+test-t047-grpc-transport:
+\tbash ./scripts/test-t047-grpc-transport.sh
+
+.PHONY: race-t047-grpc-transport
+race-t047-grpc-transport:
+\tbash ./scripts/test-t047-grpc-transport.sh race
+
+.PHONY: test-t047-grpc-transport-package
+test-t047-grpc-transport-package:
+\tbash ./scripts/test-t047-grpc-transport.sh package
+
+.PHONY: format-t047-grpc-transport
+format-t047-grpc-transport:
+\tbash ./scripts/test-t047-grpc-transport.sh format
+
+.PHONY: benchmark-t047-grpc-transport
+benchmark-t047-grpc-transport:
+\tbash ./scripts/test-t047-grpc-transport.sh benchmark
+
+.PHONY: stage-t047-grpc-transport commit-t047-grpc-transport push-t047-grpc-transport
+stage-t047-grpc-transport:
+\tbash ./scripts/deliver-t047-grpc-transport.sh stage
+
+commit-t047-grpc-transport:
+\tbash ./scripts/deliver-t047-grpc-transport.sh commit
+
+push-t047-grpc-transport:
+\tbash ./scripts/deliver-t047-grpc-transport.sh push

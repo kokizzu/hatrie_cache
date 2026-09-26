@@ -16,6 +16,7 @@ service CacheService {
   rpc Snapshot(SnapshotRequest) returns (CommandResponse);
   rpc Replication(ReplicationRequest) returns (ReplicationResponse);
   rpc ReplicationStream(stream ReplicationStreamBatch) returns (stream ReplicationStreamAck);
+  rpc ClusterWriteCommit(ClusterWriteCommitRequest) returns (ClusterWriteCommitResponse);
   rpc Topology(TopologyRequest) returns (TopologyResponse);
   rpc UpdateTopology(UpdateTopologyRequest) returns (TopologyResponse);
   rpc Election(ElectionRequest) returns (ElectionResponse);
@@ -382,4 +383,25 @@ message StructuredBatchResponse {
   // Unexpected per-command errors are sparse and paired by position.
   repeated uint32 error_indexes = 9;
   repeated string errors = 10;
+}
+
+enum ClusterWriteCommitPhase {
+  CLUSTER_WRITE_COMMIT_PHASE_UNSPECIFIED = 0;
+  CLUSTER_WRITE_COMMIT_PHASE_PREPARE = 1;
+  CLUSTER_WRITE_COMMIT_PHASE_COMMIT = 2;
+  CLUSTER_WRITE_COMMIT_PHASE_ABORT = 3;
+}
+
+message ClusterWriteCommitRequest {
+  string transaction_id = 1;
+  uint64 sequence = 2;
+  uint64 fence_token = 3;
+  bytes payload_digest = 4;
+  ClusterWriteCommitPhase phase = 5;
+}
+
+message ClusterWriteCommitResponse {
+  bool ok = 1;
+  string message = 2;
+  ClusterWriteCommitPhase phase = 3;
 }
