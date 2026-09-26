@@ -18,7 +18,9 @@ stage_feature() {
         printf '%s\n' 'refusing to stage: the index already contains unrelated staged changes' >&2
         exit 1
     fi
-    if ! git grep -q 'benchmark-t047k-http-status' HEAD -- Makefile; then
+    if git grep 'benchmark-t047k-http-status' HEAD -- Makefile; then
+        :
+    else
     git apply --cached --whitespace=nowarn <<'PATCH'
 diff --git a/Makefile b/Makefile
 --- a/Makefile
