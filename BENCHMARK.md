@@ -38833,3 +38833,31 @@ ns/op, about 0.97x the baseline CPU time, with no memory or allocation change.
 The feature is retained because it closes the cross-generation consistency
 gap at effectively zero steady-state cost; it remains opt-in through the
 multi-source coordinator.
+
+## M037k Differential String MIN/MAX
+
+Raw `make benchmark-differential-group-min-max` results (`-benchmem`, five
+samples, one CPU, Linux/amd64, AMD Ryzen 9 5950X):
+
+```text
+BenchmarkM037kDifferentialStringMinMax/naive_rebuild   1170 1021556 ns/op 1046273 B/op 6194 allocs/op
+BenchmarkM037kDifferentialStringMinMax/naive_rebuild   1128 1010207 ns/op 1046273 B/op 6194 allocs/op
+BenchmarkM037kDifferentialStringMinMax/naive_rebuild   1233  920069 ns/op 1046273 B/op 6194 allocs/op
+BenchmarkM037kDifferentialStringMinMax/naive_rebuild   1274  936625 ns/op 1046273 B/op 6194 allocs/op
+BenchmarkM037kDifferentialStringMinMax/naive_rebuild   1255  922299 ns/op 1046273 B/op 6194 allocs/op
+BenchmarkM037kDifferentialStringMinMax/incremental     1917  624009 ns/op 1046272 B/op 6194 allocs/op
+BenchmarkM037kDifferentialStringMinMax/incremental     1910  627432 ns/op 1046272 B/op 6194 allocs/op
+BenchmarkM037kDifferentialStringMinMax/incremental     1900  622396 ns/op 1046272 B/op 6194 allocs/op
+BenchmarkM037kDifferentialStringMinMax/incremental     1881  621938 ns/op 1046272 B/op 6194 allocs/op
+BenchmarkM037kDifferentialStringMinMax/incremental     1888  626256 ns/op 1046272 B/op 6194 allocs/op
+```
+
+| implementation | median ns/op | B/op | allocs/op | improvement vs naive |
+| --- | ---: | ---: | ---: | ---: |
+| naive endpoint rebuild | 936,625 | 1,046,273 | 6,194 | 1.00x |
+| incremental string multiplicity | 624,009 | 1,046,272 | 6,194 | 1.50x CPU, 1.00x memory |
+
+The incremental path retains exact value multiplicities and only rescans a
+group when a live endpoint is retracted. It is opt-in and does not alter the
+existing integer differential or default SQL paths. See
+[M037K_DIFFERENTIAL_STRING_MIN_MAX.md](M037K_DIFFERENTIAL_STRING_MIN_MAX.md).

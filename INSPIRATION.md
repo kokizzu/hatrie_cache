@@ -411,6 +411,11 @@ Materialize's Timely/Differential Dataflow runtime.
   keeps exact value multiplicities, suppresses duplicate-only changes, and
   emits only visible count transitions; see
   [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).
+- [x] M037k Signed differential string grouped `MIN`/`MAX` maintenance keeps
+  exact string multiplicities, restores endpoints after retractions, and
+  preserves empty-string values without changing the existing numeric path;
+  see [M037K_DIFFERENTIAL_STRING_MIN_MAX.md](M037K_DIFFERENTIAL_STRING_MIN_MAX.md)
+  and [BENCHMARK.md](BENCHMARK.md#m037k-differential-string-minmax).
 - [ ] M038 Generic multiset duplicate preservation across all operators.
 - [x] M038a Duplicate multiplicity retained as signed diff weights.
 - [x] M038b Multiset-preserving expansion, union, and weighted join composition; see [DIFFERENTIAL_OPERATORS.md](DIFFERENTIAL_OPERATORS.md).
