@@ -20,6 +20,8 @@ const (
 	clusterWriteCommitHTTPMaxBodyBytes     = 64 << 10
 	clusterWriteCommitHTTPMaxResponseBytes = 64 << 10
 	clusterWriteCommitHTTPMaxMessageBytes  = 4 << 10
+	clusterWriteCommitHTTPMaxQueryBytes    = 1 << 20
+	clusterWriteCommitHTTPMaxTransactionID = 1 << 20
 )
 
 var (
@@ -28,6 +30,7 @@ var (
 	ErrClusterWriteCommitHTTPRemoteUnavailable = errors.New("hatriecache: cluster write commit HTTP remote unavailable")
 	ErrClusterWriteCommitHTTPResponseInvalid   = errors.New("hatriecache: invalid cluster write commit HTTP response")
 	ErrClusterWriteCommitHTTPPhaseRejected     = errors.New("hatriecache: cluster write commit HTTP phase rejected")
+	ErrClusterWriteCommitHTTPStatusInvalid     = errors.New("hatriecache: invalid cluster write commit HTTP status")
 )
 
 // ClusterWriteCommitHTTPRequest is the bounded JSON wire request for one
@@ -45,9 +48,14 @@ type ClusterWriteCommitHTTPRequest struct {
 // participant-rejected phase calls. HTTP status codes are reserved for
 // transport, authentication, and request validation failures.
 type ClusterWriteCommitHTTPResponse struct {
-	OK      bool   `json:"ok"`
-	Message string `json:"message,omitempty"`
-	Phase   string `json:"phase,omitempty"`
+	OK            bool   `json:"ok"`
+	Found         bool   `json:"found"`
+	Message       string `json:"message,omitempty"`
+	Phase         string `json:"phase,omitempty"`
+	TransactionID string `json:"transaction_id,omitempty"`
+	Sequence      uint64 `json:"sequence,omitempty"`
+	FenceToken    uint64 `json:"fence_token,omitempty"`
+	PayloadDigest []byte `json:"payload_digest,omitempty"`
 }
 
 // ClusterWriteCommitHTTPHandler exposes one participant as an opt-in HTTP
@@ -171,6 +179,95 @@ func (client *ClusterWriteCommitHTTPClient) Abort(ctx context.Context, proposal 
 	return client.call(ctx, "abort", proposal)
 }
 
+// Status reads one participant transaction without changing participant state.
+// It is intended for recovery after a coordinator reports an indeterminate
+// commit outcome.
+func (client *ClusterWriteCommitHTTPClient) Status(ctx context.Context, transactionID string) (hatReplication.ClusterWriteCommitParticipantRecord, bool, error) {
+	if client == nil || !validClusterWriteCommitHTTPEndpoint(client.endpoint) {
+		return hatReplication.ClusterWriteCommitParticipantRecord{}, false, ErrClusterWriteCommitHTTPRemoteUnavailable
+	}
+	transactionID = strings.TrimSpace(transactionID)
+	if len(transactionID) == 0 || len(transactionID) > clusterWriteCommitHTTPMaxTransactionID {
+		return hatReplication.ClusterWriteCommitParticipantRecord{}, false, ErrClusterWriteCommitHTTPStatusInvalid
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	statusEndpoint, err := clusterWriteCommitHTTPStatusEndpoint(client.endpoint, transactionID)
+	if err != nil {
+		return hatReplication.ClusterWriteCommitParticipantRecord{}, false, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, statusEndpoint, nil)
+	if err != nil {
+		return hatReplication.ClusterWriteCommitParticipantRecord{}, false, fmt.Errorf("%w: create request: %v", ErrClusterWriteCommitHTTPRemoteUnavailable, err)
+	}
+	if client.replicationToken != "" {
+		request.Header.Set(clusterWriteCommitHTTPTokenHeader, client.replicationToken)
+	}
+	response, err := client.httpClient.Do(request)
+	if err != nil {
+		return hatReplication.ClusterWriteCommitParticipantRecord{}, false, fmt.Errorf("%w: %v", ErrClusterWriteCommitHTTPRemoteUnavailable, err)
+	}
+	defer response.Body.Close()
+	decoded, err := decodeClusterWriteCommitHTTPResponse(response.Body)
+	if err != nil {
+		if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
+			return hatReplication.ClusterWriteCommitParticipantRecord{}, false, ErrClusterWriteCommitHTTPUnauthorized
+		}
+		return hatReplication.ClusterWriteCommitParticipantRecord{}, false, err
+	}
+	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
+		return hatReplication.ClusterWriteCommitParticipantRecord{}, false, ErrClusterWriteCommitHTTPUnauthorized
+	}
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return hatReplication.ClusterWriteCommitParticipantRecord{}, false, ErrClusterWriteCommitHTTPRemoteUnavailable
+	}
+	if !decoded.OK {
+		if decoded.Message != "" {
+			return hatReplication.ClusterWriteCommitParticipantRecord{}, false, fmt.Errorf("%w: %s", ErrClusterWriteCommitHTTPStatusInvalid, decoded.Message)
+		}
+		return hatReplication.ClusterWriteCommitParticipantRecord{}, false, ErrClusterWriteCommitHTTPStatusInvalid
+	}
+	if !decoded.Found {
+		return hatReplication.ClusterWriteCommitParticipantRecord{}, false, nil
+	}
+	phase, ok := normalizeClusterWriteCommitHTTPParticipantPhase(decoded.Phase)
+	if !ok || decoded.TransactionID != transactionID || len(decoded.PayloadDigest) != clusterWriteCommitPayloadDigestSize {
+		return hatReplication.ClusterWriteCommitParticipantRecord{}, false, ErrClusterWriteCommitHTTPStatusInvalid
+	}
+	var digest [clusterWriteCommitPayloadDigestSize]byte
+	copy(digest[:], decoded.PayloadDigest)
+	return hatReplication.ClusterWriteCommitParticipantRecord{
+		Proposal: hatReplication.ClusterWriteCommitProposal{
+			TransactionID: decoded.TransactionID,
+			Sequence:      decoded.Sequence,
+			FenceToken:    decoded.FenceToken,
+			PayloadDigest: digest,
+		},
+		Phase: phase,
+	}, true, nil
+}
+
+func clusterWriteCommitHTTPStatusEndpoint(endpoint, transactionID string) (string, error) {
+	parsed, err := url.Parse(endpoint)
+	if err != nil || !parsed.IsAbs() || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return "", ErrClusterWriteCommitHTTPRemoteUnavailable
+	}
+	if len(parsed.RawQuery) > clusterWriteCommitHTTPMaxQueryBytes {
+		return "", ErrClusterWriteCommitHTTPStatusInvalid
+	}
+	query, err := url.ParseQuery(parsed.RawQuery)
+	if err != nil {
+		return "", ErrClusterWriteCommitHTTPStatusInvalid
+	}
+	query.Set("transaction_id", transactionID)
+	parsed.RawQuery = query.Encode()
+	if len(parsed.RawQuery) > clusterWriteCommitHTTPMaxQueryBytes {
+		return "", ErrClusterWriteCommitHTTPStatusInvalid
+	}
+	return parsed.String(), nil
+}
+
 func (client *ClusterWriteCommitHTTPClient) call(ctx context.Context, phase string, proposal hatReplication.ClusterWriteCommitProposal) error {
 	if client == nil || !validClusterWriteCommitHTTPEndpoint(client.endpoint) {
 		return ErrClusterWriteCommitHTTPRemoteUnavailable
@@ -229,8 +326,8 @@ func (client *ClusterWriteCommitHTTPClient) call(ctx context.Context, phase stri
 	return nil
 }
 
-// ServeHTTP handles exactly one phase request. It does not expose the
-// participant through the default monitoring router.
+// ServeHTTP handles one phase request or one authenticated status read. It
+// does not expose the participant through the default monitoring router.
 func (handler *ClusterWriteCommitHTTPHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if writer == nil {
 		return
@@ -240,9 +337,9 @@ func (handler *ClusterWriteCommitHTTPHandler) ServeHTTP(writer http.ResponseWrit
 		writeClusterWriteCommitHTTPResponse(writer, http.StatusBadRequest, ClusterWriteCommitHTTPResponse{Message: ErrClusterWriteCommitHTTPInvalidRequest.Error()})
 		return
 	}
-	if request.Method != http.MethodPost {
-		writer.Header().Set("Allow", http.MethodPost)
-		writeClusterWriteCommitHTTPResponse(writer, http.StatusMethodNotAllowed, ClusterWriteCommitHTTPResponse{Message: "POST is required"})
+	if request.Method != http.MethodGet && request.Method != http.MethodPost {
+		writer.Header().Set("Allow", http.MethodGet+", "+http.MethodPost)
+		writeClusterWriteCommitHTTPResponse(writer, http.StatusMethodNotAllowed, ClusterWriteCommitHTTPResponse{Message: "GET or POST is required"})
 		return
 	}
 	expectedToken := ""
@@ -258,6 +355,10 @@ func (handler *ClusterWriteCommitHTTPHandler) ServeHTTP(writer http.ResponseWrit
 		return
 	}
 	if err := request.Context().Err(); err != nil {
+		return
+	}
+	if request.Method == http.MethodGet {
+		handler.serveStatus(writer, request)
 		return
 	}
 	decoded, err := decodeClusterWriteCommitHTTPRequest(request.Body)
@@ -294,6 +395,38 @@ func (handler *ClusterWriteCommitHTTPHandler) ServeHTTP(writer http.ResponseWrit
 	writeClusterWriteCommitHTTPResponse(writer, http.StatusOK, response)
 }
 
+func (handler *ClusterWriteCommitHTTPHandler) serveStatus(writer http.ResponseWriter, request *http.Request) {
+	if len(request.URL.RawQuery) > clusterWriteCommitHTTPMaxQueryBytes {
+		writeClusterWriteCommitHTTPResponse(writer, http.StatusBadRequest, ClusterWriteCommitHTTPResponse{Message: ErrClusterWriteCommitHTTPInvalidRequest.Error()})
+		return
+	}
+	query, err := url.ParseQuery(request.URL.RawQuery)
+	if err != nil || len(query) != 1 || len(query["transaction_id"]) != 1 {
+		writeClusterWriteCommitHTTPResponse(writer, http.StatusBadRequest, ClusterWriteCommitHTTPResponse{Message: ErrClusterWriteCommitHTTPInvalidRequest.Error()})
+		return
+	}
+	transactionID := strings.TrimSpace(query.Get("transaction_id"))
+	if len(transactionID) == 0 || len(transactionID) > clusterWriteCommitHTTPMaxTransactionID {
+		writeClusterWriteCommitHTTPResponse(writer, http.StatusBadRequest, ClusterWriteCommitHTTPResponse{Message: ErrClusterWriteCommitHTTPInvalidRequest.Error()})
+		return
+	}
+	record, found := handler.Participant.Status(transactionID)
+	response := ClusterWriteCommitHTTPResponse{OK: true, Found: found}
+	if found {
+		phase, ok := clusterWriteCommitHTTPParticipantPhaseName(record.Phase)
+		if !ok {
+			writeClusterWriteCommitHTTPResponse(writer, http.StatusServiceUnavailable, ClusterWriteCommitHTTPResponse{Message: ErrClusterWriteCommitHTTPStatusInvalid.Error()})
+			return
+		}
+		response.Phase = phase
+		response.TransactionID = record.Proposal.TransactionID
+		response.Sequence = record.Proposal.Sequence
+		response.FenceToken = record.Proposal.FenceToken
+		response.PayloadDigest = append([]byte(nil), record.Proposal.PayloadDigest[:]...)
+	}
+	writeClusterWriteCommitHTTPResponse(writer, http.StatusOK, response)
+}
+
 func decodeClusterWriteCommitHTTPRequest(reader io.Reader) (ClusterWriteCommitHTTPRequest, error) {
 	if reader == nil {
 		return ClusterWriteCommitHTTPRequest{}, ErrClusterWriteCommitHTTPInvalidRequest
@@ -314,7 +447,7 @@ func decodeClusterWriteCommitHTTPRequest(reader io.Reader) (ClusterWriteCommitHT
 	if err := ensureClusterWriteCommitHTTPEOF(decoder); err != nil {
 		return ClusterWriteCommitHTTPRequest{}, err
 	}
-	if len(request.TransactionID) == 0 || len(request.TransactionID) > 1<<20 {
+	if len(request.TransactionID) == 0 || len(request.TransactionID) > clusterWriteCommitHTTPMaxTransactionID {
 		return ClusterWriteCommitHTTPRequest{}, ErrClusterWriteCommitHTTPInvalidRequest
 	}
 	if len(request.PayloadDigest) != clusterWriteCommitPayloadDigestSize {
@@ -366,6 +499,32 @@ func normalizeClusterWriteCommitHTTPPhase(phase string) (string, bool) {
 		return "commit", true
 	case "abort":
 		return "abort", true
+	default:
+		return "", false
+	}
+}
+
+func normalizeClusterWriteCommitHTTPParticipantPhase(phase string) (hatReplication.ClusterWriteCommitParticipantPhase, bool) {
+	switch strings.ToLower(strings.TrimSpace(phase)) {
+	case "prepared":
+		return hatReplication.ClusterWriteCommitParticipantPrepared, true
+	case "committed":
+		return hatReplication.ClusterWriteCommitParticipantCommitted, true
+	case "aborted":
+		return hatReplication.ClusterWriteCommitParticipantAborted, true
+	default:
+		return 0, false
+	}
+}
+
+func clusterWriteCommitHTTPParticipantPhaseName(phase hatReplication.ClusterWriteCommitParticipantPhase) (string, bool) {
+	switch phase {
+	case hatReplication.ClusterWriteCommitParticipantPrepared:
+		return "prepared", true
+	case hatReplication.ClusterWriteCommitParticipantCommitted:
+		return "committed", true
+	case hatReplication.ClusterWriteCommitParticipantAborted:
+		return "aborted", true
 	default:
 		return "", false
 	}

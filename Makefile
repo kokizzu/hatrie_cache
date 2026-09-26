@@ -28189,6 +28189,14 @@ push-t047j-http-transport:
 deliver-t047j-http-transport:
 	bash ./scripts/deliver-t047j-http-transport.sh deliver
 
+.PHONY: benchmark-t047k-http-status
+benchmark-t047k-http-status:
+	bash ./scripts/benchmark-t047k-http-status.sh
+
+.PHONY: deliver-t047k-http-status
+deliver-t047k-http-status:
+	bash ./scripts/deliver-t047k-http-status.sh deliver
+
 .PHONY: test-m032-snapshot-provider
 test-m032-snapshot-provider:
 	@bash scripts/test-m032-snapshot-provider.sh

@@ -38888,3 +38888,19 @@ BenchmarkM037lDifferentialStringCountDistinct/incremental       408869 ns/op 647
 The incremental helper retains exact string multiplicities and is opt-in; the
 existing int64 path, SQL planner, and default behavior remain unchanged. See
 [M037L_DIFFERENTIAL_STRING_COUNT_DISTINCT.md](M037L_DIFFERENTIAL_STRING_COUNT_DISTINCT.md).
+<a id="t047k-http-status"></a>
+## T047k HTTP participant status
+
+Command: `make benchmark-t047k-http-status`.
+
+Measured on Linux/amd64, AMD Ryzen 9 5950X, with `-benchtime=200ms -count=3`:
+
+| Path | Median ns/op | B/op | allocs/op | Relative latency |
+| --- | ---: | ---: | ---: | ---: |
+| Direct participant `Status` | 19.1 | 0 | 0 | 1.00x |
+| HTTP status transport | 70,085 | 10,822 | 98 | 3,669x slower |
+
+The status endpoint is a recovery/control-plane operation and is opt-in. The
+existing HTTP phase path showed no measurable regression: its median changed
+from `159,493 ns/op`, `28,970 B/op`, `254 allocs/op` to `158,121 ns/op`,
+`28,970 B/op`, `254 allocs/op` across three-run samples.

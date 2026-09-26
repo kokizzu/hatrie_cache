@@ -52,3 +52,43 @@ func BenchmarkTU047DirectCoordinatorBaseline(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkTU047HTTPStatus(b *testing.B) {
+	participant, err := hatReplication.NewClusterWriteCommitParticipant(hatReplication.ClusterWriteCommitParticipantOptions{MaxRecords: 4})
+	if err != nil {
+		b.Fatal(err)
+	}
+	proposal := hatReplication.ClusterWriteCommitProposal{TransactionID: "tx-status-benchmark", Sequence: 7, FenceToken: 9}
+	proposal.PayloadDigest[0] = 0x42
+	if _, err := participant.Prepare(proposal); err != nil {
+		b.Fatal(err)
+	}
+	server := httptest.NewServer(&ClusterWriteCommitHTTPHandler{Participant: participant, ReplicationToken: "replication-secret"})
+	defer server.Close()
+	client := NewClusterWriteCommitHTTPClient(server.URL, server.Client(), "replication-secret")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		if _, found, err := client.Status(context.Background(), proposal.TransactionID); err != nil || !found {
+			b.Fatalf("Status() = found=%t err=%v", found, err)
+		}
+	}
+}
+
+func BenchmarkTU047DirectParticipantStatus(b *testing.B) {
+	participant, err := hatReplication.NewClusterWriteCommitParticipant(hatReplication.ClusterWriteCommitParticipantOptions{MaxRecords: 4})
+	if err != nil {
+		b.Fatal(err)
+	}
+	proposal := hatReplication.ClusterWriteCommitProposal{TransactionID: "tx-status-direct", Sequence: 7, FenceToken: 9}
+	if _, err := participant.Prepare(proposal); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		if _, found := participant.Status(proposal.TransactionID); !found {
+			b.Fatal("Status() did not find prepared transaction")
+		}
+	}
+}

@@ -43,6 +43,64 @@ func TestTU047HTTPClusterWriteCommitPhases(t *testing.T) {
 	}
 }
 
+func TestTU047HTTPClusterWriteCommitStatusRoundTrip(t *testing.T) {
+	participant, err := hatReplication.NewClusterWriteCommitParticipant(hatReplication.ClusterWriteCommitParticipantOptions{MaxRecords: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(&ClusterWriteCommitHTTPHandler{
+		Participant:      participant,
+		ReplicationToken: "replication-secret",
+	})
+	defer server.Close()
+
+	proposal := hatReplication.ClusterWriteCommitProposal{TransactionID: "tx-status", Sequence: 17, FenceToken: 23}
+	proposal.PayloadDigest[0] = 0x7a
+	if _, err := participant.Prepare(proposal); err != nil {
+		t.Fatalf("Prepare() error = %v", err)
+	}
+	client := NewClusterWriteCommitHTTPClient(server.URL, server.Client(), "replication-secret")
+	got, found, err := client.Status(context.Background(), proposal.TransactionID)
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if !found || got.Proposal != proposal || got.Phase != hatReplication.ClusterWriteCommitParticipantPrepared {
+		t.Fatalf("Status() = %#v/%t, want prepared proposal", got, found)
+	}
+	if _, found, err := client.Status(context.Background(), "tx-missing"); err != nil || found {
+		t.Fatalf("Status(missing) = %t/%v, want false/nil", found, err)
+	}
+}
+
+func TestTU047HTTPClusterWriteCommitStatusRequiresAuthAndStrictQuery(t *testing.T) {
+	participant, err := hatReplication.NewClusterWriteCommitParticipant(hatReplication.ClusterWriteCommitParticipantOptions{MaxRecords: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(&ClusterWriteCommitHTTPHandler{
+		Participant:      participant,
+		ReplicationToken: "replication-secret",
+	})
+	defer server.Close()
+
+	proposal := hatReplication.ClusterWriteCommitProposal{TransactionID: "tx-status-auth"}
+	proposal.PayloadDigest[0] = 1
+	if _, err := participant.Prepare(proposal); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := NewClusterWriteCommitHTTPClient(server.URL, server.Client(), "wrong-secret").Status(context.Background(), proposal.TransactionID); !errors.Is(err, ErrClusterWriteCommitHTTPUnauthorized) {
+		t.Fatalf("wrong-token Status() error = %v, want unauthorized", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, server.URL+"?transaction_id=tx-status-auth&extra=1", nil)
+	request.Header.Set(clusterWriteCommitHTTPTokenHeader, "replication-secret")
+	response := httptest.NewRecorder()
+	(&ClusterWriteCommitHTTPHandler{Participant: participant, ReplicationToken: "replication-secret"}).ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("unknown status query field status = %d, want %d", response.Code, http.StatusBadRequest)
+	}
+}
+
 func TestTU047HTTPClusterWriteCommitAuthAndValidation(t *testing.T) {
 	participant, err := hatReplication.NewClusterWriteCommitParticipant(hatReplication.ClusterWriteCommitParticipantOptions{MaxRecords: 2})
 	if err != nil {
@@ -130,8 +188,8 @@ func TestTU047HTTPClusterWriteCommitBoundsMethodsAndBodies(t *testing.T) {
 	getRequest := httptest.NewRequest(http.MethodGet, "http://example.test", nil)
 	getResponse := httptest.NewRecorder()
 	handler.ServeHTTP(getResponse, getRequest)
-	if getResponse.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("GET status = %d, want %d", getResponse.Code, http.StatusMethodNotAllowed)
+	if getResponse.Code != http.StatusBadRequest {
+		t.Fatalf("GET without transaction status = %d, want %d", getResponse.Code, http.StatusBadRequest)
 	}
 
 	oversizedRequest := httptest.NewRequest(http.MethodPost, "http://example.test", strings.NewReader(strings.Repeat(" ", clusterWriteCommitHTTPMaxBodyBytes+1)))
