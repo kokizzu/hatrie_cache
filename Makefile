@@ -28013,3 +28013,23 @@ push-mz009-validity-partition-pruning:
 	bash scripts/push-mz009-validity-partition-pruning.sh
 
 # MZ009_VALIDITY_PARTITION_PRUNING_FEATURE_TARGETS_END
+test-ch012-projection-forecast:
+	bash scripts/test-ch012-projection-forecast.sh
+
+format-ch012-projection-forecast:
+	bash scripts/format-ch012-projection-forecast.sh
+
+benchmark-ch012-forecast-baseline:
+	bash scripts/benchmark-ch012-forecast-baseline.sh
+
+benchmark-ch012-projection-forecast:
+	bash scripts/benchmark-ch012-projection-forecast.sh
+
+race-ch012-projection-forecast:
+	bash scripts/race-ch012-projection-forecast.sh
+
+test-hatsql-package:
+	bash scripts/test-hatsql-package.sh
+
+test-all-temp-cache:
+	bash scripts/test-all-temp-cache.sh

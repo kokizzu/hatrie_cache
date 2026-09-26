@@ -54,9 +54,11 @@ type SQLProjectionCostRecommendation struct {
 // materialized projections. It is opt-in and only records queries with a
 // caller-supplied QueryID, avoiding retention of generated or sensitive SQL.
 type SQLProjectionAdvisor struct {
-	mu       sync.RWMutex
-	capacity int
-	counts   map[sqlProjectionAdvisorKey]sqlProjectionAdvisorStats
+	mu              sync.RWMutex
+	capacity        int
+	counts          map[sqlProjectionAdvisorKey]sqlProjectionAdvisorStats
+	forecastEnabled bool
+	workloads       map[sqlProjectionAdvisorKey]sqlProjectionAdvisorWorkloadStats
 }
 
 type sqlProjectionAdvisorKey struct {
@@ -80,7 +82,7 @@ type sqlProjectionAdvisorStats struct {
 // NewSQLProjectionAdvisor creates an advisor that retains at most capacity
 // distinct query/dependency recommendations. A nonpositive capacity is inert.
 func NewSQLProjectionAdvisor(capacity int) *SQLProjectionAdvisor {
-	return &SQLProjectionAdvisor{capacity: capacity, counts: make(map[sqlProjectionAdvisorKey]sqlProjectionAdvisorStats)}
+	return NewSQLProjectionAdvisorWithOptions(SQLProjectionAdvisorOptions{Capacity: capacity})
 }
 
 // Recommendations returns deterministic independent copies ordered by the
@@ -219,7 +221,10 @@ func sqlProjectionAdvisorRecommendation(key sqlProjectionAdvisorKey, stats sqlPr
 
 func (advisor *SQLProjectionAdvisor) observeSlowQuery(query *sqlQuery, queryID string, metrics *sqlExecutionMetrics, elapsed time.Duration, threshold time.Duration, err error) {
 	queryID = strings.TrimSpace(queryID)
-	if advisor == nil || advisor.capacity <= 0 || queryID == "" || err != nil || threshold <= 0 || elapsed < threshold {
+	if advisor == nil || advisor.capacity <= 0 || queryID == "" || err != nil {
+		return
+	}
+	if !advisor.forecastEnabled && (threshold <= 0 || elapsed < threshold) {
 		return
 	}
 	if metrics != nil {
@@ -233,7 +238,14 @@ func (advisor *SQLProjectionAdvisor) observeSlowQuery(query *sqlQuery, queryID s
 	if !ok {
 		return
 	}
-	advisor.recordFeedbackWithShape(queryID, dependencies, sqlProjectionAdvisorQueryShape(query), elapsed)
+	shape := sqlProjectionAdvisorQueryShape(query)
+	if advisor.forecastEnabled {
+		advisor.recordWorkloadWithShape(queryID, dependencies, shape, time.Now())
+	}
+	if threshold <= 0 || elapsed < threshold {
+		return
+	}
+	advisor.recordFeedbackWithShape(queryID, dependencies, shape, elapsed)
 }
 
 func (advisor *SQLProjectionAdvisor) recordFeedback(queryID string, dependencies []string, elapsed time.Duration) {
