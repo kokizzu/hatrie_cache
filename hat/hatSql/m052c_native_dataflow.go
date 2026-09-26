@@ -52,6 +52,10 @@ func validateNativeSQLDataflowQuery(query *sqlQuery) error {
 			if _, ok := nativeSQLDataflowCompositeGroupedOrderedPlanFor(query); !ok {
 				return fmt.Errorf("%w: grouped ordered query shape", ErrSQLNativeDataflowUnsupported)
 			}
+		} else if len(query.groupBy) == 3 {
+			if _, ok := nativeSQLDataflowTripleGroupedOrderedPlanFor(query); !ok {
+				return fmt.Errorf("%w: grouped ordered query shape", ErrSQLNativeDataflowUnsupported)
+			}
 		} else if _, ok := nativeSQLDataflowGroupedOrderedPlanFor(query); !ok {
 			return fmt.Errorf("%w: grouped ordered query shape", ErrSQLNativeDataflowUnsupported)
 		}
@@ -503,6 +507,9 @@ func nativeSQLDataflowAggregatePlan(query *sqlQuery) ([]sqlStreamAggregate, bool
 func executeNativeSQLDataflow(ctx context.Context, query *sqlQuery, initial []SQLRow) ([]SQLRow, error) {
 	if plan, ok := nativeSQLDataflowCompositeGroupedOrderedPlanFor(query); ok {
 		return executeNativeSQLDataflowCompositeGroupedOrdered(ctx, query, initial, plan)
+	}
+	if plan, ok := nativeSQLDataflowTripleGroupedOrderedPlanFor(query); ok {
+		return executeNativeSQLDataflowTripleGroupedOrdered(ctx, query, initial, plan)
 	}
 	if plan, ok := nativeSQLDataflowGroupedOrderedPlanFor(query); ok {
 		return executeNativeSQLDataflowGroupedOrdered(ctx, query, initial, plan)

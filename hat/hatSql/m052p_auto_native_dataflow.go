@@ -202,6 +202,10 @@ func sqlAutoNativeGroupedOrderedEligible(query *sqlQuery, resolver SQLSourceReso
 		_, ok := nativeSQLDataflowGroupedOrderedPlanFor(query)
 		return ok && validateNativeSQLDataflowQuery(query) == nil
 	}
+	if len(query.groupBy) == 3 {
+		_, ok := nativeSQLDataflowTripleGroupedOrderedPlanFor(query)
+		return ok && validateNativeSQLDataflowQuery(query) == nil
+	}
 	_, ok := nativeSQLDataflowCompositeGroupedOrderedPlanFor(query)
 	return ok && validateNativeSQLDataflowQuery(query) == nil
 }

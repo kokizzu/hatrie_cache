@@ -20,10 +20,10 @@ key types. Automatic execution selects the path for ordinary row resolvers;
 `DisableNativeDataflow: true` remains the explicit fallback.
 
 The implementation deliberately remains fail-closed for four or more grouping
-fields, grouped `HAVING`, grouped ordering, and bounded grouped output. Those
-queries continue through the established executor rather than being silently
-misclassified.
-
+fields and bounded grouped output without the supported ordered Top-N shape.
+M052af adds the separate three-field grouped `HAVING` plus finite `ORDER BY`
+path; richer or unsupported ordered expressions still use the established
+executor rather than being silently misclassified.
 ## Verification
 
 ```text

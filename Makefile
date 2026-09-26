@@ -28255,3 +28255,35 @@ push-m052ae-native-triple-group:
 
 deliver-m052ae-native-triple-group:
 	@bash scripts/deliver-m052ae-native-triple-group.sh deliver
+
+.PHONY: test-m052af-native-triple-grouped-ordered
+test-m052af-native-triple-grouped-ordered:
+	@bash scripts/test-m052af-native-triple-grouped-ordered.sh
+
+.PHONY: format-m052af-native-triple-grouped-ordered
+format-m052af-native-triple-grouped-ordered:
+	@bash scripts/format-m052af-native-triple-grouped-ordered.sh
+
+.PHONY: benchmark-m052af-native-triple-grouped-ordered
+benchmark-m052af-native-triple-grouped-ordered:
+	@bash scripts/benchmark-m052af-native-triple-grouped-ordered.sh
+
+.PHONY: race-m052af-native-triple-grouped-ordered
+race-m052af-native-triple-grouped-ordered:
+	@bash scripts/race-m052af-native-triple-grouped-ordered.sh
+
+.PHONY: plan-m052af-native-triple-grouped-ordered stage-m052af-native-triple-grouped-ordered commit-m052af-native-triple-grouped-ordered push-m052af-native-triple-grouped-ordered deliver-m052af-native-triple-grouped-ordered
+plan-m052af-native-triple-grouped-ordered:
+	@bash scripts/deliver-m052af-native-triple-grouped-ordered.sh plan
+
+stage-m052af-native-triple-grouped-ordered:
+	@bash scripts/deliver-m052af-native-triple-grouped-ordered.sh stage
+
+commit-m052af-native-triple-grouped-ordered:
+	@bash scripts/deliver-m052af-native-triple-grouped-ordered.sh commit
+
+push-m052af-native-triple-grouped-ordered:
+	@bash scripts/deliver-m052af-native-triple-grouped-ordered.sh push
+
+deliver-m052af-native-triple-grouped-ordered:
+	@bash scripts/deliver-m052af-native-triple-grouped-ordered.sh deliver

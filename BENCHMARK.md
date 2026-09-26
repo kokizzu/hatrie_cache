@@ -38177,9 +38177,59 @@ native:
 | Native three-field grouping | 6.070 ms/op | 6,329,904 B/op | 4,708 | **3.79x faster; 4.39x lower bytes; 50.0x fewer allocations** |
 
 The result is an unbounded grouped aggregation optimization only. Four or more
-grouping fields, grouped `HAVING`, grouped ordering, and bounded grouped output
-retain the established fallback boundary. See
+grouping fields and bounded grouped output without the supported ordered Top-N
+shape retain the established fallback boundary. M052af adds the supported
+three-field grouped ordered path. See
 [M052AE_NATIVE_TRIPLE_GROUP.md](M052AE_NATIVE_TRIPLE_GROUP.md).
+
+<a id="m052af-native-three-field-grouped-ordered-top-n"></a>
+## M052af: Native Three-Field Grouped Ordered Top-N
+
+`make benchmark-m052af-native-triple-grouped-ordered` compares the established
+materialized grouped-order path with the fixed three-field native grouping plus
+the existing bounded Top-N heap. The fixture has 20,000 rows, 1,536 possible
+groups, three grouping fields, `COUNT(*)`, `SUM(value)`, and a
+`LIMIT 100 OFFSET 25` page. Linux/amd64, AMD Ryzen 9 5950X, five samples per
+path.
+
+The pre-implementation baseline was collected before the native plan existed:
+
+```text
+BenchmarkCompiledSQLNativeTripleGroupedOrderedBaseline-32
+25780427 ns/op 27931388 B/op 236972 allocs/op
+25224147 ns/op 27930919 B/op 236970 allocs/op
+24639782 ns/op 27930992 B/op 236971 allocs/op
+24935371 ns/op 27931059 B/op 236971 allocs/op
+24830300 ns/op 27930906 B/op 236971 allocs/op
+```
+
+Final implementation run:
+
+```text
+fallback control:
+25888314 ns/op 27931116 B/op 236971 allocs/op
+25212524 ns/op 27931178 B/op 236971 allocs/op
+25289815 ns/op 27931057 B/op 236971 allocs/op
+25418293 ns/op 27931104 B/op 236971 allocs/op
+25468618 ns/op 27931177 B/op 236971 allocs/op
+native:
+6518954 ns/op 6401280 B/op 6379 allocs/op
+6328391 ns/op 6401276 B/op 6379 allocs/op
+6525452 ns/op 6401276 B/op 6379 allocs/op
+6450456 ns/op 6401278 B/op 6379 allocs/op
+6385372 ns/op 6401274 B/op 6379 allocs/op
+```
+
+| Path | Median time | Median bytes | Median allocs | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Pre-change fallback baseline | 24.640 ms/op | 27,930,992 B/op | 236,971 | 1.00x |
+| Final fallback control | 25.418 ms/op | 27,931,116 B/op | 236,971 | 1.03x CPU measurement noise |
+| Native three-field grouped Top-N | 6.450 ms/op | 6,401,276 B/op | 6,379 | **3.94x faster; 4.36x lower bytes; 37.15x fewer allocations** |
+
+The native plan changes only eligible three-field grouped ordered queries;
+unsupported shapes continue through the fallback and retain the prior default
+semantics. See
+[M052AF_NATIVE_TRIPLE_GROUPED_ORDERED.md](M052AF_NATIVE_TRIPLE_GROUPED_ORDERED.md).
 
 <a id="rejected-t042-independent-setint-parallel-replay"></a>
 ## Rejected T042: Independent-Key Parallel Journal Replay

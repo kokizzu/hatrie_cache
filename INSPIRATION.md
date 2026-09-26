@@ -1152,8 +1152,16 @@ SQL shape. See [CH035_REMOTE_SHARD_PRUNING.md](CH035_REMOTE_SHARD_PRUNING.md).
 - [x] M052ae Native three-field composite `GROUP BY` dataflow. A fixed
   comparable three-component key supports integer, string, and `NULL` fields,
   preserves first-seen group order, and is selected automatically for ordinary
-  row resolvers; four-field, grouped `HAVING`, grouped ordering, and bounded
-  grouped output remain fail-closed. The paired benchmark is 3.79x faster with
-  4.39x lower bytes and 50.0x fewer allocations; see
+  row resolvers; four-field and bounded grouped output without a supported
+  order remain fail-closed. The paired benchmark is 3.79x faster with 4.39x
+  lower bytes and 50.0x fewer allocations; see
   [M052AE_NATIVE_TRIPLE_GROUP.md](M052AE_NATIVE_TRIPLE_GROUP.md) and
   [BENCHMARK.md](BENCHMARK.md#m052ae-native-three-field-group-by).
+- [x] M052af Native three-field grouped ordered Top-N dataflow. Three-field
+  grouped aggregates now support selected aggregate `HAVING`, alias-resolved
+  finite `ORDER BY`, `LIMIT`, and `OFFSET` through the existing bounded heap;
+  richer order expressions, `WITH TIES`, and four-field groups remain
+  fail-closed. The paired benchmark is 3.94x faster with 4.36x lower bytes and
+  37.15x fewer allocations; see
+  [M052AF_NATIVE_TRIPLE_GROUPED_ORDERED.md](M052AF_NATIVE_TRIPLE_GROUPED_ORDERED.md)
+  and [BENCHMARK.md](BENCHMARK.md#m052af-native-three-field-grouped-ordered-top-n).
