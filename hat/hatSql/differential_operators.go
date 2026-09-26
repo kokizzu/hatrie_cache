@@ -264,7 +264,23 @@ func smallDifferentialUnion(batches [][]DifferentialRow, length int) ([]Differen
 		return []DifferentialRow{first}, true, nil
 	}
 	if first.Key != second.Key || first.Time != second.Time {
-		return nil, false, nil
+		if first.Key == "" || second.Key == "" {
+			return nil, true, ErrDifferentialRowKeyRequired
+		}
+		if first.Diff == 0 {
+			if second.Diff == 0 {
+				return nil, true, nil
+			}
+			second.Row = cloneDifferentialRow(second.Row)
+			return []DifferentialRow{second}, true, nil
+		}
+		if second.Diff == 0 {
+			first.Row = cloneDifferentialRow(first.Row)
+			return []DifferentialRow{first}, true, nil
+		}
+		first.Row = cloneDifferentialRow(first.Row)
+		second.Row = cloneDifferentialRow(second.Row)
+		return []DifferentialRow{first, second}, true, nil
 	}
 	if first.Key == "" {
 		return nil, true, ErrDifferentialRowKeyRequired
