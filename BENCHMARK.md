@@ -38533,3 +38533,29 @@ The gRPC number is an in-process transport measurement and excludes external
 network latency. It is retained as a capability addition rather than a speed
 optimization; the endpoint and participant option are disabled by default, so
 the legacy command path has no added work.
+
+## C153g Partition-ownership consensus vote transport
+
+`make bench-c153g-ownership-grpc` (`-count=3`, 200 ms samples on Linux/amd64,
+AMD Ryzen 9 5950X):
+
+| Path | ns/op | B/op | allocs/op | Relative latency |
+| --- | ---: | ---: | ---: | ---: |
+| direct bounded collector callback | 8,259 | 3,081 | 41 | 1.00x |
+| opt-in authenticated gRPC vote fetch | 50,023 | 17,878 | 255 | 6.06x |
+
+Raw output:
+
+```text
+BenchmarkC153gPartitionOwnershipConsensusDirect-32        31916  7784 ns/op  3083 B/op   41 allocs/op
+BenchmarkC153gPartitionOwnershipConsensusDirect-32        29391  8528 ns/op  3081 B/op   41 allocs/op
+BenchmarkC153gPartitionOwnershipConsensusDirect-32        29060  8259 ns/op  3081 B/op   41 allocs/op
+BenchmarkC153gPartitionOwnershipConsensusGRPCFetch-32     4579 49805 ns/op 17795 B/op  255 allocs/op
+BenchmarkC153gPartitionOwnershipConsensusGRPCFetch-32     4628 50407 ns/op 17903 B/op  255 allocs/op
+BenchmarkC153gPartitionOwnershipConsensusGRPCFetch-32     4296 50023 ns/op 17878 B/op  255 allocs/op
+```
+
+The gRPC path is intentionally more expensive because it adds protobuf
+framing, metadata authentication, HMAC verification, server validation, and
+the remote call boundary. It is disabled unless a vote handler is configured;
+the local collector and existing cache paths are unchanged.

@@ -17,6 +17,7 @@ service CacheService {
   rpc Replication(ReplicationRequest) returns (ReplicationResponse);
   rpc ReplicationStream(stream ReplicationStreamBatch) returns (stream ReplicationStreamAck);
   rpc ClusterWriteCommit(ClusterWriteCommitRequest) returns (ClusterWriteCommitResponse);
+  rpc PartitionOwnershipConsensusVote(PartitionOwnershipConsensusVoteRequest) returns (PartitionOwnershipConsensusVoteResponse);
   rpc Topology(TopologyRequest) returns (TopologyResponse);
   rpc UpdateTopology(UpdateTopologyRequest) returns (TopologyResponse);
   rpc Election(ElectionRequest) returns (ElectionResponse);
@@ -404,4 +405,24 @@ message ClusterWriteCommitResponse {
   bool ok = 1;
   string message = 2;
   ClusterWriteCommitPhase phase = 3;
+}
+
+message PartitionOwnershipConsensusVoteRequest {
+  uint32 shard_id = 1;
+  string primary = 2;
+  repeated string replicas = 3;
+  string topology_fingerprint = 4;
+  uint64 fencing_token = 5;
+}
+
+message PartitionOwnershipConsensusVoteResponse {
+  string node_id = 1;
+  bool accepted = 2;
+  uint32 shard_id = 3;
+  string primary = 4;
+  repeated string replicas = 5;
+  string topology_fingerprint = 6;
+  uint64 fencing_token = 7;
+  string key_id = 8;
+  bytes signature = 9;
 }

@@ -255,7 +255,7 @@ name.
   `hat/hatReplication` with eventual, bounded-staleness, and read-after-write
   replica selection while preserving the legacy selector default.
 - [x] C152 Leader election independent from query workers (see LEADER_ELECTION.md).
-- [ ] C153 Metadata consensus for partition ownership. Quorum admission and validated ownership metadata are implemented; durable snapshot/restore is now available as an opt-in caller-owned primitive, while transport, authentication, and automatic control-plane integration remain open.
+- [x] C153 Metadata consensus for partition ownership. Quorum admission, validated ownership metadata, durable snapshot/restore, authenticated bounded gRPC vote transport, and a reusable gRPC collector adapter are implemented; automatic topology publication and durable control-plane coordination remain caller-owned. See [C153_PARTITION_OWNERSHIP_GRPC.md](C153_PARTITION_OWNERSHIP_GRPC.md).
 - [x] C153a Consensus-bound, retry-safe topology commit admission with
   fingerprint compare-and-swap, strict-majority vote evaluation, and fencing
   monotonicity; transport and vote authentication remain caller-owned. See

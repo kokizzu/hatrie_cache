@@ -1,3 +1,47 @@
+.PHONY: test-c153g-ownership-grpc
+test-c153g-ownership-grpc:
+	@bash scripts/test-c153g-ownership-grpc.sh
+
+.PHONY: format-c153g-ownership-grpc
+format-c153g-ownership-grpc:
+	@bash scripts/format-c153g-ownership-grpc.sh
+
+.PHONY: bench-c153g-ownership-grpc
+bench-c153g-ownership-grpc:
+	@bash scripts/bench-c153g-ownership-grpc.sh
+
+.PHONY: test-c153g-all
+test-c153g-all:
+	@bash scripts/test-c153g-all.sh
+
+.PHONY: race-c153g-ownership-grpc
+race-c153g-ownership-grpc:
+	@bash scripts/race-c153g-ownership-grpc.sh
+
+.PHONY: verify-c153g-ownership-grpc
+verify-c153g-ownership-grpc:
+	@bash scripts/verify-c153g-ownership-grpc.sh
+
+.PHONY: test-c153g-packages
+test-c153g-packages:
+	@bash scripts/test-c153g-packages.sh
+
+.PHONY: stage-c153g-ownership-grpc
+stage-c153g-ownership-grpc:
+	@bash scripts/deliver-c153g-ownership-grpc.sh stage
+
+.PHONY: commit-c153g-ownership-grpc
+commit-c153g-ownership-grpc:
+	@bash scripts/deliver-c153g-ownership-grpc.sh commit
+
+.PHONY: push-c153g-ownership-grpc
+push-c153g-ownership-grpc:
+	@bash scripts/deliver-c153g-ownership-grpc.sh push
+
+.PHONY: deliver-c153g-ownership-grpc
+deliver-c153g-ownership-grpc:
+	@bash scripts/deliver-c153g-ownership-grpc.sh commit
+
 .PHONY: inspect-tmp-hatrie-builds
 inspect-tmp-hatrie-builds:
 	bash ./scripts/inspect-tmp-hatrie-builds.sh
