@@ -83,6 +83,11 @@ func (operator *DifferentialIntersect) Apply(left, right []DifferentialRow) ([]D
 		}
 		return operator.applySingle(right[0], false)
 	}
+	if capacity <= 8 {
+		if key, ok := differentialIntersectBatchKey(left, right); ok {
+			return operator.applySameKey(left, right, key)
+		}
+	}
 
 	working := make(map[string]differentialIntersectCounts, capacity)
 	if err := operator.validateSide(working, left, true); err != nil {
@@ -102,6 +107,77 @@ func (operator *DifferentialIntersect) Apply(left, right []DifferentialRow) ([]D
 		return nil, nil
 	}
 	return result, nil
+}
+
+func differentialIntersectBatchKey(left, right []DifferentialRow) (string, bool) {
+	var key string
+	hasKey := false
+	for side := 0; side < 2; side++ {
+		updates := left
+		if side == 1 {
+			updates = right
+		}
+		for _, update := range updates {
+			if !hasKey {
+				key = update.Key
+				hasKey = true
+				continue
+			}
+			if update.Key != key {
+				return "", false
+			}
+		}
+	}
+	return key, hasKey
+}
+
+func (operator *DifferentialIntersect) applySameKey(left, right []DifferentialRow, key string) ([]DifferentialRow, error) {
+	state := operator.entries[key]
+	counts := differentialIntersectCounts{left: state.left, right: state.right}
+	if err := validateDifferentialIntersectSameKeySide(&counts, left, true); err != nil {
+		return nil, err
+	}
+	if err := validateDifferentialIntersectSameKeySide(&counts, right, false); err != nil {
+		return nil, err
+	}
+
+	if operator.entries == nil {
+		operator.entries = make(map[string]differentialIntersectState, 1)
+	}
+	var result []DifferentialRow
+	operator.applySide(left, true, &result)
+	operator.applySide(right, false, &result)
+	return result, nil
+}
+
+func validateDifferentialIntersectSameKeySide(counts *differentialIntersectCounts, updates []DifferentialRow, leftSide bool) error {
+	for _, update := range updates {
+		if update.Key == "" {
+			return ErrDifferentialRowKeyRequired
+		}
+		if update.Diff == 0 {
+			continue
+		}
+		before := differentialIntersectMinimum(counts.left, counts.right)
+		if leftSide {
+			next, err := nextDifferentialDistinctMultiplicity(counts.left, update.Diff)
+			if err != nil {
+				return differentialIntersectCountError("left", update.Key, err)
+			}
+			counts.left = next
+		} else {
+			next, err := nextDifferentialDistinctMultiplicity(counts.right, update.Diff)
+			if err != nil {
+				return differentialIntersectCountError("right", update.Key, err)
+			}
+			counts.right = next
+		}
+		after := differentialIntersectMinimum(counts.left, counts.right)
+		if _, ok := differentialIntersectDelta(before, after); !ok {
+			return fmt.Errorf("%s key %q: %w", differentialIntersectSideName(leftSide), update.Key, ErrDifferentialIntersectDiffOverflow)
+		}
+	}
+	return nil
 }
 
 // applySingle handles the common one-row update without allocating the
