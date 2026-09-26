@@ -35,6 +35,7 @@ type CacheServiceClient interface {
 	ReplicationStream(ctx context.Context, opts ...grpc.CallOption) (CacheService_ReplicationStreamClient, error)
 	ClusterWriteCommit(ctx context.Context, in *ClusterWriteCommitRequest, opts ...grpc.CallOption) (*ClusterWriteCommitResponse, error)
 	PartitionOwnershipConsensusVote(ctx context.Context, in *PartitionOwnershipConsensusVoteRequest, opts ...grpc.CallOption) (*PartitionOwnershipConsensusVoteResponse, error)
+	GlobalTimestampReserve(ctx context.Context, in *GlobalTimestampReserveRequest, opts ...grpc.CallOption) (*GlobalTimestampReserveResponse, error)
 	Topology(ctx context.Context, in *TopologyRequest, opts ...grpc.CallOption) (*TopologyResponse, error)
 	UpdateTopology(ctx context.Context, in *UpdateTopologyRequest, opts ...grpc.CallOption) (*TopologyResponse, error)
 	Election(ctx context.Context, in *ElectionRequest, opts ...grpc.CallOption) (*ElectionResponse, error)
@@ -276,6 +277,15 @@ func (c *cacheServiceClient) PartitionOwnershipConsensusVote(ctx context.Context
 	return out, nil
 }
 
+func (c *cacheServiceClient) GlobalTimestampReserve(ctx context.Context, in *GlobalTimestampReserveRequest, opts ...grpc.CallOption) (*GlobalTimestampReserveResponse, error) {
+	out := new(GlobalTimestampReserveResponse)
+	err := c.cc.Invoke(ctx, "/hatriecache.v1.CacheService/GlobalTimestampReserve", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *cacheServiceClient) Topology(ctx context.Context, in *TopologyRequest, opts ...grpc.CallOption) (*TopologyResponse, error) {
 	out := new(TopologyResponse)
 	err := c.cc.Invoke(ctx, "/hatriecache.v1.CacheService/Topology", in, out, opts...)
@@ -329,6 +339,7 @@ type CacheServiceServer interface {
 	ReplicationStream(CacheService_ReplicationStreamServer) error
 	ClusterWriteCommit(context.Context, *ClusterWriteCommitRequest) (*ClusterWriteCommitResponse, error)
 	PartitionOwnershipConsensusVote(context.Context, *PartitionOwnershipConsensusVoteRequest) (*PartitionOwnershipConsensusVoteResponse, error)
+	GlobalTimestampReserve(context.Context, *GlobalTimestampReserveRequest) (*GlobalTimestampReserveResponse, error)
 	Topology(context.Context, *TopologyRequest) (*TopologyResponse, error)
 	UpdateTopology(context.Context, *UpdateTopologyRequest) (*TopologyResponse, error)
 	Election(context.Context, *ElectionRequest) (*ElectionResponse, error)
@@ -378,6 +389,9 @@ func (UnimplementedCacheServiceServer) ClusterWriteCommit(context.Context, *Clus
 }
 func (UnimplementedCacheServiceServer) PartitionOwnershipConsensusVote(context.Context, *PartitionOwnershipConsensusVoteRequest) (*PartitionOwnershipConsensusVoteResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PartitionOwnershipConsensusVote not implemented")
+}
+func (UnimplementedCacheServiceServer) GlobalTimestampReserve(context.Context, *GlobalTimestampReserveRequest) (*GlobalTimestampReserveResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GlobalTimestampReserve not implemented")
 }
 func (UnimplementedCacheServiceServer) Topology(context.Context, *TopologyRequest) (*TopologyResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Topology not implemented")
@@ -678,6 +692,24 @@ func _CacheService_PartitionOwnershipConsensusVote_Handler(srv interface{}, ctx 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CacheService_GlobalTimestampReserve_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GlobalTimestampReserveRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CacheServiceServer).GlobalTimestampReserve(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/hatriecache.v1.CacheService/GlobalTimestampReserve",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CacheServiceServer).GlobalTimestampReserve(ctx, req.(*GlobalTimestampReserveRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _CacheService_Topology_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(TopologyRequest)
 	if err := dec(in); err != nil {
@@ -788,6 +820,10 @@ var CacheService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PartitionOwnershipConsensusVote",
 			Handler:    _CacheService_PartitionOwnershipConsensusVote_Handler,
+		},
+		{
+			MethodName: "GlobalTimestampReserve",
+			Handler:    _CacheService_GlobalTimestampReserve_Handler,
 		},
 		{
 			MethodName: "Topology",

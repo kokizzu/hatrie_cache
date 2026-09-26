@@ -66,6 +66,10 @@ type CacheGRPCOptions struct {
 	// transport for the caller-owned cluster write coordinator. Nil keeps the
 	// phase RPC unavailable and does not alter normal command handling.
 	ClusterWriteCommitParticipant *hatReplication.ClusterWriteCommitParticipant
+	// GlobalTimestampReserve enables the opt-in gRPC global timestamp
+	// reservation transport. Nil keeps the RPC unavailable and does not alter
+	// local timestamp allocation or caller-owned consensus.
+	GlobalTimestampReserve GlobalTimestampReserveHandler
 	// PartitionOwnershipConsensusVote enables the opt-in gRPC ownership vote
 	// transport. Nil keeps the RPC unavailable and does not alter normal
 	// command handling.

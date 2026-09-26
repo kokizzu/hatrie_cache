@@ -18,6 +18,7 @@ service CacheService {
   rpc ReplicationStream(stream ReplicationStreamBatch) returns (stream ReplicationStreamAck);
   rpc ClusterWriteCommit(ClusterWriteCommitRequest) returns (ClusterWriteCommitResponse);
   rpc PartitionOwnershipConsensusVote(PartitionOwnershipConsensusVoteRequest) returns (PartitionOwnershipConsensusVoteResponse);
+  rpc GlobalTimestampReserve(GlobalTimestampReserveRequest) returns (GlobalTimestampReserveResponse);
   rpc Topology(TopologyRequest) returns (TopologyResponse);
   rpc UpdateTopology(UpdateTopologyRequest) returns (TopologyResponse);
   rpc Election(ElectionRequest) returns (ElectionResponse);
@@ -425,4 +426,23 @@ message PartitionOwnershipConsensusVoteResponse {
   uint64 fencing_token = 7;
   string key_id = 8;
   bytes signature = 9;
+}
+
+message GlobalTimestampReserveRequest {
+  uint64 term = 1;
+  string node_id = 2;
+  uint64 node_epoch = 3;
+  uint64 sequence = 4;
+  int64 observed = 5;
+  uint64 count = 6;
+}
+
+message GlobalTimestampReserveResponse {
+  uint64 term = 1;
+  string node_id = 2;
+  uint64 node_epoch = 3;
+  uint64 sequence = 4;
+  int64 start = 5;
+  int64 end = 6;
+  uint64 count = 7;
 }

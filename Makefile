@@ -28114,3 +28114,15 @@ commit-t047-grpc-transport:
 
 push-t047-grpc-transport:
 \tbash ./scripts/deliver-t047-grpc-transport.sh push
+
+stage-m033c-global-timestamp-grpc:
+	@bash ./scripts/deliver-m033c-global-timestamp-grpc.sh stage
+
+commit-m033c-global-timestamp-grpc:
+	@bash ./scripts/deliver-m033c-global-timestamp-grpc.sh commit
+
+push-m033c-global-timestamp-grpc:
+	@bash ./scripts/deliver-m033c-global-timestamp-grpc.sh push
+
+deliver-m033c-global-timestamp-grpc:
+	@bash ./scripts/deliver-m033c-global-timestamp-grpc.sh deliver

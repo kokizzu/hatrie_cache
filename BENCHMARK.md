@@ -38559,3 +38559,22 @@ The gRPC path is intentionally more expensive because it adds protobuf
 framing, metadata authentication, HMAC verification, server validation, and
 the remote call boundary. It is disabled unless a vote handler is configured;
 the local collector and existing cache paths are unchanged.
+
+## M033c Global timestamp reservation gRPC transport
+
+Raw `go test ./hat/hatCache -run '^$' -bench 'BenchmarkM033cGlobalTimestampReserve' -benchmem -benchtime=1s -count=3` results:
+
+```text
+BenchmarkM033cGlobalTimestampReserveDirect-32  23447428  51.22 ns/op       0 B/op    0 allocs/op
+BenchmarkM033cGlobalTimestampReserveDirect-32  23034114  48.27 ns/op       0 B/op    0 allocs/op
+BenchmarkM033cGlobalTimestampReserveDirect-32  23307928  52.02 ns/op       0 B/op    0 allocs/op
+BenchmarkM033cGlobalTimestampReserveGRPC-32      35863 29181 ns/op   11984 B/op  173 allocs/op
+BenchmarkM033cGlobalTimestampReserveGRPC-32      38778 28786 ns/op   11949 B/op  172 allocs/op
+BenchmarkM033cGlobalTimestampReserveGRPC-32      39265 30130 ns/op   11902 B/op  172 allocs/op
+```
+
+Median direct reservation is 51.22 ns/op with zero allocations. Median gRPC
+reservation is 29,181 ns/op, 11,949 B/op, and 172 allocations: about 570x the
+latency of the in-process baseline. This is expected transport overhead for a
+new cross-process capability; the RPC is opt-in and the local/default path is
+unchanged.
