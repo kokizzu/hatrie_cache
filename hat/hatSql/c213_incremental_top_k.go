@@ -125,6 +125,13 @@ func (topK *IncrementalTopK) apply(updates []DifferentialRow) ([]incrementalTopK
 	if len(updates) == 0 {
 		return nil, nil, nil
 	}
+	if len(updates) == 2 &&
+		updates[0].Key == updates[1].Key &&
+		updates[0].Diff < 0 && updates[1].Diff > 0 {
+		if _, exists := topK.entries[updates[0].Key]; exists {
+			return topK.applyReplacement(updates)
+		}
+	}
 
 	pending := make(map[string]incrementalTopKPendingEntry, len(updates))
 	prepared := make([]incrementalTopKPreparedUpdate, 0, len(updates))
@@ -232,6 +239,78 @@ func (topK *IncrementalTopK) apply(updates []DifferentialRow) ([]incrementalTopK
 		}
 	}
 
+	after := topK.selectedRowsInto(&topK.scratch[1])
+	return before, after, nil
+}
+
+// applyReplacement handles a delete-then-insert transition for one retained
+// key without constructing the generic pending map and prepared slice. It
+// returns the same before/after selections as apply so both public APIs keep
+// their existing change semantics.
+func (topK *IncrementalTopK) applyReplacement(updates []DifferentialRow) ([]incrementalTopKSelection, []incrementalTopKSelection, error) {
+	remove := updates[0]
+	insert := updates[1]
+	if remove.Key == "" {
+		return nil, nil, fmt.Errorf("incremental top-k update 0: differential row key is required")
+	}
+	if insert.Key == "" {
+		return nil, nil, fmt.Errorf("incremental top-k update 1: differential row key is required")
+	}
+	current := topK.entries[remove.Key]
+	if current == nil || current.count == 0 {
+		return nil, nil, fmt.Errorf("incremental top-k update 0 key %q: %w", remove.Key, ErrIncrementalTopKNegativeMultiplicity)
+	}
+	decrement := incrementalTopKMagnitude(remove.Diff)
+	if decrement > current.count {
+		return nil, nil, fmt.Errorf("incremental top-k update 0 key %q: %w", remove.Key, ErrIncrementalTopKNegativeMultiplicity)
+	}
+	remaining := current.count - decrement
+
+	row := current.row
+	order := current.order
+	time := current.time
+	if remaining > 0 {
+		if insert.Row != nil {
+			candidateOrder, err := topK.orderKey(insert.Row)
+			if err != nil {
+				return nil, nil, fmt.Errorf("incremental top-k update 1 key %q order key: %w", insert.Key, err)
+			}
+			if Compare(candidateOrder, current.order) != 0 || !reflect.DeepEqual(insert.Row, current.row) {
+				return nil, nil, fmt.Errorf("incremental top-k update 1 key %q: %w", insert.Key, ErrIncrementalTopKRowConflict)
+			}
+		}
+	} else {
+		candidateOrder, err := topK.orderKey(insert.Row)
+		if err != nil {
+			return nil, nil, fmt.Errorf("incremental top-k update 1 key %q order key: %w", insert.Key, err)
+		}
+		row = cloneDifferentialRow(insert.Row)
+		order = cloneIncrementalTopKOrder(candidateOrder)
+		time = insert.Time
+	}
+	nextCount, ok := incrementalTopKAddMultiplicity(remaining, insert.Diff)
+	if !ok {
+		return nil, nil, fmt.Errorf("incremental top-k update 1 key %q: %w", insert.Key, ErrIncrementalTopKOverflow)
+	}
+
+	before := topK.selectedRowsInto(&topK.scratch[0])
+	if remaining > 0 {
+		current.count = nextCount
+		topK.root = incrementalTopKSetCount(topK.root, current, nextCount, topK.descending)
+	} else {
+		topK.root = incrementalTopKErase(topK.root, current, topK.descending)
+		delete(topK.entries, remove.Key)
+		replacement := &incrementalTopKNode{
+			key:      insert.Key,
+			time:     time,
+			row:      row,
+			order:    order,
+			count:    nextCount,
+			priority: topK.nextPriority(),
+		}
+		topK.entries[insert.Key] = replacement
+		topK.root = incrementalTopKInsert(topK.root, replacement, topK.descending)
+	}
 	after := topK.selectedRowsInto(&topK.scratch[1])
 	return before, after, nil
 }
