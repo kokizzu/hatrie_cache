@@ -1,3 +1,25 @@
+# T042 Key-Partitioned Parallel Recovery Replay
+
+Command: `make benchmark-t042-parallel-replay`.
+
+Host: Linux/amd64, AMD Ryzen 9 5950X. Workload: 10,000 `SET` records across
+64 independent keys, eight workers, five samples.
+
+| Operation | Median ns/op | B/op | Allocs/op | Raw ns/op samples |
+| --- | ---: | ---: | ---: | --- |
+| Serial baseline | 2,262,314 | 0 | 0 | 2,262,314; 2,374,584; 2,070,900; 2,252,808; 2,320,478 |
+| Parallel key lanes | 669,342 | 96,211 | 25 | 669,342; 656,636; 672,645; 670,849; 658,028 |
+
+Parallel replay is about 3.38x faster for this independent-key workload. The
+default serial path remains zero-allocation; parallel mode costs about 96 KB
+and 25 allocations per 10,000-record batch.
+
+## Rejected T042 Full-Record Lane Copy
+
+The first implementation copied complete journal records into each lane. It
+measured approximately 2.12 ms/op, 7.16 MB/op, and 112 allocations without a
+speedup over serial replay, so it was replaced by compact record-index lanes.
+
 # M033d Durable Global Timestamp Snapshot Codec
 
 Command: `make benchmark-m033d-global-timestamp-snapshot`.

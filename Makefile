@@ -28416,3 +28416,27 @@ vet-m033d-global-timestamp-snapshot:
 
 test-m033d-global-timestamp-package:
 	bash ./scripts/test-m033d-global-timestamp-package.sh
+
+benchmark-t042-parallel-replay:
+	bash ./scripts/benchmark-t042-parallel-replay.sh
+
+test-t042-parallel-replay:
+	bash ./scripts/test-t042-parallel-replay.sh
+
+format-t042-parallel-replay:
+	bash ./scripts/format-t042-parallel-replay.sh
+
+race-t042-parallel-replay:
+	bash ./scripts/race-t042-parallel-replay.sh
+
+vet-t042-parallel-replay:
+	bash ./scripts/vet-t042-parallel-replay.sh
+
+test-t042-package:
+	bash ./scripts/test-t042-package.sh
+
+stage-t042-parallel-replay:
+	bash ./scripts/deliver-t042-parallel-replay.sh stage
+
+deliver-t042-parallel-replay:
+	bash ./scripts/deliver-t042-parallel-replay.sh deliver
