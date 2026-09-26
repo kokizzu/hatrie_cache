@@ -151,6 +151,15 @@ func (join *IncrementalIntervalJoin) Apply(updates []IncrementalIntervalJoinUpda
 	if len(updates) == 0 {
 		return nil, nil
 	}
+	if len(updates) == 2 &&
+		updates[0].Side == updates[1].Side &&
+		(updates[0].Side == IncrementalIntervalJoinLeft || updates[0].Side == IncrementalIntervalJoinRight) &&
+		updates[0].Row.Key == updates[1].Row.Key &&
+		updates[0].Row.Diff < 0 && updates[1].Row.Diff > 0 {
+		if _, exists := join.incrementalIntervalJoinEntries(updates[0].Side)[updates[0].Row.Key]; exists {
+			return join.applyReplacement(updates)
+		}
+	}
 
 	leftPending := make(map[string]*incrementalIntervalJoinPendingEntry, len(updates))
 	rightPending := make(map[string]*incrementalIntervalJoinPendingEntry, len(updates))
@@ -226,6 +235,149 @@ func (join *IncrementalIntervalJoin) Apply(updates []IncrementalIntervalJoinUpda
 	join.incrementalIntervalJoinCommit(IncrementalIntervalJoinLeft, leftPending)
 	join.incrementalIntervalJoinCommit(IncrementalIntervalJoinRight, rightPending)
 	return deltas, nil
+}
+
+// applyReplacement handles the common delete-then-insert update for one
+// retained source key without constructing pending maps. It preserves the
+// generic path's validation, delta order, row cloning, and atomic commit.
+func (join *IncrementalIntervalJoin) applyReplacement(updates []IncrementalIntervalJoinUpdate) ([]DifferentialRow, error) {
+	remove := updates[0]
+	insert := updates[1]
+	if remove.Side != insert.Side ||
+		(remove.Side != IncrementalIntervalJoinLeft && remove.Side != IncrementalIntervalJoinRight) ||
+		remove.Row.Key != insert.Row.Key || remove.Row.Diff >= 0 || insert.Row.Diff <= 0 {
+		return nil, ErrIncrementalIntervalJoinMultiplicity
+	}
+	if err := validateIncrementalIntervalJoinSourceKey(remove.Row.Key); err != nil {
+		return nil, err
+	}
+	if err := validateIncrementalIntervalJoinSourceKey(insert.Row.Key); err != nil {
+		return nil, err
+	}
+
+	entries := join.incrementalIntervalJoinEntries(remove.Side)
+	current := entries[remove.Row.Key]
+	if current == nil || current.count <= 0 {
+		return nil, fmt.Errorf("%w: key %q", ErrIncrementalIntervalJoinMultiplicity, remove.Row.Key)
+	}
+	if remove.Row.Row != nil {
+		joinKey, start, end, err := join.incrementalIntervalJoinMetadata(remove.Side, remove.Row.Row)
+		if err != nil {
+			return nil, err
+		}
+		if current.joinKey != joinKey || current.start != start || current.end != end || !reflect.DeepEqual(current.row, remove.Row.Row) {
+			return nil, fmt.Errorf("%w: key %q", ErrIncrementalIntervalJoinRowConflict, remove.Row.Key)
+		}
+	}
+
+	decrement := intervalJoinAbsInt64(remove.Row.Diff)
+	if decrement > uint64(current.count) {
+		return nil, fmt.Errorf("%w: key %q", ErrIncrementalIntervalJoinMultiplicity, remove.Row.Key)
+	}
+	remaining := current.count - int64(decrement)
+
+	newJoinKey := current.joinKey
+	newStart := current.start
+	newEnd := current.end
+	newRow := current.row
+	if insert.Row.Row != nil && remaining > 0 {
+		joinKey, start, end, err := join.incrementalIntervalJoinMetadata(insert.Side, insert.Row.Row)
+		if err != nil {
+			return nil, err
+		}
+		if current.joinKey != joinKey || current.start != start || current.end != end || !reflect.DeepEqual(current.row, insert.Row.Row) {
+			return nil, fmt.Errorf("%w: key %q", ErrIncrementalIntervalJoinRowConflict, insert.Row.Key)
+		}
+	} else if remaining == 0 {
+		if insert.Row.Row == nil {
+			return nil, fmt.Errorf("%w: key %q", ErrIncrementalIntervalJoinRowRequired, insert.Row.Key)
+		}
+		var err error
+		newJoinKey, newStart, newEnd, err = join.incrementalIntervalJoinMetadata(insert.Side, insert.Row.Row)
+		if err != nil {
+			return nil, err
+		}
+		newRow = cloneIncrementalIntervalJoinRow(insert.Row.Row)
+	}
+
+	nextCount, err := addIncrementalIntervalJoinCount(remaining, insert.Row.Diff)
+	if err != nil {
+		return nil, fmt.Errorf("%w: key %q", err, insert.Row.Key)
+	}
+
+	oldMatches := join.incrementalIntervalJoinReplacementMatches(remove.Side, current.joinKey, current.start, current.end)
+	newMatches := join.incrementalIntervalJoinReplacementMatches(insert.Side, newJoinKey, newStart, newEnd)
+	deltas := make([]DifferentialRow, 0, len(oldMatches)+len(newMatches))
+	deltas, err = join.appendIncrementalIntervalJoinReplacementDeltas(deltas, remove.Side, remove.Row.Key, current.row, remove.Row.Diff, remaining, oldMatches)
+	if err != nil {
+		return nil, err
+	}
+	deltas, err = join.appendIncrementalIntervalJoinReplacementDeltas(deltas, insert.Side, insert.Row.Key, newRow, insert.Row.Diff, nextCount, newMatches)
+	if err != nil {
+		return nil, err
+	}
+
+	if remaining > 0 {
+		current.count = nextCount
+		return deltas, nil
+	}
+	buckets := join.leftBuckets
+	if remove.Side == IncrementalIntervalJoinRight {
+		buckets = join.rightBuckets
+	}
+	if current.joinKey != newJoinKey || current.start != newStart || current.end != newEnd {
+		join.incrementalIntervalJoinRemoveFromBucket(buckets, current)
+		current.joinKey = newJoinKey
+		current.start = newStart
+		current.end = newEnd
+		current.row = newRow
+		current.count = nextCount
+		join.incrementalIntervalJoinAddToBucket(buckets, current)
+		return deltas, nil
+	}
+	current.row = newRow
+	current.count = nextCount
+	return deltas, nil
+}
+
+func (join *IncrementalIntervalJoin) incrementalIntervalJoinReplacementMatches(side IncrementalIntervalJoinSide, joinKey string, start, end int64) []*incrementalIntervalJoinEntry {
+	buckets := join.leftBuckets
+	if side == IncrementalIntervalJoinLeft {
+		buckets = join.rightBuckets
+	}
+	bucket := buckets[joinKey]
+	if bucket == nil {
+		return nil
+	}
+	return bucket.overlap(start, end)
+}
+
+func (join *IncrementalIntervalJoin) appendIncrementalIntervalJoinReplacementDeltas(output []DifferentialRow, side IncrementalIntervalJoinSide, key string, row Row, diff, nextCount int64, matches []*incrementalIntervalJoinEntry) ([]DifferentialRow, error) {
+	for _, match := range matches {
+		if _, err := multiplyIncrementalIntervalJoinDelta(nextCount, match.count); err != nil {
+			return nil, fmt.Errorf("%w: key %q with match %q", err, key, match.key)
+		}
+		joinedDiff, err := multiplyIncrementalIntervalJoinDelta(diff, match.count)
+		if err != nil {
+			return nil, fmt.Errorf("%w: key %q with match %q", err, key, match.key)
+		}
+		leftRow, rightRow := row, match.row
+		joinedKey := key + "\x00" + match.key
+		if side == IncrementalIntervalJoinRight {
+			leftRow, rightRow = match.row, row
+			joinedKey = match.key + "\x00" + key
+		}
+		merged, err := join.merge(leftRow, rightRow)
+		if err != nil {
+			return nil, err
+		}
+		output = append(output, DifferentialRow{
+			Key:  joinedKey,
+			Diff: joinedDiff,
+			Row:  cloneIncrementalIntervalJoinRow(merged),
+		})
+	}
+	return output, nil
 }
 
 // Snapshot returns the complete current joined multiset in deterministic key
