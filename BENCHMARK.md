@@ -38861,3 +38861,30 @@ The incremental path retains exact value multiplicities and only rescans a
 group when a live endpoint is retracted. It is opt-in and does not alter the
 existing integer differential or default SQL paths. See
 [M037K_DIFFERENTIAL_STRING_MIN_MAX.md](M037K_DIFFERENTIAL_STRING_MIN_MAX.md).
+
+## M037l Differential String COUNT(DISTINCT)
+
+Raw `make benchmark-differential-group-min-max` results (`-benchmem`, five
+samples, one CPU, Linux/amd64, AMD Ryzen 9 5950X):
+
+```text
+BenchmarkM037lDifferentialStringCountDistinct/naive_rebuild   22133892 ns/op 612482 B/op 2573 allocs/op
+BenchmarkM037lDifferentialStringCountDistinct/naive_rebuild   22118295 ns/op 612481 B/op 2573 allocs/op
+BenchmarkM037lDifferentialStringCountDistinct/naive_rebuild   22465227 ns/op 612483 B/op 2573 allocs/op
+BenchmarkM037lDifferentialStringCountDistinct/naive_rebuild   22106556 ns/op 612483 B/op 2573 allocs/op
+BenchmarkM037lDifferentialStringCountDistinct/naive_rebuild   22497107 ns/op 612482 B/op 2573 allocs/op
+BenchmarkM037lDifferentialStringCountDistinct/incremental       401602 ns/op 647912 B/op 2828 allocs/op
+BenchmarkM037lDifferentialStringCountDistinct/incremental       398132 ns/op 647912 B/op 2828 allocs/op
+BenchmarkM037lDifferentialStringCountDistinct/incremental       429031 ns/op 647912 B/op 2828 allocs/op
+BenchmarkM037lDifferentialStringCountDistinct/incremental       426350 ns/op 647912 B/op 2828 allocs/op
+BenchmarkM037lDifferentialStringCountDistinct/incremental       408869 ns/op 647912 B/op 2828 allocs/op
+```
+
+| implementation | median ns/op | B/op | allocs/op | improvement vs rebuild |
+| --- | ---: | ---: | ---: | ---: |
+| naive per-update rebuild | 22,133,892 | 612,482 | 2,573 | 1.00x |
+| incremental string multiplicity | 408,869 | 647,912 | 2,828 | 54.13x CPU, 1.06x bytes, 1.10x allocs |
+
+The incremental helper retains exact string multiplicities and is opt-in; the
+existing int64 path, SQL planner, and default behavior remain unchanged. See
+[M037L_DIFFERENTIAL_STRING_COUNT_DISTINCT.md](M037L_DIFFERENTIAL_STRING_COUNT_DISTINCT.md).

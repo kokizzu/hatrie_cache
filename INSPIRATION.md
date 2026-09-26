@@ -416,6 +416,12 @@ Materialize's Timely/Differential Dataflow runtime.
   preserves empty-string values without changing the existing numeric path;
   see [M037K_DIFFERENTIAL_STRING_MIN_MAX.md](M037K_DIFFERENTIAL_STRING_MIN_MAX.md)
   and [BENCHMARK.md](BENCHMARK.md#m037k-differential-string-minmax).
+- [x] M037l Signed differential string grouped `COUNT(DISTINCT)` maintains
+  exact value multiplicities, supports empty strings, and emits atomic signed
+  transitions; the paired benchmark is 54.13x faster than per-update rebuilds
+  at a measured 1.06x byte and 1.10x allocation cost. See
+  [M037L_DIFFERENTIAL_STRING_COUNT_DISTINCT.md](M037L_DIFFERENTIAL_STRING_COUNT_DISTINCT.md)
+  and [BENCHMARK.md](BENCHMARK.md#m037l-differential-string-count-distinct).
 - [ ] M038 Generic multiset duplicate preservation across all operators.
 - [x] M038a Duplicate multiplicity retained as signed diff weights.
 - [x] M038b Multiset-preserving expansion, union, and weighted join composition; see [DIFFERENTIAL_OPERATORS.md](DIFFERENTIAL_OPERATORS.md).
