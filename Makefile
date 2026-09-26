@@ -27703,3 +27703,39 @@ commit-tu47-participant-store:
 .PHONY: push-tu47-participant-store
 push-tu47-participant-store:
 	sh scripts/push-tu47-participant-store.sh
+
+.PHONY: benchmark-c153e-wire
+benchmark-c153e-wire:
+	sh scripts/benchmark-c153e-wire.sh
+
+.PHONY: test-c153e-wire
+test-c153e-wire:
+	sh scripts/test-c153e-wire.sh
+
+.PHONY: format-c153e-wire
+format-c153e-wire:
+	sh scripts/format-c153e-wire.sh
+
+.PHONY: test-c153e-package
+test-c153e-package:
+	sh scripts/test-c153e-package.sh
+
+.PHONY: race-c153e-package
+race-c153e-package:
+	sh scripts/race-c153e-package.sh
+
+.PHONY: vet-c153e-package
+vet-c153e-package:
+	sh scripts/vet-c153e-package.sh
+
+.PHONY: stage-c153e-wire
+stage-c153e-wire:
+	sh scripts/stage-c153e-wire.sh
+
+.PHONY: commit-c153e-wire
+commit-c153e-wire:
+	sh scripts/commit-c153e-wire.sh
+
+.PHONY: push-c153e-wire
+push-c153e-wire:
+	sh scripts/push-c153e-wire.sh

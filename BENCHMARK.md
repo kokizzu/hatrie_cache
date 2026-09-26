@@ -38178,3 +38178,44 @@ BenchmarkTU047ParticipantFileStore/load-32           160782     7306 ns/op  1552
 ```
 
 The file store is intentionally much more expensive than in-memory participant operations because it includes local durable filesystem work. The tradeoff is bounded restart recovery without changing normal write-path latency. The CRC32C envelope detects accidental or partial corruption; it is not authentication or encryption.
+
+<a id="c153e-partition-ownership-wire"></a>
+## C153e Partition-Ownership Vote Wire Codec
+
+The bounded `hatTopology.MarshalPartitionOwnershipConsensusVote` and
+`UnmarshalPartitionOwnershipConsensusVote` APIs carry legacy or authenticated
+partition-ownership votes in a deterministic binary format for caller-owned
+HTTP/gRPC transport. They validate field sizes, canonical varints, metadata,
+flags, signature shape, and trailing bytes before returning a vote.
+
+| Operation | JSON baseline | Binary codec | Improvement |
+|---|---:|---:|---:|
+| marshal | 570.3 ns/op, 432 B/op, 2 allocs | 126.6 ns/op, 160 B/op, 1 alloc | 4.50x faster, 2.70x less allocation bytes |
+| unmarshal | 3,212 ns/op, 608 B/op, 17 allocs | 220.0 ns/op, 136 B/op, 8 allocs | 14.60x faster, 4.47x less allocation bytes |
+| payload | 266 bytes | 118 bytes | 2.25x smaller, 55.6% less bandwidth |
+
+Raw five-sample output from `make benchmark-c153e-wire` is recorded in
+[C153E_PARTITION_OWNERSHIP_WIRE.md](C153E_PARTITION_OWNERSHIP_WIRE.md).
+
+```text
+BenchmarkC153ePartitionOwnershipVoteWireJSON/marshal-32  2121344  568.6 ns/op  432 B/op  2 allocs/op
+BenchmarkC153ePartitionOwnershipVoteWireJSON/marshal-32  2109584  572.5 ns/op  432 B/op  2 allocs/op
+BenchmarkC153ePartitionOwnershipVoteWireJSON/marshal-32  2150533  560.0 ns/op  432 B/op  2 allocs/op
+BenchmarkC153ePartitionOwnershipVoteWireJSON/marshal-32  2098915  570.3 ns/op  432 B/op  2 allocs/op
+BenchmarkC153ePartitionOwnershipVoteWireJSON/marshal-32  2084490  578.3 ns/op  432 B/op  2 allocs/op
+BenchmarkC153ePartitionOwnershipVoteWireJSON/unmarshal-32  364878  3195 ns/op  608 B/op  17 allocs/op
+BenchmarkC153ePartitionOwnershipVoteWireJSON/unmarshal-32  370466  3244 ns/op  608 B/op  17 allocs/op
+BenchmarkC153ePartitionOwnershipVoteWireJSON/unmarshal-32  380785  3219 ns/op  608 B/op  17 allocs/op
+BenchmarkC153ePartitionOwnershipVoteWireJSON/unmarshal-32  366949  3212 ns/op  608 B/op  17 allocs/op
+BenchmarkC153ePartitionOwnershipVoteWireJSON/unmarshal-32  337366  3212 ns/op  608 B/op  17 allocs/op
+BenchmarkC153ePartitionOwnershipVoteWire/marshal-32  9559248  126.0 ns/op  160 B/op  1 allocs/op
+BenchmarkC153ePartitionOwnershipVoteWire/marshal-32  9248680  124.4 ns/op  160 B/op  1 allocs/op
+BenchmarkC153ePartitionOwnershipVoteWire/marshal-32  9131565  126.8 ns/op  160 B/op  1 allocs/op
+BenchmarkC153ePartitionOwnershipVoteWire/marshal-32  9407535  126.6 ns/op  160 B/op  1 allocs/op
+BenchmarkC153ePartitionOwnershipVoteWire/marshal-32  9348489  127.1 ns/op  160 B/op  1 allocs/op
+BenchmarkC153ePartitionOwnershipVoteWire/unmarshal-32  5222091  228.5 ns/op  136 B/op  8 allocs/op
+BenchmarkC153ePartitionOwnershipVoteWire/unmarshal-32  5362305  220.0 ns/op  136 B/op  8 allocs/op
+BenchmarkC153ePartitionOwnershipVoteWire/unmarshal-32  5400908  219.8 ns/op  136 B/op  8 allocs/op
+BenchmarkC153ePartitionOwnershipVoteWire/unmarshal-32  5526069  220.0 ns/op  136 B/op  8 allocs/op
+BenchmarkC153ePartitionOwnershipVoteWire/unmarshal-32  5241472  221.0 ns/op  136 B/op  8 allocs/op
+```
