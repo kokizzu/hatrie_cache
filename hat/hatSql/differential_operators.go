@@ -55,6 +55,9 @@ func FilterDifferentialRows(rows []DifferentialRow, keep DifferentialFilterFunc)
 	if keep == nil {
 		return nil, ErrDifferentialFilterCallbackRequired
 	}
+	if len(rows) == 1 && rows[0].Key != "" && rows[0].Diff == 0 {
+		return nil, nil
+	}
 	filtered := make([]DifferentialRow, 0, len(rows))
 	for _, update := range rows {
 		if update.Key == "" {
