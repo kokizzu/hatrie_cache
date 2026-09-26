@@ -28219,3 +28219,39 @@ push-m032-snapshot-provider:
 
 deliver-m032-snapshot-provider:
 	@bash scripts/deliver-m032-snapshot-provider.sh deliver
+
+.PHONY: test-m052ae-native-triple-group
+test-m052ae-native-triple-group:
+	@bash scripts/test-m052ae-native-triple-group.sh
+
+.PHONY: format-m052ae-native-triple-group
+format-m052ae-native-triple-group:
+	@bash scripts/format-m052ae-native-triple-group.sh
+
+.PHONY: benchmark-m052ae-native-triple-group
+benchmark-m052ae-native-triple-group:
+	@bash scripts/benchmark-m052ae-native-triple-group.sh
+
+.PHONY: test-m052ae-sql-package
+test-m052ae-sql-package:
+	@bash scripts/test-m052ae-sql-package.sh
+
+.PHONY: race-m052ae-native-triple-group
+race-m052ae-native-triple-group:
+	@bash scripts/race-m052ae-native-triple-group.sh
+
+.PHONY: plan-m052ae-native-triple-group stage-m052ae-native-triple-group commit-m052ae-native-triple-group push-m052ae-native-triple-group deliver-m052ae-native-triple-group
+plan-m052ae-native-triple-group:
+	@bash scripts/deliver-m052ae-native-triple-group.sh plan
+
+stage-m052ae-native-triple-group:
+	@bash scripts/deliver-m052ae-native-triple-group.sh stage
+
+commit-m052ae-native-triple-group:
+	@bash scripts/deliver-m052ae-native-triple-group.sh commit
+
+push-m052ae-native-triple-group:
+	@bash scripts/deliver-m052ae-native-triple-group.sh push
+
+deliver-m052ae-native-triple-group:
+	@bash scripts/deliver-m052ae-native-triple-group.sh deliver

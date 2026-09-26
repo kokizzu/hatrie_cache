@@ -38146,6 +38146,41 @@ scalar conditional forms; `DisableNativeDataflow` remains the explicit
 fallback switch. See
 [M052AD_AUTO_NATIVE_CONDITIONAL_AGGREGATES.md](M052AD_AUTO_NATIVE_CONDITIONAL_AGGREGATES.md).
 
+<a id="m052ae-native-three-field-group-by"></a>
+## M052ae: Native Three-Field GROUP BY
+
+`make benchmark-m052ae-native-triple-group` compares the established
+materialized executor with the new fixed-key native path for a three-field
+`GROUP BY`. The fixture has 20,000 rows, about 1,536 groups, three grouping
+fields, `COUNT(*)`, and `SUM(value)`. The fallback explicitly sets
+`DisableNativeDataflow: true`. Linux/amd64, AMD Ryzen 9 5950X, five samples
+per path:
+
+```text
+fallback:
+23637973 ns/op 27791391 B/op 235425 allocs/op
+23466769 ns/op 27791260 B/op 235425 allocs/op
+23010441 ns/op 27791467 B/op 235425 allocs/op
+22960331 ns/op 27791267 B/op 235425 allocs/op
+22513380 ns/op 27791255 B/op 235425 allocs/op
+native:
+6070375 ns/op 6329905 B/op 4708 allocs/op
+6065369 ns/op 6329904 B/op 4708 allocs/op
+6054045 ns/op 6329903 B/op 4708 allocs/op
+6140381 ns/op 6329904 B/op 4708 allocs/op
+6105030 ns/op 6329906 B/op 4708 allocs/op
+```
+
+| Path | Median time | Median bytes | Median allocs | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Materialized fallback | 23.010 ms/op | 27,791,267 B/op | 235,425 | 1.00x |
+| Native three-field grouping | 6.070 ms/op | 6,329,904 B/op | 4,708 | **3.79x faster; 4.39x lower bytes; 50.0x fewer allocations** |
+
+The result is an unbounded grouped aggregation optimization only. Four or more
+grouping fields, grouped `HAVING`, grouped ordering, and bounded grouped output
+retain the established fallback boundary. See
+[M052AE_NATIVE_TRIPLE_GROUP.md](M052AE_NATIVE_TRIPLE_GROUP.md).
+
 <a id="rejected-t042-independent-setint-parallel-replay"></a>
 ## Rejected T042: Independent-Key Parallel Journal Replay
 

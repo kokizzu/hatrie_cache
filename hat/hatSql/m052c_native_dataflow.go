@@ -81,6 +81,10 @@ func validateNativeSQLDataflowQuery(query *sqlQuery) error {
 			if _, ok := nativeSQLDataflowCompositeGroupPlanFor(query); !ok {
 				return fmt.Errorf("%w: grouped query shape", ErrSQLNativeDataflowUnsupported)
 			}
+		} else if len(query.groupBy) == 3 {
+			if _, ok := nativeSQLDataflowTripleGroupPlanFor(query); !ok {
+				return fmt.Errorf("%w: grouped query shape", ErrSQLNativeDataflowUnsupported)
+			}
 		} else if _, ok := nativeSQLDataflowGroupPlanFor(query); !ok {
 			return fmt.Errorf("%w: grouped query shape", ErrSQLNativeDataflowUnsupported)
 		}
@@ -517,6 +521,9 @@ func executeNativeSQLDataflow(ctx context.Context, query *sqlQuery, initial []SQ
 	}
 	if plan, ok := nativeSQLDataflowCompositeGroupPlanFor(query); ok {
 		return executeNativeSQLDataflowCompositeGroups(ctx, query, initial, plan)
+	}
+	if plan, ok := nativeSQLDataflowTripleGroupPlanFor(query); ok {
+		return executeNativeSQLDataflowTripleGroups(ctx, query, initial, plan)
 	}
 	if aggregates, ok := nativeSQLDataflowAggregatePlan(query); ok {
 		return executeNativeSQLDataflowAggregates(ctx, query, initial, aggregates)

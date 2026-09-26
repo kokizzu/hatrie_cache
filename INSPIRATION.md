@@ -1149,3 +1149,11 @@ SQL shape. See [CH035_REMOTE_SHARD_PRUNING.md](CH035_REMOTE_SHARD_PRUNING.md).
   the correct fallback. See
   [M052AD_AUTO_NATIVE_CONDITIONAL_AGGREGATES.md](M052AD_AUTO_NATIVE_CONDITIONAL_AGGREGATES.md)
   and [BENCHMARK.md](BENCHMARK.md#m052ad-automatic-native-conditional-aggregates).
+- [x] M052ae Native three-field composite `GROUP BY` dataflow. A fixed
+  comparable three-component key supports integer, string, and `NULL` fields,
+  preserves first-seen group order, and is selected automatically for ordinary
+  row resolvers; four-field, grouped `HAVING`, grouped ordering, and bounded
+  grouped output remain fail-closed. The paired benchmark is 3.79x faster with
+  4.39x lower bytes and 50.0x fewer allocations; see
+  [M052AE_NATIVE_TRIPLE_GROUP.md](M052AE_NATIVE_TRIPLE_GROUP.md) and
+  [BENCHMARK.md](BENCHMARK.md#m052ae-native-three-field-group-by).
