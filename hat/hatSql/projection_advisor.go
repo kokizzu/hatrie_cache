@@ -105,11 +105,8 @@ func (advisor *SQLProjectionAdvisor) CostRecommendations(limit int) []SQLProject
 // expected query count. Maintenance includes one initial build and the
 // expected refreshes. This method never changes planning or creates a view.
 func (advisor *SQLProjectionAdvisor) CostBasedRecommendations(limit int, model SQLProjectionCostModel) ([]SQLProjectionCostRecommendation, error) {
-	if model.ExpectedQueries == 0 {
-		return nil, fmt.Errorf("projection cost model expected queries must be positive")
-	}
-	if model.QueryHitLatency < 0 || model.InitialBuildCost < 0 || model.RefreshCost < 0 {
-		return nil, fmt.Errorf("projection cost model durations must not be negative")
+	if err := validateSQLProjectionCostModel(model, true); err != nil {
+		return nil, err
 	}
 	maintenance := sqlProjectionAdvisorDurationSum(
 		model.InitialBuildCost,
@@ -137,6 +134,40 @@ func (advisor *SQLProjectionAdvisor) CostBasedRecommendations(limit int, model S
 		}
 		advisor.mu.RUnlock()
 	}
+	sortSQLProjectionCostRecommendations(recommendations)
+	if limit > 0 && len(recommendations) > limit {
+		recommendations = recommendations[:limit]
+	}
+	return recommendations, nil
+}
+
+func validateSQLProjectionCostModel(model SQLProjectionCostModel, requireExpectedQueries bool) error {
+	if requireExpectedQueries && model.ExpectedQueries == 0 {
+		return fmt.Errorf("projection cost model expected queries must be positive")
+	}
+	if model.QueryHitLatency < 0 || model.InitialBuildCost < 0 || model.RefreshCost < 0 {
+		return fmt.Errorf("projection cost model durations must not be negative")
+	}
+	return nil
+}
+
+func sqlProjectionAdvisorCostRecommendation(recommendation SQLProjectionRecommendation, expectedQueries uint64, model SQLProjectionCostModel, maintenance time.Duration) SQLProjectionCostRecommendation {
+	savingsPerQuery := recommendation.AverageElapsed - model.QueryHitLatency
+	if savingsPerQuery < 0 {
+		savingsPerQuery = 0
+	}
+	savings := sqlProjectionAdvisorDurationProduct(savingsPerQuery, expectedQueries)
+	netBenefit := sqlProjectionAdvisorDurationDifference(savings, maintenance)
+	return SQLProjectionCostRecommendation{
+		SQLProjectionRecommendation: recommendation,
+		EstimatedQuerySavings:       savings,
+		EstimatedMaintenanceCost:    maintenance,
+		EstimatedNetBenefit:         netBenefit,
+		WorthBuilding:               netBenefit > 0,
+	}
+}
+
+func sortSQLProjectionCostRecommendations(recommendations []SQLProjectionCostRecommendation) {
 	sort.Slice(recommendations, func(left, right int) bool {
 		if recommendations[left].EstimatedNetBenefit != recommendations[right].EstimatedNetBenefit {
 			return recommendations[left].EstimatedNetBenefit > recommendations[right].EstimatedNetBenefit
@@ -146,10 +177,6 @@ func (advisor *SQLProjectionAdvisor) CostBasedRecommendations(limit int, model S
 		}
 		return sqlProjectionAdvisorEncodeDependencies(recommendations[left].Dependencies) < sqlProjectionAdvisorEncodeDependencies(recommendations[right].Dependencies)
 	})
-	if limit > 0 && len(recommendations) > limit {
-		recommendations = recommendations[:limit]
-	}
-	return recommendations, nil
 }
 
 func (advisor *SQLProjectionAdvisor) recommendations(byCost bool, limit int) []SQLProjectionRecommendation {

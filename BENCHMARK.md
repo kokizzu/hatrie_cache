@@ -38480,3 +38480,42 @@ BenchmarkCH004FinalPushdownFastPath-32  4584  262764 ns/op  447714 B/op  2069 al
 The fallback difference is within benchmark noise; the optimization is
 strictly opt-in and normal queries do not allocate its reconciled-source cache.
 Reproduce with `make benchmark-ch004-final`.
+
+## CH-012 Forecast-Aware Projection Cost Selection
+
+Command:
+
+```text
+make benchmark-ch012-forecast-cost
+```
+
+The new explicit `ForecastCostBasedRecommendations` path combines the bounded
+workload rate with the existing projection cost model. The fixture records 128
+candidates, forecasts a 24-hour horizon, and returns the best 32. The legacy
+cost path is the clean `HEAD` baseline; all values are medians of five samples
+on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Comparison |
+| --- | ---: | ---: | ---: | ---: |
+| Existing `CostBasedRecommendations` baseline | 31,682 | 29,576 | 132 | 1.00x |
+| `ForecastCostBasedRecommendations` | 36,554 | 29,576 | 132 | 1.15x CPU; same heap/allocations |
+
+Raw output:
+
+```text
+BenchmarkCH012ProjectionAdvisorCostBased-32  36084  33437 ns/op  29576 B/op  132 allocs/op
+BenchmarkCH012ProjectionAdvisorCostBased-32  38414  31568 ns/op  29576 B/op  132 allocs/op
+BenchmarkCH012ProjectionAdvisorCostBased-32  38743  32084 ns/op  29576 B/op  132 allocs/op
+BenchmarkCH012ProjectionAdvisorCostBased-32  37173  31682 ns/op  29576 B/op  132 allocs/op
+BenchmarkCH012ProjectionAdvisorCostBased-32  37566  31617 ns/op  29576 B/op  132 allocs/op
+BenchmarkCH012ProjectionAdvisorForecastCostBased-32  31568  36599 ns/op  29576 B/op  132 allocs/op
+BenchmarkCH012ProjectionAdvisorForecastCostBased-32  32920  35779 ns/op  29576 B/op  132 allocs/op
+BenchmarkCH012ProjectionAdvisorForecastCostBased-32  33282  35906 ns/op  29576 B/op  132 allocs/op
+BenchmarkCH012ProjectionAdvisorForecastCostBased-32  32794  36554 ns/op  29576 B/op  132 allocs/op
+BenchmarkCH012ProjectionAdvisorForecastCostBased-32  30616  39240 ns/op  29576 B/op  132 allocs/op
+```
+
+The forecast path is opt-in and does not alter normal query execution or the
+legacy cost method. Its added CPU is the cost of per-candidate forecast
+calculation and ranking; direct construction avoids duplicate forecast slices,
+so it introduces no additional heap or allocation cost in this workload.

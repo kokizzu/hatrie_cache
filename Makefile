@@ -1,6 +1,10 @@
 .PHONY: inspect-tmp-hatrie-builds
 inspect-tmp-hatrie-builds:
 	bash ./scripts/inspect-tmp-hatrie-builds.sh
+
+.PHONY: benchmark-ch012-forecast-cost
+benchmark-ch012-forecast-cost:
+	bash ./scripts/benchmark-ch012-forecast-cost.sh
 .PHONY: audit-tmp-hatrie-all
 audit-tmp-hatrie-all:
 	bash ./scripts/audit-tmp-hatrie-all.sh $(or $(MODE),preview)

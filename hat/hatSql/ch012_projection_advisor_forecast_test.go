@@ -108,3 +108,34 @@ func TestCH012ProjectionAdvisorRecordsAutomaticWorkloadWhenEnabled(t *testing.T)
 		t.Fatalf("automatic forecasts = %#v, want one team_totals observation", forecasts)
 	}
 }
+
+func TestCH012ProjectionAdvisorForecastCostRecommendationsUsePerCandidateRate(t *testing.T) {
+	base := time.Unix(500, 0)
+	advisor := NewSQLProjectionAdvisorWithOptions(SQLProjectionAdvisorOptions{
+		Capacity:               4,
+		EnableWorkloadForecast: true,
+	})
+	advisor.recordFeedback("hot", []string{"events"}, 10*time.Millisecond)
+	advisor.recordFeedback("cold", []string{"events"}, 10*time.Millisecond)
+	advisor.RecordWorkload("hot", []string{"events"}, base)
+	advisor.RecordWorkload("hot", []string{"events"}, base.Add(time.Hour))
+	advisor.RecordWorkload("cold", []string{"events"}, base)
+
+	recommendations, err := advisor.ForecastCostBasedRecommendations(0, base.Add(24*time.Hour), 24*time.Hour, SQLProjectionCostModel{
+		ExpectedQueries:  1,
+		QueryHitLatency:  time.Millisecond,
+		InitialBuildCost: 20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recommendations) != 2 {
+		t.Fatalf("recommendations = %#v, want 2", recommendations)
+	}
+	if recommendations[0].QueryID != "hot" || recommendations[0].EstimatedQuerySavings != 432*time.Millisecond || recommendations[0].EstimatedNetBenefit != 412*time.Millisecond || !recommendations[0].WorthBuilding {
+		t.Fatalf("hot recommendation = %#v", recommendations[0])
+	}
+	if recommendations[1].QueryID != "cold" || recommendations[1].EstimatedQuerySavings != 9*time.Millisecond || recommendations[1].EstimatedNetBenefit != -11*time.Millisecond || recommendations[1].WorthBuilding {
+		t.Fatalf("cold recommendation = %#v", recommendations[1])
+	}
+}

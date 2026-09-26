@@ -46,3 +46,32 @@ func BenchmarkCH012ProjectionAdvisorForecastWorkload(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkCH012ProjectionAdvisorForecastCostBased(b *testing.B) {
+	advisor := NewSQLProjectionAdvisorWithOptions(SQLProjectionAdvisorOptions{
+		Capacity:               128,
+		EnableWorkloadForecast: true,
+	})
+	base := time.Unix(100, 0)
+	for index := 0; index < 128; index++ {
+		queryID := "query-" + strconv.Itoa(index)
+		advisor.recordFeedback(queryID, []string{"events"}, time.Duration(index+1)*time.Millisecond)
+		advisor.RecordWorkload(queryID, []string{"events"}, base)
+		advisor.RecordWorkload(queryID, []string{"events"}, base.Add(time.Hour))
+	}
+	model := SQLProjectionCostModel{
+		ExpectedQueries:  1,
+		QueryHitLatency:  100 * time.Microsecond,
+		InitialBuildCost: 10 * time.Millisecond,
+		RefreshCost:      time.Millisecond,
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if recommendations, err := advisor.ForecastCostBasedRecommendations(32, base.Add(24*time.Hour), 24*time.Hour, model); err != nil {
+			b.Fatal(err)
+		} else if len(recommendations) != 32 {
+			b.Fatalf("ForecastCostBasedRecommendations() length = %d, want 32", len(recommendations))
+		}
+	}
+}

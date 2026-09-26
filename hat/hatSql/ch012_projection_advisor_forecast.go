@@ -75,20 +75,9 @@ func (advisor *SQLProjectionAdvisor) ForecastWorkloadAt(now time.Time, horizon t
 	advisor.mu.RLock()
 	forecasts := make([]SQLProjectionWorkloadForecast, 0, len(advisor.workloads))
 	for key, workload := range advisor.workloads {
-		if !workload.hasObservation || workload.queries == 0 {
+		observationWindow, expectedQueries, ok := sqlProjectionAdvisorForecastEstimate(workload, nowUnix, horizon)
+		if !ok {
 			continue
-		}
-		if workload.firstObservedUnix > nowUnix {
-			continue
-		}
-		lastObservedUnix := workload.lastObservedUnix
-		if lastObservedUnix > nowUnix {
-			lastObservedUnix = nowUnix
-		}
-		observationWindow := sqlProjectionAdvisorObservationWindow(workload.firstObservedUnix, lastObservedUnix)
-		expectedQueries := workload.queries
-		if observationWindow > 0 {
-			expectedQueries = sqlProjectionAdvisorForecastQueries(workload.queries, observationWindow, horizon)
 		}
 		forecasts = append(forecasts, SQLProjectionWorkloadForecast{
 			SQLProjectionRecommendation: sqlProjectionAdvisorRecommendation(key, advisor.counts[key]),
@@ -124,6 +113,62 @@ func (advisor *SQLProjectionAdvisor) ForecastWorkloadAt(now time.Time, horizon t
 		})
 	})
 	return forecasts, nil
+}
+
+// ForecastCostBasedRecommendations ranks only candidates with an enabled
+// workload forecast. Each candidate uses its own projected query count rather
+// than one global expected-query assumption. Forecasting is opt-in; a disabled
+// advisor returns an empty result without changing the legacy cost API.
+func (advisor *SQLProjectionAdvisor) ForecastCostBasedRecommendations(limit int, now time.Time, horizon time.Duration, model SQLProjectionCostModel) ([]SQLProjectionCostRecommendation, error) {
+	if err := validateSQLProjectionCostModel(model, false); err != nil {
+		return nil, err
+	}
+	if horizon <= 0 {
+		return nil, fmt.Errorf("projection workload forecast horizon must be positive")
+	}
+	if advisor == nil || !advisor.forecastEnabled {
+		return nil, nil
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	maintenance := sqlProjectionAdvisorDurationSum(
+		model.InitialBuildCost,
+		sqlProjectionAdvisorDurationProduct(model.RefreshCost, model.ExpectedRefreshes),
+	)
+	nowUnix := now.UnixNano()
+	advisor.mu.RLock()
+	recommendations := make([]SQLProjectionCostRecommendation, 0, len(advisor.workloads))
+	for key, workload := range advisor.workloads {
+		_, expectedQueries, ok := sqlProjectionAdvisorForecastEstimate(workload, nowUnix, horizon)
+		if !ok {
+			continue
+		}
+		recommendation := sqlProjectionAdvisorRecommendation(key, advisor.counts[key])
+		recommendations = append(recommendations, sqlProjectionAdvisorCostRecommendation(recommendation, expectedQueries, model, maintenance))
+	}
+	advisor.mu.RUnlock()
+	sortSQLProjectionCostRecommendations(recommendations)
+	if limit > 0 && len(recommendations) > limit {
+		recommendations = recommendations[:limit]
+	}
+	return recommendations, nil
+}
+
+func sqlProjectionAdvisorForecastEstimate(workload sqlProjectionAdvisorWorkloadStats, nowUnix int64, horizon time.Duration) (time.Duration, uint64, bool) {
+	if !workload.hasObservation || workload.queries == 0 || workload.firstObservedUnix > nowUnix {
+		return 0, 0, false
+	}
+	lastObservedUnix := workload.lastObservedUnix
+	if lastObservedUnix > nowUnix {
+		lastObservedUnix = nowUnix
+	}
+	observationWindow := sqlProjectionAdvisorObservationWindow(workload.firstObservedUnix, lastObservedUnix)
+	expectedQueries := workload.queries
+	if observationWindow > 0 {
+		expectedQueries = sqlProjectionAdvisorForecastQueries(workload.queries, observationWindow, horizon)
+	}
+	return observationWindow, expectedQueries, true
 }
 
 func (advisor *SQLProjectionAdvisor) recordWorkloadWithShape(queryID string, dependencies []string, shape sqlProjectionAdvisorShape, observedAt time.Time) {
