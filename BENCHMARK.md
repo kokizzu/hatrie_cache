@@ -38603,3 +38603,30 @@ The default direct path is unchanged. Durable execution is intentionally
 opt-in; its roughly 2,421x latency cost versus direct execution buys
 coordinator recovery boundaries and should only be enabled where that recovery
 guarantee is required. See [T047I_COORDINATOR_DURABILITY.md](T047I_COORDINATOR_DURABILITY.md).
+
+## T047j HTTP phase transport
+
+Measured with `make benchmark-t047j-http-transport`. The HTTP row uses one
+in-process `httptest` participant and executes the complete three-phase
+coordinator. The direct row uses the same coordinator and one direct callback
+participant. Each row was run three times with `-benchmem`.
+
+```text
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatCache
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkTU047HTTPTransport-32                6270  163906 ns/op  28908 B/op 254 allocs/op
+BenchmarkTU047HTTPTransport-32                7119  159485 ns/op  29007 B/op 254 allocs/op
+BenchmarkTU047HTTPTransport-32                7311  156943 ns/op  28927 B/op 254 allocs/op
+BenchmarkTU047DirectCoordinatorBaseline-32  867777    1417 ns/op    625 B/op  13 allocs/op
+BenchmarkTU047DirectCoordinatorBaseline-32  751207    1442 ns/op    625 B/op  13 allocs/op
+BenchmarkTU047DirectCoordinatorBaseline-32  811896    1466 ns/op    625 B/op  13 allocs/op
+PASS
+```
+
+Median HTTP cost is 159,485 ns/op, 28,927 B/op, and 254 allocs/op. Median
+direct cost is 1,442 ns/op, 625 B/op, and 13 allocs/op. HTTP is therefore
+110.60x slower, uses 46.28x more bytes, and performs 19.54x as many
+allocations. This is an explicit interoperability cost; the transport is
+opt-in and the existing direct and gRPC paths remain unchanged.

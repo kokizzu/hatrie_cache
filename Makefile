@@ -28157,3 +28157,34 @@ commit-t047i-coordinator-durability:
 .PHONY: push-t047i-coordinator-durability
 push-t047i-coordinator-durability:
 	bash ./scripts/deliver-t047i-coordinator-durability.sh push
+
+.PHONY: test-t047j-http-transport
+test-t047j-http-transport:
+	bash ./scripts/test-t047j-http-transport.sh
+.PHONY: format-t047j-http-transport
+format-t047j-http-transport:
+	bash ./scripts/format-t047j-http-transport.sh
+.PHONY: benchmark-t047j-http-transport
+benchmark-t047j-http-transport:
+	bash ./scripts/benchmark-t047j-http-transport.sh
+.PHONY: race-t047j-http-transport
+race-t047j-http-transport:
+	bash ./scripts/race-t047j-http-transport.sh
+.PHONY: test-t047j-package
+test-t047j-package:
+	bash ./scripts/test-t047j-package.sh
+.PHONY: plan-t047j-http-transport
+plan-t047j-http-transport:
+	bash ./scripts/deliver-t047j-http-transport.sh plan
+.PHONY: stage-t047j-http-transport
+stage-t047j-http-transport:
+	bash ./scripts/deliver-t047j-http-transport.sh stage
+.PHONY: commit-t047j-http-transport
+commit-t047j-http-transport:
+	bash ./scripts/deliver-t047j-http-transport.sh commit
+.PHONY: push-t047j-http-transport
+push-t047j-http-transport:
+	bash ./scripts/deliver-t047j-http-transport.sh push
+.PHONY: deliver-t047j-http-transport
+deliver-t047j-http-transport:
+	bash ./scripts/deliver-t047j-http-transport.sh deliver
