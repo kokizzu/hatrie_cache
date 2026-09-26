@@ -170,6 +170,25 @@ func FlatMapDifferentialRows(rows []DifferentialRow, expand DifferentialFlatMapF
 				Row:  cloneDifferentialRow(result.Row),
 			}}, nil
 		}
+		if len(results) == 2 {
+			first, second := results[0], results[1]
+			if first.Key == "" || second.Key == "" {
+				return nil, ErrDifferentialRowKeyRequired
+			}
+			if first.Key == second.Key {
+				combined, ok := addDifferentialCounts(update.Diff, update.Diff)
+				if !ok {
+					return nil, fmt.Errorf("differential row %q at time %d overflows diff", first.Key, update.Time)
+				}
+				return []DifferentialRow{{
+					Key: first.Key, Time: update.Time, Diff: combined, Row: cloneDifferentialRow(first.Row),
+				}}, nil
+			}
+			return []DifferentialRow{
+				{Key: first.Key, Time: update.Time, Diff: update.Diff, Row: cloneDifferentialRow(first.Row)},
+				{Key: second.Key, Time: update.Time, Diff: update.Diff, Row: cloneDifferentialRow(second.Row)},
+			}, nil
+		}
 		expanded := make([]DifferentialRow, 0, len(results))
 		for _, result := range results {
 			if result.Key == "" {
