@@ -143,6 +143,47 @@ func FlatMapDifferentialRows(rows []DifferentialRow, expand DifferentialFlatMapF
 	if expand == nil {
 		return nil, ErrDifferentialMapCallbackRequired
 	}
+	if len(rows) == 1 {
+		update := rows[0]
+		if update.Key == "" {
+			return nil, ErrDifferentialRowKeyRequired
+		}
+		if update.Diff == 0 {
+			return nil, nil
+		}
+		results, err := expand(cloneDifferentialRow(update.Row))
+		if err != nil {
+			return nil, fmt.Errorf("flat-map differential row %q: %w", update.Key, err)
+		}
+		if len(results) == 0 {
+			return nil, nil
+		}
+		if len(results) == 1 {
+			result := results[0]
+			if result.Key == "" {
+				return nil, ErrDifferentialRowKeyRequired
+			}
+			return []DifferentialRow{{
+				Key:  result.Key,
+				Time: update.Time,
+				Diff: update.Diff,
+				Row:  cloneDifferentialRow(result.Row),
+			}}, nil
+		}
+		expanded := make([]DifferentialRow, 0, len(results))
+		for _, result := range results {
+			if result.Key == "" {
+				return nil, ErrDifferentialRowKeyRequired
+			}
+			expanded = append(expanded, DifferentialRow{
+				Key:  result.Key,
+				Time: update.Time,
+				Diff: update.Diff,
+				Row:  cloneDifferentialRow(result.Row),
+			})
+		}
+		return consolidateDifferentialRows(expanded, false)
+	}
 	expanded := make([]DifferentialRow, 0, len(rows))
 	for _, update := range rows {
 		if update.Key == "" {
