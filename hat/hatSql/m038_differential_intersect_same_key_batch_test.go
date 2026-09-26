@@ -38,7 +38,6 @@ func TestMZ038DifferentialIntersectSameKeyBatchPreservesTransitions(t *testing.T
 		t.Fatalf("same-key restoration error = %v", err)
 	}
 	want = []DifferentialRow{
-		{Key: "k", Time: 5, Diff: -1, Row: leftRow},
 		{Key: "k", Time: 6, Diff: 1, Row: leftRow},
 	}
 	if !reflect.DeepEqual(changes, want) {

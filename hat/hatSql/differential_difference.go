@@ -52,6 +52,9 @@ func ExceptDifferentialRows(left, right []DifferentialRow) ([]DifferentialRow, e
 	if capacity == 0 {
 		return nil, nil
 	}
+	if result, handled, err := smallDifferentialDifference(left, right); handled {
+		return result, err
+	}
 	indexes := make(map[differentialRowKey]int, capacity)
 	result := make([]DifferentialRow, 0, capacity)
 	appendUpdate := func(update DifferentialRow, negate bool) error {
@@ -107,4 +110,59 @@ func ExceptDifferentialRows(left, right []DifferentialRow) ([]DifferentialRow, e
 		return nil, nil
 	}
 	return remaining, nil
+}
+
+func smallDifferentialDifference(left, right []DifferentialRow) ([]DifferentialRow, bool, error) {
+	if len(left) == 1 && len(right) == 0 {
+		result, err := singleDifferentialDifference(left[0], false)
+		return result, true, err
+	}
+	if len(left) == 0 && len(right) == 1 {
+		result, err := singleDifferentialDifference(right[0], true)
+		return result, true, err
+	}
+	if len(left) != 1 || len(right) != 1 {
+		return nil, false, nil
+	}
+	if left[0].Key != right[0].Key || left[0].Time != right[0].Time {
+		return nil, false, nil
+	}
+	if left[0].Key == "" {
+		return nil, true, ErrDifferentialRowKeyRequired
+	}
+	if right[0].Diff == math.MinInt64 {
+		return nil, true, ErrDifferentialDifferenceOverflow
+	}
+	combined, ok := addDifferentialCounts(left[0].Diff, -right[0].Diff)
+	if !ok {
+		return nil, true, fmt.Errorf("differential difference row %q at time %d overflows diff: %w", left[0].Key, left[0].Time, ErrDifferentialDifferenceOverflow)
+	}
+	if combined == 0 {
+		return nil, true, nil
+	}
+	update := left[0]
+	if update.Diff == 0 {
+		update = right[0]
+		update.Diff = -update.Diff
+	}
+	update.Diff = combined
+	update.Row = cloneDifferentialRow(update.Row)
+	return []DifferentialRow{update}, true, nil
+}
+
+func singleDifferentialDifference(update DifferentialRow, negate bool) ([]DifferentialRow, error) {
+	if update.Key == "" {
+		return nil, ErrDifferentialRowKeyRequired
+	}
+	if update.Diff == 0 {
+		return nil, nil
+	}
+	if negate {
+		if update.Diff == math.MinInt64 {
+			return nil, ErrDifferentialDifferenceOverflow
+		}
+		update.Diff = -update.Diff
+	}
+	update.Row = cloneDifferentialRow(update.Row)
+	return []DifferentialRow{update}, nil
 }
