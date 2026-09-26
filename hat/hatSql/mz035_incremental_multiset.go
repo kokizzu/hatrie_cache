@@ -41,6 +41,8 @@ type incrementalMultisetPendingEntry struct {
 	delta int64
 }
 
+const incrementalMultisetSmallBatchLimit = 8
+
 // NewIncrementalMultiset creates an empty exact multiset operator.
 func NewIncrementalMultiset() *IncrementalMultiset {
 	return &IncrementalMultiset{
@@ -66,7 +68,115 @@ func (multiset *IncrementalMultiset) Apply(updates []DifferentialRow) ([]Differe
 	if incrementalMultisetSameKeyBatch(updates) {
 		return multiset.applySameKeyBatch(updates)
 	}
+	if len(updates) <= incrementalMultisetSmallBatchLimit {
+		return multiset.applySmallBatch(updates)
+	}
 	return multiset.applyGenericBatch(updates)
+}
+
+func (multiset *IncrementalMultiset) applySmallBatch(updates []DifferentialRow) ([]DifferentialRow, error) {
+	if len(updates) > incrementalMultisetSmallBatchLimit {
+		return multiset.applyGenericBatch(updates)
+	}
+	var pending [incrementalMultisetSmallBatchLimit]incrementalMultisetPendingEntry
+	var keys [incrementalMultisetSmallBatchLimit]string
+	pendingCount := 0
+	for _, update := range updates {
+		if update.Key == "" {
+			return nil, ErrIncrementalMultisetInvalidKey
+		}
+		if update.Diff == 0 {
+			continue
+		}
+		index := -1
+		for candidate := 0; candidate < pendingCount; candidate++ {
+			if keys[candidate] == update.Key {
+				index = candidate
+				break
+			}
+		}
+		if index < 0 {
+			index = pendingCount
+			keys[index] = update.Key
+			pending[index] = incrementalMultisetPendingEntry{
+				count: multiset.counts[update.Key],
+				row:   multiset.rows[update.Key],
+				time:  multiset.times[update.Key],
+			}
+			pendingCount++
+		}
+		entry := &pending[index]
+		if err := validateIncrementalMultisetRow(entry.count, entry.row, update.Row); err != nil {
+			return nil, err
+		}
+		if update.Diff > 0 {
+			if entry.count == 0 && update.Row != nil {
+				entry.row = update.Row
+			}
+			if entry.count == 0 || entry.time == 0 {
+				entry.time = update.Time
+			}
+			count, ok := incrementalMultisetAdd(entry.count, uint64(update.Diff))
+			if !ok {
+				return nil, ErrIncrementalMultisetOverflow
+			}
+			entry.count = count
+		} else {
+			magnitude := incrementalMultisetMagnitude(update.Diff)
+			if magnitude > entry.count {
+				return nil, ErrIncrementalMultisetNegativeMultiplicity
+			}
+			entry.count -= magnitude
+		}
+		if update.Time != 0 {
+			entry.time = update.Time
+		}
+		if err := incrementalMultisetAddDelta(&entry.delta, update.Diff); err != nil {
+			return nil, err
+		}
+	}
+	if pendingCount == 0 {
+		return nil, nil
+	}
+
+	// Keep the same deterministic key order as the generic map path without
+	// allocating a map, key slice, or sort closure for small batches.
+	for index := 1; index < pendingCount; index++ {
+		key := keys[index]
+		entry := pending[index]
+		position := index
+		for position > 0 && keys[position-1] > key {
+			keys[position] = keys[position-1]
+			pending[position] = pending[position-1]
+			position--
+		}
+		keys[position] = key
+		pending[position] = entry
+	}
+
+	changes := make([]DifferentialRow, 0, pendingCount)
+	for index := 0; index < pendingCount; index++ {
+		key := keys[index]
+		entry := pending[index]
+		if entry.count == 0 {
+			delete(multiset.counts, key)
+			delete(multiset.rows, key)
+			delete(multiset.times, key)
+		} else {
+			multiset.counts[key] = entry.count
+			multiset.rows[key] = cloneDifferentialRow(entry.row)
+			multiset.times[key] = entry.time
+		}
+		if entry.delta != 0 {
+			changes = append(changes, DifferentialRow{
+				Key:  key,
+				Time: entry.time,
+				Diff: entry.delta,
+				Row:  cloneDifferentialRow(entry.row),
+			})
+		}
+	}
+	return changes, nil
 }
 
 func (multiset *IncrementalMultiset) applyGenericBatch(updates []DifferentialRow) ([]DifferentialRow, error) {
