@@ -87,6 +87,9 @@ func MapDifferentialRows(rows []DifferentialRow, mapRow DifferentialMapFunc) ([]
 	if mapRow == nil {
 		return nil, ErrDifferentialMapCallbackRequired
 	}
+	if result, handled, err := smallDifferentialMap(rows, mapRow); handled {
+		return result, err
+	}
 	mapped := make([]DifferentialRow, 0, len(rows))
 	for _, update := range rows {
 		if update.Key == "" {
@@ -105,6 +108,32 @@ func MapDifferentialRows(rows []DifferentialRow, mapRow DifferentialMapFunc) ([]
 		mapped = append(mapped, DifferentialRow{Key: key, Time: update.Time, Diff: update.Diff, Row: cloneDifferentialRow(row)})
 	}
 	return consolidateDifferentialRows(mapped, false)
+}
+
+func smallDifferentialMap(rows []DifferentialRow, mapRow DifferentialMapFunc) ([]DifferentialRow, bool, error) {
+	if len(rows) != 1 {
+		return nil, false, nil
+	}
+	update := rows[0]
+	if update.Key == "" {
+		return nil, true, ErrDifferentialRowKeyRequired
+	}
+	if update.Diff == 0 {
+		return nil, true, nil
+	}
+	key, row, err := mapRow(cloneDifferentialRow(update.Row))
+	if err != nil {
+		return nil, true, fmt.Errorf("map differential row %q: %w", update.Key, err)
+	}
+	if key == "" {
+		return nil, true, ErrDifferentialRowKeyRequired
+	}
+	return []DifferentialRow{{
+		Key:  key,
+		Time: update.Time,
+		Diff: update.Diff,
+		Row:  cloneDifferentialRow(row),
+	}}, true, nil
 }
 
 // FlatMapDifferentialRows applies a one-to-many transform while preserving
