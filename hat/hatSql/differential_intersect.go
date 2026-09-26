@@ -77,6 +77,12 @@ func (operator *DifferentialIntersect) Apply(left, right []DifferentialRow) ([]D
 	if capacity == 0 {
 		return nil, nil
 	}
+	if capacity == 1 {
+		if len(left) == 1 {
+			return operator.applySingle(left[0], true)
+		}
+		return operator.applySingle(right[0], false)
+	}
 
 	working := make(map[string]differentialIntersectCounts, capacity)
 	if err := operator.validateSide(working, left, true); err != nil {
@@ -96,6 +102,59 @@ func (operator *DifferentialIntersect) Apply(left, right []DifferentialRow) ([]D
 		return nil, nil
 	}
 	return result, nil
+}
+
+// applySingle handles the common one-row update without allocating the
+// validation overlay used by multi-row atomic batches.
+func (operator *DifferentialIntersect) applySingle(update DifferentialRow, leftSide bool) ([]DifferentialRow, error) {
+	if update.Key == "" {
+		return nil, ErrDifferentialRowKeyRequired
+	}
+	if update.Diff == 0 {
+		return nil, nil
+	}
+
+	state := operator.entries[update.Key]
+	before := differentialIntersectMinimum(state.left, state.right)
+	if leftSide {
+		next, err := nextDifferentialDistinctMultiplicity(state.left, update.Diff)
+		if err != nil {
+			return nil, differentialIntersectCountError("left", update.Key, err)
+		}
+		state.left = next
+	} else {
+		next, err := nextDifferentialDistinctMultiplicity(state.right, update.Diff)
+		if err != nil {
+			return nil, differentialIntersectCountError("right", update.Key, err)
+		}
+		state.right = next
+	}
+	after := differentialIntersectMinimum(state.left, state.right)
+	delta, ok := differentialIntersectDelta(before, after)
+	if !ok {
+		return nil, fmt.Errorf("%s key %q: %w", differentialIntersectSideName(leftSide), update.Key, ErrDifferentialIntersectDiffOverflow)
+	}
+
+	if leftSide && state.left > 0 && (operator.entries[update.Key].left == 0) {
+		state.row = cloneDifferentialRow(update.Row)
+	}
+	if state.left == 0 && state.right == 0 {
+		delete(operator.entries, update.Key)
+	} else {
+		if operator.entries == nil {
+			operator.entries = make(map[string]differentialIntersectState, 1)
+		}
+		operator.entries[update.Key] = state
+	}
+	if delta == 0 {
+		return nil, nil
+	}
+	return []DifferentialRow{{
+		Key:  update.Key,
+		Time: update.Time,
+		Diff: delta,
+		Row:  cloneDifferentialRow(state.row),
+	}}, nil
 }
 
 func differentialIntersectInputCapacity(left, right int) (int, error) {
