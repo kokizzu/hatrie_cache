@@ -187,6 +187,9 @@ func validatePartitionOwnershipConsensusWireVote(vote PartitionOwnershipConsensu
 	if len(vote.Signature) != 0 && len(vote.Signature) != sha256.Size {
 		return fmt.Errorf("%w: signature length", ErrPartitionOwnershipConsensusWireInvalid)
 	}
+	if len(vote.Signature) > 0 && vote.KeyID == "" {
+		return fmt.Errorf("%w: signature without key id", ErrPartitionOwnershipConsensusWireInvalid)
+	}
 	if len(vote.Signature) == 0 && vote.KeyID != "" {
 		return fmt.Errorf("%w: key id without signature", ErrPartitionOwnershipConsensusWireInvalid)
 	}

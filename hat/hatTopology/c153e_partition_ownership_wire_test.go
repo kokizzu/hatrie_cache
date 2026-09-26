@@ -129,6 +129,7 @@ func TestC153ePartitionOwnershipConsensusVoteWireRejectsInvalidValues(t *testing
 		"blank node":            func(vote *PartitionOwnershipConsensusVote) { vote.NodeID = " node-a" },
 		"blank key id":          func(vote *PartitionOwnershipConsensusVote) { vote.KeyID = " key-v1" },
 		"key without signature": func(vote *PartitionOwnershipConsensusVote) { vote.Signature = nil },
+		"signature without key": func(vote *PartitionOwnershipConsensusVote) { vote.KeyID = "" },
 		"short signature":       func(vote *PartitionOwnershipConsensusVote) { vote.Signature = []byte{1} },
 		"missing primary":       func(vote *PartitionOwnershipConsensusVote) { vote.Ownership.Primary = "" },
 	} {
