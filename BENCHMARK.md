@@ -36508,6 +36508,46 @@ The existing ownership registry and ordinary replication defaults are
 unchanged; callers opt into snapshot persistence or transfer explicitly. See
 [C153C_PARTITION_OWNERSHIP_SNAPSHOT.md](C153C_PARTITION_OWNERSHIP_SNAPSHOT.md).
 
+<a id="c153d-partition-ownership-authentication"></a>
+## C153d Partition-Ownership Vote Authentication
+
+Command: `make benchmark-c153d-ownership-auth`.
+
+This is an opt-in control-plane security feature. The benchmark compares the
+existing unsigned quorum evaluator with HMAC-SHA256 signing, verification, and
+quorum evaluation for the same ownership vote. The routing hot path is not
+changed.
+
+Median of five samples:
+
+| Path | ns/op | B/op | allocs/op | Relative CPU | Relative bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Legacy unsigned | 761.8 | 848 | 9 | 1.00x | 1.00x |
+| Authenticated | 2,830 | 2,912 | 30 | 3.71x | 3.43x |
+
+The authenticated path is slower by design because it computes and verifies an
+HMAC over the complete ownership metadata. The overhead is limited to callers
+that opt into authenticated votes; the legacy evaluator remains available for
+trusted in-process callers.
+
+Raw output:
+
+```text
+BenchmarkC153dPartitionOwnershipConsensus/legacy-32          1489860  809.5 ns/op  848 B/op  9 allocs/op
+BenchmarkC153dPartitionOwnershipConsensus/legacy-32          1532114  761.8 ns/op  848 B/op  9 allocs/op
+BenchmarkC153dPartitionOwnershipConsensus/legacy-32          1564852  782.1 ns/op  848 B/op  9 allocs/op
+BenchmarkC153dPartitionOwnershipConsensus/legacy-32          1374253  742.7 ns/op  848 B/op  9 allocs/op
+BenchmarkC153dPartitionOwnershipConsensus/legacy-32          1631161  736.3 ns/op  848 B/op  9 allocs/op
+BenchmarkC153dPartitionOwnershipConsensus/authenticated-32   377784  2881 ns/op  2912 B/op  30 allocs/op
+BenchmarkC153dPartitionOwnershipConsensus/authenticated-32   418466  2829 ns/op  2912 B/op  30 allocs/op
+BenchmarkC153dPartitionOwnershipConsensus/authenticated-32   410958  2816 ns/op  2912 B/op  30 allocs/op
+BenchmarkC153dPartitionOwnershipConsensus/authenticated-32   407202  2834 ns/op  2912 B/op  30 allocs/op
+BenchmarkC153dPartitionOwnershipConsensus/authenticated-32   410437  2830 ns/op  2912 B/op  30 allocs/op
+```
+
+See [C153D_PARTITION_OWNERSHIP_AUTH.md](C153D_PARTITION_OWNERSHIP_AUTH.md) for
+the API and security boundary.
+
 <a id="c154f-schema-migration-barrier-snapshot"></a>
 ### C154f schema migration barrier snapshot
 

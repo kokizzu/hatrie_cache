@@ -265,6 +265,10 @@ name.
   and vote authentication remain caller-owned. See
   [PARTITION_OWNERSHIP_CONSENSUS.md](PARTITION_OWNERSHIP_CONSENSUS.md).
 - [x] C153c CRC-protected bounded binary partition-ownership snapshots with atomic restore, migration-state validation, and no change to the routing hot path. See [C153C_PARTITION_OWNERSHIP_SNAPSHOT.md](C153C_PARTITION_OWNERSHIP_SNAPSHOT.md).
+- [x] C153d Opt-in HMAC-SHA256 authentication for partition-ownership consensus
+  votes. Invalid or unsigned votes are rejected before quorum evaluation while
+  the legacy unsigned evaluator and routing hot path remain unchanged. See
+  [C153D_PARTITION_OWNERSHIP_AUTH.md](C153D_PARTITION_OWNERSHIP_AUTH.md).
 - [ ] C154 Rolling schema changes across replicas.
 - [x] C154b Atomic catalog DDL batches. `hatSchema.SpaceCatalog.ApplyAtomic` validates ordered named-space upserts and deletes before publishing one catalog state, leaving failed batches invisible; row/data-plane coordination remains caller-owned. See [TT030_TRANSACTIONAL_DDL.md](TT030_TRANSACTIONAL_DDL.md).
 - [x] C154a Conservative rolling-schema compatibility preflight over validated

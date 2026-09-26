@@ -19,6 +19,8 @@ type PartitionOwnershipConsensusVote struct {
 	NodeID    string             `json:"node_id"`
 	Ownership PartitionOwnership `json:"ownership"`
 	Accepted  bool               `json:"accepted"`
+	KeyID     string             `json:"key_id,omitempty"`
+	Signature []byte             `json:"signature,omitempty"`
 }
 
 // PartitionOwnershipConsensusDecision is the deterministic result of

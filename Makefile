@@ -27639,3 +27639,31 @@ commit-m090c-projected-source:
 .PHONY: push-m090c-projected-source
 push-m090c-projected-source:
 	sh scripts/push-m090c-projected-source.sh
+
+.PHONY: test-c153d-ownership-auth format-c153d-ownership-auth benchmark-c153d-ownership-auth test-c153d-package race-c153d-package vet-c153d-package stage-c153d-ownership-auth commit-c153d-ownership-auth push-c153d-ownership-auth
+test-c153d-ownership-auth:
+	sh scripts/test-c153d-ownership-auth.sh
+
+format-c153d-ownership-auth:
+	sh scripts/format-c153d-ownership-auth.sh
+
+benchmark-c153d-ownership-auth:
+	sh scripts/benchmark-c153d-ownership-auth.sh
+
+test-c153d-package:
+	sh scripts/test-c153d-package.sh
+
+race-c153d-package:
+	sh scripts/race-c153d-package.sh
+
+vet-c153d-package:
+	sh scripts/vet-c153d-package.sh
+
+stage-c153d-ownership-auth:
+	sh scripts/stage-c153d-ownership-auth.sh
+
+commit-c153d-ownership-auth:
+	sh scripts/commit-c153d-ownership-auth.sh
+
+push-c153d-ownership-auth:
+	sh scripts/push-c153d-ownership-auth.sh
