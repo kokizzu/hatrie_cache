@@ -55,11 +55,28 @@ func TestTU047ClusterWriteCommitGRPCParticipantPhases(t *testing.T) {
 	if record, ok := participant.Status(proposal.TransactionID); !ok || record.Phase != hatReplication.ClusterWriteCommitParticipantPrepared {
 		t.Fatalf("prepared participant status = %#v/%v", record, ok)
 	}
+	status, found, err := client.Status(ctx, proposal.TransactionID)
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if !found || status.Proposal != proposal || status.Phase != hatReplication.ClusterWriteCommitParticipantPrepared {
+		t.Fatalf("Status() = %#v/%v, want prepared proposal", status, found)
+	}
+	if _, found, err := client.Status(ctx, "tx-grpc-missing"); err != nil || found {
+		t.Fatalf("Status(missing) = %t/%v, want false/nil", found, err)
+	}
 	if err := client.Commit(ctx, proposal); err != nil {
 		t.Fatalf("Commit() error = %v", err)
 	}
 	if record, ok := participant.Status(proposal.TransactionID); !ok || record.Phase != hatReplication.ClusterWriteCommitParticipantCommitted {
 		t.Fatalf("committed participant status = %#v/%v", record, ok)
+	}
+	status, found, err = client.Status(ctx, proposal.TransactionID)
+	if err != nil {
+		t.Fatalf("committed Status() error = %v", err)
+	}
+	if !found || status.Proposal != proposal || status.Phase != hatReplication.ClusterWriteCommitParticipantCommitted {
+		t.Fatalf("committed Status() = %#v/%v, want committed proposal", status, found)
 	}
 
 	abortProposal := proposal
@@ -119,5 +136,8 @@ func TestTU047ClusterWriteCommitGRPCRequiresReplicationAuthorization(t *testing.
 	}
 	if _, ok := participant.Status("tx-unauthorized"); ok {
 		t.Fatal("unauthorized prepare changed participant state")
+	}
+	if _, ok, err := client.Status(ctx, "tx-unauthorized"); err == nil || ok {
+		t.Fatalf("unauthorized Status() = %t/%v, want authorization failure", ok, err)
 	}
 }

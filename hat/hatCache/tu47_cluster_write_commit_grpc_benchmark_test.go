@@ -34,8 +34,37 @@ func BenchmarkTU047ClusterWriteCommitGRPC(b *testing.B) {
 			}
 		}
 	})
+	b.Run("direct_participant_status", func(b *testing.B) {
+		participant, err := hatReplication.NewClusterWriteCommitParticipant(hatReplication.ClusterWriteCommitParticipantOptions{MaxRecords: 1})
+		if err != nil {
+			b.Fatal(err)
+		}
+		if _, err := participant.Prepare(proposal); err != nil {
+			b.Fatal(err)
+		}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for range b.N {
+			if _, found := participant.Status(proposal.TransactionID); !found {
+				b.Fatal("participant status was not found")
+			}
+		}
+	})
 
 	client, cleanup := newTU047ClusterWriteCommitBenchmarkClient(b)
+	if err := client.Prepare(context.Background(), proposal); err != nil {
+		cleanup()
+		b.Fatal(err)
+	}
+	b.Run("grpc_participant_status", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for range b.N {
+			if _, found, err := client.Status(context.Background(), proposal.TransactionID); err != nil || !found {
+				b.Fatalf("Status() = %t/%v", found, err)
+			}
+		}
+	})
 	b.Run("grpc_participant_phases", func(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()

@@ -392,6 +392,14 @@ enum ClusterWriteCommitPhase {
   CLUSTER_WRITE_COMMIT_PHASE_PREPARE = 1;
   CLUSTER_WRITE_COMMIT_PHASE_COMMIT = 2;
   CLUSTER_WRITE_COMMIT_PHASE_ABORT = 3;
+  CLUSTER_WRITE_COMMIT_PHASE_STATUS = 4;
+}
+
+enum ClusterWriteCommitParticipantPhase {
+  CLUSTER_WRITE_COMMIT_PARTICIPANT_PHASE_UNSPECIFIED = 0;
+  CLUSTER_WRITE_COMMIT_PARTICIPANT_PHASE_PREPARED = 1;
+  CLUSTER_WRITE_COMMIT_PARTICIPANT_PHASE_COMMITTED = 2;
+  CLUSTER_WRITE_COMMIT_PARTICIPANT_PHASE_ABORTED = 3;
 }
 
 message ClusterWriteCommitRequest {
@@ -406,6 +414,12 @@ message ClusterWriteCommitResponse {
   bool ok = 1;
   string message = 2;
   ClusterWriteCommitPhase phase = 3;
+  string transaction_id = 4;
+  uint64 sequence = 5;
+  uint64 fence_token = 6;
+  bytes payload_digest = 7;
+  bool found = 8;
+  ClusterWriteCommitParticipantPhase participant_phase = 9;
 }
 
 message PartitionOwnershipConsensusVoteRequest {

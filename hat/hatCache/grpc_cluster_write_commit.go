@@ -27,7 +27,10 @@ type ClusterWriteCommitGRPCClient struct {
 // participant node. The caller owns the connection lifetime.
 type ClusterWriteCommitGRPCClientFactory func(context.Context, string) (*ClusterWriteCommitGRPCClient, error)
 
-const clusterWriteCommitPayloadDigestSize = 32
+const (
+	clusterWriteCommitPayloadDigestSize    = 32
+	clusterWriteCommitTransactionIDMaxSize = 1 << 20
+)
 
 // ExecuteClusterWriteCommitOverGRPC binds the existing transport-neutral
 // coordinator to one reusable gRPC client per participant. Connections are
@@ -129,6 +132,62 @@ func (client *ClusterWriteCommitGRPCClient) Abort(ctx context.Context, proposal 
 	return client.call(ctx, hatriecachev1.ClusterWriteCommitPhase_CLUSTER_WRITE_COMMIT_PHASE_ABORT, proposal)
 }
 
+// Status reads a participant's durable phase record without changing it.
+// The status request uses the existing authenticated ClusterWriteCommit RPC
+// and returns found=false when the participant has no record for the ID.
+func (client *ClusterWriteCommitGRPCClient) Status(ctx context.Context, transactionID string) (hatReplication.ClusterWriteCommitParticipantRecord, bool, error) {
+	var zero hatReplication.ClusterWriteCommitParticipantRecord
+	if client == nil || client.client == nil {
+		return zero, false, errors.New("hatriecache: cluster write commit gRPC client is not configured")
+	}
+	transactionID, err := normalizeClusterWriteCommitTransactionID(transactionID)
+	if err != nil {
+		return zero, false, err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if client.replicationToken != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-hatrie-replication-token", client.replicationToken)
+	}
+	response, err := client.client.ClusterWriteCommit(ctx, &hatriecachev1.ClusterWriteCommitRequest{
+		TransactionId: transactionID,
+		Phase:         hatriecachev1.ClusterWriteCommitPhase_CLUSTER_WRITE_COMMIT_PHASE_STATUS,
+	})
+	if err != nil {
+		return zero, false, err
+	}
+	if response == nil || !response.GetOk() {
+		if response == nil || strings.TrimSpace(response.GetMessage()) == "" {
+			return zero, false, errors.New("hatriecache: remote cluster write commit status failed")
+		}
+		return zero, false, errors.New(response.GetMessage())
+	}
+	if response.GetPhase() != hatriecachev1.ClusterWriteCommitPhase_CLUSTER_WRITE_COMMIT_PHASE_STATUS {
+		return zero, false, fmt.Errorf("hatriecache: cluster write commit response phase %s does not match status request", response.GetPhase())
+	}
+	if !response.GetFound() {
+		return zero, false, nil
+	}
+	if response.GetTransactionId() != transactionID {
+		return zero, false, errors.New("hatriecache: cluster write commit status transaction ID does not match request")
+	}
+	digest := response.GetPayloadDigest()
+	if len(digest) != clusterWriteCommitPayloadDigestSize {
+		return zero, false, fmt.Errorf("hatriecache: cluster write commit status payload digest must be %d bytes", clusterWriteCommitPayloadDigestSize)
+	}
+	phase, err := clusterWriteCommitParticipantPhaseFromProto(response.GetParticipantPhase())
+	if err != nil {
+		return zero, false, err
+	}
+	var proposal hatReplication.ClusterWriteCommitProposal
+	proposal.TransactionID = response.GetTransactionId()
+	proposal.Sequence = response.GetSequence()
+	proposal.FenceToken = response.GetFenceToken()
+	copy(proposal.PayloadDigest[:], digest)
+	return hatReplication.ClusterWriteCommitParticipantRecord{Proposal: proposal, Phase: phase}, true, nil
+}
+
 func (client *ClusterWriteCommitGRPCClient) call(ctx context.Context, phase hatriecachev1.ClusterWriteCommitPhase, proposal hatReplication.ClusterWriteCommitProposal) error {
 	if client == nil || client.client == nil {
 		return errors.New("hatriecache: cluster write commit gRPC client is not configured")
@@ -173,6 +232,34 @@ func (server *CacheGRPCServer) ClusterWriteCommit(ctx context.Context, request *
 	if server.options.ClusterWriteCommitParticipant == nil {
 		return nil, status.Error(codes.Unavailable, "cluster write commit participant is not configured")
 	}
+	if request.GetPhase() == hatriecachev1.ClusterWriteCommitPhase_CLUSTER_WRITE_COMMIT_PHASE_STATUS {
+		transactionID, err := normalizeClusterWriteCommitTransactionID(request.GetTransactionId())
+		if err != nil {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
+		if request.GetSequence() != 0 || request.GetFenceToken() != 0 || len(request.GetPayloadDigest()) != 0 {
+			return nil, status.Error(codes.InvalidArgument, "cluster write commit status request must not include proposal fields")
+		}
+		record, found := server.options.ClusterWriteCommitParticipant.Status(transactionID)
+		response := &hatriecachev1.ClusterWriteCommitResponse{
+			Ok:    true,
+			Phase: hatriecachev1.ClusterWriteCommitPhase_CLUSTER_WRITE_COMMIT_PHASE_STATUS,
+			Found: found,
+		}
+		if !found {
+			return response, nil
+		}
+		participantPhase, err := clusterWriteCommitParticipantPhaseToProto(record.Phase)
+		if err != nil {
+			return nil, status.Error(codes.Internal, err.Error())
+		}
+		response.TransactionId = record.Proposal.TransactionID
+		response.Sequence = record.Proposal.Sequence
+		response.FenceToken = record.Proposal.FenceToken
+		response.PayloadDigest = append([]byte(nil), record.Proposal.PayloadDigest[:]...)
+		response.ParticipantPhase = participantPhase
+		return response, nil
+	}
 	proposal, err := clusterWriteCommitProposalFromProto(request)
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
@@ -196,6 +283,43 @@ func (server *CacheGRPCServer) ClusterWriteCommit(ctx context.Context, request *
 	}
 	response.Ok = true
 	return response, nil
+}
+
+func normalizeClusterWriteCommitTransactionID(transactionID string) (string, error) {
+	transactionID = strings.TrimSpace(transactionID)
+	if transactionID == "" {
+		return "", errors.New("cluster write commit transaction ID is required")
+	}
+	if len(transactionID) > clusterWriteCommitTransactionIDMaxSize {
+		return "", fmt.Errorf("cluster write commit transaction ID must be at most %d bytes", clusterWriteCommitTransactionIDMaxSize)
+	}
+	return transactionID, nil
+}
+
+func clusterWriteCommitParticipantPhaseToProto(phase hatReplication.ClusterWriteCommitParticipantPhase) (hatriecachev1.ClusterWriteCommitParticipantPhase, error) {
+	switch phase {
+	case hatReplication.ClusterWriteCommitParticipantPrepared:
+		return hatriecachev1.ClusterWriteCommitParticipantPhase_CLUSTER_WRITE_COMMIT_PARTICIPANT_PHASE_PREPARED, nil
+	case hatReplication.ClusterWriteCommitParticipantCommitted:
+		return hatriecachev1.ClusterWriteCommitParticipantPhase_CLUSTER_WRITE_COMMIT_PARTICIPANT_PHASE_COMMITTED, nil
+	case hatReplication.ClusterWriteCommitParticipantAborted:
+		return hatriecachev1.ClusterWriteCommitParticipantPhase_CLUSTER_WRITE_COMMIT_PARTICIPANT_PHASE_ABORTED, nil
+	default:
+		return hatriecachev1.ClusterWriteCommitParticipantPhase_CLUSTER_WRITE_COMMIT_PARTICIPANT_PHASE_UNSPECIFIED, fmt.Errorf("hatriecache: unknown cluster write commit participant phase %d", phase)
+	}
+}
+
+func clusterWriteCommitParticipantPhaseFromProto(phase hatriecachev1.ClusterWriteCommitParticipantPhase) (hatReplication.ClusterWriteCommitParticipantPhase, error) {
+	switch phase {
+	case hatriecachev1.ClusterWriteCommitParticipantPhase_CLUSTER_WRITE_COMMIT_PARTICIPANT_PHASE_PREPARED:
+		return hatReplication.ClusterWriteCommitParticipantPrepared, nil
+	case hatriecachev1.ClusterWriteCommitParticipantPhase_CLUSTER_WRITE_COMMIT_PARTICIPANT_PHASE_COMMITTED:
+		return hatReplication.ClusterWriteCommitParticipantCommitted, nil
+	case hatriecachev1.ClusterWriteCommitParticipantPhase_CLUSTER_WRITE_COMMIT_PARTICIPANT_PHASE_ABORTED:
+		return hatReplication.ClusterWriteCommitParticipantAborted, nil
+	default:
+		return 0, fmt.Errorf("hatriecache: unknown cluster write commit participant phase %d", phase)
+	}
 }
 
 func clusterWriteCommitProposalFromProto(request *hatriecachev1.ClusterWriteCommitRequest) (hatReplication.ClusterWriteCommitProposal, error) {

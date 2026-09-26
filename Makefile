@@ -28362,3 +28362,7 @@ push-ch039-grouped-approx:
 .PHONY: deliver-ch039-grouped-approx
 deliver-ch039-grouped-approx:
 	bash scripts/deliver-ch039-grouped-approx.sh deliver
+
+.PHONY: deliver-t047l-grpc-status
+deliver-t047l-grpc-status:
+	bash ./scripts/deliver-t047l-grpc-status.sh deliver

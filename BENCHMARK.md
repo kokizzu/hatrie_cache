@@ -38889,6 +38889,25 @@ The incremental helper retains exact string multiplicities and is opt-in; the
 existing int64 path, SQL planner, and default behavior remain unchanged. See
 [M037L_DIFFERENTIAL_STRING_COUNT_DISTINCT.md](M037L_DIFFERENTIAL_STRING_COUNT_DISTINCT.md).
 <a id="t047k-http-status"></a>
+
+<a id="t047l-grpc-status"></a>
+## T047l gRPC participant status
+
+Command: `make benchmark-t047-grpc-transport`.
+
+Measured on Linux/amd64, AMD Ryzen 9 5950X, five samples per subbenchmark:
+
+| Path | Median ns/op | B/op | allocs/op | Relative latency |
+| --- | ---: | ---: | ---: | ---: |
+| Direct participant `Status` | 19.60 | 0 | 0 | 1.00x |
+| Authenticated gRPC `Status` | 32,664 | 12,492 | 175 | 1,667x direct latency |
+| Existing gRPC prepare+commit | 62,168 | 24,530 | 348 | status is 1.90x lower |
+
+Status is a read-only recovery operation over the existing authenticated
+`ClusterWriteCommit` RPC. Compared with the existing prepare+commit pair, it
+uses 1.96x fewer response-path bytes and 1.99x fewer allocations. The cost is
+one authenticated unary round trip and the additional proposal metadata in a
+found response; normal write phases and their wire contract are unchanged.
 ## T047k HTTP participant status
 
 Command: `make benchmark-t047k-http-status`.

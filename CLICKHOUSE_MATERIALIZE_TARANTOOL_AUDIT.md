@@ -269,6 +269,7 @@ records a separate implementation boundary.
 - [x] T047e Transport-neutral two-phase cluster write commit with a prepare barrier and explicit indeterminate commit outcome; see [T047_CLUSTER_WRITE_COMMIT.md](T047_CLUSTER_WRITE_COMMIT.md).
 - [x] T047f Bounded durable participant phase state for two-phase writes. `ClusterWriteCommitParticipant` provides idempotent prepare/commit/abort transitions, deterministic bounded `HCP1` snapshots, strict restore validation, and atomic replacement; transport wiring, application-data durability, and reconciliation policy remain caller-owned. See [T047_PARTICIPANT_STATE.md](T047_PARTICIPANT_STATE.md).
 - [x] T047k Authenticated HTTP participant status reads for recovery inspection; see [T047K_HTTP_STATUS.md](T047K_HTTP_STATUS.md).
+- [x] T047l Authenticated gRPC participant status reads over the existing cluster-write RPC; see [T047L_GRPC_STATUS.md](T047L_GRPC_STATUS.md).
 - [ ] T103 Native FFI extension boundary.
 - [ ] T150 Language-neutral client SDK coverage.
 
