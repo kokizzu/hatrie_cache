@@ -27,6 +27,7 @@ var (
 	ErrSQLMultiSourceSnapshotDuplicateSource = errors.New("hatSql: multi-source snapshot source is duplicated")
 	ErrSQLMultiSourceSnapshotSourceLimit     = errors.New("hatSql: multi-source snapshot source limit exceeded")
 	ErrSQLMultiSourceSnapshotIdentity        = errors.New("hatSql: multi-source snapshot identity is invalid")
+	ErrSQLMultiSourceSnapshotUnavailable    = errors.New("hatSql: multi-source snapshot is not published")
 	ErrSQLMultiSourceSnapshotInvalid         = errors.New("hatSql: multi-source snapshot is invalid")
 
 	// These aliases let callers handle a coordinated source failure with the
@@ -318,6 +319,27 @@ func (coordinator *SQLMultiSourceSnapshotCoordinator) View() *SQLMultiSourceSnap
 	return view
 }
 
+// BeginSQLSnapshot pins the currently published immutable view for one SQL
+// execution. A later capture publishes a new view pointer and cannot mutate
+// the one returned here, so the release callback is intentionally a no-op.
+func (coordinator *SQLMultiSourceSnapshotCoordinator) BeginSQLSnapshot(ctx context.Context) (SQLSourceResolver, func(), error) {
+    if coordinator == nil {
+        return nil, nil, ErrSQLMultiSourceSnapshotNil
+    }
+    if ctx == nil {
+        ctx = context.Background()
+    }
+    if err := ctx.Err(); err != nil {
+        return nil, nil, err
+    }
+    coordinator.mu.RLock()
+    view := coordinator.view
+    coordinator.mu.RUnlock()
+    if view == nil {
+        return nil, nil, ErrSQLMultiSourceSnapshotUnavailable
+    }
+    return view, func() {}, nil
+}
 // ResolveSQLSource resolves a source from the currently published view.
 func (coordinator *SQLMultiSourceSnapshotCoordinator) ResolveSQLSource(kind, key string) ([]Row, error) {
 	if coordinator == nil {

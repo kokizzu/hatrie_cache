@@ -28188,3 +28188,34 @@ push-t047j-http-transport:
 .PHONY: deliver-t047j-http-transport
 deliver-t047j-http-transport:
 	bash ./scripts/deliver-t047j-http-transport.sh deliver
+
+.PHONY: test-m032-snapshot-provider
+test-m032-snapshot-provider:
+	@bash scripts/test-m032-snapshot-provider.sh
+
+.PHONY: format-m032-snapshot-provider benchmark-m032-snapshot-provider
+format-m032-snapshot-provider:
+	@bash scripts/format-m032-snapshot-provider.sh
+
+benchmark-m032-snapshot-provider:
+	@bash scripts/benchmark-m032-snapshot-provider.sh
+
+.PHONY: race-m032-snapshot-provider
+race-m032-snapshot-provider:
+	@bash scripts/race-m032-snapshot-provider.sh
+
+.PHONY: plan-m032-snapshot-provider stage-m032-snapshot-provider commit-m032-snapshot-provider push-m032-snapshot-provider deliver-m032-snapshot-provider
+plan-m032-snapshot-provider:
+	@bash scripts/deliver-m032-snapshot-provider.sh plan
+
+stage-m032-snapshot-provider:
+	@bash scripts/deliver-m032-snapshot-provider.sh stage
+
+commit-m032-snapshot-provider:
+	@bash scripts/deliver-m032-snapshot-provider.sh commit
+
+push-m032-snapshot-provider:
+	@bash scripts/deliver-m032-snapshot-provider.sh push
+
+deliver-m032-snapshot-provider:
+	@bash scripts/deliver-m032-snapshot-provider.sh deliver

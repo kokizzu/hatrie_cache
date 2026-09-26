@@ -38630,3 +38630,35 @@ direct cost is 1,442 ns/op, 625 B/op, and 13 allocs/op. HTTP is therefore
 110.60x slower, uses 46.28x more bytes, and performs 19.54x as many
 allocations. This is an explicit interoperability cost; the transport is
 opt-in and the existing direct and gRPC paths remain unchanged.
+
+## M032 SQL snapshot provider pinning
+
+Raw `make benchmark-m032-snapshot-provider` results (`-benchmem`, five
+samples, Linux/amd64, AMD Ryzen 9 5950X):
+
+```text
+BenchmarkM032MultiSourceSnapshotLiveResolveBaseline-32  5198348  232.1 ns/op  344 B/op  3 allocs/op
+BenchmarkM032MultiSourceSnapshotLiveResolveBaseline-32  5223302  223.8 ns/op  344 B/op  3 allocs/op
+BenchmarkM032MultiSourceSnapshotLiveResolveBaseline-32  5306199  232.1 ns/op  344 B/op  3 allocs/op
+BenchmarkM032MultiSourceSnapshotLiveResolveBaseline-32  5294707  228.9 ns/op  344 B/op  3 allocs/op
+BenchmarkM032MultiSourceSnapshotLiveResolveBaseline-32  5398131  223.0 ns/op  344 B/op  3 allocs/op
+BenchmarkM032MultiSourceSnapshotBeginAndResolve-32      5044141  231.8 ns/op  344 B/op  3 allocs/op
+BenchmarkM032MultiSourceSnapshotBeginAndResolve-32      5306896  231.4 ns/op  344 B/op  3 allocs/op
+BenchmarkM032MultiSourceSnapshotBeginAndResolve-32      5279688  226.2 ns/op  344 B/op  3 allocs/op
+BenchmarkM032MultiSourceSnapshotBeginAndResolve-32      5309121  229.3 ns/op  344 B/op  3 allocs/op
+BenchmarkM032MultiSourceSnapshotBeginAndResolve-32      5380942  228.6 ns/op  344 B/op  3 allocs/op
+BenchmarkM032MultiSourceSnapshotPinnedResolve-32        5439189  220.1 ns/op  344 B/op  3 allocs/op
+BenchmarkM032MultiSourceSnapshotPinnedResolve-32        5458924  221.7 ns/op  344 B/op  3 allocs/op
+BenchmarkM032MultiSourceSnapshotPinnedResolve-32        5194110  223.2 ns/op  344 B/op  3 allocs/op
+BenchmarkM032MultiSourceSnapshotPinnedResolve-32        5309815  220.9 ns/op  344 B/op  3 allocs/op
+BenchmarkM032MultiSourceSnapshotPinnedResolve-32        5412830  221.8 ns/op  344 B/op  3 allocs/op
+PASS
+```
+
+The live resolver baseline median is 228.9 ns/op. Beginning a pinned view and
+resolving through it is 229.3 ns/op, with identical 344 B/op and 3
+allocations. Reusing the pinned view for repeated source reads is 221.7
+ns/op, about 0.97x the baseline CPU time, with no memory or allocation change.
+The feature is retained because it closes the cross-generation consistency
+gap at effectively zero steady-state cost; it remains opt-in through the
+multi-source coordinator.

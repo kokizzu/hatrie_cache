@@ -39,6 +39,27 @@ if err != nil {
 orders, err := result.View.ResolveSQLSource("POSTGRES", "orders")
 ```
 
+## SQL Execution Pinning
+
+`SQLMultiSourceSnapshotCoordinator` implements `SQLSnapshotProvider`. After a
+successful capture, it can be passed directly to SQL execution:
+
+```go
+result, err := hatSql.ExecuteSQLQueryContext(
+    ctx,
+    query,
+    coordinator,
+    hatSql.SQLQueryOptions{},
+)
+```
+
+The query captures the current immutable publication view once through
+`BeginSQLSnapshot`. A later capture swaps in a new view without changing
+the one already used by the query, so independent source reads cannot mix
+generations. The hook is only used when the caller supplies this coordinator;
+ordinary resolvers and default SQL execution remain unchanged. There is no
+per-row allocation or retained lock for the release callback.
+
 The checkpoint store's `Commit` receives the complete multi-source payload in
 one call. A source authentication, provider, validation, context, or commit
 failure leaves the previously published coordinator view unchanged. On a

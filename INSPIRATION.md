@@ -372,7 +372,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M029 SUBSCRIBE-style streaming results.
 - [x] M030 Snapshot-then-tail subscription startup.
 - [x] M031 Transaction-consistent snapshots.
-- [ ] M032 Strong consistency across all independent source partitions.
+- [x] M032 Strong consistency across all independent source partitions. Partially adopted: `SQLMultiSourceSnapshotCoordinator` now implements `SQLSnapshotProvider`, so SQL execution pins one immutable publication generation across independent sources; distributed frontier acquisition and physical source coordination remain caller-owned. See [MU04_MULTI_SOURCE_SNAPSHOT_COORDINATOR.md](MU04_MULTI_SOURCE_SNAPSHOT_COORDINATOR.md).
 - [x] M032a Opt-in SQL snapshot provider pins every source read in one query to a caller-owned immutable view; full distributed frontier coordination remains open. See [SQL_SNAPSHOT_PROVIDER.md](SQL_SNAPSHOT_PROVIDER.md).
 - [x] M032b Fixed-partition indexed common frontier tracking with O(1) readiness checks; physical source waiting remains caller-owned. See [SQL_SOURCE_FRONTIERS.md](SQL_SOURCE_FRONTIERS.md).
 - [x] M032c Bounded context-aware waits over indexed common source frontiers, with atomic batch publication, generation-based wake-ups, and an allocation-free cached ready path; physical snapshot acquisition remains caller-owned. See [SQL_SOURCE_FRONTIERS.md](SQL_SOURCE_FRONTIERS.md#bounded-snapshot-barrier).
