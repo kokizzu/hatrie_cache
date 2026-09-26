@@ -66,7 +66,9 @@ func (reachability *IncrementalRecursiveReachability) Append(edges []RecursiveRe
 }
 
 func (reachability *IncrementalRecursiveReachability) appendLocked(edges []RecursiveReachabilityEdge) ([]DifferentialRow, error) {
-
+	if len(edges) == 1 {
+		return reachability.appendSingleLocked(edges[0])
+	}
 	pending := make(map[string]struct{}, len(edges))
 	var pendingEdges map[string]RecursiveReachabilityEdge
 	if reachability.mutableEdges != nil {
@@ -123,6 +125,71 @@ func (reachability *IncrementalRecursiveReachability) appendLocked(edges []Recur
 		}
 		for key, edge := range pendingEdges {
 			reachability.mutableEdges[key] = edge
+		}
+	}
+	if len(updates) == 0 {
+		return nil, nil
+	}
+	return updates, nil
+}
+
+func (reachability *IncrementalRecursiveReachability) appendSingleLocked(edge RecursiveReachabilityEdge) ([]DifferentialRow, error) {
+	if err := validateRecursiveReachabilityEdge(edge); err != nil {
+		return nil, err
+	}
+	if _, exists := reachability.edges[edge.Key]; exists {
+		return nil, fmt.Errorf("%w: %q", ErrIncrementalRecursiveReachabilityDuplicateEdge, edge.Key)
+	}
+	reachability.edges[edge.Key] = struct{}{}
+	if reachability.mutableEdges != nil {
+		reachability.mutableEdges[edge.Key] = edge
+	}
+
+	ancestors := reachability.ancestors[edge.From]
+	destinations := reachability.reachable[edge.To]
+	if len(ancestors) == 0 && len(destinations) == 0 {
+		if _, exists := reachability.reachable[edge.From][edge.To]; exists {
+			return nil, nil
+		}
+		if reachability.reachable[edge.From] == nil {
+			reachability.reachable[edge.From] = make(map[string]struct{})
+		}
+		reachability.reachable[edge.From][edge.To] = struct{}{}
+		if reachability.ancestors[edge.To] == nil {
+			reachability.ancestors[edge.To] = make(map[string]struct{})
+		}
+		reachability.ancestors[edge.To][edge.From] = struct{}{}
+		return []DifferentialRow{{
+			Key:  recursiveReachabilityPairKey(edge.From, edge.To),
+			Diff: 1,
+			Row:  Row{"from": edge.From, "to": edge.To},
+		}}, nil
+	}
+
+	sources := recursiveReachabilityEndpoints(ancestors, edge.From)
+	destinationEndpoints := recursiveReachabilityEndpoints(destinations, edge.To)
+	updates := make([]DifferentialRow, 0, len(sources))
+	for _, source := range sources {
+		for _, destination := range destinationEndpoints {
+			if _, exists := reachability.reachable[source][destination]; exists {
+				continue
+			}
+			if reachability.reachable[source] == nil {
+				reachability.reachable[source] = make(map[string]struct{})
+			}
+			reachability.reachable[source][destination] = struct{}{}
+			if reachability.ancestors[destination] == nil {
+				reachability.ancestors[destination] = make(map[string]struct{})
+			}
+			reachability.ancestors[destination][source] = struct{}{}
+			updates = append(updates, DifferentialRow{
+				Key:  recursiveReachabilityPairKey(source, destination),
+				Diff: 1,
+				Row: Row{
+					"from": source,
+					"to":   destination,
+				},
+			})
 		}
 	}
 	if len(updates) == 0 {
