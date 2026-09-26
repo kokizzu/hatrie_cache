@@ -407,6 +407,17 @@ retain the established evaluator fallback. Five-sample benchmarking recorded
 without changing wire, persistence, packing, or configuration behavior. See
 [CH048_NULL_PREDICATE.md](CH048_NULL_PREDICATE.md) and [BENCHMARK.md](BENCHMARK.md).
 
+### M065-numeric-in: Packed Numeric `IN` Predicate Kernel
+
+Implemented the CH-048 literal-membership follow-up. Direct numeric `IN`
+lists on packed `int64` and `float64` columns now use sorted, deduplicated
+membership sets with zero allocations in the row loop. Nullable validity,
+malformed metadata, `NOT IN`, `NULL` list items, unsafe coercions, and
+unsupported shapes retain the general evaluator. The measured workload is
+41.45x faster than the paired fallback and drops from 555,015 B/op and 12,032
+allocations/op to zero. See [CH048_NUMERIC_IN.md](CH048_NUMERIC_IN.md) and
+[BENCHMARK.md](BENCHMARK.md#ch048-numeric-in-predicates).
+
 ### M065w: Mutable Numeric RANGE Windows
 
 Adopted as an opt-in `hatSql.MutableIncrementalRangeWindow`. It supports the

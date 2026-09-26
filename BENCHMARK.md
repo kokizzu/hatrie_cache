@@ -38336,3 +38336,21 @@ BenchmarkPartitionOwnershipConsensusCollection-32              1137  1054080 ns/
 BenchmarkPartitionOwnershipConsensusCollection-32              1131  1069328 ns/op 11240 B/op 107 allocs/op
 BenchmarkPartitionOwnershipConsensusCollection-32              1084  1070129 ns/op 11248 B/op 107 allocs/op
 ```
+
+<a id="ch048-numeric-in-predicates"></a>
+## CH-048 Packed Numeric `IN` Predicate Kernels
+
+Command: `make benchmark-ch048-numeric-in`.
+
+Five samples compare the original general evaluator, a paired post-change
+fallback, and the packed `int64`/`float64` literal-`IN` kernel over 4,096 rows:
+
+| Workload | Median ns/op | B/op | allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: |
+| Pre-change general evaluator | 1,003,325 | 555,016 | 12,032 | 1.00x |
+| Paired fallback | 967,145 | 555,015 | 12,032 | 1.00x |
+| Packed numeric `IN` fast path | 23,331 | 0 | 0 | **41.45x faster than fallback** |
+
+The kernel removes 555,015 B/op and 12,032 allocations/op for this workload.
+Unsafe shapes remain on the general evaluator. Raw samples and fallback rules
+are recorded in [CH048_NUMERIC_IN.md](CH048_NUMERIC_IN.md).

@@ -27839,3 +27839,36 @@ commit-ch048-null:
 push-ch048-null:
 	bash scripts/push-ch048-null.sh
 # CH048_NULL_FEATURE_TARGETS_END
+# CH048_NUMERIC_IN_FEATURE_TARGETS_BEGIN
+.PHONY: test-ch048-numeric-in-package
+test-ch048-numeric-in-package:
+	bash scripts/test-ch048-numeric-in-package.sh
+
+.PHONY: race-ch048-numeric-in
+race-ch048-numeric-in:
+	bash scripts/race-ch048-numeric-in.sh
+
+.PHONY: vet-ch048-numeric-in
+vet-ch048-numeric-in:
+	bash scripts/vet-ch048-numeric-in.sh
+
+.PHONY: verify-ch048-numeric-in-docs
+verify-ch048-numeric-in-docs:
+	bash scripts/verify-ch048-numeric-in-docs.sh
+
+.PHONY: review-ch048-numeric-in
+review-ch048-numeric-in:
+	bash scripts/review-ch048-numeric-in.sh
+
+.PHONY: stage-ch048-numeric-in
+stage-ch048-numeric-in:
+	bash scripts/stage-ch048-numeric-in.sh
+
+.PHONY: commit-ch048-numeric-in
+commit-ch048-numeric-in:
+	bash scripts/commit-ch048-numeric-in.sh
+
+.PHONY: push-ch048-numeric-in
+push-ch048-numeric-in:
+	bash scripts/push-ch048-numeric-in.sh
+# CH048_NUMERIC_IN_FEATURE_TARGETS_END

@@ -198,3 +198,12 @@ planner statistics. Consensus,
 distributed fan-out, durable dataflow state, and automatic repartitioning need
 separate designs because they affect backup, recovery, and correctness across
 nodes.
+
+## CH-048 numeric `IN` follow-up
+
+The packed columnar SQL path now recognizes direct literal numeric `IN` lists
+and uses sorted, deduplicated `int64`/`float64` membership kernels. Nullable
+validity, malformed metadata, `NOT IN`, `NULL` list items, unsafe coercions,
+and unsupported expression shapes retain the general evaluator. See
+[CH048_NUMERIC_IN.md](CH048_NUMERIC_IN.md) and
+[BENCHMARK.md](BENCHMARK.md#ch048-numeric-in-predicates).
