@@ -227,6 +227,9 @@ func JoinDifferentialRows(left, right []DifferentialRow, match DifferentialJoinM
 	if project == nil {
 		return nil, ErrDifferentialJoinProjectRequired
 	}
+	if result, handled, err := smallDifferentialJoin(left, right, match, project); handled {
+		return result, err
+	}
 	leftRows, err := ConsolidateDifferentialRows(left)
 	if err != nil {
 		return nil, fmt.Errorf("consolidate left differential rows: %w", err)
@@ -264,4 +267,46 @@ func JoinDifferentialRows(left, right []DifferentialRow, match DifferentialJoinM
 		}
 	}
 	return consolidateDifferentialRows(joined, false)
+}
+
+func smallDifferentialJoin(left, right []DifferentialRow, match DifferentialJoinMatchFunc, project DifferentialJoinProjectFunc) ([]DifferentialRow, bool, error) {
+	if len(left) != 1 || len(right) != 1 {
+		return nil, false, nil
+	}
+	leftUpdate := left[0]
+	rightUpdate := right[0]
+	if leftUpdate.Key == "" {
+		return nil, true, fmt.Errorf("consolidate left differential rows: differential row key is required")
+	}
+	if rightUpdate.Key == "" {
+		return nil, true, fmt.Errorf("consolidate right differential rows: differential row key is required")
+	}
+	if leftUpdate.Diff == 0 || rightUpdate.Diff == 0 {
+		return nil, true, nil
+	}
+	leftUpdate.Row = cloneDifferentialRow(leftUpdate.Row)
+	rightUpdate.Row = cloneDifferentialRow(rightUpdate.Row)
+	matches, err := match(leftUpdate.Row, rightUpdate.Row)
+	if err != nil {
+		return nil, true, fmt.Errorf("match differential rows %q and %q: %w", leftUpdate.Key, rightUpdate.Key, err)
+	}
+	if !matches {
+		return nil, true, nil
+	}
+	weight, ok := multiplyDifferentialCounts(leftUpdate.Diff, rightUpdate.Diff)
+	if !ok {
+		return nil, true, fmt.Errorf("join differential rows %q and %q: %w", leftUpdate.Key, rightUpdate.Key, ErrDifferentialJoinWeightOverflow)
+	}
+	key, row, err := project(leftUpdate.Row, rightUpdate.Row)
+	if err != nil {
+		return nil, true, fmt.Errorf("project differential rows %q and %q: %w", leftUpdate.Key, rightUpdate.Key, err)
+	}
+	if key == "" {
+		return nil, true, ErrDifferentialRowKeyRequired
+	}
+	joinedTime := leftUpdate.Time
+	if rightUpdate.Time > joinedTime {
+		joinedTime = rightUpdate.Time
+	}
+	return []DifferentialRow{{Key: key, Time: joinedTime, Diff: weight, Row: cloneDifferentialRow(row)}}, true, nil
 }
