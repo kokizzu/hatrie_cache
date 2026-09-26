@@ -119,7 +119,7 @@ func validateNativeSQLDataflowQuery(query *sqlQuery) error {
 type nativeSQLDataflowGroupPlan struct {
 	group               sqlExpr
 	projectionAggregate []int
-	aggregates           []sqlStreamAggregate
+	aggregates          []sqlStreamAggregate
 }
 
 type nativeSQLDataflowCompositeGroupPlan struct {
@@ -451,6 +451,15 @@ func nativeSQLDataflowAggregateExpression(expr sqlExpr) (sqlStreamAggregate, boo
 		}
 		argument := expr.args[0]
 		aggregate.arg = &argument
+	case "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE":
+		if len(expr.args) == 0 || expr.args[0].kind == "star" || !sqlStreamScalarExpr(expr.args[0]) {
+			return sqlStreamAggregate{}, false
+		}
+		state, ok := newSQLApproximateStreamState(expr)
+		if !ok {
+			return sqlStreamAggregate{}, false
+		}
+		aggregate.approximate = state
 	case "COUNTIF", "COUNT_IF":
 		if len(expr.args) != 1 || !sqlStreamScalarExpr(expr.args[0]) {
 			return sqlStreamAggregate{}, false
@@ -480,6 +489,16 @@ func nativeSQLDataflowAggregateExpression(expr sqlExpr) (sqlStreamAggregate, boo
 		aggregate.filter = &filter
 	}
 	return aggregate, true
+}
+
+func cloneNativeSQLDataflowAggregate(aggregate sqlStreamAggregate) sqlStreamAggregate {
+	if aggregate.approximate == nil {
+		return aggregate
+	}
+	if state, ok := newSQLApproximateStreamState(aggregate.approximate.expr); ok {
+		aggregate.approximate = state
+	}
+	return aggregate
 }
 
 func nativeSQLDataflowConditionalAggregate(expr sqlExpr) bool {
@@ -534,9 +553,6 @@ func executeNativeSQLDataflow(ctx context.Context, query *sqlQuery, initial []SQ
 		}
 		return executeNativeSQLDataflowDistinct(ctx, query, initial, plan)
 	}
-	if plan, ok := nativeSQLDataflowQuadGroupPlanFor(query); ok {
-		return executeNativeSQLDataflowQuadGroups(ctx, query, initial, plan)
-	}
 	if plan, ok := nativeSQLDataflowGroupPlanFor(query); ok {
 		return executeNativeSQLDataflowGroups(ctx, query, initial, plan)
 	}
@@ -545,6 +561,9 @@ func executeNativeSQLDataflow(ctx context.Context, query *sqlQuery, initial []SQ
 	}
 	if plan, ok := nativeSQLDataflowTripleGroupPlanFor(query); ok {
 		return executeNativeSQLDataflowTripleGroups(ctx, query, initial, plan)
+	}
+	if plan, ok := nativeSQLDataflowQuadGroupPlanFor(query); ok {
+		return executeNativeSQLDataflowQuadGroups(ctx, query, initial, plan)
 	}
 	if aggregates, ok := nativeSQLDataflowAggregatePlan(query); ok {
 		return executeNativeSQLDataflowAggregates(ctx, query, initial, aggregates)
@@ -958,7 +977,7 @@ func executeNativeSQLDataflowGroups(ctx context.Context, query *sqlQuery, initia
 			groupIndex = len(groups)
 			if isNull {
 				nullGroup = groupIndex
-		} else if stringValue, stringOK := value.(string); stringOK {
+			} else if stringValue, stringOK := value.(string); stringOK {
 				if stringIndexes == nil {
 					stringIndexes = make(map[string]int, len(initial))
 				}
@@ -968,7 +987,9 @@ func executeNativeSQLDataflowGroups(ctx context.Context, query *sqlQuery, initia
 			}
 			group := nativeSQLDataflowGroupState{key: groupValue, value: value, null: isNull, aggregateOffset: len(aggregates)}
 			groups = append(groups, group)
-			aggregates = append(aggregates, plan.aggregates...)
+			for _, aggregate := range plan.aggregates {
+				aggregates = append(aggregates, cloneNativeSQLDataflowAggregate(aggregate))
+			}
 		}
 		group := groups[groupIndex]
 		for _, aggregateIndex := range plan.projectionAggregate {
@@ -1059,7 +1080,9 @@ func executeNativeSQLDataflowCompositeGroups(ctx context.Context, query *sqlQuer
 				values:          values,
 				aggregateOffset: len(aggregates),
 			})
-			aggregates = append(aggregates, plan.aggregates...)
+			for _, aggregate := range plan.aggregates {
+				aggregates = append(aggregates, cloneNativeSQLDataflowAggregate(aggregate))
+			}
 		}
 		group := groups[groupIndex]
 		for aggregateIndex := range plan.aggregates {

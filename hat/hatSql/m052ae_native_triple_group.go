@@ -118,7 +118,9 @@ func executeNativeSQLDataflowTripleGroups(ctx context.Context, query *sqlQuery, 
 				values:          values,
 				aggregateOffset: len(aggregates),
 			})
-			aggregates = append(aggregates, plan.aggregates...)
+			for _, aggregate := range plan.aggregates {
+				aggregates = append(aggregates, cloneNativeSQLDataflowAggregate(aggregate))
+			}
 		}
 		group := groups[groupIndex]
 		for aggregateIndex := range plan.aggregates {

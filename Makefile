@@ -28319,3 +28319,38 @@ push-m052ag-native-quad-grouped-ordered:
 
 deliver-m052ag-native-quad-grouped-ordered:
 	@bash scripts/deliver-m052ag-native-quad-grouped-ordered.sh deliver
+.PHONY: test-ch039-grouped-approx
+test-ch039-grouped-approx:
+	bash scripts/test-ch039-grouped-approx.sh
+
+.PHONY: benchmark-ch039-grouped-approx
+benchmark-ch039-grouped-approx:
+	bash scripts/benchmark-ch039-grouped-approx.sh
+
+.PHONY: format-ch039-grouped-approx
+format-ch039-grouped-approx:
+	bash scripts/format-ch039-grouped-approx.sh
+
+.PHONY: race-ch039-grouped-approx
+race-ch039-grouped-approx:
+	bash scripts/race-ch039-grouped-approx.sh
+
+.PHONY: plan-ch039-grouped-approx
+plan-ch039-grouped-approx:
+	bash scripts/deliver-ch039-grouped-approx.sh plan
+
+.PHONY: stage-ch039-grouped-approx
+stage-ch039-grouped-approx:
+	bash scripts/deliver-ch039-grouped-approx.sh stage
+
+.PHONY: commit-ch039-grouped-approx
+commit-ch039-grouped-approx:
+	bash scripts/deliver-ch039-grouped-approx.sh commit
+
+.PHONY: push-ch039-grouped-approx
+push-ch039-grouped-approx:
+	bash scripts/deliver-ch039-grouped-approx.sh push
+
+.PHONY: deliver-ch039-grouped-approx
+deliver-ch039-grouped-approx:
+	bash scripts/deliver-ch039-grouped-approx.sh deliver

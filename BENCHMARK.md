@@ -22450,6 +22450,58 @@ Raw output after the change:
 4354967 ns/op 192827 B/op 20154 allocs/op
 ```
 
+## CH-039 grouped approximate aggregate native dataflow
+
+This benchmark uses 20,000 rows, 64 string groups, and both
+`APPROX_COUNT_DISTINCT` and `APPROX_PERCENTILE` in one grouped query. Five
+samples were collected before and after enabling native grouped sketch state
+on an AMD Ryzen 9 5950X. The fallback is forced with
+`DisableNativeDataflow: true`; lower is better.
+
+| Executor | Median ns/op | Median B/op | Median allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: |
+| Materialized fallback | 19,550,988 | 21,211,671 | 121,467 | baseline |
+| Native grouped sketches | 11,455,037 | 4,941,887 | 61,212 | 1.71x faster, 4.29x less allocated memory, 1.98x fewer allocations |
+
+The feature changes execution only; the existing sketch implementations and
+their approximation behavior remain unchanged. Memory still grows with the
+number of groups because every group owns independent sketch state. State and
+merge functions, `APPROX_TOP_K`, `AUTO_COUNT_DISTINCT`, and T-Digest variants
+remain on their existing paths.
+
+Raw output before the change (automatic execution still fell back):
+
+```text
+BenchmarkCH039GroupedApproxFallback-32      60  19709689 ns/op  21211924 B/op  121467 allocs/op
+BenchmarkCH039GroupedApproxFallback-32      56  19766770 ns/op  21211611 B/op  121466 allocs/op
+BenchmarkCH039GroupedApproxFallback-32      62  18525587 ns/op  21211742 B/op  121466 allocs/op
+BenchmarkCH039GroupedApproxFallback-32      54  19762473 ns/op  21211617 B/op  121466 allocs/op
+BenchmarkCH039GroupedApproxFallback-32      51  20122789 ns/op  21211869 B/op  121467 allocs/op
+BenchmarkCH039GroupedApproxAutomatic-32    61  19010893 ns/op  21211766 B/op  121467 allocs/op
+BenchmarkCH039GroupedApproxAutomatic-32    62  19377948 ns/op  21211607 B/op  121467 allocs/op
+BenchmarkCH039GroupedApproxAutomatic-32    54  18818170 ns/op  21211814 B/op  121466 allocs/op
+BenchmarkCH039GroupedApproxAutomatic-32    61  18672011 ns/op  21211669 B/op  121467 allocs/op
+BenchmarkCH039GroupedApproxAutomatic-32    63  18867823 ns/op  21211683 B/op  121467 allocs/op
+```
+
+Raw output after the change:
+
+```text
+BenchmarkCH039GroupedApproxFallback-32      58  19931542 ns/op  21211583 B/op  121467 allocs/op
+BenchmarkCH039GroupedApproxFallback-32      51  19671601 ns/op  21211680 B/op  121465 allocs/op
+BenchmarkCH039GroupedApproxFallback-32      62  18744024 ns/op  21211835 B/op  121467 allocs/op
+BenchmarkCH039GroupedApproxFallback-32      55  19212455 ns/op  21211616 B/op  121466 allocs/op
+BenchmarkCH039GroupedApproxFallback-32      61  19550988 ns/op  21211671 B/op  121467 allocs/op
+BenchmarkCH039GroupedApproxAutomatic-32    100  11455037 ns/op   4941887 B/op   61212 allocs/op
+BenchmarkCH039GroupedApproxAutomatic-32     88  11405421 ns/op   4941924 B/op   61212 allocs/op
+BenchmarkCH039GroupedApproxAutomatic-32     92  11555064 ns/op   4941863 B/op   61212 allocs/op
+BenchmarkCH039GroupedApproxAutomatic-32     86  11634613 ns/op   4941907 B/op   61212 allocs/op
+BenchmarkCH039GroupedApproxAutomatic-32     92  11383766 ns/op   4941852 B/op   61212 allocs/op
+```
+
+Reproduce with `make benchmark-ch039-grouped-approx`. The detailed scope and
+correctness notes are in [CH039_GROUPED_APPROXIMATE_AGGREGATES.md](CH039_GROUPED_APPROXIMATE_AGGREGATES.md).
+
 ## CH-041 grouping branch plan sharing
 
 The pre-change comparison used commit `4855231c`; the post-change samples used
