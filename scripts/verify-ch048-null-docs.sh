@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+rg -n 'CH048_NULL_PREDICATE.md|CH-048.*NULL|benchmark-ch048-null|M065-null' BENCHMARK.md ENGINE_IDEAS.md CLICKHOUSE_MATERIALIZE_TARANTOOL_AUDIT.md CH048_NULL_PREDICATE.md

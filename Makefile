@@ -27797,3 +27797,45 @@ commit-ch048-between:
 	bash scripts/commit-ch048-between.sh
 push-ch048-between:
 	bash scripts/push-ch048-between.sh
+
+# CH048_NULL_FEATURE_TARGETS_BEGIN
+.PHONY: test-ch048-null
+test-ch048-null:
+	bash scripts/test-ch048-null.sh
+
+.PHONY: format-ch048-null
+format-ch048-null:
+	bash scripts/format-ch048-null.sh
+
+.PHONY: test-ch048-null-package
+test-ch048-null-package:
+	bash scripts/test-ch048-null-package.sh
+
+.PHONY: race-ch048-null
+race-ch048-null:
+	bash scripts/race-ch048-null.sh
+
+.PHONY: vet-ch048-null
+vet-ch048-null:
+	bash scripts/vet-ch048-null.sh
+
+.PHONY: verify-ch048-null-docs
+verify-ch048-null-docs:
+	bash scripts/verify-ch048-null-docs.sh
+
+.PHONY: review-ch048-null
+review-ch048-null:
+	bash scripts/review-ch048-null.sh
+
+.PHONY: stage-ch048-null
+stage-ch048-null:
+	bash scripts/stage-ch048-null.sh
+
+.PHONY: commit-ch048-null
+commit-ch048-null:
+	bash scripts/commit-ch048-null.sh
+
+.PHONY: push-ch048-null
+push-ch048-null:
+	bash scripts/push-ch048-null.sh
+# CH048_NULL_FEATURE_TARGETS_END

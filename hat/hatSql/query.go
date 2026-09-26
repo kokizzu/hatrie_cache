@@ -1283,6 +1283,11 @@ func sqlColumnarQueryRowsMatcher(query *sqlQuery, batch ColumnarBatch, functions
 	if query.where.kind == "" {
 		return func(int) (bool, error) { return true, nil }
 	}
+	if kernel, nullPredicate := sqlColumnarNullPredicateKernelForBatch(query.where, query.from.alias, batch); nullPredicate {
+		return func(rowIndex int) (bool, error) {
+			return kernel.matches(rowIndex), nil
+		}
+	}
 	if dictionary, codes, encoded := sqlColumnarDictionaryLiteralINPredicate(query.where, query.from.alias, batch); encoded {
 		return func(rowIndex int) (bool, error) {
 			code, ok := dictionary.CodeAt(rowIndex)
@@ -8947,6 +8952,14 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(int) bool { return true }, metrics != nil)
 		if metrics != nil {
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), started)
+		}
+		return result, true, nil
+	} else if kernel, nullPredicate := sqlColumnarNullPredicateKernelForBatch(q.where, q.from.alias, batch); nullPredicate {
+		filterStarted := time.Now()
+		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, kernel.matches, metrics != nil)
+		if metrics != nil {
+			metrics.record("COLUMNAR NULL FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
+			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
 		}
 		return result, true, nil
 	} else if kernel, boolean := sqlColumnarBooleanKernelForQuery(q.where, q.from.alias, batch); boolean {

@@ -38282,6 +38282,27 @@ The paired fallback uses the same post-change binary and the same packed
 fixtures, isolating the row-evaluation path from process-to-process variation.
 The change does not alter wire or persistence formats.
 
+<a id="ch048-null-predicates"></a>
+## CH-048 `IS NULL` Predicate Kernels
+
+Command: `make benchmark-ch048-null`.
+
+This compares the general row evaluator with the typed validity-bitmap kernel
+over 4,096-row numeric and boolean columnar batches. Five samples were run on
+Linux/amd64 with an AMD Ryzen 9 5950X. The pre-change column is from the run
+before the kernel was added; the paired fallback uses the same post-change
+fixtures.
+
+| Workload | Pre-change median | Paired fallback median | Fast-path median | Improvement | Memory/allocations |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Numeric `IS NULL` | 470,852 ns/op | 434,638 ns/op | 14,685 ns/op | 29.6x | 23,042 B/op, 2,880 allocs/op -> 0/0 |
+| Numeric `IS NOT NULL` | 458,256 ns/op | 428,663 ns/op | 16,137 ns/op | 26.6x | 23,042 B/op, 2,880 allocs/op -> 0/0 |
+| Boolean `IS NULL` | 383,167 ns/op | 372,927 ns/op | 15,133 ns/op | 24.6x | 1 B/op, 0 allocs/op -> 0/0 |
+| Boolean `IS NOT NULL` | 384,531 ns/op | 380,636 ns/op | 15,377 ns/op | 24.8x | 1 B/op, 0 allocs/op -> 0/0 |
+
+See [CH048_NULL_PREDICATE.md](CH048_NULL_PREDICATE.md) for scope guards and
+raw samples.
+
 <a id="c153f-partition-ownership-consensus-collector"></a>
 ## C153f Partition-Ownership Consensus Collector
 

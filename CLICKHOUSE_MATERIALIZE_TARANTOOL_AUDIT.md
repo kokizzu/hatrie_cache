@@ -395,6 +395,18 @@ expression shapes retain the established fallback. The benchmark and raw
 samples are recorded in [CH048_BETWEEN_PREDICATE.md](CH048_BETWEEN_PREDICATE.md)
 and [BENCHMARK.md](BENCHMARK.md).
 
+### M065-null: SQL packed NULL predicate kernel
+
+Implemented the CH-048 follow-up for direct `IS NULL` and `IS NOT NULL`
+predicates. Existing nullable-packed, bit-packed boolean, fixed-width numeric,
+and ordinary plain columns now use validated validity-bit checks without
+per-row interface materialization. Dictionaries, nested layouts, malformed
+metadata, prepared fields, compound expressions, and unsupported aliases
+retain the established evaluator fallback. Five-sample benchmarking recorded
+24.6x to 29.6x lower CPU time and zero allocations on the typed workloads,
+without changing wire, persistence, packing, or configuration behavior. See
+[CH048_NULL_PREDICATE.md](CH048_NULL_PREDICATE.md) and [BENCHMARK.md](BENCHMARK.md).
+
 ### M065w: Mutable Numeric RANGE Windows
 
 Adopted as an opt-in `hatSql.MutableIncrementalRangeWindow`. It supports the
