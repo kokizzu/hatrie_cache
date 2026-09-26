@@ -38145,3 +38145,36 @@ is not a valid performance baseline. Native selection is restricted to proven
 scalar conditional forms; `DisableNativeDataflow` remains the explicit
 fallback switch. See
 [M052AD_AUTO_NATIVE_CONDITIONAL_AGGREGATES.md](M052AD_AUTO_NATIVE_CONDITIONAL_AGGREGATES.md).
+
+<a id="t047g-durable-participant-state"></a>
+## T047g Durable Participant State
+
+The opt-in `ClusterWriteCommitParticipantFileStore` persists the existing deterministic HCP1 participant snapshot in a bounded CRC32C envelope. It uses a same-directory temporary file, `0600` file permissions, `fsync`, atomic rename, and verified restore. It is checkpoint I/O, not a change to the prepare/commit/abort hot path.
+
+| Operation | Median ns/op | Bytes/op | Allocs/op |
+|---|---:|---:|---:|
+| snapshot marshal | 155.8 | 184 | 3 |
+| durable save | 1,438,291 | 1,607 | 20 |
+| durable load | 7,290 | 1,552 | 8 |
+
+Raw five-sample output from `make benchmark-tu47-participant-store`:
+
+```text
+BenchmarkTU047ParticipantFileStore/marshal-32          7841767  155.8 ns/op  184 B/op  3 allocs/op
+BenchmarkTU047ParticipantFileStore/marshal-32          7590798  162.7 ns/op  184 B/op  3 allocs/op
+BenchmarkTU047ParticipantFileStore/marshal-32          7509488  156.2 ns/op  184 B/op  3 allocs/op
+BenchmarkTU047ParticipantFileStore/marshal-32          7889265  155.5 ns/op  184 B/op  3 allocs/op
+BenchmarkTU047ParticipantFileStore/marshal-32          7749588  155.1 ns/op  184 B/op  3 allocs/op
+BenchmarkTU047ParticipantFileStore/save-32             632  2838607 ns/op  1607 B/op  20 allocs/op
+BenchmarkTU047ParticipantFileStore/save-32             842  1438291 ns/op  1607 B/op  20 allocs/op
+BenchmarkTU047ParticipantFileStore/save-32             825  1487574 ns/op  1607 B/op  20 allocs/op
+BenchmarkTU047ParticipantFileStore/save-32             865  1429323 ns/op  1607 B/op  20 allocs/op
+BenchmarkTU047ParticipantFileStore/save-32             804  1424578 ns/op  1607 B/op  20 allocs/op
+BenchmarkTU047ParticipantFileStore/load-32           159990     7284 ns/op  1552 B/op  8 allocs/op
+BenchmarkTU047ParticipantFileStore/load-32           164782     7166 ns/op  1552 B/op  8 allocs/op
+BenchmarkTU047ParticipantFileStore/load-32           160290     7290 ns/op  1552 B/op  8 allocs/op
+BenchmarkTU047ParticipantFileStore/load-32           155600     7374 ns/op  1552 B/op  8 allocs/op
+BenchmarkTU047ParticipantFileStore/load-32           160782     7306 ns/op  1552 B/op  8 allocs/op
+```
+
+The file store is intentionally much more expensive than in-memory participant operations because it includes local durable filesystem work. The tradeoff is bounded restart recovery without changing normal write-path latency. The CRC32C envelope detects accidental or partial corruption; it is not authentication or encryption.

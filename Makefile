@@ -27667,3 +27667,39 @@ commit-c153d-ownership-auth:
 
 push-c153d-ownership-auth:
 	sh scripts/push-c153d-ownership-auth.sh
+
+.PHONY: format-tu47-participant-store
+format-tu47-participant-store:
+	sh scripts/format-tu47-participant-store.sh
+
+.PHONY: test-tu47-participant-store
+test-tu47-participant-store:
+	sh scripts/test-tu47-participant-store.sh
+
+.PHONY: benchmark-tu47-participant-store
+benchmark-tu47-participant-store:
+	sh scripts/benchmark-tu47-participant-store.sh
+
+.PHONY: test-tu47-package
+test-tu47-package:
+	sh scripts/test-tu47-package.sh
+
+.PHONY: race-tu47-package
+race-tu47-package:
+	sh scripts/race-tu47-package.sh
+
+.PHONY: vet-tu47-package
+vet-tu47-package:
+	sh scripts/vet-tu47-package.sh
+
+.PHONY: stage-tu47-participant-store
+stage-tu47-participant-store:
+	sh scripts/stage-tu47-participant-store.sh
+
+.PHONY: commit-tu47-participant-store
+commit-tu47-participant-store:
+	sh scripts/commit-tu47-participant-store.sh
+
+.PHONY: push-tu47-participant-store
+push-tu47-participant-store:
+	sh scripts/push-tu47-participant-store.sh
