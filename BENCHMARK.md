@@ -1,3 +1,21 @@
+# M033d Durable Global Timestamp Snapshot Codec
+
+Command: `make benchmark-m033d-global-timestamp-snapshot`.
+
+Host: Linux/amd64, AMD Ryzen 9 5950X. Fixture: two global timestamp oracle
+nodes. Each case was sampled five times; the table preserves the raw samples.
+
+| Operation | Median ns/op | B/op | Allocs/op | Wire bytes | Raw ns/op samples |
+| --- | ---: | ---: | ---: | ---: | --- |
+| JSON encode | 930.0 | 496 | 2 | 426 | 963.8, 925.7, 932.8, 930.0, 916.3 |
+| Binary encode | 216.2 | 112 | 1 | 108 | 213.0, 212.8, 217.5, 216.6, 216.2 |
+| JSON decode | 6,051 | 792 | 15 | 426 | 6,038, 6,035, 6,051, 6,137, 6,227 |
+| Binary decode | 291.1 | 272 | 5 | 108 | 284.4, 288.0, 291.1, 292.6, 293.5 |
+
+Binary is approximately 4.3x faster for encoding, 20.8x faster for decoding,
+and 3.9x smaller on the wire for this bounded snapshot. Existing JSON encode
+performance remains the compatibility baseline; the binary codec is opt-in.
+
 # Benchmark
 
 ## M038h Differential Distinct Small-Batch Fast Path

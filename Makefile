@@ -28398,3 +28398,21 @@ stage-m038-distinct-fastpath:
 .PHONY: deliver-m038-distinct-fastpath
 deliver-m038-distinct-fastpath:
 	bash ./scripts/deliver-m038-distinct-fastpath.sh deliver
+
+benchmark-m033d-global-timestamp-snapshot:
+	bash ./scripts/benchmark-m033d-global-timestamp-snapshot.sh
+
+test-m033d-global-timestamp-snapshot:
+	bash ./scripts/test-m033d-global-timestamp-snapshot.sh
+
+format-m033d-global-timestamp-snapshot:
+	bash ./scripts/format-m033d-global-timestamp-snapshot.sh
+
+race-m033d-global-timestamp-snapshot:
+	bash ./scripts/race-m033d-global-timestamp-snapshot.sh
+
+vet-m033d-global-timestamp-snapshot:
+	bash ./scripts/vet-m033d-global-timestamp-snapshot.sh
+
+test-m033d-global-timestamp-package:
+	bash ./scripts/test-m033d-global-timestamp-package.sh
