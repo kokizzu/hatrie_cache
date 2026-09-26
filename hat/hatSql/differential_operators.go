@@ -151,6 +151,12 @@ func UnionDifferentialRows(batches ...[]DifferentialRow) ([]DifferentialRow, err
 		}
 		length += len(batch)
 	}
+	if length == 0 {
+		return nil, nil
+	}
+	if result, handled, err := smallDifferentialUnion(batches, length); handled {
+		return result, err
+	}
 	combined := make([]DifferentialRow, 0, length)
 	for _, batch := range batches {
 		for _, update := range batch {
@@ -159,6 +165,54 @@ func UnionDifferentialRows(batches ...[]DifferentialRow) ([]DifferentialRow, err
 		}
 	}
 	return consolidateDifferentialRows(combined, false)
+}
+
+func smallDifferentialUnion(batches [][]DifferentialRow, length int) ([]DifferentialRow, bool, error) {
+	if length > 2 {
+		return nil, false, nil
+	}
+	var first, second DifferentialRow
+	count := 0
+	for _, batch := range batches {
+		for _, update := range batch {
+			if count == 0 {
+				first = update
+			} else {
+				second = update
+			}
+			count++
+		}
+	}
+	if count == 1 {
+		if first.Key == "" {
+			return nil, true, ErrDifferentialRowKeyRequired
+		}
+		if first.Diff == 0 {
+			return nil, true, nil
+		}
+		first.Row = cloneDifferentialRow(first.Row)
+		return []DifferentialRow{first}, true, nil
+	}
+	if first.Key != second.Key || first.Time != second.Time {
+		return nil, false, nil
+	}
+	if first.Key == "" {
+		return nil, true, ErrDifferentialRowKeyRequired
+	}
+	combined, ok := addDifferentialCounts(first.Diff, second.Diff)
+	if !ok {
+		return nil, false, nil
+	}
+	if combined == 0 {
+		return nil, true, nil
+	}
+	update := first
+	if update.Diff == 0 {
+		update = second
+	}
+	update.Diff = combined
+	update.Row = cloneDifferentialRow(update.Row)
+	return []DifferentialRow{update}, true, nil
 }
 
 // JoinDifferentialRows computes an inner join over two weighted batches. A
