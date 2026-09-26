@@ -63,7 +63,13 @@ func (multiset *IncrementalMultiset) Apply(updates []DifferentialRow) ([]Differe
 	if len(updates) == 1 {
 		return multiset.applySingle(updates[0])
 	}
+	if incrementalMultisetSameKeyBatch(updates) {
+		return multiset.applySameKeyBatch(updates)
+	}
+	return multiset.applyGenericBatch(updates)
+}
 
+func (multiset *IncrementalMultiset) applyGenericBatch(updates []DifferentialRow) ([]DifferentialRow, error) {
 	pending := make(map[string]incrementalMultisetPendingEntry, len(updates))
 	for _, update := range updates {
 		if update.Key == "" {
@@ -143,6 +149,92 @@ func (multiset *IncrementalMultiset) Apply(updates []DifferentialRow) ([]Differe
 		}
 	}
 	return changes, nil
+}
+
+func incrementalMultisetSameKeyBatch(updates []DifferentialRow) bool {
+	if len(updates) < 2 {
+		return false
+	}
+	key := updates[0].Key
+	for _, update := range updates[1:] {
+		if update.Key != key {
+			return false
+		}
+	}
+	return true
+}
+
+func (multiset *IncrementalMultiset) applySameKeyBatch(updates []DifferentialRow) ([]DifferentialRow, error) {
+	if len(updates) == 0 {
+		return nil, nil
+	}
+	if !incrementalMultisetSameKeyBatch(updates) {
+		return multiset.Apply(updates)
+	}
+
+	key := updates[0].Key
+	if key == "" {
+		return nil, ErrIncrementalMultisetInvalidKey
+	}
+	count := multiset.counts[key]
+	row := multiset.rows[key]
+	timestamp := multiset.times[key]
+	var delta int64
+	for _, update := range updates {
+		if update.Key == "" {
+			return nil, ErrIncrementalMultisetInvalidKey
+		}
+		if update.Diff == 0 {
+			continue
+		}
+		if err := validateIncrementalMultisetRow(count, row, update.Row); err != nil {
+			return nil, err
+		}
+		if update.Diff > 0 {
+			if count == 0 && update.Row != nil {
+				row = update.Row
+			}
+			if count == 0 || timestamp == 0 {
+				timestamp = update.Time
+			}
+			var ok bool
+			count, ok = incrementalMultisetAdd(count, uint64(update.Diff))
+			if !ok {
+				return nil, ErrIncrementalMultisetOverflow
+			}
+		} else {
+			magnitude := incrementalMultisetMagnitude(update.Diff)
+			if magnitude > count {
+				return nil, ErrIncrementalMultisetNegativeMultiplicity
+			}
+			count -= magnitude
+		}
+		if update.Time != 0 {
+			timestamp = update.Time
+		}
+		if err := incrementalMultisetAddDelta(&delta, update.Diff); err != nil {
+			return nil, err
+		}
+	}
+
+	if count == 0 {
+		delete(multiset.counts, key)
+		delete(multiset.rows, key)
+		delete(multiset.times, key)
+	} else {
+		multiset.counts[key] = count
+		multiset.rows[key] = cloneDifferentialRow(row)
+		multiset.times[key] = timestamp
+	}
+	if delta == 0 {
+		return nil, nil
+	}
+	return []DifferentialRow{{
+		Key:  key,
+		Time: timestamp,
+		Diff: delta,
+		Row:  cloneDifferentialRow(row),
+	}}, nil
 }
 
 func (multiset *IncrementalMultiset) applySingle(update DifferentialRow) ([]DifferentialRow, error) {
