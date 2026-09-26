@@ -1,3 +1,6 @@
+.PHONY: inspect-tmp-hatrie-builds
+inspect-tmp-hatrie-builds:
+	bash ./scripts/inspect-tmp-hatrie-builds.sh
 .PHONY: audit-tmp-hatrie-all
 audit-tmp-hatrie-all:
 	bash ./scripts/audit-tmp-hatrie-all.sh $(or $(MODE),preview)
