@@ -384,6 +384,17 @@ partitions. The existing append-only constructor and default behavior remain
 unchanged. Full planner selection, arbitrary late-data arrangements, and
 distributed frontier coordination remain open.
 
+### M065w: SQL packed `BETWEEN` predicate kernels
+
+Implemented the CH-048 follow-up for literal inclusive `BETWEEN` ranges.
+Binary-collated dictionary strings precompute matching code masks, while
+packed numeric columns reuse the native `>=` and `<=` kernels. The fast paths
+remove per-row interface boxing and allocations. `NOT BETWEEN`, dynamic or
+NULL bounds, non-binary collation, malformed packed columns, and wider
+expression shapes retain the established fallback. The benchmark and raw
+samples are recorded in [CH048_BETWEEN_PREDICATE.md](CH048_BETWEEN_PREDICATE.md)
+and [BENCHMARK.md](BENCHMARK.md).
+
 ### M065w: Mutable Numeric RANGE Windows
 
 Adopted as an opt-in `hatSql.MutableIncrementalRangeWindow`. It supports the

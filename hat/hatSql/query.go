@@ -1292,6 +1292,15 @@ func sqlColumnarQueryRowsMatcher(query *sqlQuery, batch ColumnarBatch, functions
 			return codes[code], nil
 		}
 	}
+	if dictionary, codes, encoded := sqlColumnarDictionaryBetweenPredicate(query.where, query.from.alias, batch); encoded {
+		return func(rowIndex int) (bool, error) {
+			code, ok := dictionary.CodeAt(rowIndex)
+			if !ok {
+				return false, fmt.Errorf("SQL columnar source %q returned an invalid dictionary code", query.from.key)
+			}
+			return codes.matches(code), nil
+		}
+	}
 	if dictionary, codes, encoded := sqlColumnarDictionaryOrderedPredicate(query.where, query.from.alias, batch); encoded {
 		return func(rowIndex int) (bool, error) {
 			code, ok := dictionary.CodeAt(rowIndex)
@@ -1337,6 +1346,27 @@ func sqlColumnarQueryRowsMatcher(query *sqlQuery, batch ColumnarBatch, functions
 			candidate, _ := batch.Value(field, rowIndex)
 			text, ok := candidate.(string)
 			return ok && expression.MatchString(text) != inverted, nil
+		}
+	}
+	if predicates, numeric := sqlColumnarNumericBetweenPredicate(query.where, query.from.alias); numeric {
+		kernels, packedNumeric := sqlColumnarNumericPredicateKernels(batch, predicates)
+		return func(rowIndex int) (bool, error) {
+			if packedNumeric {
+				for _, kernel := range kernels {
+					if !kernel.matches(rowIndex) {
+						return false, nil
+					}
+				}
+				return true, nil
+			}
+			for _, predicate := range predicates {
+				candidate, _ := batch.Value(predicate.field, rowIndex)
+				number, ok := sqlNumber(candidate)
+				if !ok || !sqlColumnarNumericMatches(number, predicate.operator, predicate.value) {
+					return false, nil
+				}
+			}
+			return true, nil
 		}
 	}
 	if predicates, numeric := sqlColumnarNumericConjunction(query.where, query.from.alias); numeric {
@@ -8949,6 +8979,17 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
 		}
 		return result, true, nil
+	} else if dictionary, codes, encoded := sqlColumnarDictionaryBetweenPredicate(q.where, q.from.alias, batch); encoded {
+		filterStarted := time.Now()
+		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
+			code, ok := dictionary.CodeAt(rowIndex)
+			return ok && codes.matches(code)
+		}, metrics != nil)
+		if metrics != nil {
+			metrics.record("COLUMNAR DICTIONARY BETWEEN FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
+			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
+		}
+		return result, true, nil
 	} else if dictionary, codes, encoded := sqlColumnarDictionaryOrderedPredicate(q.where, q.from.alias, batch); encoded {
 		filterStarted := time.Now()
 		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
@@ -9090,6 +9131,18 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		}, metrics != nil)
 		if metrics != nil {
 			metrics.record("COLUMNAR REGEXP FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
+			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
+		}
+		return result, true, nil
+	} else if predicates, numeric := sqlColumnarNumericBetweenPredicate(q.where, q.from.alias); numeric {
+		predicates = sqlColumnarOrderNumericPredicates(segments, predicates)
+		filterStarted := time.Now()
+		result, matched, scanned := sqlColumnarNumericMaterialize(q, batch, projectionFields, segments, predicates, metrics != nil)
+		if metrics != nil {
+			if skippedRows := batch.Rows - scanned; skippedRows > 0 {
+				metrics.recordPruning("COLUMNAR NUMERIC BETWEEN SEGMENT SKIP", sqlExplainExpression(q.where), batch.Rows, skippedRows, scanned, matched, filterStarted)
+			}
+			metrics.record("COLUMNAR NUMERIC BETWEEN FILTER", sqlExplainExpression(q.where), scanned, matched, filterStarted)
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
 		}
 		return result, true, nil
@@ -11401,6 +11454,14 @@ func sqlColumnarPredicateFields(expr sqlExpr, alias string, add func(string)) bo
 			}
 		}
 		return true
+	case "between":
+		if expr.op != "BETWEEN" || expr.left == nil || expr.left.kind != "field" || (expr.left.qualifier != "" && expr.left.qualifier != alias) || len(expr.args) != 2 {
+			return false
+		}
+		if add != nil {
+			add(expr.left.name)
+		}
+		return expr.args[0].kind == "literal" && expr.args[1].kind == "literal"
 	default:
 		return false
 	}
@@ -11422,6 +11483,24 @@ func sqlColumnarNumericPredicate(expr sqlExpr, alias string) (field, operator st
 		return expr.right.name, sqlReverseComparisonOperator(expr.op), value, ok && sqlColumnarNumericOperator(expr.op)
 	}
 	return "", "", 0, false
+}
+
+// sqlColumnarNumericBetweenPredicate lowers a literal numeric BETWEEN into
+// the two packed comparisons already used by the numeric columnar kernel.
+// NOT BETWEEN and dynamic bounds retain the general evaluator's semantics.
+func sqlColumnarNumericBetweenPredicate(expr sqlExpr, alias string) ([]sqlColumnarNumericFilter, bool) {
+	if expr.kind != "between" || expr.op != "BETWEEN" || expr.left == nil || expr.left.kind != "field" || (expr.left.qualifier != "" && expr.left.qualifier != alias) || len(expr.args) != 2 || expr.args[0].kind != "literal" || expr.args[1].kind != "literal" {
+		return nil, false
+	}
+	lower, lowerOK := sqlNumber(expr.args[0].value)
+	upper, upperOK := sqlNumber(expr.args[1].value)
+	if !lowerOK || !upperOK {
+		return nil, false
+	}
+	return []sqlColumnarNumericFilter{
+		{field: expr.left.name, operator: ">=", value: lower},
+		{field: expr.left.name, operator: "<=", value: upper},
+	}, true
 }
 
 type sqlColumnarNumericFilter struct {

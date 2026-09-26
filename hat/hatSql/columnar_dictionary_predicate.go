@@ -64,3 +64,38 @@ func sqlColumnarDictionaryOrderingOperator(operator string) bool {
 		return false
 	}
 }
+
+// sqlColumnarDictionaryBetweenPredicate recognizes a binary-collation range
+// over one dictionary string field and precomputes the matching codes. Literal
+// bounds keep NULL and dynamic-expression semantics on the general evaluator.
+func sqlColumnarDictionaryBetweenPredicate(expr sqlExpr, alias string, batch ColumnarBatch) (DictionaryColumn, sqlColumnarDictionaryCodeMask, bool) {
+	if expr.kind != "between" || expr.op != "BETWEEN" || expr.left == nil || expr.left.kind != "field" || (expr.left.qualifier != "" && expr.left.qualifier != alias) || len(expr.args) != 2 || expr.collation.normalized() != SQLCollationBinary {
+		return DictionaryColumn{}, sqlColumnarDictionaryCodeMask{}, false
+	}
+	lower, lowerOK := expr.args[0].value.(string)
+	upper, upperOK := expr.args[1].value.(string)
+	if expr.args[0].kind != "literal" || expr.args[1].kind != "literal" || !lowerOK || !upperOK {
+		return DictionaryColumn{}, sqlColumnarDictionaryCodeMask{}, false
+	}
+	dictionary, ok := batch.Dictionaries[expr.left.name]
+	if !ok {
+		return DictionaryColumn{}, sqlColumnarDictionaryCodeMask{}, false
+	}
+	mask := sqlColumnarDictionaryCodeMask{}
+	if dictionary.ValueCount() > 64 {
+		mask.wide = make([]bool, dictionary.ValueCount())
+	}
+	for code := 0; code < dictionary.ValueCount(); code++ {
+		candidate, valid := dictionary.ValueAt(uint32(code))
+		if !valid {
+			return DictionaryColumn{}, sqlColumnarDictionaryCodeMask{}, false
+		}
+		matches := sqlColumnarStringComparisonMatches(candidate, ">=", lower) && sqlColumnarStringComparisonMatches(candidate, "<=", upper)
+		if mask.wide != nil {
+			mask.wide[code] = matches
+		} else if matches {
+			mask.bits |= uint64(1) << uint(code)
+		}
+	}
+	return dictionary, mask, true
+}

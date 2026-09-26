@@ -27767,3 +27767,33 @@ test-c153f-package:
 .PHONY: stage-c153f-collector
 stage-c153f-collector:
 	bash scripts/stage-c153f-collector.sh
+
+.PHONY: benchmark-ch048-between
+benchmark-ch048-between:
+	bash scripts/benchmark-ch048-between.sh
+
+.PHONY: test-ch048-between
+test-ch048-between:
+	bash scripts/test-ch048-between.sh
+
+.PHONY: format-ch048-between
+format-ch048-between:
+	bash scripts/format-ch048-between.sh
+
+.PHONY: test-ch048-between-package race-ch048-between vet-ch048-between verify-ch048-between-docs review-ch048-between stage-ch048-between commit-ch048-between push-ch048-between
+test-ch048-between-package:
+	bash scripts/test-ch048-between-package.sh
+race-ch048-between:
+	bash scripts/race-ch048-between.sh
+vet-ch048-between:
+	bash scripts/vet-ch048-between.sh
+verify-ch048-between-docs:
+	bash scripts/verify-ch048-between-docs.sh
+review-ch048-between:
+	bash scripts/review-ch048-between.sh
+stage-ch048-between:
+	bash scripts/stage-ch048-between.sh
+commit-ch048-between:
+	bash scripts/commit-ch048-between.sh
+push-ch048-between:
+	bash scripts/push-ch048-between.sh

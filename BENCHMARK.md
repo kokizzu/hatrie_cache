@@ -22596,6 +22596,7 @@ Raw output after the change, grouping identifiers:
 31033 ns/op 29502 B/op 286 allocs/op
 31342 ns/op 29502 B/op 286 allocs/op
 ```
+
 ## CH-041 multi-argument `GROUPING_ID`
 
 This focused benchmark compares a derived two-argument grouping bitmask with
@@ -23344,7 +23345,7 @@ This benchmark compares a full-row materialized resolver with the optional
 `region`. Three `-benchmem` samples were collected with
 `make benchmark-m090c-projected-source` on `linux/amd64` with an AMD Ryzen 9
 5950X. `source-bytes/op` is the source payload accounting added by the
-benchmark; it is separate from local executor `B/op`.
+benchmark; it is separate from the local executor's `B/op`.
 
 ### Raw Samples
 
@@ -38063,7 +38064,6 @@ The control is not an equivalent replica implementation. The feature is
 opt-in, so ordinary command execution has no new hot-standby work unless a
 caller starts a runner. Full interpretation and adapter guidance are in
 [TT006_HOT_STANDBY_WAL.md](TT006_HOT_STANDBY_WAL.md).
-
 ### MZ-021 Replica Hot Handoff
 
 Command: `make benchmark-mz021-replica-hot-handoff` (five samples per case,
@@ -38146,18 +38146,59 @@ scalar conditional forms; `DisableNativeDataflow` remains the explicit
 fallback switch. See
 [M052AD_AUTO_NATIVE_CONDITIONAL_AGGREGATES.md](M052AD_AUTO_NATIVE_CONDITIONAL_AGGREGATES.md).
 
+<a id="rejected-t042-independent-setint-parallel-replay"></a>
+## Rejected T042: Independent-Key Parallel Journal Replay
+
+The bounded worker-partition prototype was measured against the existing
+serial replay on the same 16,384-entry journal containing non-expiring
+`SETINT` mutations over 1,024 keys. It preserved same-key order and passed
+the sequential equivalence test, but the shared trie locking and per-batch
+worker bookkeeping made the result worse. Linux/amd64, AMD Ryzen 9 5950X,
+five samples per path:
+
+```text
+serial:
+28031384/12994365/245801, 28190826/12994152/245800,
+27948571/12994127/245800, 28593875/12994072/245800,
+28837637/12994066/245800
+parallel:
+41992097/28566586/328135, 42522566/28565071/328133,
+42969361/28564214/328131, 42924716/28563309/328130,
+43071331/28562966/328129
+```
+
+Values are `ns/op`, `B/op`, and `allocs/op`:
+
+| Path | Median time | Median bytes | Median allocs | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Existing serial replay | 28.191 ms/op | 12,994,127 B/op | 245,800 | 1.00x |
+| Worker-partitioned replay | 42.925 ms/op | 28,564,214 B/op | 328,131 | **1.52x slower; 2.20x more bytes; 1.34x more allocations** |
+
+The implementation and focused tests were removed after this result. The
+existing serial replay remains the only supported behavior for this path.
 <a id="t047g-durable-participant-state"></a>
 ## T047g Durable Participant State
 
-The opt-in `ClusterWriteCommitParticipantFileStore` persists the existing deterministic HCP1 participant snapshot in a bounded CRC32C envelope. It uses a same-directory temporary file, `0600` file permissions, `fsync`, atomic rename, and verified restore. It is checkpoint I/O, not a change to the prepare/commit/abort hot path.
+Command: `make benchmark-tu47-participant-store`.
 
-| Operation | Median ns/op | Bytes/op | Allocs/op |
-|---|---:|---:|---:|
-| snapshot marshal | 155.8 | 184 | 3 |
-| durable save | 1,438,291 | 1,607 | 20 |
-| durable load | 7,290 | 1,552 | 8 |
+The benchmark compares the existing deterministic in-memory HCP1 snapshot
+marshal with the opt-in HCPF1 file-store save and verified load paths. The
+durable paths include bounded validation, CRC32C, private temporary-file
+replacement, and filesystem synchronization.
 
-Raw five-sample output from `make benchmark-tu47-participant-store`:
+Median of five samples:
+
+| Operation | ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Existing HCP1 marshal | 155.8 | 184 | 3 |
+| Durable atomic save | 1,438,291 | 1,607 | 20 |
+| Verified load and restore | 7,290 | 1,552 | 8 |
+
+The durable save is intentionally expensive relative to an in-memory snapshot;
+it is an explicit recovery checkpoint and is not run by normal participant
+operations.
+
+Raw output:
 
 ```text
 BenchmarkTU047ParticipantFileStore/marshal-32          7841767  155.8 ns/op  184 B/op  3 allocs/op
@@ -38165,19 +38206,19 @@ BenchmarkTU047ParticipantFileStore/marshal-32          7590798  162.7 ns/op  184
 BenchmarkTU047ParticipantFileStore/marshal-32          7509488  156.2 ns/op  184 B/op  3 allocs/op
 BenchmarkTU047ParticipantFileStore/marshal-32          7889265  155.5 ns/op  184 B/op  3 allocs/op
 BenchmarkTU047ParticipantFileStore/marshal-32          7749588  155.1 ns/op  184 B/op  3 allocs/op
-BenchmarkTU047ParticipantFileStore/save-32             632  2838607 ns/op  1607 B/op  20 allocs/op
-BenchmarkTU047ParticipantFileStore/save-32             842  1438291 ns/op  1607 B/op  20 allocs/op
-BenchmarkTU047ParticipantFileStore/save-32             825  1487574 ns/op  1607 B/op  20 allocs/op
-BenchmarkTU047ParticipantFileStore/save-32             865  1429323 ns/op  1607 B/op  20 allocs/op
-BenchmarkTU047ParticipantFileStore/save-32             804  1424578 ns/op  1607 B/op  20 allocs/op
-BenchmarkTU047ParticipantFileStore/load-32           159990     7284 ns/op  1552 B/op  8 allocs/op
-BenchmarkTU047ParticipantFileStore/load-32           164782     7166 ns/op  1552 B/op  8 allocs/op
-BenchmarkTU047ParticipantFileStore/load-32           160290     7290 ns/op  1552 B/op  8 allocs/op
-BenchmarkTU047ParticipantFileStore/load-32           155600     7374 ns/op  1552 B/op  8 allocs/op
-BenchmarkTU047ParticipantFileStore/load-32           160782     7306 ns/op  1552 B/op  8 allocs/op
+BenchmarkTU047ParticipantFileStore/save-32                632  2838607 ns/op  1607 B/op  20 allocs/op
+BenchmarkTU047ParticipantFileStore/save-32                842  1438291 ns/op  1607 B/op  20 allocs/op
+BenchmarkTU047ParticipantFileStore/save-32                825  1487574 ns/op  1607 B/op  20 allocs/op
+BenchmarkTU047ParticipantFileStore/save-32                865  1429323 ns/op  1607 B/op  20 allocs/op
+BenchmarkTU047ParticipantFileStore/save-32                804  1424578 ns/op  1607 B/op  20 allocs/op
+BenchmarkTU047ParticipantFileStore/load-32             159990    7284 ns/op  1552 B/op  8 allocs/op
+BenchmarkTU047ParticipantFileStore/load-32             164782    7166 ns/op  1552 B/op  8 allocs/op
+BenchmarkTU047ParticipantFileStore/load-32             160290    7290 ns/op  1552 B/op  8 allocs/op
+BenchmarkTU047ParticipantFileStore/load-32             155600    7374 ns/op  1552 B/op  8 allocs/op
+BenchmarkTU047ParticipantFileStore/load-32             160782    7306 ns/op  1552 B/op  8 allocs/op
 ```
 
-The file store is intentionally much more expensive than in-memory participant operations because it includes local durable filesystem work. The tradeoff is bounded restart recovery without changing normal write-path latency. The CRC32C envelope detects accidental or partial corruption; it is not authentication or encryption.
+See [T047G_DURABLE_PARTICIPANT_STATE.md](T047G_DURABLE_PARTICIPANT_STATE.md).
 
 <a id="c153e-partition-ownership-wire"></a>
 ## C153e Partition-Ownership Vote Wire Codec
@@ -38219,6 +38260,27 @@ BenchmarkC153ePartitionOwnershipVoteWire/unmarshal-32  5095035  238.2 ns/op  136
 BenchmarkC153ePartitionOwnershipVoteWire/unmarshal-32  5017592  235.4 ns/op  136 B/op  8 allocs/op
 BenchmarkC153ePartitionOwnershipVoteWire/unmarshal-32  5073927  240.3 ns/op  136 B/op  8 allocs/op
 ```
+
+<a id="ch048-packed-between-predicates"></a>
+## CH-048 Packed `BETWEEN` Predicate Kernels
+
+Literal inclusive `BETWEEN` predicates now use direct columnar kernels for
+binary-collated dictionary strings and packed numeric columns. The dictionary
+path builds a code mask once; the numeric path reuses the existing packed
+comparison kernels. Unsafe shapes remain on the general evaluator. See
+[CH048_BETWEEN_PREDICATE.md](CH048_BETWEEN_PREDICATE.md) for the complete
+scope and raw output.
+
+Five samples per case on Linux/amd64, AMD Ryzen 9 5950X, 4,096 rows:
+
+| Workload | Pre-change median | Paired fallback median | Fast-path median | Improvement vs paired fallback | Memory/allocations |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Dictionary string | 884,034 ns/op | 993,766 ns/op | 32,924 ns/op | 30.18x | 589,829 B/op and 12,288 allocs/op to 0/0 |
+| Packed numeric | 851,629 ns/op | 907,378 ns/op | 89,820 ns/op | 10.10x | 555,015 B/op and 12,032 allocs/op to 0/0 |
+
+The paired fallback uses the same post-change binary and the same packed
+fixtures, isolating the row-evaluation path from process-to-process variation.
+The change does not alter wire or persistence formats.
 
 <a id="c153f-partition-ownership-consensus-collector"></a>
 ## C153f Partition-Ownership Consensus Collector
