@@ -14077,6 +14077,14 @@ func sqlPartitionPredicate(source sqlSource, condition sqlExpr, allowUnqualified
 	if condition.collation.normalized() != SQLCollationBinary {
 		return SQLPartitionPredicate{}, false
 	}
+	if at, validFromField, validToField, matched := sqlTemporalValidityIndexArgs(source, condition); matched {
+		return SQLPartitionPredicate{
+			Operator:       "VALID_AT",
+			Values:         []interface{}{at},
+			ValidFromField: validFromField,
+			ValidToField:   validToField,
+		}, true
+	}
 	if condition.kind == "binary" && condition.left != nil && condition.right != nil {
 		if operator, ok := sqlPartitionComparisonOperator(condition.op); ok {
 			if field, ok := sqlPartitionField(source, *condition.left, allowUnqualified); ok && condition.right.kind == "literal" && condition.right.value != nil {

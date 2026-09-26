@@ -474,3 +474,14 @@ source-row materialization and merge step. Unsupported query shapes retain
 the general evaluator, and focused tests cover inner, left, empty, NULL, and
 fallback behavior. See [CH037_COLUMNAR_ARRAY_JOIN.md](CH037_COLUMNAR_ARRAY_JOIN.md)
 and [BENCHMARK.md](BENCHMARK.md#ch-037-columnar-array-join).
+
+## MZ-009 implementation update
+
+Materialize-style temporal validity partition pruning is implemented as an
+opt-in extension of the existing `hatSql.PartitionPruningSourceResolver`.
+Direct literal `VALID_AT` predicates carry the timestamp and validity field
+names in `SQLPartitionPredicate`; providers may use their own frontier and
+partition metadata to return a conservative subset. The executor always
+rechecks the original predicate, and unavailable metadata preserves the
+existing source path. See [MZ009_VALIDITY_PARTITION_PRUNING.md](MZ009_VALIDITY_PARTITION_PRUNING.md)
+and [BENCHMARK.md](BENCHMARK.md#mz-009-validity-partition-pruning).

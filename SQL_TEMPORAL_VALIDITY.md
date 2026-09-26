@@ -45,8 +45,25 @@ The index uses the shared augmented interval arrangement, rebuilds lazily when
 the source generation changes, and returns candidates that the SQL executor
 rechecks with the original predicate. Unsupported timestamp text, out-of-range
 timestamps, admission-budget rejection, and computed arguments safely fall
-back to the normal scan. This does not yet provide frontier-aware partition
-pruning; that remains a separate provider-level feature.
+back to the normal scan.
+
+## Partition pruning
+
+When the source also implements `hatSql.PartitionPruningSourceResolver`, a
+direct literal `VALID_AT(at, valid_from, valid_to)` predicate is exposed as a
+`SQLPartitionPredicate` with `Operator: "VALID_AT"`, the timestamp in
+`Values`, and the two validity field names. The provider may use its own
+frontier and partition metadata to return a conservative subset of physical
+partitions. The SQL executor always rechecks the original predicate, so this
+is an optimization hint rather than a semantic or consistency boundary.
+
+Providers that cannot prove the pruning decision return `available=false` and
+retain the existing source resolution path. Existing providers do not need to
+implement the optional interface.
+
+The focused implementation benchmark is recorded in
+[MZ009_VALIDITY_PARTITION_PRUNING.md](MZ009_VALIDITY_PARTITION_PRUNING.md) and
+[BENCHMARK.md](BENCHMARK.md#mz-009-validity-partition-pruning).
 
 Focused correctness and race checks:
 

@@ -38394,3 +38394,39 @@ shapes continue to use the generic evaluator.
 The admitted path uses 6.08x fewer allocated bytes and 6.37x fewer
 allocations than the post-change fallback. Raw samples and admission rules
 are recorded in [CH037_COLUMNAR_ARRAY_JOIN.md](CH037_COLUMNAR_ARRAY_JOIN.md).
+
+<a id="mz-009-validity-partition-pruning"></a>
+## MZ-009 `VALID_AT` Partition Pruning
+
+Command: `make benchmark-mz009-validity-partition-pruning`.
+
+The workload has 64 physical partitions. The first partition contains four
+matching rows and one out-of-range row; the other 63 partitions contain 256
+expired rows each. The executor rechecks the original predicate after the
+provider returns the first partition. Median of five samples on Linux/amd64,
+AMD Ryzen 9 5950X:
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: |
+| Post-change full-source fallback | 4,672,182 | 7,658,563 | 32,635 | 1.00x |
+| `VALID_AT` partition pruning | 8,016 | 8,345 | 42 | **583.1x faster; 917.7x fewer bytes; 777.0x fewer allocations** |
+
+This is an opt-in provider hint. Providers return `available=false` when they
+cannot prove the partition decision, preserving the existing source path.
+Raw samples and the provider contract are recorded in
+[MZ009_VALIDITY_PARTITION_PRUNING.md](MZ009_VALIDITY_PARTITION_PRUNING.md).
+
+Raw output:
+
+```text
+BenchmarkMZ009ValidityPartitionPruningBaseline-32  240  4801276 ns/op  7659606 B/op  32647 allocs/op
+BenchmarkMZ009ValidityPartitionPruningBaseline-32  249  4659854 ns/op  7658563 B/op  32635 allocs/op
+BenchmarkMZ009ValidityPartitionPruningBaseline-32  242  4546846 ns/op  7659327 B/op  32644 allocs/op
+BenchmarkMZ009ValidityPartitionPruningBaseline-32  255  4672182 ns/op  7657937 B/op  32627 allocs/op
+BenchmarkMZ009ValidityPartitionPruningBaseline-32  249  4709527 ns/op  7658559 B/op  32635 allocs/op
+BenchmarkMZ009ValidityPartitionPruningFastPath-32  130911  8016 ns/op  8346 B/op  42 allocs/op
+BenchmarkMZ009ValidityPartitionPruningFastPath-32  137665  7964 ns/op  8344 B/op  42 allocs/op
+BenchmarkMZ009ValidityPartitionPruningFastPath-32  133785  8037 ns/op  8345 B/op  42 allocs/op
+BenchmarkMZ009ValidityPartitionPruningFastPath-32  134032  8103 ns/op  8345 B/op  42 allocs/op
+BenchmarkMZ009ValidityPartitionPruningFastPath-32  137786  7983 ns/op  8344 B/op  42 allocs/op
+```

@@ -27963,3 +27963,53 @@ push-ch037-columnar-array-join:
 	bash scripts/push-ch037-columnar-array-join.sh
 
 # CH037_COLUMNAR_ARRAY_JOIN_FEATURE_TARGETS_END
+# MZ009_VALIDITY_PARTITION_PRUNING_FEATURE_TARGETS_BEGIN
+.PHONY: test-mz009-validity-partition-pruning
+test-mz009-validity-partition-pruning:
+	bash scripts/test-mz009-validity-partition-pruning.sh
+
+.PHONY: benchmark-mz009-validity-partition-pruning
+benchmark-mz009-validity-partition-pruning:
+	bash scripts/benchmark-mz009-validity-partition-pruning.sh
+
+
+
+
+
+.PHONY: format-mz009-validity-partition-pruning
+format-mz009-validity-partition-pruning:
+	bash scripts/format-mz009-validity-partition-pruning.sh
+
+.PHONY: test-mz009-validity-partition-pruning-package
+test-mz009-validity-partition-pruning-package:
+	bash scripts/test-mz009-validity-partition-pruning-package.sh
+
+.PHONY: race-mz009-validity-partition-pruning
+race-mz009-validity-partition-pruning:
+	bash scripts/race-mz009-validity-partition-pruning.sh
+
+.PHONY: vet-mz009-validity-partition-pruning
+vet-mz009-validity-partition-pruning:
+	bash scripts/vet-mz009-validity-partition-pruning.sh
+
+.PHONY: verify-mz009-validity-partition-pruning-docs
+verify-mz009-validity-partition-pruning-docs:
+	bash scripts/verify-mz009-validity-partition-pruning-docs.sh
+
+.PHONY: review-mz009-validity-partition-pruning
+review-mz009-validity-partition-pruning:
+	bash scripts/review-mz009-validity-partition-pruning.sh
+
+.PHONY: stage-mz009-validity-partition-pruning
+stage-mz009-validity-partition-pruning:
+	bash scripts/stage-mz009-validity-partition-pruning.sh
+
+.PHONY: commit-mz009-validity-partition-pruning
+commit-mz009-validity-partition-pruning:
+	bash scripts/commit-mz009-validity-partition-pruning.sh
+
+.PHONY: push-mz009-validity-partition-pruning
+push-mz009-validity-partition-pruning:
+	bash scripts/push-mz009-validity-partition-pruning.sh
+
+# MZ009_VALIDITY_PARTITION_PRUNING_FEATURE_TARGETS_END

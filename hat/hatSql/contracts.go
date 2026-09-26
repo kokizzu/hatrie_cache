@@ -117,11 +117,15 @@ type PartitionedOrderedSourceResolver interface {
 // SQLPartitionPredicate is a planner-proven literal predicate that may be
 // used to select a subset of physical partitions. Values are read-only for
 // the duration of the resolver call. The SQL executor still evaluates the
-// complete original predicate after the source is resolved.
+// complete original predicate after the source is resolved. VALID_AT uses
+// Operator="VALID_AT", one timestamp in Values, and the validity column
+// names in ValidFromField and ValidToField.
 type SQLPartitionPredicate struct {
-	Field    string
-	Operator string
-	Values   []interface{}
+	Field          string
+	Operator       string
+	Values         []interface{}
+	ValidFromField string
+	ValidToField   string
 }
 
 // PartitionPruningSourceResolver optionally prunes a partitioned source from
