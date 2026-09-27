@@ -28711,3 +28711,18 @@ verify-ch036-asof-sorted-fastpath:
 
 deliver-ch036-asof-sorted-fastpath:
 	@bash scripts/deliver-ch036-asof-sorted-fastpath.sh
+
+inspect-go-build-tmp:
+	@bash scripts/cleanup-go-build-tmp.sh preview
+
+cleanup-go-build-tmp-preview:
+	@bash scripts/cleanup-go-build-tmp.sh preview
+
+cleanup-go-build-tmp-apply:
+	@bash scripts/cleanup-go-build-tmp.sh apply
+
+test-cleanup-go-build-tmp:
+	@bash scripts/test-cleanup-go-build-tmp.sh
+
+deliver-cleanup-go-build-tmp:
+	@bash scripts/deliver-cleanup-go-build-tmp.sh
