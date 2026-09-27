@@ -81,6 +81,12 @@ make benchmark-mz034-incremental-sql-filter
 The bounded SQL filter adapter and its rebuild comparison are documented in
 [MZ034_INCREMENTAL_SQL_FILTER.md](MZ034_INCREMENTAL_SQL_FILTER.md).
 
+`CompiledSQLQuery.CompileIncrementalGroupAggregate` now lowers a bounded
+single-field `GROUP BY` with `COUNT(*)`, integer `SUM`, and optional scalar
+`WHERE` into retained signed state. Its exact supported shape and rebuild
+versus one-update measurements are documented in
+[MZ034_INCREMENTAL_SQL_GROUP_AGGREGATE.md](MZ034_INCREMENTAL_SQL_GROUP_AGGREGATE.md).
+
 ## Benchmark
 
 Measurements are in-process Go microbenchmarks on an AMD Ryzen 9 5950X. Each

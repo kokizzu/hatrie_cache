@@ -29398,3 +29398,36 @@ push-mz034-incremental-sql-projection:
 
 deliver-mz034-incremental-sql-projection:
 	bash ./scripts/deliver-mz034-incremental-sql-projection.sh deliver
+
+baseline-mz034-incremental-sql-group:
+	@bash ./scripts/baseline-mz034-incremental-sql-group.sh
+
+test-mz034-incremental-sql-group:
+	@bash ./scripts/test-mz034-incremental-sql-group.sh
+
+format-mz034-incremental-sql-group:
+	@bash ./scripts/format-mz034-incremental-sql-group.sh
+
+benchmark-mz034-incremental-sql-group:
+	@bash ./scripts/benchmark-mz034-incremental-sql-group.sh
+
+test-mz034-incremental-sql-group-package:
+	@bash ./scripts/test-mz034-incremental-sql-group-package.sh
+
+race-mz034-incremental-sql-group:
+	@bash ./scripts/race-mz034-incremental-sql-group.sh
+
+vet-mz034-incremental-sql-group:
+	@bash ./scripts/vet-mz034-incremental-sql-group.sh
+
+stage-mz034-incremental-sql-group:
+	@bash ./scripts/deliver-mz034-incremental-sql-group.sh stage
+
+commit-mz034-incremental-sql-group:
+	@bash ./scripts/deliver-mz034-incremental-sql-group.sh commit
+
+push-mz034-incremental-sql-group:
+	@bash ./scripts/deliver-mz034-incremental-sql-group.sh push
+
+deliver-mz034-incremental-sql-group:
+	@bash ./scripts/deliver-mz034-incremental-sql-group.sh deliver
