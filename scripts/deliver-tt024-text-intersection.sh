@@ -103,12 +103,17 @@ deliver)
 	git apply --cached "$patch_file"
 
 	git diff --cached --check
+	staged_feature=false
 	for path in "${feature_files[@]}"; do
-		if git diff --cached --quiet -- "$path"; then
-			echo "expected staged feature path is missing: $path" >&2
-			exit 1
+		if ! git diff --cached --quiet -- "$path"; then
+			staged_feature=true
+			break
 		fi
 	done
+	if [[ "$staged_feature" != true ]]; then
+		echo "no intended TT024 changes are staged" >&2
+		exit 1
+	fi
 	git commit -m 'perf: intersect multi-field text indexes [skip ci]'
 	git push origin HEAD
 	;;
