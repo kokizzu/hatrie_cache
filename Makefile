@@ -29332,3 +29332,37 @@ push-m039-incremental-group-count-distinct:
 
 deliver-m039-incremental-group-count-distinct:
 	bash ./scripts/deliver-m039-incremental-group-count-distinct.sh deliver
+
+
+baseline-mz034-incremental-sql-filter:
+	bash ./scripts/test-mz034-incremental-sql-filter.sh baseline
+
+format-mz034-incremental-sql-filter:
+	bash ./scripts/test-mz034-incremental-sql-filter.sh format
+
+test-mz034-incremental-sql-filter:
+	bash ./scripts/test-mz034-incremental-sql-filter.sh test
+
+benchmark-mz034-incremental-sql-filter:
+	bash ./scripts/test-mz034-incremental-sql-filter.sh benchmark
+
+test-mz034-incremental-sql-filter-package:
+	bash ./scripts/test-mz034-incremental-sql-filter.sh package
+
+race-mz034-incremental-sql-filter:
+	bash ./scripts/test-mz034-incremental-sql-filter.sh race
+
+vet-mz034-incremental-sql-filter:
+	bash ./scripts/test-mz034-incremental-sql-filter.sh vet
+
+stage-mz034-incremental-sql-filter:
+	bash ./scripts/deliver-mz034-incremental-sql-filter.sh stage
+
+commit-mz034-incremental-sql-filter:
+	bash ./scripts/deliver-mz034-incremental-sql-filter.sh commit
+
+push-mz034-incremental-sql-filter:
+	bash ./scripts/deliver-mz034-incremental-sql-filter.sh push
+
+deliver-mz034-incremental-sql-filter:
+	bash ./scripts/deliver-mz034-incremental-sql-filter.sh deliver

@@ -7,9 +7,12 @@ differential operator surface. It represents relation changes as
 `DifferentialRow` values with signed `int64` `Diff` weights, so inserts,
 retractions, and duplicate multiplicity can flow through the same operators.
 
-This is a library API, not automatic differential execution for every SQL plan.
-The regular SQL evaluator and operator wiring remain unchanged by default, and
-MZ-035 remains open for auditing multiset preservation across every path.
+The regular SQL evaluator remains unchanged by default, but a bounded SQL
+adapter now lowers `SELECT * FROM CACHE(...)` or `VALUES` with an optional
+scalar `WHERE` into `SQLIncrementalFilter`. Broader automatic planner wiring
+for joins, projections, aggregates, ordering, and every SQL operator remains
+open, and MZ-035 remains open for auditing multiset preservation across every
+path.
 
 ## Public Surface
 
@@ -17,6 +20,7 @@ MZ-035 remains open for auditing multiset preservation across every path.
 | --- | --- | --- |
 | Change record | `DifferentialRow` | Carries `Key`, logical `Time`, signed `Diff`, and a `Row` payload. |
 | Selection | `FilterDifferentialRows` | Preserves non-zero signed weights and duplicate updates for selected rows. |
+| SQL filter lowering | `CompiledSQLQuery.CompileIncrementalFilter` | Reuses SQL scalar expression semantics for signed `SELECT * ... WHERE` updates and rejects unsupported query shapes explicitly. |
 | Projection | `MapDifferentialRows` | Applies a one-to-one mapping and consolidates equal output key/time identities. |
 | Expansion | `FlatMapDifferentialRows` | Applies a one-to-many mapping while inheriting timestamp and signed weight. |
 | Union | `UnionDifferentialRows` | Implements `UNION ALL`-style signed concatenation with consolidation. |
@@ -70,7 +74,12 @@ make test-mz034-c203
 make race-mz034-c203
 make vet-mz034-c203
 make benchmark-mz034-c203
+make test-mz034-incremental-sql-filter
+make benchmark-mz034-incremental-sql-filter
 ```
+
+The bounded SQL filter adapter and its rebuild comparison are documented in
+[MZ034_INCREMENTAL_SQL_FILTER.md](MZ034_INCREMENTAL_SQL_FILTER.md).
 
 ## Benchmark
 

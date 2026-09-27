@@ -4485,6 +4485,7 @@ the measured cost in
 - [Materialize-style late-data reclock](MZ032_LATE_DATA_RECLOCK.md)
 - [Materialize-style timestamp oracle](MZ033_TIMESTAMP_ORACLE.md)
 - [Materialize-style generic negative-diff operators](MZ034_GENERIC_NEGATIVE_DIFF.md)
+- [Materialize-style incremental SQL filter lowering](MZ034_INCREMENTAL_SQL_FILTER.md)
 - [Materialize-style recursive convergence diagnostics and iteration bounds](MZ040_RECURSIVE_CONVERGENCE_BOUNDS.md)
 ### External window streaming
 
