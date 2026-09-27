@@ -28640,3 +28640,31 @@ cleanup-empty-tmp-plan-preview:
 \tbash ./scripts/cleanup-empty-tmp-plan-artifacts.sh preview
 cleanup-empty-tmp-plan:
 \tbash ./scripts/cleanup-empty-tmp-plan-artifacts.sh apply
+
+.PHONY: test-ch004-final-schema-store
+test-ch004-final-schema-store:
+	@bash scripts/test-ch004-final-schema-store.sh
+
+.PHONY: benchmark-ch004-final-schema-store
+benchmark-ch004-final-schema-store:
+	@bash scripts/benchmark-ch004-final-schema-store.sh
+
+.PHONY: format-ch004-final-schema-store
+format-ch004-final-schema-store:
+	@bash scripts/format-ch004-final-schema-store.sh
+
+.PHONY: test-ch004-final-schema-store-package
+test-ch004-final-schema-store-package:
+	@bash scripts/test-ch004-final-schema-store-package.sh
+
+.PHONY: race-ch004-final-schema-store
+race-ch004-final-schema-store:
+	@bash scripts/race-ch004-final-schema-store.sh
+
+.PHONY: vet-ch004-final-schema-store
+vet-ch004-final-schema-store:
+	@bash scripts/vet-ch004-final-schema-store.sh
+
+.PHONY: deliver-ch004-final-schema-store
+deliver-ch004-final-schema-store:
+	@bash scripts/deliver-ch004-final-schema-store.sh
