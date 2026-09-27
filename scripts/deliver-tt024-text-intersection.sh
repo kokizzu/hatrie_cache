@@ -86,10 +86,32 @@ deliver)
 		exit 1
 	fi
 	awk -v block_file="$block_file" '
-		{ print }
-		$0 == "# CH037_NATIVE_ARRAY_FASTPATH_TARGETS_END" {
+		function print_block(line) {
 			while ((getline line < block_file) > 0) print line
 			close(block_file)
+		}
+		$0 == "# TT024_TEXT_INTERSECTION_TARGETS_BEGIN" {
+			if (!replaced) {
+				print_block()
+				replaced=1
+			}
+			in_block=1
+			next
+		}
+		in_block && $0 == "# TT024_TEXT_INTERSECTION_TARGETS_END" {
+			in_block=0
+			next
+		}
+		in_block { next }
+		$0 == "# CH037_NATIVE_ARRAY_FASTPATH_TARGETS_END" && !replaced {
+			print
+			print_block()
+			replaced=1
+			next
+		}
+		{ print }
+		END {
+			if (!replaced) exit 2
 		}
 	' "$base_file" > "$feature_file"
 	diff_status=0
