@@ -1166,3 +1166,12 @@ query paths remain unchanged. The measured 16-caller cold-miss burst is 1.95x
 faster, with 3.43x lower transient bytes and 2.78x fewer allocations. See
 [M049_COMPILED_PLAN_SINGLEFLIGHT.md](M049_COMPILED_PLAN_SINGLEFLIGHT.md) and
 [BENCHMARK.md](BENCHMARK.md#m049-concurrent-compiled-plan-miss-coalescing).
+
+## M065ag: SQL `FIRST_VALUE`/`LAST_VALUE` Streaming
+
+Added SQL materialized support for `FIRST_VALUE` and `LAST_VALUE`, then wired
+the unpartitioned, unordered default-frame subset into the existing running
+window stream. The stream retains O(1) boundary state, preserves SQL NULL
+semantics, and updates only after `WHERE` filtering. See
+[M065_FIRST_LAST_WINDOW_STREAM.md](M065_FIRST_LAST_WINDOW_STREAM.md) and
+[BENCHMARK.md](BENCHMARK.md#m065ag-sql-first_value-last_value-streaming).

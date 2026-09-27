@@ -1190,3 +1190,10 @@ SQL shape. See [CH035_REMOTE_SHARD_PRUNING.md](CH035_REMOTE_SHARD_PRUNING.md).
   allocations; see
   [M052AG_NATIVE_QUAD_GROUPED_ORDERED.md](M052AG_NATIVE_QUAD_GROUPED_ORDERED.md)
   and [BENCHMARK.md](BENCHMARK.md#m052ag-native-four-field-grouped-ordered-top-n).
+
+- [x] M065ag SQL `FIRST_VALUE`/`LAST_VALUE` support in the materialized
+  executor plus automatic O(1)-state streaming for unpartitioned, unordered
+  default-frame queries. NULL and filtered-row semantics are covered, and the
+  final stream is 45.9x faster at roughly flat cumulative bytes. See
+  [M065_FIRST_LAST_WINDOW_STREAM.md](M065_FIRST_LAST_WINDOW_STREAM.md) and
+  [BENCHMARK.md](BENCHMARK.md#m065ag-sql-first_value-last_value-streaming).

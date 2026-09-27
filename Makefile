@@ -28970,3 +28970,45 @@ push-tt024-cache-cross-field:
 deliver-tt024-cache-cross-field:
 	bash scripts/deliver-tt024-cache-cross-field.sh deliver
 # TT024_CACHE_CROSS_FIELD_END
+
+# M065_FIRST_LAST_WINDOW_NEXT10_BEGIN
+.PHONY: format-m065-first-last-window-next10 test-m065-first-last-window-next10 benchmark-m065-first-last-window-next10 test-m065-first-last-package-next10 race-m065-first-last-window-next10 vet-m065-first-last-window-next10
+format-m065-first-last-window-next10:
+	bash scripts/format-m065-first-last-window-next10.sh
+
+test-m065-first-last-window-next10:
+	bash scripts/test-m065-first-last-window-next10.sh
+
+benchmark-m065-first-last-window-next10:
+	bash scripts/benchmark-m065-first-last-window-next10.sh
+
+test-m065-first-last-package-next10:
+	bash scripts/test-m065-first-last-package-next10.sh
+
+race-m065-first-last-window-next10:
+	bash scripts/race-m065-first-last-window-next10.sh
+
+vet-m065-first-last-window-next10:
+	bash scripts/vet-m065-first-last-window-next10.sh
+# M065_FIRST_LAST_WINDOW_NEXT10_END
+
+# M065_FIRST_LAST_DELIVERY_NEXT10_BEGIN
+.PHONY: status-m065-first-last-window-next10 stage-m065-first-last-window-next10 unstage-m065-first-last-window-next10 commit-m065-first-last-window-next10 push-m065-first-last-window-next10 deliver-m065-first-last-window-next10
+status-m065-first-last-window-next10:
+	bash scripts/deliver-m065-first-last-window-next10.sh status
+
+stage-m065-first-last-window-next10:
+	bash scripts/deliver-m065-first-last-window-next10.sh stage
+
+unstage-m065-first-last-window-next10:
+	bash scripts/deliver-m065-first-last-window-next10.sh unstage
+
+commit-m065-first-last-window-next10:
+	bash scripts/deliver-m065-first-last-window-next10.sh commit
+
+push-m065-first-last-window-next10:
+	bash scripts/deliver-m065-first-last-window-next10.sh push
+
+deliver-m065-first-last-window-next10:
+	bash scripts/deliver-m065-first-last-window-next10.sh deliver
+# M065_FIRST_LAST_DELIVERY_NEXT10_END

@@ -1136,9 +1136,10 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 			return err
 		}
 		outputRows++
-		quotaBytes += int64(sqlRowBytes(row))
+		rowBytes := sqlRowBytes(row)
+		quotaBytes += int64(rowBytes)
 		if resultBytes >= 0 {
-			resultBytes += sqlRowBytes(row)
+			resultBytes += rowBytes
 		}
 		return nil
 	})
@@ -2422,6 +2423,9 @@ type sqlRunningWindowState struct {
 	min         float64
 	max         float64
 	seen        bool
+	firstValue  interface{}
+	lastValue   interface{}
+	valueSeen   bool
 	lagOffset   int
 	lagDefault  *sqlExpr
 	lagValues   []interface{}
@@ -2471,6 +2475,10 @@ func sqlRunningWindowStreamable(query *sqlQuery, resolver SQLSourceResolver) boo
 				return false
 			}
 		case "SUM", "AVG", "MIN", "MAX":
+			if len(expr.args) != 1 || sqlExprHasAggregate(expr.args[0]) || sqlExprHasWindow(expr.args[0]) || sqlExprHasCustomFunction(expr.args[0], nil) {
+				return false
+			}
+		case "FIRST_VALUE", "LAST_VALUE":
 			if len(expr.args) != 1 || sqlExprHasAggregate(expr.args[0]) || sqlExprHasWindow(expr.args[0]) || sqlExprHasCustomFunction(expr.args[0], nil) {
 				return false
 			}
@@ -2671,14 +2679,14 @@ func (state *sqlRunningWindowState) add(row sqlExecRow) (interface{}, error) {
 		// With no ORDER BY every row is tied, so both ranks are one.
 		return int64(1), nil
 	case "LAG":
-		value := evalSQLExpr(state.arg, []sqlExecRow{row}, row)
-		if err := sqlExpressionError(value); err != nil {
+		value, err := evalSQLRunningWindowExpr(state.arg, row)
+		if err != nil {
 			return nil, err
 		}
 		defaultValue := interface{}(nil)
 		if state.lagDefault != nil {
-			defaultValue = evalSQLExpr(*state.lagDefault, []sqlExecRow{row}, row)
-			if err := sqlExpressionError(defaultValue); err != nil {
+			defaultValue, err = evalSQLRunningWindowExpr(*state.lagDefault, row)
+			if err != nil {
 				return nil, err
 			}
 		}
@@ -2694,9 +2702,23 @@ func (state *sqlRunningWindowState) add(row sqlExecRow) (interface{}, error) {
 		}
 		state.lagSeen++
 		return result, nil
+	case "FIRST_VALUE", "LAST_VALUE":
+		value, err := evalSQLRunningWindowExpr(state.arg, row)
+		if err != nil {
+			return nil, err
+		}
+		if !state.valueSeen {
+			state.firstValue = value
+			state.valueSeen = true
+		}
+		state.lastValue = value
+		if state.name == "FIRST_VALUE" {
+			return state.firstValue, nil
+		}
+		return state.lastValue, nil
 	}
-	value := evalSQLExpr(state.arg, []sqlExecRow{row}, row)
-	if err := sqlExpressionError(value); err != nil {
+	value, err := evalSQLRunningWindowExpr(state.arg, row)
+	if err != nil {
 		return nil, err
 	}
 	number, ok := sqlNumber(value)
@@ -2740,6 +2762,10 @@ func (state sqlRunningWindowState) value() interface{} {
 		return state.max
 	}
 	return nil
+}
+
+func evalSQLRunningWindowExpr(expr sqlExpr, row sqlExecRow) (interface{}, error) {
+	return evalSQLStreamExpr(expr, row, nil)
 }
 
 func executeSQLRunningWindowStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func(columns []string, row SQLRow) error) error {
@@ -2799,8 +2825,8 @@ func executeSQLRunningWindowStream(ctx context.Context, query *sqlQuery, resolve
 				row[columns[index]] = value
 				continue
 			}
-			value := evalSQLExpr(item.expr, []sqlExecRow{execRow}, execRow)
-			if err := sqlExpressionError(value); err != nil {
+			value, err := evalSQLRunningWindowExpr(item.expr, execRow)
+			if err != nil {
 				return err
 			}
 			row[columns[index]] = value
@@ -12719,7 +12745,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		if item.expr.window == nil {
 			continue
 		}
-		if item.expr.name != "ROW_NUMBER" && item.expr.name != "RANK" && item.expr.name != "DENSE_RANK" && item.expr.name != "SUM" && item.expr.name != "AVG" && item.expr.name != "MIN" && item.expr.name != "MAX" && item.expr.name != "ARGMAX" && item.expr.name != "ARGMIN" && item.expr.name != "LAG" && item.expr.name != "LEAD" {
+		if item.expr.name != "ROW_NUMBER" && item.expr.name != "RANK" && item.expr.name != "DENSE_RANK" && item.expr.name != "SUM" && item.expr.name != "AVG" && item.expr.name != "MIN" && item.expr.name != "MAX" && item.expr.name != "ARGMAX" && item.expr.name != "ARGMIN" && item.expr.name != "LAG" && item.expr.name != "LEAD" && item.expr.name != "FIRST_VALUE" && item.expr.name != "LAST_VALUE" {
 			return SQLQueryResult{}, fmt.Errorf("SQL window function %q is not supported", item.expr.name)
 		}
 		for _, output := range out {
@@ -12853,6 +12879,41 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 						}
 					}
 					out[index].row[result.Columns[column]] = sqlWindowAggregate(item.expr.name, values)
+				case "FIRST_VALUE", "LAST_VALUE":
+					if len(item.expr.args) != 1 {
+						return SQLQueryResult{}, fmt.Errorf("%s window function expects one argument", item.expr.name)
+					}
+					start, end := sqlWindowFrameBounds(item.expr.window.frame, position, len(indexes))
+					if item.expr.window.frame != nil && item.expr.window.frame.kind == "RANGE" {
+						var err error
+						start, end, err = sqlRangeWindowFrameBounds(item.expr.window.frame, item.expr.window.order[0], rangeValues, position)
+						if err != nil {
+							return SQLQueryResult{}, err
+						}
+					}
+					var value interface{}
+					found := false
+					for framePosition := start; framePosition <= end; framePosition++ {
+						if item.expr.window.frame != nil && item.expr.window.frame.exclude != "" && !sqlWindowFramePositionIncluded(item.expr.window.frame, framePosition, position, indexes, out, item.expr.window.order) {
+							continue
+						}
+						frameRow := sqlExecRow{}
+						if len(out[indexes[framePosition]].group) > 0 {
+							frameRow = out[indexes[framePosition]].group[0]
+						}
+						value = evalSQLExpr(item.expr.args[0], out[indexes[framePosition]].group, frameRow)
+						if err := sqlExpressionError(value); err != nil {
+							return SQLQueryResult{}, err
+						}
+						found = true
+						if item.expr.name == "FIRST_VALUE" {
+							break
+						}
+					}
+					if !found {
+						value = nil
+					}
+					out[index].row[result.Columns[column]] = value
 				case "ARGMAX", "ARGMIN":
 					start, end := sqlWindowFrameBounds(item.expr.window.frame, position, len(indexes))
 					if item.expr.window.frame != nil && item.expr.window.frame.kind == "RANGE" {

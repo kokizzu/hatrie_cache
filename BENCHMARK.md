@@ -39012,3 +39012,31 @@ The status endpoint is a recovery/control-plane operation and is opt-in. The
 existing HTTP phase path showed no measurable regression: its median changed
 from `159,493 ns/op`, `28,970 B/op`, `254 allocs/op` to `158,121 ns/op`,
 `28,970 B/op`, `254 allocs/op` across three-run samples.
+
+<a id="m065ag-sql-first_value-last_value-streaming"></a>
+## M065ag SQL `FIRST_VALUE`/`LAST_VALUE` Streaming
+
+Command: `make benchmark-m065-first-last-window-next10`.
+
+Fixture: 4,096 integer `VALUES` rows with `FIRST_VALUE` and `LAST_VALUE`; five
+`-benchmem` samples. The streamed callback discards emitted rows, while the
+materialized path retains its result slice.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Materialized baseline | 273,664,810 | 4,007,866 | 20,597 | 1.00x |
+| Final bounded stream | 5,963,358 | 4,118,815 | 53,283 | 45.9x faster |
+
+Raw `ns/op` samples: materialized 273,664,810; 265,068,910; 266,293,655;
+293,943,440; 278,850,421. Streamed 5,963,324; 6,177,221; 6,137,763;
+5,941,805; 5,963,358.
+
+The stream is 45.9x faster, with 1.03x cumulative bytes and 2.59x allocation
+count versus materialization. The extra allocation count comes from the public
+per-row `SQLRow` callback; the streamed result slice is not retained. The
+initial prototype was 6,600,934 ns/op, 5,497,944 B/op, and 65,575 allocs/op,
+so the final scalar evaluator and single row-byte calculation reduced stream
+CPU by 1.19x, bytes by 1.33x, and allocations by 1.23x.
+
+See [M065_FIRST_LAST_WINDOW_STREAM.md](M065_FIRST_LAST_WINDOW_STREAM.md) for
+the supported subset, NULL behavior, limitations, and raw samples.
