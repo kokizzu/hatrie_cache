@@ -28561,3 +28561,7 @@ test-ch048-not-between-all:
 .PHONY: deliver-ch048-not-between
 deliver-ch048-not-between:
 	bash ./scripts/deliver-ch048-not-between.sh
+
+.PHONY: deliver-ch039-grouped-topk
+deliver-ch039-grouped-topk:
+	bash ./scripts/deliver-ch039-grouped-topk.sh

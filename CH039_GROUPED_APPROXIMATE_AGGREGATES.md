@@ -2,14 +2,14 @@
 
 ClickHouse-style approximate aggregation is useful inside grouped queries, not
 only for one global result. This change routes supported grouped
-`APPROX_COUNT_DISTINCT` and `APPROX_PERCENTILE` expressions through the native
-dataflow executor while keeping the existing HyperLogLog and quantile-sketch
-algorithms and fallback semantics.
+`APPROX_COUNT_DISTINCT`, `APPROX_PERCENTILE`, and `APPROX_TOP_K` expressions
+through the native dataflow executor while keeping the existing HyperLogLog,
+quantile-sketch, and Space-Saving algorithms and fallback semantics.
 
 ## Implementation
 
 - Native aggregate planning accepts direct scalar arguments for
-  `APPROX_COUNT_DISTINCT` and `APPROX_PERCENTILE`.
+  `APPROX_COUNT_DISTINCT`, `APPROX_PERCENTILE`, and `APPROX_TOP_K`.
 - Each native group receives a fresh sketch state. The clone is deliberate:
   native plans are reused as a template, and sharing a pointer-backed sketch
   would combine values from different groups.
@@ -22,9 +22,11 @@ algorithms and fallback semantics.
 ## Supported Scope
 
 Native grouped execution currently covers the existing eligible single-source
-dataflow shapes with a scalar field or literal as the sketch input. State and
-merge functions, `APPROX_TOP_K`, `AUTO_COUNT_DISTINCT`, and T-Digest variants
-remain on their existing paths until separately benchmarked.
+dataflow shapes with a scalar field or literal as the approximate input. State
+and merge functions, `AUTO_COUNT_DISTINCT`, and T-Digest variants remain on
+their existing paths until separately benchmarked. The grouped Top-K benchmark
+and raw samples are recorded in
+`CH039_GROUPED_TOPK.md`.
 
 ## Verification
 

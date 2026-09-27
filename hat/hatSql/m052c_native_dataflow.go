@@ -451,7 +451,7 @@ func nativeSQLDataflowAggregateExpression(expr sqlExpr) (sqlStreamAggregate, boo
 		}
 		argument := expr.args[0]
 		aggregate.arg = &argument
-	case "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE":
+	case "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TOP_K":
 		if len(expr.args) == 0 || expr.args[0].kind == "star" || !sqlStreamScalarExpr(expr.args[0]) {
 			return sqlStreamAggregate{}, false
 		}

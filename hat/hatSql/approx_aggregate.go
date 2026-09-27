@@ -27,6 +27,68 @@ type sqlApproxTopKEntry struct {
 	key string
 }
 
+type sqlApproxTopKAccumulator struct {
+	entries   []sqlApproxTopKEntry
+	positions map[string]int
+}
+
+func newSQLApproxTopKAccumulator(capacity int) *sqlApproxTopKAccumulator {
+	return &sqlApproxTopKAccumulator{
+		entries:   make([]sqlApproxTopKEntry, 0, capacity),
+		positions: make(map[string]int, capacity),
+	}
+}
+
+func (accumulator *sqlApproxTopKAccumulator) add(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+	key, err := sqlApproximateValueKey(value)
+	if err != nil {
+		return err
+	}
+	if index, ok := accumulator.positions[key]; ok {
+		accumulator.entries[index].Estimate++
+		return nil
+	}
+	if len(accumulator.entries) < cap(accumulator.entries) {
+		accumulator.positions[key] = len(accumulator.entries)
+		accumulator.entries = append(accumulator.entries, sqlApproxTopKEntry{
+			SQLApproxTopKItem: SQLApproxTopKItem{Value: value, Estimate: 1},
+			key:               key,
+		})
+		return nil
+	}
+	minimum := 0
+	for index := 1; index < len(accumulator.entries); index++ {
+		if accumulator.entries[index].Estimate < accumulator.entries[minimum].Estimate || accumulator.entries[index].Estimate == accumulator.entries[minimum].Estimate && accumulator.entries[index].key > accumulator.entries[minimum].key {
+			minimum = index
+		}
+	}
+	delete(accumulator.positions, accumulator.entries[minimum].key)
+	replaced := accumulator.entries[minimum].Estimate
+	accumulator.entries[minimum] = sqlApproxTopKEntry{
+		SQLApproxTopKItem: SQLApproxTopKItem{Value: value, Estimate: replaced + 1, Error: replaced},
+		key:               key,
+	}
+	accumulator.positions[key] = minimum
+	return nil
+}
+
+func (accumulator *sqlApproxTopKAccumulator) result() []SQLApproxTopKItem {
+	sort.Slice(accumulator.entries, func(left, right int) bool {
+		if accumulator.entries[left].Estimate != accumulator.entries[right].Estimate {
+			return accumulator.entries[left].Estimate > accumulator.entries[right].Estimate
+		}
+		return accumulator.entries[left].key < accumulator.entries[right].key
+	})
+	out := make([]SQLApproxTopKItem, len(accumulator.entries))
+	for index := range accumulator.entries {
+		out[index] = accumulator.entries[index].SQLApproxTopKItem
+	}
+	return out
+}
+
 type sqlApproximateStreamState struct {
 	expr         sqlExpr
 	hll          *hatDataStructure.HyperLogLog
@@ -39,6 +101,7 @@ type sqlApproximateStreamState struct {
 	auto         *sqlAutoDistinctState
 	hllState     bool
 	hllMerge     bool
+	topK         *sqlApproxTopKAccumulator
 }
 
 func newSQLApproximateStreamState(expr sqlExpr) (*sqlApproximateStreamState, bool) {
@@ -54,6 +117,16 @@ func newSQLApproximateStreamState(expr sqlExpr) (*sqlApproximateStreamState, boo
 			return nil, false
 		}
 		state.auto = auto
+		return state, true
+	case "APPROX_TOP_K":
+		if len(expr.args) < 1 || len(expr.args) > 2 {
+			return nil, false
+		}
+		capacity, err := sqlApproxTopKCapacity(expr)
+		if err != nil {
+			return nil, false
+		}
+		state.topK = newSQLApproxTopKAccumulator(capacity)
 		return state, true
 	case "APPROX_COUNT_DISTINCT":
 		if len(expr.args) < 1 || len(expr.args) > 2 {
@@ -176,6 +249,12 @@ func (state *sqlApproximateStreamState) addValue(value interface{}) error {
 	if value == nil {
 		return nil
 	}
+	if state.topK != nil {
+		if err := state.topK.add(value); err != nil {
+			return sqlApproximateAggregateError(state.expr, err.Error())
+		}
+		return nil
+	}
 	if state.hllMerge {
 		serialized, ok := value.([]byte)
 		if !ok {
@@ -239,6 +318,9 @@ func (state *sqlApproximateStreamState) addValue(value interface{}) error {
 }
 
 func (state *sqlApproximateStreamState) result() interface{} {
+	if state.topK != nil {
+		return state.topK.result()
+	}
 	if state.auto != nil {
 		return state.auto.count()
 	}
@@ -422,65 +504,36 @@ func evalSQLApproxTDigestPercentile(expr sqlExpr, group []sqlExecRow) interface{
 }
 
 func evalSQLApproxTopK(expr sqlExpr, group []sqlExecRow) interface{} {
-	if len(expr.args) < 1 || len(expr.args) > 2 {
-		return sqlApproximateAggregateError(expr, "APPROX_TOP_K expects one value expression and an optional capacity")
+	capacity, err := sqlApproxTopKCapacity(expr)
+	if err != nil {
+		return sqlApproximateAggregateError(expr, err.Error())
 	}
-	capacity := defaultSQLApproxTopKCapacity
-	if len(expr.args) == 2 {
-		value, err := sqlApproximateIntegerArgument(expr.args[1], "APPROX_TOP_K capacity")
-		if err != nil || value <= 0 || value > maxSQLApproxTopKCapacity {
-			if err == nil {
-				err = fmt.Errorf("APPROX_TOP_K capacity must be between 1 and %d", maxSQLApproxTopKCapacity)
-			}
-			return sqlApproximateAggregateError(expr, err.Error())
-		}
-		capacity = int(value)
-	}
-	entries := make([]sqlApproxTopKEntry, 0, capacity)
-	positions := make(map[string]int, capacity)
+	accumulator := newSQLApproxTopKAccumulator(capacity)
 	for _, row := range group {
 		value := evalSQLExpr(expr.args[0], nil, row)
 		if err := sqlExpressionError(value); err != nil {
 			return sqlEvaluationFailure(err)
 		}
-		if value == nil {
-			continue
-		}
-		key, err := sqlApproximateValueKey(value)
-		if err != nil {
+		if err := accumulator.add(value); err != nil {
 			return sqlApproximateAggregateError(expr, err.Error())
 		}
-		if index, ok := positions[key]; ok {
-			entries[index].Estimate++
-			continue
-		}
-		if len(entries) < capacity {
-			positions[key] = len(entries)
-			entries = append(entries, sqlApproxTopKEntry{SQLApproxTopKItem: SQLApproxTopKItem{Value: value, Estimate: 1}, key: key})
-			continue
-		}
-		minimum := 0
-		for index := 1; index < len(entries); index++ {
-			if entries[index].Estimate < entries[minimum].Estimate || entries[index].Estimate == entries[minimum].Estimate && entries[index].key > entries[minimum].key {
-				minimum = index
-			}
-		}
-		delete(positions, entries[minimum].key)
-		replaced := entries[minimum].Estimate
-		entries[minimum] = sqlApproxTopKEntry{SQLApproxTopKItem: SQLApproxTopKItem{Value: value, Estimate: replaced + 1, Error: replaced}, key: key}
-		positions[key] = minimum
 	}
-	sort.Slice(entries, func(left, right int) bool {
-		if entries[left].Estimate != entries[right].Estimate {
-			return entries[left].Estimate > entries[right].Estimate
+	return accumulator.result()
+}
+
+func sqlApproxTopKCapacity(expr sqlExpr) (int, error) {
+	capacity := defaultSQLApproxTopKCapacity
+	if len(expr.args) == 2 {
+		value, err := sqlApproximateIntegerArgument(expr.args[1], "APPROX_TOP_K capacity")
+		if err != nil {
+			return 0, err
 		}
-		return entries[left].key < entries[right].key
-	})
-	out := make([]SQLApproxTopKItem, len(entries))
-	for index := range entries {
-		out[index] = entries[index].SQLApproxTopKItem
+		if value <= 0 || value > maxSQLApproxTopKCapacity {
+			return 0, fmt.Errorf("APPROX_TOP_K capacity must be between 1 and %d", maxSQLApproxTopKCapacity)
+		}
+		capacity = int(value)
 	}
-	return out
+	return capacity, nil
 }
 
 func sqlApproximateNumberArgument(expr sqlExpr, name string) (float64, error) {
