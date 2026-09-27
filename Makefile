@@ -1,3 +1,10 @@
+.PHONY: inspect-hatrie-tmp-all
+inspect-hatrie-tmp-all:
+	bash ./scripts/inspect-hatrie-tmp.sh
+
+.PHONY: deliver-hatrie-tmp-audit
+deliver-hatrie-tmp-audit:
+	bash ./scripts/deliver-hatrie-tmp-audit.sh
 .PHONY: inspect-tt024-cross-field benchmark-tt024-cross-field deliver-tt024-cross-field
 
 inspect-tt024-cross-field:
