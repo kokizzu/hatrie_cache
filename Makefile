@@ -28726,3 +28726,15 @@ test-cleanup-go-build-tmp:
 
 deliver-cleanup-go-build-tmp:
 	@bash scripts/deliver-cleanup-go-build-tmp.sh
+
+.PHONY: test-ch006-mutation-worker benchmark-ch006-mutation-worker format-ch006-mutation-worker verify-ch006-mutation-worker deliver-ch006-mutation-worker
+test-ch006-mutation-worker:
+	@bash scripts/test-ch006-mutation-worker.sh
+benchmark-ch006-mutation-worker:
+	@bash scripts/benchmark-ch006-mutation-worker.sh
+format-ch006-mutation-worker:
+	@bash scripts/format-ch006-mutation-worker.sh
+verify-ch006-mutation-worker:
+	@bash scripts/verify-ch006-mutation-worker.sh
+deliver-ch006-mutation-worker:
+	@bash scripts/deliver-ch006-mutation-worker.sh
