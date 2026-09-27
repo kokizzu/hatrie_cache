@@ -14571,6 +14571,9 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 	if rows, indexed, err := resolveSQLTextProximityUnionIndexedSource(source, condition, resolver, metrics, hint); indexed || err != nil {
 		return rows, indexed, err
 	}
+	if rows, indexed, err := resolveSQLTextProximityIntersectionIndexedSource(source, condition, resolver, metrics, hint); indexed || err != nil {
+		return rows, indexed, err
+	}
 	if rows, indexed, err := resolveSQLTextProximityMixedBooleanUnionIndexedSource(source, condition, resolver, metrics, hint); indexed || err != nil {
 		return rows, indexed, err
 	}

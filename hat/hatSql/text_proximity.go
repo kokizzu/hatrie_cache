@@ -116,6 +116,53 @@ func resolveSQLTextProximityUnionIndexedSource(source sqlSource, condition sqlEx
 	return rows, available, err
 }
 
+// resolveSQLTextProximityIntersectionIndexedSource narrows a pure AND of
+// indexed phrase/proximity predicates. A non-text conjunct deliberately
+// disables this path because the existing selective-index planner can choose
+// the better candidate source for that mixed expression.
+func resolveSQLTextProximityIntersectionIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSourceResolver, metrics *sqlExecutionMetrics, hint SQLIndexHint) ([]SQLRow, bool, error) {
+	if condition.kind != "binary" || condition.op != "AND" || condition.left == nil || condition.right == nil {
+		return nil, false, nil
+	}
+	indexed, ok := resolver.(TextProximityMultiFieldIntersectionIndexedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	queries := make([]SQLTextProximityFieldQuery, 0, 2)
+	allMatched := true
+	var collect func(sqlExpr) error
+	collect = func(expression sqlExpr) error {
+		if expression.kind == "binary" && expression.op == "AND" && expression.left != nil && expression.right != nil {
+			if err := collect(*expression.left); err != nil {
+				return err
+			}
+			return collect(*expression.right)
+		}
+		field, query, matched, err := sqlTextProximityPredicate(source, expression, hint)
+		if err != nil {
+			return err
+		}
+		if !matched {
+			allMatched = false
+			return nil
+		}
+		queries = append(queries, SQLTextProximityFieldQuery{Field: field, Query: query})
+		return nil
+	}
+	if err := collect(condition); err != nil {
+		return nil, false, err
+	}
+	if !allMatched || len(queries) < 2 {
+		return nil, false, nil
+	}
+	started := time.Now()
+	rows, available, err := indexed.ResolveSQLTextProximityMultiFieldIntersectionSource(source.kind, source.key, queries)
+	if available && metrics != nil {
+		metrics.record("TEXT PROXIMITY INDEX INTERSECTION", sqlExplainSource(source), len(queries), len(rows), started)
+	}
+	return rows, available, err
+}
+
 // resolveSQLTextProximityMixedBooleanUnionIndexedSource narrows a mixed OR
 // expression such as (phrase AND filter) OR (proximity AND filter). Every OR
 // branch must contain an indexable phrase/proximity predicate; otherwise a

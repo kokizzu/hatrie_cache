@@ -1597,6 +1597,15 @@ type TextProximityMultiFieldUnionIndexedSourceResolver interface {
 	ResolveSQLTextProximityMultiFieldUnionSource(name, key string, queries []SQLTextProximityFieldQuery) ([]Row, bool, error)
 }
 
+// TextProximityMultiFieldIntersectionIndexedSourceResolver optionally resolves
+// a pure AND of ordered phrase or proximity predicates across one or more
+// indexed text fields. Implementations must return rows in source order. The
+// SQL executor still evaluates every predicate before publishing results, so
+// conservative candidates remain correct.
+type TextProximityMultiFieldIntersectionIndexedSourceResolver interface {
+	ResolveSQLTextProximityMultiFieldIntersectionSource(name, key string, queries []SQLTextProximityFieldQuery) ([]Row, bool, error)
+}
+
 // ExternalSourceResolver supplies a named, imported external table. It is
 // used only by EXTERNAL('name') sources and never receives a filesystem path.
 type ExternalSourceResolver interface {

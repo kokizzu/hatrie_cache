@@ -137,3 +137,45 @@ ORDER BY article.id`, trie)
 		t.Fatalf("OR phrase query rows = %#v", result.Rows)
 	}
 }
+
+func TestSQLTextPhraseIndexIntersectionAcrossFields(t *testing.T) {
+	t.Parallel()
+	trie := newTestTrie(t)
+	trie.UpsertString("articles", `[
+  {"id":1,"title":"quick brown fox","body":"lazy fox"},
+  {"id":2,"title":"quick brown fox","body":"unrelated"},
+  {"id":3,"title":"unrelated","body":"lazy red fox"},
+  {"id":4,"title":"quick brown","body":"lazy fox"}
+]`)
+	for _, field := range []string{"title", "body"} {
+		if err := trie.CreateSQLJSONTextIndex("articles", field); err != nil {
+			t.Fatalf("CreateSQLJSONTextIndex(%q) error = %v", field, err)
+		}
+	}
+	queries := []hatSql.SQLTextProximityFieldQuery{
+		{Field: "title", Query: hatSql.SQLTextProximityQuery{Query: "quick brown"}},
+		{Field: "body", Query: hatSql.SQLTextProximityQuery{Query: "lazy fox"}},
+	}
+	rows, available, err := trie.ResolveSQLTextProximityMultiFieldIntersectionSource("CACHE", "articles", queries)
+	if err != nil || !available {
+		t.Fatalf("ResolveSQLTextProximityMultiFieldIntersectionSource() availability/error = %t/%v", available, err)
+	}
+	if !reflect.DeepEqual(rows, []SQLRow{
+		{"id": float64(1), "title": "quick brown fox", "body": "lazy fox"},
+		{"id": float64(4), "title": "quick brown", "body": "lazy fox"},
+	}) {
+		t.Fatalf("intersection rows = %#v", rows)
+	}
+	result, err := ExecuteSQLQuery(`
+FROM CACHE('articles') AS article
+WHERE CONTAINS_PHRASE(article.title, 'quick brown')
+  AND CONTAINS_PHRASE(article.body, 'lazy fox')
+SELECT article.id
+ORDER BY article.id`, trie)
+	if err != nil {
+		t.Fatalf("cross-field AND phrase query error = %v", err)
+	}
+	if !reflect.DeepEqual(result.Rows, []SQLRow{{"id": float64(1)}, {"id": float64(4)}}) {
+		t.Fatalf("cross-field AND phrase rows = %#v", result.Rows)
+	}
+}

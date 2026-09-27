@@ -43,3 +43,12 @@ func (adapter SQLResolverAdapter) ResolveSQLTextProximityUnionSource(name, key, 
 	}
 	return nil, false, nil
 }
+
+// ResolveSQLTextProximityMultiFieldIntersectionSource exposes one source
+// ordered intersection of phrase/proximity candidates to the SQL planner.
+func (adapter SQLResolverAdapter) ResolveSQLTextProximityMultiFieldIntersectionSource(name, key string, queries []hatSql.SQLTextProximityFieldQuery) ([]hatSql.Row, bool, error) {
+	if indexed, ok := adapter.Base.(hatSql.TextProximityMultiFieldIntersectionIndexedSourceResolver); ok {
+		return indexed.ResolveSQLTextProximityMultiFieldIntersectionSource(name, key, queries)
+	}
+	return nil, false, nil
+}
