@@ -391,7 +391,7 @@ func nativeSQLDataflowRewriteGroupedHaving(expr sqlExpr, query *sqlQuery, column
 		}
 		name := strings.ToUpper(expr.name)
 		switch name {
-		case "COUNT", "SUM", "AVG", "MIN", "MAX":
+		case "COUNT", "SUM", "AVG", "MIN", "MAX", "COUNT_OR_NULL", "SUM_OR_NULL", "AVG_OR_NULL", "MIN_OR_NULL", "MAX_OR_NULL":
 			return sqlExpr{}, false
 		}
 	}
@@ -428,12 +428,16 @@ func nativeSQLDataflowAggregateExpression(expr sqlExpr) (sqlStreamAggregate, boo
 		return sqlStreamAggregate{}, false
 	}
 	name := strings.ToUpper(expr.name)
+	baseName := name
+	if base, ok := sqlAggregateOrNullBase(name); ok {
+		baseName = base
+	}
 	conditional := nativeSQLDataflowConditionalAggregate(expr)
 	if expr.filter != nil && !conditional {
 		return sqlStreamAggregate{}, false
 	}
 	aggregate := sqlStreamAggregate{name: name}
-	switch name {
+	switch baseName {
 	case "COUNT":
 		if len(expr.args) > 1 {
 			return sqlStreamAggregate{}, false

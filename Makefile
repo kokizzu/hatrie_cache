@@ -28757,3 +28757,26 @@ verify-ch011-source-notifications:
 	@bash scripts/verify-ch011-source-notifications.sh
 deliver-ch011-source-notifications:
 	@bash scripts/deliver-ch011-source-notifications.sh deliver
+# CH038_NATIVE_DATAFLOW_FEATURE_TARGETS_BEGIN
+.PHONY: test-ch038-ornull-native benchmark-ch038-ornull-native
+test-ch038-ornull-native:
+	bash ./scripts/test-ch038-ornull-native.sh
+benchmark-ch038-ornull-native:
+	bash ./scripts/benchmark-ch038-ornull-native.sh
+
+.PHONY: format-ch038-ornull-native
+format-ch038-ornull-native:
+	bash ./scripts/format-ch038-ornull-native.sh
+
+.PHONY: race-ch038-ornull-native vet-ch038-ornull-native test-ch038-ornull-native-package
+race-ch038-ornull-native:
+	bash ./scripts/race-ch038-ornull-native.sh
+vet-ch038-ornull-native:
+	bash ./scripts/vet-ch038-ornull-native.sh
+test-ch038-ornull-native-package:
+	bash ./scripts/test-ch038-ornull-native-package.sh
+
+.PHONY: deliver-ch038-ornull-native
+deliver-ch038-ornull-native:
+	bash ./scripts/deliver-ch038-ornull-native.sh deliver
+# CH038_NATIVE_DATAFLOW_FEATURE_TARGETS_END
