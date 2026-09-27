@@ -29214,3 +29214,47 @@ push-m038-incremental-group-count:
 .PHONY: deliver-m038-incremental-group-count
 deliver-m038-incremental-group-count:
 	@bash scripts/deliver-m038-incremental-group-count.sh deliver
+
+.PHONY: baseline-m038-incremental-group-count-sum
+baseline-m038-incremental-group-count-sum:
+	@bash scripts/test-m038-incremental-group-count-sum.sh baseline
+
+.PHONY: format-m038-incremental-group-count-sum
+format-m038-incremental-group-count-sum:
+	@bash scripts/test-m038-incremental-group-count-sum.sh format
+
+.PHONY: test-m038-incremental-group-count-sum
+test-m038-incremental-group-count-sum:
+	@bash scripts/test-m038-incremental-group-count-sum.sh test
+
+.PHONY: benchmark-m038-incremental-group-count-sum
+benchmark-m038-incremental-group-count-sum:
+	@bash scripts/test-m038-incremental-group-count-sum.sh benchmark
+
+.PHONY: test-m038-incremental-group-count-sum-package
+test-m038-incremental-group-count-sum-package:
+	@bash scripts/test-m038-incremental-group-count-sum.sh package
+
+.PHONY: race-m038-incremental-group-count-sum
+race-m038-incremental-group-count-sum:
+	@bash scripts/test-m038-incremental-group-count-sum.sh race
+
+.PHONY: vet-m038-incremental-group-count-sum
+vet-m038-incremental-group-count-sum:
+	@bash scripts/test-m038-incremental-group-count-sum.sh vet
+
+.PHONY: stage-m038-incremental-group-count-sum
+stage-m038-incremental-group-count-sum:
+	@bash scripts/deliver-m038-incremental-group-count-sum.sh stage
+
+.PHONY: commit-m038-incremental-group-count-sum
+commit-m038-incremental-group-count-sum:
+	@bash scripts/deliver-m038-incremental-group-count-sum.sh commit
+
+.PHONY: push-m038-incremental-group-count-sum
+push-m038-incremental-group-count-sum:
+	@bash scripts/deliver-m038-incremental-group-count-sum.sh push
+
+.PHONY: deliver-m038-incremental-group-count-sum
+deliver-m038-incremental-group-count-sum:
+	@bash scripts/deliver-m038-incremental-group-count-sum.sh deliver
