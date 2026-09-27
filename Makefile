@@ -28668,3 +28668,31 @@ vet-ch004-final-schema-store:
 .PHONY: deliver-ch004-final-schema-store
 deliver-ch004-final-schema-store:
 	@bash scripts/deliver-ch004-final-schema-store.sh
+
+.PHONY: benchmark-mz011-file-sink
+benchmark-mz011-file-sink:
+	@bash scripts/benchmark-mz011-file-sink.sh
+
+.PHONY: format-mz011-file-sink
+format-mz011-file-sink:
+	@bash scripts/format-mz011-file-sink.sh
+
+.PHONY: test-mz011-file-sink
+test-mz011-file-sink:
+	@bash scripts/test-mz011-file-sink.sh
+
+.PHONY: test-mz011-file-sink-package
+test-mz011-file-sink-package:
+	@bash scripts/test-mz011-file-sink-package.sh
+
+.PHONY: race-mz011-file-sink
+race-mz011-file-sink:
+	@bash scripts/race-mz011-file-sink.sh
+
+.PHONY: vet-mz011-file-sink
+vet-mz011-file-sink:
+	@bash scripts/vet-mz011-file-sink.sh
+
+.PHONY: deliver-mz011-file-sink
+deliver-mz011-file-sink:
+	@bash scripts/deliver-mz011-file-sink.sh
