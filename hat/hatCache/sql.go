@@ -1104,6 +1104,10 @@ func CompileSQL(source string) (CacheCommandRequest, error) {
 	if err != nil {
 		return CacheCommandRequest{}, err
 	}
+	return compileSQLTokens(source, tokens)
+}
+
+func compileSQLTokens(source string, tokens []sqlToken) (CacheCommandRequest, error) {
 	parser := sqlParser{source: source, tokens: tokens}
 	return parser.parseProgram()
 }
