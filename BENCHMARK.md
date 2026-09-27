@@ -39013,6 +39013,26 @@ existing HTTP phase path showed no measurable regression: its median changed
 from `159,493 ns/op`, `28,970 B/op`, `254 allocs/op` to `158,121 ns/op`,
 `28,970 B/op`, `254 allocs/op` across three-run samples.
 
+<a id="c154g-replication-schema-rollout"></a>
+## C154g Replication Schema Rollout Contract Bridge
+
+Command: `make benchmark-c154-replication-rollout-next10`.
+
+This compares the existing `hatSchema.RollingSchemaPlan.Run` with the opt-in
+`hatCache.ReplicationSchemaRollout.Run` over four replicas and no-op install /
+activate hooks. Five samples were collected on Linux/amd64 with an AMD Ryzen 9
+5950X using `-benchtime=200ms -benchmem`.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative |
+| --- | ---: | ---: | ---: | ---: |
+| Existing plan coordinator | 4,825 | 7,636 | 30 | 1.00x |
+| Replication rollout bridge | 4,934 | 7,636 | 30 | 1.02x time |
+
+The bridge is about 2.3% slower in this control-plane fixture, with no measured
+heap or allocation increase. It adds no default-path work because callers must
+construct the rollout explicitly. Raw samples and contract semantics are in
+[C154_REPLICATION_SCHEMA_ROLLOUT.md](C154_REPLICATION_SCHEMA_ROLLOUT.md).
+
 <a id="m065ag-sql-first_value-last_value-streaming"></a>
 ## M065ag SQL `FIRST_VALUE`/`LAST_VALUE` Streaming
 

@@ -29012,3 +29012,55 @@ push-m065-first-last-window-next10:
 deliver-m065-first-last-window-next10:
 	bash scripts/deliver-m065-first-last-window-next10.sh deliver
 # M065_FIRST_LAST_DELIVERY_NEXT10_END
+# C154_REPLICATION_SCHEMA_ROLLOUT_NEXT10_BEGIN
+.PHONY: test-c154-replication-rollout-next10
+test-c154-replication-rollout-next10:
+	bash scripts/test-c154-replication-rollout-next10.sh
+# C154_REPLICATION_SCHEMA_ROLLOUT_NEXT10_END
+
+# C154_REPLICATION_SCHEMA_ROLLOUT_FORMAT_NEXT10_BEGIN
+.PHONY: format-c154-replication-rollout-next10
+format-c154-replication-rollout-next10:
+	bash scripts/format-c154-replication-rollout-next10.sh
+# C154_REPLICATION_SCHEMA_ROLLOUT_FORMAT_NEXT10_END
+
+# C154_REPLICATION_SCHEMA_ROLLOUT_BENCHMARK_NEXT10_BEGIN
+.PHONY: benchmark-c154-replication-rollout-next10
+benchmark-c154-replication-rollout-next10:
+	bash scripts/benchmark-c154-replication-rollout-next10.sh
+# C154_REPLICATION_SCHEMA_ROLLOUT_BENCHMARK_NEXT10_END
+
+# C154_REPLICATION_SCHEMA_ROLLOUT_VERIFY_NEXT10_BEGIN
+.PHONY: test-c154-replication-rollout-package-next10 race-c154-replication-rollout-next10 vet-c154-replication-rollout-next10
+test-c154-replication-rollout-package-next10:
+	bash scripts/test-c154-replication-rollout-package-next10.sh
+
+race-c154-replication-rollout-next10:
+	bash scripts/race-c154-replication-rollout-next10.sh
+
+vet-c154-replication-rollout-next10:
+	bash scripts/vet-c154-replication-rollout-next10.sh
+# C154_REPLICATION_SCHEMA_ROLLOUT_VERIFY_NEXT10_END
+
+# C154_REPLICATION_SCHEMA_ROLLOUT_DELIVERY_NEXT10_BEGIN
+.PHONY: status-c154-replication-rollout-next10 stage-c154-replication-rollout-next10 unstage-c154-replication-rollout-next10 commit-c154-replication-rollout-next10 push-c154-replication-rollout-next10 deliver-c154-replication-rollout-next10
+
+status-c154-replication-rollout-next10:
+	@bash ./scripts/deliver-c154-replication-rollout-next10.sh status
+
+stage-c154-replication-rollout-next10:
+	@bash ./scripts/deliver-c154-replication-rollout-next10.sh stage
+
+unstage-c154-replication-rollout-next10:
+	@bash ./scripts/deliver-c154-replication-rollout-next10.sh unstage
+
+commit-c154-replication-rollout-next10:
+	@bash ./scripts/deliver-c154-replication-rollout-next10.sh commit
+
+push-c154-replication-rollout-next10:
+	@bash ./scripts/deliver-c154-replication-rollout-next10.sh push
+
+deliver-c154-replication-rollout-next10:
+	@bash ./scripts/deliver-c154-replication-rollout-next10.sh deliver
+
+# C154_REPLICATION_SCHEMA_ROLLOUT_DELIVERY_NEXT10_END

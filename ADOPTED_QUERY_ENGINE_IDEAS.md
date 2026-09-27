@@ -591,6 +591,12 @@ C250 is distinct from C204: C204 propagates identity metadata through
 projections, while C250 performs the admission decision at the ingestion
 boundary. Existing unkeyed async callers remain unchanged.
 
+## C154g: Replication Schema Rollout Contract Bridge
+
+| Source | Adopted idea | Implementation | Evidence |
+| --- | --- | --- | --- |
+| ClickHouse / Materialize | Keep old and new replication schemas compatible during a rolling cutover, then retire the old contract atomically | Opt-in `hatCache.ReplicationSchemaRollout` composes the validated `hatSchema.RollingSchemaPlan`, reports each node's active contract, accepts both contracts until every node is active, and provides a strict refreshed policy afterward. Transport, authentication, checkpoint persistence, and topology publication remain caller-owned. | [C154_REPLICATION_SCHEMA_ROLLOUT.md](C154_REPLICATION_SCHEMA_ROLLOUT.md), [BENCHMARK.md](BENCHMARK.md#c154g-replication-schema-rollout) |
+
 ## C205: Subquery Result Cache Controls
 
 | Source | Adopted idea | Implementation | Evidence |

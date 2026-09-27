@@ -228,6 +228,7 @@ records a separate implementation boundary.
 
 - [ ] C153 Metadata consensus for partition ownership.
 - [ ] C154 Rolling schema changes across replicas.
+- [x] C154g Opt-in replication-schema rollout bridge composes validated replica phases with contract acceptance and retires the previous contract only after the last replica activates; transport, checkpoint persistence, and topology publication remain caller-owned. See [C154_REPLICATION_SCHEMA_ROLLOUT.md](C154_REPLICATION_SCHEMA_ROLLOUT.md).
 - [x] C154e Durable HRC1 rolling-schema checkpoints with exact plan fingerprint
   validation, stable-phase restart recovery, and bounded CRC-checked binary
   frames; storage and authentication remain caller-owned. See
