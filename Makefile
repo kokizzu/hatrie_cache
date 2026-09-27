@@ -28738,3 +28738,22 @@ verify-ch006-mutation-worker:
 	@bash scripts/verify-ch006-mutation-worker.sh
 deliver-ch006-mutation-worker:
 	@bash scripts/deliver-ch006-mutation-worker.sh
+
+.PHONY: test-ch011-source-notifications benchmark-ch011-source-notifications format-ch011-source-notifications
+test-ch011-source-notifications:
+	@bash scripts/test-ch011-source-notifications.sh
+benchmark-ch011-source-notifications:
+	@bash scripts/benchmark-ch011-source-notifications.sh
+format-ch011-source-notifications:
+	@bash scripts/format-ch011-source-notifications.sh
+.PHONY: race-ch011-source-notifications vet-ch011-source-notifications test-ch011-source-notifications-package verify-ch011-source-notifications
+race-ch011-source-notifications:
+	@bash scripts/race-ch011-source-notifications.sh
+vet-ch011-source-notifications:
+	@bash scripts/vet-ch011-source-notifications.sh
+test-ch011-source-notifications-package:
+	@bash scripts/test-ch011-source-notifications-package.sh
+verify-ch011-source-notifications:
+	@bash scripts/verify-ch011-source-notifications.sh
+deliver-ch011-source-notifications:
+	@bash scripts/deliver-ch011-source-notifications.sh deliver
