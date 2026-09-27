@@ -28590,3 +28590,9 @@ test-tt024-package:
 .PHONY: deliver-tt024-mixed-boolean
 deliver-tt024-mixed-boolean:
 \tbash ./scripts/deliver-tt024-mixed-boolean.sh deliver
+
+.PHONY: cleanup-empty-tmp-plan-preview cleanup-empty-tmp-plan
+cleanup-empty-tmp-plan-preview:
+\tbash ./scripts/cleanup-empty-tmp-plan-artifacts.sh preview
+cleanup-empty-tmp-plan:
+\tbash ./scripts/cleanup-empty-tmp-plan-artifacts.sh apply
