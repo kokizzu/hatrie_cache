@@ -37438,6 +37438,42 @@ BenchmarkTT024TextIndexBuild-32   100  33393692 ns/op  26255546 B/op 260258 allo
 BenchmarkTT024TextIndexBuild-32   100  32566476 ns/op  26255541 B/op 260258 allocs/op
 BenchmarkTT024TextIndexBuild-32   100  32911228 ns/op  26255594 B/op 260258 allocs/op
 ```
+<a id="tt-024-text-index-auto-selection"></a>
+## TT-024 Materialized Text Index Auto-Selection
+
+The existing materialized positional text index was not previously selected
+for ordinary SQL `CONTAINS(field, literal)` queries through
+`SQLResolverAdapter`. This benchmark compares that full-scan fallback with
+automatic token-posting selection over the same deterministic 20,000-row
+source. Five `-benchmem` samples ran on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Full scan (`scan_baseline`) | 25,548,346 | 21,950,523 | 180,034 | Baseline |
+| Automatic text index (`automatic_text_index`) | 37,894 | 21,608 | 173 | 674.2x lower CPU, 1,015.9x fewer bytes, 1,040.7x fewer allocations |
+
+The measured bytes are timed allocation volume, not retained index memory. The
+tradeoff is retained token/posting sidecar memory and index maintenance during
+builds/writes in exchange for substantially less read work. Full predicate
+rechecks and the old scan path remain in place for correctness and fallback.
+Implementation and test details are in
+[TT024_MATERIALIZED_TEXT_AUTO_SELECTION.md](TT024_MATERIALIZED_TEXT_AUTO_SELECTION.md).
+
+Raw output from `make benchmark-tt024-materialized-text`:
+
+```text
+BenchmarkTT024MaterializedTextIndexSelection/scan_baseline-32          45  26053179 ns/op  21950524 B/op  180034 allocs/op
+BenchmarkTT024MaterializedTextIndexSelection/scan_baseline-32          46  25355048 ns/op  21950523 B/op  180034 allocs/op
+BenchmarkTT024MaterializedTextIndexSelection/scan_baseline-32          46  25460686 ns/op  21950517 B/op  180034 allocs/op
+BenchmarkTT024MaterializedTextIndexSelection/scan_baseline-32          45  26164124 ns/op  21950637 B/op  180034 allocs/op
+BenchmarkTT024MaterializedTextIndexSelection/scan_baseline-32          44  25548346 ns/op  21950518 B/op  180034 allocs/op
+BenchmarkTT024MaterializedTextIndexSelection/automatic_text_index-32  33000     37979 ns/op     21608 B/op       173 allocs/op
+BenchmarkTT024MaterializedTextIndexSelection/automatic_text_index-32  31130     36341 ns/op     21608 B/op       173 allocs/op
+BenchmarkTT024MaterializedTextIndexSelection/automatic_text_index-32  33244     36510 ns/op     21608 B/op       173 allocs/op
+BenchmarkTT024MaterializedTextIndexSelection/automatic_text_index-32  30375     38082 ns/op     21608 B/op       173 allocs/op
+BenchmarkTT024MaterializedTextIndexSelection/automatic_text_index-32  31264     37894 ns/op     21608 B/op       173 allocs/op
+```
+
 <a id="tt-024-text-index-or-union"></a>
 ## TT-024 Positional Text Index OR Union
 

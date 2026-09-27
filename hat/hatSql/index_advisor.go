@@ -523,6 +523,17 @@ func sqlIndexAdvisorPredicateFieldOrder(expr sqlExpr, alias string) []string {
 			collect(*current.right)
 			return
 		}
+		if current.kind == "func" && strings.EqualFold(current.name, "CONTAINS") && len(current.args) == 2 {
+			field, query := current.args[0], current.args[1]
+			if field.kind == "field" && (field.qualifier == "" || field.qualifier == alias) && query.kind == "literal" {
+				if _, exists := seen[field.name]; !exists {
+					seen[field.name] = struct{}{}
+					candidates = append(candidates, fieldCandidate{field: field.name, rank: 1, order: order})
+					order++
+				}
+			}
+			return
+		}
 		if current.kind != "binary" || current.left == nil || current.right == nil {
 			return
 		}

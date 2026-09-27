@@ -1060,6 +1060,12 @@ measurements and the rejected prototype tradeoffs are recorded in
 - [x] T156 ClickHouse-style optional gzip compression for public command and
   batch request bodies. JSON remains the default; `Client.CommandCompressionThreshold`
   enables bandwidth reduction for larger JSON or protobuf requests.
+- [x] T157 Tarantool-style automatic selection of an existing materialized text
+  index for literal `CONTAINS(field, query)` predicates. The SQL adapter now
+  intersects the smallest token posting lists and preserves full predicate
+  rechecks and scan fallback; see
+  [TT024_MATERIALIZED_TEXT_AUTO_SELECTION.md](TT024_MATERIALIZED_TEXT_AUTO_SELECTION.md)
+  and [BENCHMARK.md](BENCHMARK.md#tt-024-text-index-auto-selection).
 - [x] CHG02 ClickHouse-style small-cardinality grouped-state lookup. The first
   four normalized `GROUP BY` keys use an inline linear index and promote to the
   existing map for larger groups; see [CHG02_SMALL_GROUP_INDEX.md](CHG02_SMALL_GROUP_INDEX.md)

@@ -28631,6 +28631,47 @@ vet-tt024-text:
 	bash ./scripts/vet-tt024-text.sh
 test-tt024-package:
 	bash ./scripts/test-tt024-package.sh
+.PHONY: test-tt024-materialized-text
+test-tt024-materialized-text:
+	bash scripts/test-tt024-materialized-text.sh
+
+.PHONY: benchmark-tt024-materialized-text
+benchmark-tt024-materialized-text:
+	bash scripts/benchmark-tt024-materialized-text.sh
+
+.PHONY: format-tt024-materialized-text
+format-tt024-materialized-text:
+	bash scripts/format-tt024-materialized-text.sh
+
+.PHONY: race-tt024-materialized-text test-tt024-materialized-text-packages vet-tt024-materialized-text
+race-tt024-materialized-text:
+	bash scripts/race-tt024-materialized-text.sh
+
+test-tt024-materialized-text-packages:
+	bash scripts/test-tt024-materialized-text-packages.sh
+
+vet-tt024-materialized-text:
+	bash scripts/vet-tt024-materialized-text.sh
+
+.PHONY: stage-tt024-materialized-text commit-tt024-materialized-text push-tt024-materialized-text deliver-tt024-materialized-text status-tt024-materialized-text
+stage-tt024-materialized-text:
+	bash scripts/deliver-tt024-materialized-text.sh stage
+
+commit-tt024-materialized-text:
+	bash scripts/deliver-tt024-materialized-text.sh commit
+
+push-tt024-materialized-text:
+	bash scripts/deliver-tt024-materialized-text.sh push
+
+deliver-tt024-materialized-text:
+	bash scripts/deliver-tt024-materialized-text.sh deliver
+
+status-tt024-materialized-text:
+	bash scripts/deliver-tt024-materialized-text.sh status
+
+.PHONY: unstage-tt024-materialized-text
+unstage-tt024-materialized-text:
+	bash scripts/deliver-tt024-materialized-text.sh unstage
 .PHONY: deliver-tt024-mixed-boolean
 deliver-tt024-mixed-boolean:
 	bash ./scripts/deliver-tt024-mixed-boolean.sh deliver

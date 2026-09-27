@@ -6,6 +6,25 @@ import (
 	"hatrie_cache/hat/hatSql"
 )
 
+// ResolveSQLTextSource exposes the maintained token index to the SQL
+// CONTAINS planner. Returned rows are candidates; hatSql evaluates the full
+// predicate again before publishing results.
+func (adapter SQLResolverAdapter) ResolveSQLTextSource(name, key, field, query string) ([]hatSql.Row, bool, error) {
+	if strings.EqualFold(name, "CACHE") {
+		if source := adapter.Sources[strings.ToLower(key)]; source != nil {
+			rows, available := source.lookupTextContains(field, query)
+			if !available {
+				return nil, false, nil
+			}
+			return sqlRows(rows), true, nil
+		}
+	}
+	if indexed, ok := adapter.Base.(hatSql.TextIndexedSourceResolver); ok {
+		return indexed.ResolveSQLTextSource(name, key, field, query)
+	}
+	return nil, false, nil
+}
+
 // ResolveSQLTextProximitySource exposes the opt-in positional index to the
 // SQL phrase/proximity planner. Returned rows are candidates; hatSql evaluates
 // the complete predicate again before publishing results.

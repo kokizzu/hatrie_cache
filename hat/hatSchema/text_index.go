@@ -98,6 +98,30 @@ func (source *MaterializedSource) LookupText(field, query string, maxGap int) []
 	return rows
 }
 
+func (source *MaterializedSource) lookupTextContains(field, query string) ([]Row, bool) {
+	if source == nil {
+		return nil, false
+	}
+	field = strings.TrimSpace(field)
+	tokens := hatSql.TextTokens(query)
+	if len(tokens) == 0 {
+		return nil, false
+	}
+	source.mu.RLock()
+	index := source.textIndexes[field]
+	if index == nil {
+		source.mu.RUnlock()
+		return nil, false
+	}
+	positions := index.matchingRowsContains(tokens)
+	rows := make([]Row, 0, len(positions))
+	for _, position := range positions {
+		rows = append(rows, cloneRow(source.rows[position]))
+	}
+	source.mu.RUnlock()
+	return rows, true
+}
+
 func (source *MaterializedSource) lookupText(field, query string, maxGap int) ([]Row, bool) {
 	if source == nil || maxGap < 0 {
 		return nil, false
@@ -237,6 +261,50 @@ func (index *materializedTextIndex) matchingRows(query string, maxGap int) []int
 		}
 	}
 	return rows
+}
+
+func (index *materializedTextIndex) matchingRowsContains(tokens []string) []int {
+	if len(tokens) == 0 {
+		return nil
+	}
+	var candidates []materializedTextPosting
+	for _, token := range tokens {
+		postings, exists := index.postings[token]
+		if !exists {
+			return nil
+		}
+		if candidates == nil || len(postings) < len(candidates) {
+			candidates = postings
+		}
+	}
+	rows := make([]int, len(candidates))
+	for position, posting := range candidates {
+		rows[position] = posting.row
+	}
+	for _, token := range tokens {
+		rows = intersectMaterializedTextRows(rows, index.postings[token])
+		if len(rows) == 0 {
+			return nil
+		}
+	}
+	return rows
+}
+
+func intersectMaterializedTextRows(left []int, right []materializedTextPosting) []int {
+	result := left[:0]
+	rightIndex := 0
+	for _, row := range left {
+		for rightIndex < len(right) && right[rightIndex].row < row {
+			rightIndex++
+		}
+		if rightIndex >= len(right) {
+			break
+		}
+		if right[rightIndex].row == row {
+			result = append(result, row)
+		}
+	}
+	return result
 }
 
 func (index *materializedTextIndex) postingForRow(token string, row int) (materializedTextPosting, bool) {
