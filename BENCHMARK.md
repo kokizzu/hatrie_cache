@@ -37803,6 +37803,37 @@ The configured path costs about 200 additional bytes and four allocations per
 submission in this fixture. See [MZ004_COMPACTION_POLICY.md](MZ004_COMPACTION_POLICY.md)
 for the API and tradeoff notes.
 
+## MZ-004 Durable Compaction Jobs
+
+Command: `make benchmark-mz004-durable-jobs` on Linux/amd64, AMD Ryzen 9
+5950X, five samples per benchmark, `-benchmem`. The fixture contains 128
+bounded jobs with the same IDs, frontier IDs, boundaries, and states for both
+codecs. The JSON rows are the pre-implementation baseline; the binary rows are
+the new `HCJ1` snapshot codec.
+
+| Operation | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | ---: |
+| JSON encode baseline | 15,575 | 8,254 | 2 | 1.00x |
+| `HCJ1` binary encode | 2,613 | 4,864 | 1 | 5.96x faster; 1.70x lower heap |
+| JSON decode baseline | 106,570 | 14,328 | 144 | 1.00x |
+| `HCJ1` binary decode | 4,965 | 7,424 | 129 | 21.46x faster; 1.93x lower heap |
+| Snapshot wire size | 7,992 bytes | 1,806 bytes | n/a | 4.43x smaller |
+
+Raw samples:
+
+```text
+JSON encode: 15575 15463 15873 15697 15563 ns/op; 8254-8256 B/op; 2 allocs/op
+JSON decode: 106570 105688 106255 107503 107938 ns/op; 14328 B/op; 144 allocs/op
+HCJ1 encode: 2600 2613 2670 2774 2594 ns/op; 4864 B/op; 1 alloc/op; 1806 wire bytes
+HCJ1 decode: 4989 4898 4807 5074 4965 ns/op; 7424 B/op; 129 allocs/op; 1806 wire bytes
+```
+
+The ledger is opt-in and does not add work to the ordinary scheduler or
+frontier paths. It trades one bounded in-memory job record per retained task
+and an explicit durable save for restart recovery; automatic task recovery,
+priority selection, and coalescing remain caller policy. See
+[MZ004_DURABLE_COMPACTION_JOBS.md](MZ004_DURABLE_COMPACTION_JOBS.md).
+
 <a id="rejected-t042-counter-parallel-replay"></a>
 ## Rejected T042: Counter-Journal Parallel Replay
 

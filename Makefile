@@ -28440,3 +28440,35 @@ stage-t042-parallel-replay:
 
 deliver-t042-parallel-replay:
 	bash ./scripts/deliver-t042-parallel-replay.sh deliver
+
+.PHONY: benchmark-mz004-durable-jobs
+benchmark-mz004-durable-jobs:
+	bash ./scripts/benchmark-mz004-durable-jobs.sh
+
+.PHONY: test-mz004-durable-jobs
+test-mz004-durable-jobs:
+	bash ./scripts/test-mz004-durable-jobs.sh
+
+.PHONY: format-mz004-durable-jobs
+format-mz004-durable-jobs:
+	bash ./scripts/format-mz004-durable-jobs.sh
+
+.PHONY: race-mz004-durable-jobs
+race-mz004-durable-jobs:
+	bash ./scripts/race-mz004-durable-jobs.sh
+
+.PHONY: vet-mz004-durable-jobs
+vet-mz004-durable-jobs:
+	bash ./scripts/vet-mz004-durable-jobs.sh
+
+.PHONY: test-mz004-package
+test-mz004-package:
+	bash ./scripts/test-mz004-package.sh
+
+.PHONY: stage-mz004-durable-jobs
+stage-mz004-durable-jobs:
+	bash ./scripts/deliver-mz004-durable-jobs.sh stage
+
+.PHONY: deliver-mz004-durable-jobs
+deliver-mz004-durable-jobs:
+	bash ./scripts/deliver-mz004-durable-jobs.sh deliver
