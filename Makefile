@@ -28505,3 +28505,27 @@ push-c154g-rollout:
 .PHONY: deliver-c154g-rollout
 deliver-c154g-rollout:
 	@bash scripts/deliver-c154g-rollout.sh deliver
+
+.PHONY: benchmark-ch004-final-schema-registry
+benchmark-ch004-final-schema-registry:
+	bash ./scripts/benchmark-ch004-final-schema-registry.sh
+
+.PHONY: test-ch004-final-schema-registry
+test-ch004-final-schema-registry:
+	bash ./scripts/test-ch004-final-schema-registry.sh
+
+.PHONY: format-ch004-final-schema-registry
+format-ch004-final-schema-registry:
+	bash ./scripts/format-ch004-final-schema-registry.sh
+
+.PHONY: race-ch004-final-schema-registry
+race-ch004-final-schema-registry:
+	bash ./scripts/race-ch004-final-schema-registry.sh
+
+.PHONY: vet-ch004-final-schema-registry
+vet-ch004-final-schema-registry:
+	bash ./scripts/vet-ch004-final-schema-registry.sh
+
+.PHONY: test-ch004-final-schema-registry-package
+test-ch004-final-schema-registry-package:
+	bash ./scripts/test-ch004-final-schema-registry-package.sh
