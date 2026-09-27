@@ -264,7 +264,9 @@ name.
   primary, replica order, topology fingerprint, and fencing token; transport
   and vote authentication remain caller-owned. See
   [PARTITION_OWNERSHIP_CONSENSUS.md](PARTITION_OWNERSHIP_CONSENSUS.md).
-- [x] C153c CRC-protected bounded binary partition-ownership snapshots with atomic restore, migration-state validation, and no change to the routing hot path. See [C153C_PARTITION_OWNERSHIP_SNAPSHOT.md](C153C_PARTITION_OWNERSHIP_SNAPSHOT.md).
+- [x] C153c CRC-protected bounded binary partition-ownership snapshots with
+  atomic restore, migration-state validation, and no change to the routing hot
+  path. See [C153C_PARTITION_OWNERSHIP_SNAPSHOT.md](C153C_PARTITION_OWNERSHIP_SNAPSHOT.md).
 - [x] C153d Opt-in HMAC-SHA256 authentication for partition-ownership consensus
   votes. Invalid or unsigned votes are rejected before quorum evaluation while
   the legacy unsigned evaluator and routing hot path remain unchanged. See
@@ -388,6 +390,8 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M033b Consensus-bound global timestamp reservations with term and node-epoch fencing, idempotent per-node sequences, deterministic snapshots, and allocation-free range leases; transport and leader election remain caller-owned. See [GLOBAL_TIMESTAMP_ORACLE.md](GLOBAL_TIMESTAMP_ORACLE.md).
 - [x] M033c Authenticated bounded gRPC global timestamp reservation transport with request-bound grant validation; consensus, leader election, and durable coordinator publication remain caller-owned. See [M033C_GLOBAL_TIMESTAMP_GRPC.md](M033C_GLOBAL_TIMESTAMP_GRPC.md).
 - [x] M033d Bounded deterministic binary global timestamp snapshots with CRC32C validation and atomic `0600` file persistence; consensus publication timing and cryptographic authentication remain caller-owned. See [M033D_GLOBAL_TIMESTAMP_SNAPSHOT.md](M033D_GLOBAL_TIMESTAMP_SNAPSHOT.md).
+- [x] M033e Client-side global timestamp range leasing with retry-safe request sequences, bounded default batches, and higher-observation fencing; consensus and coordinator ownership remain caller-owned. See [M033E_GLOBAL_TIMESTAMP_LEASE_POOL.md](M033E_GLOBAL_TIMESTAMP_LEASE_POOL.md).
+- [x] M033e Client-side global timestamp range leasing with retry-safe request sequences, bounded default batches, and higher-observation fencing; consensus and coordinator ownership remain caller-owned. See [M033E_GLOBAL_TIMESTAMP_LEASE_POOL.md](M033E_GLOBAL_TIMESTAMP_LEASE_POOL.md).
 - [x] M034 Epoch management for restarts and leases. `hatStorage.PersistentShardLease` and `hatStorage.PersistentNodeEpoch` durably advance fencing tokens across restarts, reject concurrent owners, and expose explicit renew, release, inspect, and validation operations; see [PERSISTENT_NODE_EPOCHS.md](PERSISTENT_NODE_EPOCHS.md).
 - [x] M034a Durable local node epochs with monotone restart fencing; see [PERSISTENT_NODE_EPOCHS.md](PERSISTENT_NODE_EPOCHS.md).
 - [x] M035 Self-correcting materialized results for typed arrangements.
@@ -782,7 +786,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T047i Coordinator-owned durable write state. `ExecuteClusterWriteCommitWithStateStore` persists proposed, prepared, commit-started, and terminal phase boundaries through an atomic CRC32C file store; the default coordinator path remains unchanged and recovery reconciliation is explicit. See [T047I_COORDINATOR_DURABILITY.md](T047I_COORDINATOR_DURABILITY.md).
 - [x] T047j Opt-in HTTP prepare/commit/abort phase transport. `ClusterWriteCommitHTTPHandler` and `ExecuteClusterWriteCommitOverHTTP` provide strict bounded JSON requests, constant-time token authentication, and caller-owned HTTP/TLS lifecycle without registering a default route; see [T047J_HTTP_PHASE_TRANSPORT.md](T047J_HTTP_PHASE_TRANSPORT.md).
 - [x] T047k Authenticated HTTP participant status reads. `ClusterWriteCommitHTTPClient.Status` and the opt-in handler `GET` path expose bounded read-only participant records for recovery after an unknown coordinator outcome; unknown query fields are rejected and no default route or mutation is added. See [T047K_HTTP_STATUS.md](T047K_HTTP_STATUS.md).
-- [x] T047l Authenticated gRPC participant status reads over the existing cluster-write RPC; see [T047L_GRPC_STATUS.md](T047L_GRPC_STATUS.md).
+- [x] T047l Authenticated gRPC participant status reads. The existing `ClusterWriteCommit` RPC accepts a `STATUS` phase and returns a bounded participant record without mutation; prepare, commit, abort, default routing, and replication authentication behavior remain unchanged. See [T047L_GRPC_STATUS.md](T047L_GRPC_STATUS.md).
 - [x] T048 Replication sets and peer topology.
 - [x] T049 Vector-clock exposure for every replica - replication queue results expose an immutable observational `vector_clock` containing the local sequence and all current topology members' acknowledged sequences; it does not change quorum or conflict semantics.
 - [x] T050 LSN or journal sequence exposure.
@@ -1046,6 +1050,43 @@ measurements and the rejected prototype tradeoffs are recorded in
   ordering, and finite `LIMIT`/`OFFSET` use composite group state plus a bounded
   Top-N heap. Unsupported or ambiguous shapes retain the established executor;
   see [SQL_AUTO_NATIVE_COMPOSITE_GROUPED_ORDERED.md](SQL_AUTO_NATIVE_COMPOSITE_GROUPED_ORDERED.md).
+- [x] M052aa Automatic safe native equality hash joins. One plain `INNER`
+  equality join over ordinary `CACHE`/`KEYS` row resolvers uses the existing
+  typed hash index plus native scalar filtering/projection by default;
+  specialized, indexed, spillable, frontier-aware, and richer shapes retain
+  the established executor. See
+  [M052AA_NATIVE_HASH_JOIN.md](M052AA_NATIVE_HASH_JOIN.md).
+- [x] M052ad Automatic safe native conditional aggregates. Supported
+  ClickHouse-style `COUNT_IF`/`COUNTIF`, `SUM_IF`/`SUMIF`, `AVG_IF`/`AVGIF`,
+  `MIN_IF`/`MINIF`, and `MAX_IF`/`MAXIF` forms reuse the native grouped
+  aggregate state; filtered aggregate expressions and unsupported shapes keep
+  the correct fallback. See
+  [M052AD_AUTO_NATIVE_CONDITIONAL_AGGREGATES.md](M052AD_AUTO_NATIVE_CONDITIONAL_AGGREGATES.md)
+  and [BENCHMARK.md](BENCHMARK.md#m052ad-automatic-native-conditional-aggregates).
+- [x] M052ae Native three-field composite `GROUP BY` dataflow. A fixed
+  comparable three-component key supports integer, string, and `NULL` fields,
+  preserves first-seen group order, and is selected automatically for ordinary
+  row resolvers; four-field and bounded grouped output without a supported
+  order remain fail-closed. The paired benchmark is 3.79x faster with 4.39x
+  lower bytes and 50.0x fewer allocations; see
+  [M052AE_NATIVE_TRIPLE_GROUP.md](M052AE_NATIVE_TRIPLE_GROUP.md) and
+  [BENCHMARK.md](BENCHMARK.md#m052ae-native-three-field-group-by).
+- [x] M052af Native three-field grouped ordered Top-N dataflow. Three-field
+  grouped aggregates now support selected aggregate `HAVING`, alias-resolved
+  finite `ORDER BY`, `LIMIT`, and `OFFSET` through the existing bounded heap;
+  richer order expressions, `WITH TIES`, and five-field groups remain
+  fail-closed. The paired benchmark is 3.94x faster with 4.36x lower bytes and
+  37.15x fewer allocations; see
+  [M052AF_NATIVE_TRIPLE_GROUPED_ORDERED.md](M052AF_NATIVE_TRIPLE_GROUPED_ORDERED.md)
+  and [BENCHMARK.md](BENCHMARK.md#m052af-native-three-field-grouped-ordered-top-n).
+- [x] M052ag Native four-field grouped ordered Top-N dataflow. Four-field
+  grouped aggregates reuse the fixed comparable-key and bounded Top-N pattern
+  with selected aggregate `HAVING`, alias-resolved finite `ORDER BY`, `LIMIT`,
+  and `OFFSET`; five-field groups and richer expressions remain fail-closed.
+  The paired benchmark is 3.77x faster with 4.10x lower bytes and 43.42x fewer
+  allocations; see
+  [M052AG_NATIVE_QUAD_GROUPED_ORDERED.md](M052AG_NATIVE_QUAD_GROUPED_ORDERED.md)
+  and [BENCHMARK.md](BENCHMARK.md#m052ag-native-four-field-grouped-ordered-top-n).
 - [x] M065t SQL packed boolean predicate kernel. Direct comparisons against
   validated packed boolean columns use value and validity bitmaps without
   per-row interface materialization; legacy and unsupported paths retain the
@@ -1151,41 +1192,3 @@ predicates are extracted once before fan-out; adapters may exclude a shard only
 when they can prove it cannot match. Unsupported or unavailable metadata keeps
 the existing fan-out, and an all-pruned query still returns the correct empty
 SQL shape. See [CH035_REMOTE_SHARD_PRUNING.md](CH035_REMOTE_SHARD_PRUNING.md).
-
-- [x] M052aa Automatic safe native equality hash joins. One plain `INNER`
-  equality join over ordinary `CACHE`/`KEYS` row resolvers uses the existing
-  typed hash index plus native scalar filtering/projection by default;
-  specialized, indexed, spillable, frontier-aware, and richer shapes retain
-  the established executor. See
-  [M052AA_NATIVE_HASH_JOIN.md](M052AA_NATIVE_HASH_JOIN.md).
-- [x] M052ad Automatic safe native conditional aggregates. Supported
-  ClickHouse-style `COUNT_IF`/`COUNTIF`, `SUM_IF`/`SUMIF`, `AVG_IF`/`AVGIF`,
-  `MIN_IF`/`MINIF`, and `MAX_IF`/`MAXIF` forms reuse the native grouped
-  aggregate state; filtered aggregate expressions and unsupported shapes keep
-  the correct fallback. See
-  [M052AD_AUTO_NATIVE_CONDITIONAL_AGGREGATES.md](M052AD_AUTO_NATIVE_CONDITIONAL_AGGREGATES.md)
-  and [BENCHMARK.md](BENCHMARK.md#m052ad-automatic-native-conditional-aggregates).
-- [x] M052ae Native three-field composite `GROUP BY` dataflow. A fixed
-  comparable three-component key supports integer, string, and `NULL` fields,
-  preserves first-seen group order, and is selected automatically for ordinary
-  row resolvers; five-field and bounded grouped output without a supported
-  order remain fail-closed. The paired benchmark is 3.79x faster with 4.39x
-  lower bytes and 50.0x fewer allocations; see
-  [M052AE_NATIVE_TRIPLE_GROUP.md](M052AE_NATIVE_TRIPLE_GROUP.md) and
-  [BENCHMARK.md](BENCHMARK.md#m052ae-native-three-field-group-by).
-- [x] M052af Native three-field grouped ordered Top-N dataflow. Three-field
-  grouped aggregates now support selected aggregate `HAVING`, alias-resolved
-  finite `ORDER BY`, `LIMIT`, and `OFFSET` through the existing bounded heap;
-  richer order expressions, `WITH TIES`, and five-field groups remain
-  fail-closed. The paired benchmark is 3.94x faster with 4.36x lower bytes and
-  37.15x fewer allocations; see
-  [M052AF_NATIVE_TRIPLE_GROUPED_ORDERED.md](M052AF_NATIVE_TRIPLE_GROUPED_ORDERED.md)
-  and [BENCHMARK.md](BENCHMARK.md#m052af-native-three-field-grouped-ordered-top-n).
-- [x] M052ag Native four-field grouped ordered Top-N dataflow. Four-field
-  grouped aggregates reuse the fixed comparable-key and bounded Top-N pattern
-  with selected aggregate `HAVING`, alias-resolved finite `ORDER BY`, `LIMIT`,
-  and `OFFSET`; five-field groups and richer expressions remain fail-closed.
-  The paired benchmark is 3.77x faster with 4.10x lower bytes and 43.42x fewer
-  allocations; see
-  [M052AG_NATIVE_QUAD_GROUPED_ORDERED.md](M052AG_NATIVE_QUAD_GROUPED_ORDERED.md)
-  and [BENCHMARK.md](BENCHMARK.md#m052ag-native-four-field-grouped-ordered-top-n).

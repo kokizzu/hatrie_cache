@@ -1,6 +1,33 @@
 .PHONY: inspect-hatrie-tmp-all
 inspect-hatrie-tmp-all:
 	bash ./scripts/inspect-hatrie-tmp.sh
+.PHONY: test-m033e-lease-pool
+test-m033e-lease-pool:
+	bash ./scripts/test-m033e-lease-pool.sh
+
+.PHONY: test-m033e-lease-pool-package
+test-m033e-lease-pool-package:
+	bash ./scripts/test-m033e-lease-pool-package.sh
+
+.PHONY: format-m033e-lease-pool
+format-m033e-lease-pool:
+	bash ./scripts/format-m033e-lease-pool.sh
+
+.PHONY: race-m033e-lease-pool
+race-m033e-lease-pool:
+	bash ./scripts/race-m033e-lease-pool.sh
+
+.PHONY: vet-m033e-lease-pool
+vet-m033e-lease-pool:
+	bash ./scripts/vet-m033e-lease-pool.sh
+
+.PHONY: benchmark-m033e-lease-pool
+benchmark-m033e-lease-pool:
+	bash ./scripts/benchmark-m033e-lease-pool.sh
+
+.PHONY: deliver-m033e-lease-pool
+deliver-m033e-lease-pool:
+	bash ./scripts/deliver-m033e-lease-pool.sh
 
 .PHONY: deliver-hatrie-tmp-audit
 deliver-hatrie-tmp-audit:
