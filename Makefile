@@ -28631,6 +28631,22 @@ vet-tt024-text:
 	bash ./scripts/vet-tt024-text.sh
 test-tt024-package:
 	bash ./scripts/test-tt024-package.sh
+.PHONY: verify-engine-inspiration
+verify-engine-inspiration:
+	bash ./scripts/verify-engine-inspiration.sh
+.PHONY: stage-engine-inspiration commit-engine-inspiration push-engine-inspiration deliver-engine-inspiration status-engine-inspiration unstage-engine-inspiration
+stage-engine-inspiration:
+	bash ./scripts/deliver-engine-inspiration.sh stage
+commit-engine-inspiration:
+	bash ./scripts/deliver-engine-inspiration.sh commit
+push-engine-inspiration:
+	bash ./scripts/deliver-engine-inspiration.sh push
+deliver-engine-inspiration:
+	bash ./scripts/deliver-engine-inspiration.sh deliver
+status-engine-inspiration:
+	bash ./scripts/deliver-engine-inspiration.sh status
+unstage-engine-inspiration:
+	bash ./scripts/deliver-engine-inspiration.sh unstage
 .PHONY: test-tt024-materialized-text
 test-tt024-materialized-text:
 	bash scripts/test-tt024-materialized-text.sh
