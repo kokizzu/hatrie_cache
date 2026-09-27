@@ -29258,3 +29258,40 @@ push-m038-incremental-group-count-sum:
 .PHONY: deliver-m038-incremental-group-count-sum
 deliver-m038-incremental-group-count-sum:
 	@bash scripts/deliver-m038-incremental-group-count-sum.sh deliver
+
+
+baseline-m039-incremental-group-count-distinct:
+	bash ./scripts/test-m039-incremental-group-count-distinct.sh baseline
+
+format-m039-incremental-group-count-distinct:
+	bash ./scripts/test-m039-incremental-group-count-distinct.sh format
+
+test-m039-incremental-group-count-distinct:
+	bash ./scripts/test-m039-incremental-group-count-distinct.sh test
+
+benchmark-m039-incremental-group-count-distinct:
+	bash ./scripts/test-m039-incremental-group-count-distinct.sh benchmark
+
+test-m039-incremental-group-count-distinct-package:
+	bash ./scripts/test-m039-incremental-group-count-distinct.sh package
+
+race-m039-incremental-group-count-distinct:
+	bash ./scripts/test-m039-incremental-group-count-distinct.sh race
+
+vet-m039-incremental-group-count-distinct:
+	bash ./scripts/test-m039-incremental-group-count-distinct.sh vet
+
+restage-m039-incremental-group-count-distinct:
+	bash ./scripts/deliver-m039-incremental-group-count-distinct.sh restage
+
+stage-m039-incremental-group-count-distinct:
+	bash ./scripts/deliver-m039-incremental-group-count-distinct.sh stage
+
+commit-m039-incremental-group-count-distinct:
+	bash ./scripts/deliver-m039-incremental-group-count-distinct.sh commit
+
+push-m039-incremental-group-count-distinct:
+	bash ./scripts/deliver-m039-incremental-group-count-distinct.sh push
+
+deliver-m039-incremental-group-count-distinct:
+	bash ./scripts/deliver-m039-incremental-group-count-distinct.sh deliver
