@@ -29148,3 +29148,25 @@ push-m037-incremental-left-join:
 	@bash scripts/deliver-m037-incremental-left-join.sh push
 deliver-m037-incremental-left-join:
 	@bash scripts/deliver-m037-incremental-left-join.sh deliver
+
+.PHONY: format-m037-incremental-full-join test-m037-incremental-full-join benchmark-m037-incremental-full-join test-m037-full-join-package race-m037-incremental-full-join vet-m037-incremental-full-join
+format-m037-incremental-full-join:
+	@bash scripts/test-m037-incremental-full-join.sh format
+test-m037-incremental-full-join:
+	@bash scripts/test-m037-incremental-full-join.sh test
+benchmark-m037-incremental-full-join:
+	@bash scripts/test-m037-incremental-full-join.sh benchmark
+test-m037-full-join-package:
+	@bash scripts/test-m037-incremental-full-join.sh package
+race-m037-incremental-full-join:
+	@bash scripts/test-m037-incremental-full-join.sh race
+vet-m037-incremental-full-join:
+	@bash scripts/test-m037-incremental-full-join.sh vet
+stage-m037-incremental-full-join:
+	@bash scripts/deliver-m037-incremental-full-join.sh stage
+commit-m037-incremental-full-join:
+	@bash scripts/deliver-m037-incremental-full-join.sh commit
+push-m037-incremental-full-join:
+	@bash scripts/deliver-m037-incremental-full-join.sh push
+deliver-m037-incremental-full-join:
+	@bash scripts/deliver-m037-incremental-full-join.sh deliver
