@@ -24,6 +24,7 @@ security guidance before exposing it on a network.
 - Opt-in arrangement hydration progress and query admission for aggregate and join arrangements: [M036_ARRANGEMENT_HYDRATION_ADMISSION.md](M036_ARRANGEMENT_HYDRATION_ADMISSION.md), with measurements in [BENCHMARK.md#m-u36-arrangement-hydration-admission](BENCHMARK.md#m-u36-arrangement-hydration-admission)
 - Opt-in persisted immutable-part catalog with CRC-checked metadata, quarantine recovery, and atomic private checkpoints: [M038_PERSISTED_IMMUTABLE_PARTS.md](M038_PERSISTED_IMMUTABLE_PARTS.md), with measurements in [BENCHMARK.md#mu38-persisted-immutable-part-catalog](BENCHMARK.md#mu38-persisted-immutable-part-catalog)
 - Opt-in SQL partition/order declarations exposed to EXPLAIN and connector-owned filter-pushdown eligibility: [M039_PARTITION_ORDER_DECLARATIONS.md](M039_PARTITION_ORDER_DECLARATIONS.md), with measurements in [BENCHMARK.md#m-u39-partition-and-order-declarations](BENCHMARK.md#m-u39-partition-and-order-declarations)
+- Importable exact incremental grouped `COUNT(DISTINCT int64)` maintenance with signed differential updates: [M039_INCREMENTAL_SQL_GROUP_COUNT_DISTINCT.md](M039_INCREMENTAL_SQL_GROUP_COUNT_DISTINCT.md), with measurements in [BENCHMARK.md#m039-incremental-sql-count-distinct](BENCHMARK.md#m039-incremental-sql-count-distinct)
 - Opt-in ClickHouse-style `FINAL` read reconciliation for replacing and collapsing source rows, including native resolver pushdown: [CH004_FINAL_READ.md](CH004_FINAL_READ.md) and [CH004_FINAL_PUSHDOWN.md](CH004_FINAL_PUSHDOWN.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-004-final-read-semantics)
 - Opt-in CRC-protected typed-table delete bitmap snapshots for restart recovery: [CH005_DELETE_BITMAP_SNAPSHOT.md](CH005_DELETE_BITMAP_SNAPSHOT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-005-delete-bitmap-state-snapshots)
 - Opt-in ClickHouse-style vertical TTL deletion that reads only the deletion mask, key column, and expiry column: [C245_VERTICAL_TTL_DELETE.md](C245_VERTICAL_TTL_DELETE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#c245-vertical-ttl-deletion)
@@ -4488,6 +4489,7 @@ the measured cost in
 - [Incremental SQL projection lowering](MZ034_INCREMENTAL_SQL_PROJECTION.md)
 - [Materialize-style incremental SQL filter lowering](MZ034_INCREMENTAL_SQL_FILTER.md)
 - [Materialize-style incremental SQL group aggregate lowering](MZ034_INCREMENTAL_SQL_GROUP_AGGREGATE.md)
+- [Incremental SQL grouped `COUNT(DISTINCT int64)` lowering](M039_INCREMENTAL_SQL_GROUP_COUNT_DISTINCT.md)
 - [Materialize-style recursive convergence diagnostics and iteration bounds](MZ040_RECURSIVE_CONVERGENCE_BOUNDS.md)
 ### External window streaming
 

@@ -3505,7 +3505,7 @@ type sqlStreamAggregate struct {
 // It excludes joins, grouping, HAVING, and expressions around aggregates so
 // this path cannot change their materialized-query semantics.
 func sqlGlobalStreamAggregates(query *sqlQuery) ([]sqlStreamAggregate, bool) {
-	if query == nil || query.explain || query.from == nil || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || len(query.orderBy) != 0 || len(query.from.fieldTypes) != 0 || query.from.kind != "CACHE" && query.from.kind != "VALUES" || query.where.window != nil || sqlExprHasCustomFunction(query.where, nil) {
+	if query == nil || query.explain || query.from == nil || sqlQueryHasDistinctAggregate(query) || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || len(query.orderBy) != 0 || len(query.from.fieldTypes) != 0 || query.from.kind != "CACHE" && query.from.kind != "VALUES" || query.where.window != nil || sqlExprHasCustomFunction(query.where, nil) {
 		return nil, false
 	}
 	aggregates := make([]sqlStreamAggregate, len(query.selects))
@@ -3894,7 +3894,7 @@ func executeSQLGlobalAggregateStream(ctx context.Context, query *sqlQuery, resol
 // the existing direct-field/aggregate proof shared with the materialized index
 // group operator, so grouped QueryRows cannot silently change SQL semantics.
 func sqlIndexedGroupStreamable(query *sqlQuery, resolver SQLSourceResolver) ([]sqlOrderedGroupProjection, bool) {
-	if query == nil || query.explain || query.from == nil || query.from.kind != "CACHE" || len(query.from.fieldTypes) != 0 || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || query.distinct || query.having.kind != "" || query.where.window != nil || len(query.groupBy) != 1 || len(query.orderBy) != 1 {
+	if query == nil || query.explain || query.from == nil || sqlQueryHasDistinctAggregate(query) || query.from.kind != "CACHE" || len(query.from.fieldTypes) != 0 || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || query.distinct || query.having.kind != "" || query.where.window != nil || len(query.groupBy) != 1 || len(query.orderBy) != 1 {
 		return nil, false
 	}
 	if !sqlSameField(query.groupBy[0], query.orderBy[0].expr) {
@@ -6189,6 +6189,7 @@ type sqlExpr struct {
 	windowName                string
 	query                     *sqlQuery
 	filter                    *sqlExpr
+	distinct                  bool
 	token                     sqlToken
 	collation                 SQLCollation
 	jsonPath                  *sqlJSONPathProgram
@@ -7724,6 +7725,14 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 		}
 		if p.current().kind == sqlTokenLeftParen {
 			p.next()
+			distinct := false
+			if p.keyword("DISTINCT") {
+				if upper != "COUNT" {
+					return sqlExpr{}, p.diagnostic(p.current(), "DISTINCT arguments are only supported by COUNT")
+				}
+				distinct = true
+				p.next()
+			}
 			var args []sqlExpr
 			if p.current().kind != sqlTokenRightParen {
 				for {
@@ -7741,7 +7750,7 @@ func (p *sqlQueryParser) parsePrimary() (sqlExpr, error) {
 			if err := p.expectKind(sqlTokenRightParen, ")"); err != nil {
 				return sqlExpr{}, err
 			}
-			expr := sqlExpr{kind: "func", name: upper, args: args, token: token}
+			expr := sqlExpr{kind: "func", name: upper, args: args, distinct: distinct, token: token}
 			if p.keyword("FILTER") {
 				switch upper {
 				case "COUNT", "SUM", "AVG", "MIN", "MAX", "COUNT_OR_NULL", "SUM_OR_NULL", "AVG_OR_NULL", "MIN_OR_NULL", "MAX_OR_NULL", "ARGMAX", "ARGMIN", "AUTO_COUNT_DISTINCT", "APPROX_COUNT_DISTINCT", "APPROX_PERCENTILE", "APPROX_TDIGEST_PERCENTILE", "APPROX_TDIGEST_PERCENTILE_STATE", "APPROX_TDIGEST_PERCENTILE_MERGE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "BITMAP_AGG", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF", "COUNT_STATE", "SUM_STATE", "AVG_STATE", "MIN_STATE", "MAX_STATE", "COUNT_MERGE", "SUM_MERGE", "AVG_MERGE", "MIN_MERGE", "MAX_MERGE", "ARGMAX_STATE", "ARGMIN_STATE", "ARGMAX_MERGE", "COUNT_STATE_IF", "SUM_STATE_IF", "AVG_STATE_IF", "MIN_STATE_IF", "MAX_STATE_IF", "COUNT_MERGE_IF", "SUM_MERGE_IF", "AVG_MERGE_IF", "MIN_MERGE_IF", "MAX_MERGE_IF", "ARGMAX_STATE_IF", "ARGMIN_STATE_IF", "ARGMAX_MERGE_IF", "ARGMIN_MERGE_IF", "ARGMIN_MERGE":
@@ -10715,7 +10724,7 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 }
 
 func sqlColumnarDictionaryGroupAggregatePlan(q *sqlQuery, outer *sqlExecRow) (groupField string, projections []sqlColumnarDictionaryGroupProjection, fields []string, predicates []sqlColumnarNumericFilter, descending bool, ok bool) {
-	if q == nil || outer != nil || q.from == nil || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.unions) != 0 || len(q.groupBy) != 1 || len(q.groupingSets) != 0 || q.having.kind != "" || q.distinct || len(q.orderBy) > 1 || q.sample != nil || sqlQueryHasWindow(q) || sqlQueryHasSubqueryExpression(q) || len(q.orderBy) == 1 && (q.orderBy[0].nullsFirst || q.orderBy[0].nullsLast) || sqlQueryCollation(q) != SQLCollationBinary {
+	if q == nil || outer != nil || q.from == nil || sqlQueryHasDistinctAggregate(q) || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.unions) != 0 || len(q.groupBy) != 1 || len(q.groupingSets) != 0 || q.having.kind != "" || q.distinct || len(q.orderBy) > 1 || q.sample != nil || sqlQueryHasWindow(q) || sqlQueryHasSubqueryExpression(q) || len(q.orderBy) == 1 && (q.orderBy[0].nullsFirst || q.orderBy[0].nullsLast) || sqlQueryCollation(q) != SQLCollationBinary {
 		return "", nil, nil, nil, false, false
 	}
 	if !sqlColumnarAggregateField(q.groupBy[0], q.from.alias, &groupField) {
@@ -11335,7 +11344,7 @@ func sqlColumnarNumericSegmentMatches(segment ColumnarNumericSegment, predicate 
 }
 
 func sqlColumnarNumericAggregates(q *sqlQuery, outer *sqlExecRow) (aggregates []sqlColumnarNumericAggregate, fields []string, predicates []sqlColumnarNumericFilter, ok bool) {
-	if q == nil || outer != nil || q.from == nil || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.unions) != 0 || len(q.groupBy) != 0 || len(q.groupingSets) != 0 || q.having.kind != "" || q.distinct || len(q.orderBy) != 0 || q.sample != nil || sqlQueryHasWindow(q) || sqlQueryHasSubqueryExpression(q) || len(q.selects) == 0 {
+	if q == nil || outer != nil || q.from == nil || sqlQueryHasDistinctAggregate(q) || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.unions) != 0 || len(q.groupBy) != 0 || len(q.groupingSets) != 0 || q.having.kind != "" || q.distinct || len(q.orderBy) != 0 || q.sample != nil || sqlQueryHasWindow(q) || sqlQueryHasSubqueryExpression(q) || len(q.selects) == 0 {
 		return nil, nil, nil, false
 	}
 	dictionaryField, predicates, accepted := sqlColumnarTopNFilterPlan(q.where, q.from.alias)
@@ -11504,7 +11513,7 @@ func sqlColumnarAggregateField(expr sqlExpr, alias string, field *string) bool {
 }
 
 func sqlCanColumnarScan(q *sqlQuery, outer *sqlExecRow) bool {
-	if q == nil || outer != nil || q.from == nil || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.unions) != 0 || len(q.groupBy) != 0 || len(q.groupingSets) != 0 || q.having.kind != "" || q.distinct || len(q.orderBy) != 0 || q.sample != nil || sqlQueryHasAggregate(q) || sqlQueryHasWindow(q) || sqlQueryHasSubqueryExpression(q) || len(q.selects) == 0 {
+	if q == nil || outer != nil || q.from == nil || sqlQueryHasDistinctAggregate(q) || q.from.kind != "CACHE" || len(q.from.fieldTypes) != 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.unions) != 0 || len(q.groupBy) != 0 || len(q.groupingSets) != 0 || q.having.kind != "" || q.distinct || len(q.orderBy) != 0 || q.sample != nil || sqlQueryHasAggregate(q) || sqlQueryHasWindow(q) || sqlQueryHasSubqueryExpression(q) || len(q.selects) == 0 {
 		return false
 	}
 	for _, item := range q.selects {
@@ -12608,7 +12617,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			return result, err
 		}
 	}
-	if indexOrdered && !sqlQueryHasWithFill(q) {
+	if indexOrdered && !sqlQueryHasWithFill(q) && !sqlQueryHasDistinctAggregate(q) {
 		result, handled, err := executeSQLOrderedGroupAggregate(q, rows, control, metrics)
 		if err != nil {
 			return SQLQueryResult{}, err
@@ -12617,7 +12626,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			return result, nil
 		}
 	}
-	if !sqlQueryHasWithFill(q) {
+	if !sqlQueryHasWithFill(q) && !sqlQueryHasDistinctAggregate(q) {
 		if result, handled, err := executeSQLHashGroupAggregateRows(q, func(consume func(sqlExecRow) error) error {
 			for _, row := range rows {
 				if err := consume(row); err != nil {
@@ -17138,7 +17147,7 @@ func sqlSameField(left, right sqlExpr) bool {
 // through the established materialized evaluator rather than approximating its
 // representative-row, HAVING, window, or function semantics.
 func sqlOrderedGroupProjections(q *sqlQuery) ([]sqlOrderedGroupProjection, bool) {
-	if q == nil || len(q.groupBy) != 1 || q.groupBy[0].kind != "field" || q.having.kind != "" || q.distinct || len(q.unions) != 0 || sqlQueryHasWindow(q) {
+	if q == nil || sqlQueryHasDistinctAggregate(q) || len(q.groupBy) != 1 || q.groupBy[0].kind != "field" || q.having.kind != "" || q.distinct || len(q.unions) != 0 || sqlQueryHasWindow(q) {
 		return nil, false
 	}
 	columns := sqlColumns(q.selects)
@@ -17368,7 +17377,7 @@ func sqlAddSpillGroupAggregate(state *sqlSpillGroupAggregate, definition *sqlOrd
 // group field, allowing sorted spill-run merging to preserve query order and
 // source-order floating-point accumulation without retaining group rows.
 func sqlCanStreamSpilledGroupAggregate(q *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) bool {
-	if q == nil || q.from == nil || control == nil || control.options.MaxGroupBytes <= 0 || control.options.MaxGroupKeys > 0 || control.options.SpillDirectory == "" || control.options.MaxSpillBytes <= 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.from.fieldTypes) != 0 {
+	if q == nil || q.from == nil || sqlQueryHasDistinctAggregate(q) || control == nil || control.options.MaxGroupBytes <= 0 || control.options.MaxGroupKeys > 0 || control.options.SpillDirectory == "" || control.options.MaxSpillBytes <= 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.from.fieldTypes) != 0 {
 		return false
 	}
 	if q.from.kind == "CACHE" {
@@ -17640,6 +17649,38 @@ func sqlQueryHasAggregate(q *sqlQuery) bool {
 		}
 	}
 	return sqlExprHasAggregate(q.having) || sqlExprHasAggregate(q.prewhere)
+}
+
+func sqlQueryHasDistinctAggregate(q *sqlQuery) bool {
+	if q == nil {
+		return false
+	}
+	for _, item := range q.selects {
+		if sqlExprHasDistinctAggregate(item.expr) {
+			return true
+		}
+	}
+	return sqlExprHasDistinctAggregate(q.having) || sqlExprHasDistinctAggregate(q.where) || sqlExprHasDistinctAggregate(q.prewhere) || sqlExprHasDistinctAggregate(q.qualify)
+}
+
+func sqlExprHasDistinctAggregate(expr sqlExpr) bool {
+	if expr.kind == "func" && expr.distinct {
+		return true
+	}
+	if expr.left != nil && sqlExprHasDistinctAggregate(*expr.left) || expr.right != nil && sqlExprHasDistinctAggregate(*expr.right) {
+		return true
+	}
+	for _, arg := range expr.args {
+		if sqlExprHasDistinctAggregate(arg) {
+			return true
+		}
+	}
+	for _, branch := range expr.cases {
+		if sqlExprHasDistinctAggregate(branch.when) || sqlExprHasDistinctAggregate(branch.then) {
+			return true
+		}
+	}
+	return expr.filter != nil && sqlExprHasDistinctAggregate(*expr.filter)
 }
 
 func sqlQueryHasWindow(q *sqlQuery) bool {
@@ -18034,6 +18075,29 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 			aggregateRows, err := sqlAggregateFilterRows(expr, group)
 			if err != nil {
 				return sqlEvaluationFailure(err)
+			}
+			if expr.distinct {
+				if len(expr.args) != 1 || expr.args[0].kind == "star" {
+					return sqlEvaluationFailure(errors.New("COUNT(DISTINCT) requires one value expression"))
+				}
+				seen := make(map[string]struct{}, len(aggregateRows))
+				var n int64
+				for _, r := range aggregateRows {
+					value := evalSQLExpr(expr.args[0], []sqlExecRow{r}, r)
+					if err := sqlExpressionError(value); err != nil {
+						return sqlEvaluationFailure(err)
+					}
+					if value == nil {
+						continue
+					}
+					key := sqlOutputRowKeyWithCollation(SQLRow{"value": value}, expr.collation)
+					if _, exists := seen[key]; exists {
+						continue
+					}
+					seen[key] = struct{}{}
+					n++
+				}
+				return n
 			}
 			if len(expr.args) == 0 || expr.args[0].kind == "star" {
 				return int64(len(aggregateRows))

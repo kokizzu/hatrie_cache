@@ -39060,3 +39060,24 @@ CPU by 1.19x, bytes by 1.33x, and allocations by 1.23x.
 
 See [M065_FIRST_LAST_WINDOW_STREAM.md](M065_FIRST_LAST_WINDOW_STREAM.md) for
 the supported subset, NULL behavior, limitations, and raw samples.
+
+<a id="m039-incremental-sql-count-distinct"></a>
+## M039 Incremental SQL `COUNT(DISTINCT)`
+
+Command: `make baseline-m039-incremental-sql-group-count-distinct`.
+
+The rebuild path reconstructs a 10,000-row exact grouped distinct state for
+each operation. The incremental path seeds that state once and applies one
+duplicate `int64` update per operation. Five `-benchmem` samples were run on
+Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Rebuild 10,000 rows | 5,576,928 | 7,965,703 | 40,919 | 1.00x |
+| Incremental one-row update | 434.6 | 80 | 3 | 12,832x faster |
+
+The incremental path is 99,571x lower in transient allocated bytes and 13,640x
+lower in allocation count. These are per-operation allocation measurements;
+the incremental operator intentionally retains its exact multiplicity state.
+Raw samples and supported SQL shape are in
+[M039_INCREMENTAL_SQL_GROUP_COUNT_DISTINCT.md](M039_INCREMENTAL_SQL_GROUP_COUNT_DISTINCT.md).

@@ -424,7 +424,7 @@ func nativeSQLDataflowRewriteGroupedHaving(expr sqlExpr, query *sqlQuery, column
 }
 
 func nativeSQLDataflowAggregateExpression(expr sqlExpr) (sqlStreamAggregate, bool) {
-	if expr.kind != "func" || expr.window != nil || sqlExprHasCustomFunction(expr, nil) {
+	if expr.kind != "func" || expr.distinct || expr.window != nil || sqlExprHasCustomFunction(expr, nil) {
 		return sqlStreamAggregate{}, false
 	}
 	name := strings.ToUpper(expr.name)

@@ -29431,3 +29431,31 @@ push-mz034-incremental-sql-group:
 
 deliver-mz034-incremental-sql-group:
 	@bash ./scripts/deliver-mz034-incremental-sql-group.sh deliver
+
+.PHONY: baseline-m039-incremental-sql-group-count-distinct
+baseline-m039-incremental-sql-group-count-distinct:
+	bash scripts/baseline-m039-incremental-sql-group-count-distinct.sh
+
+.PHONY: verify-m039-incremental-sql-group-count-distinct
+verify-m039-incremental-sql-group-count-distinct:
+	bash scripts/verify-m039-incremental-sql-group-count-distinct.sh
+
+.PHONY: test-m039-incremental-sql-group-count-distinct
+test-m039-incremental-sql-group-count-distinct:
+	bash scripts/test-m039-incremental-sql-group-count-distinct.sh
+
+.PHONY: stage-m039-incremental-sql-group-count-distinct
+stage-m039-incremental-sql-group-count-distinct:
+	bash scripts/deliver-m039-incremental-sql-group-count-distinct.sh stage
+
+.PHONY: commit-m039-incremental-sql-group-count-distinct
+commit-m039-incremental-sql-group-count-distinct:
+	bash scripts/deliver-m039-incremental-sql-group-count-distinct.sh commit
+
+.PHONY: push-m039-incremental-sql-group-count-distinct
+push-m039-incremental-sql-group-count-distinct:
+	bash scripts/deliver-m039-incremental-sql-group-count-distinct.sh push
+
+.PHONY: deliver-m039-incremental-sql-group-count-distinct
+deliver-m039-incremental-sql-group-count-distinct:
+	bash scripts/deliver-m039-incremental-sql-group-count-distinct.sh deliver

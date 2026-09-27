@@ -87,6 +87,12 @@ single-field `GROUP BY` with `COUNT(*)`, integer `SUM`, and optional scalar
 versus one-update measurements are documented in
 [MZ034_INCREMENTAL_SQL_GROUP_AGGREGATE.md](MZ034_INCREMENTAL_SQL_GROUP_AGGREGATE.md).
 
+`CompiledSQLQuery.CompileIncrementalGroupCountDistinct` additionally lowers a
+bounded grouped `COUNT(DISTINCT direct_int64_field)` into exact retained
+multiplicity state. Its parser fallback, supported shape, atomic retractions,
+and rebuild comparison are documented in
+[M039_INCREMENTAL_SQL_GROUP_COUNT_DISTINCT.md](M039_INCREMENTAL_SQL_GROUP_COUNT_DISTINCT.md).
+
 ## Benchmark
 
 Measurements are in-process Go microbenchmarks on an AMD Ryzen 9 5950X. Each
