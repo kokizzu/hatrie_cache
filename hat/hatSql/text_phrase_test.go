@@ -91,3 +91,69 @@ ORDER BY doc.id`, resolver)
 		t.Fatalf("union resolver calls = %d, want 1", resolver.calls)
 	}
 }
+
+func TestSQLContainsPhraseMixedORUsesUnionIndex(t *testing.T) {
+	resolver := &sqlTextPhraseUnionResolver{rows: []Row{
+		{"id": int64(1), "kind": "a", "text": "quick brown fox"},
+		{"id": int64(2), "kind": "b", "text": "lazy red fox"},
+		{"id": int64(3), "kind": "a", "text": "unrelated"},
+		{"id": int64(4), "kind": "b", "text": "quick brown lazy fox"},
+	}}
+	result, err := ExecuteSQLQuery(`
+FROM CACHE('docs') AS doc
+WHERE (CONTAINS_PHRASE(doc.text, 'quick brown') AND doc.kind = 'a')
+   OR (CONTAINS_PROXIMITY(doc.text, 'lazy fox', 1) AND doc.kind = 'b')
+SELECT doc.id
+ORDER BY doc.id`, resolver)
+	if err != nil {
+		t.Fatalf("mixed OR phrase query error = %v", err)
+	}
+	if !reflect.DeepEqual(result.Rows, []SQLRow{{"id": int64(1)}, {"id": int64(2)}, {"id": int64(4)}}) {
+		t.Fatalf("mixed OR phrase query rows = %#v", result.Rows)
+	}
+	if resolver.calls != 1 {
+		t.Fatalf("mixed OR union resolver calls = %d, want 1", resolver.calls)
+	}
+}
+
+func TestSQLContainsPhraseMixedORWithoutIndexedBranchFallsBack(t *testing.T) {
+	resolver := &sqlTextPhraseUnionResolver{rows: []Row{
+		{"id": int64(1), "kind": "a", "text": "quick brown fox"},
+		{"id": int64(2), "kind": "b", "text": "unrelated"},
+	}}
+	result, err := ExecuteSQLQuery(`
+FROM CACHE('docs') AS doc
+WHERE CONTAINS_PHRASE(doc.text, 'quick brown') OR doc.kind = 'b'
+SELECT doc.id
+ORDER BY doc.id`, resolver)
+	if err != nil {
+		t.Fatalf("uncovered OR phrase query error = %v", err)
+	}
+	if !reflect.DeepEqual(result.Rows, []SQLRow{{"id": int64(1)}, {"id": int64(2)}}) {
+		t.Fatalf("uncovered OR phrase query rows = %#v", result.Rows)
+	}
+	if resolver.calls != 0 {
+		t.Fatalf("uncovered OR union resolver calls = %d, want 0", resolver.calls)
+	}
+}
+
+func TestSQLContainsPhraseMixedORAcrossFieldsFallsBack(t *testing.T) {
+	resolver := &sqlTextPhraseUnionResolver{rows: []Row{
+		{"id": int64(1), "text": "quick brown", "title": "unrelated"},
+		{"id": int64(2), "text": "unrelated", "title": "quick brown"},
+	}}
+	result, err := ExecuteSQLQuery(`
+FROM CACHE('docs') AS doc
+WHERE CONTAINS_PHRASE(doc.text, 'quick brown') OR CONTAINS_PHRASE(doc.title, 'quick brown')
+SELECT doc.id
+ORDER BY doc.id`, resolver)
+	if err != nil {
+		t.Fatalf("cross-field OR phrase query error = %v", err)
+	}
+	if !reflect.DeepEqual(result.Rows, []SQLRow{{"id": int64(1)}, {"id": int64(2)}}) {
+		t.Fatalf("cross-field OR phrase query rows = %#v", result.Rows)
+	}
+	if resolver.calls != 0 {
+		t.Fatalf("cross-field OR union resolver calls = %d, want 0", resolver.calls)
+	}
+}

@@ -115,3 +115,79 @@ func resolveSQLTextProximityUnionIndexedSource(source sqlSource, condition sqlEx
 	}
 	return rows, available, err
 }
+
+// resolveSQLTextProximityMixedBooleanUnionIndexedSource narrows a mixed OR
+// expression such as (phrase AND filter) OR (proximity AND filter). Every OR
+// branch must contain an indexable phrase/proximity predicate; otherwise a
+// scan is required because an unindexed branch could contribute any row. The
+// full Boolean expression is still evaluated by the caller after the union.
+func resolveSQLTextProximityMixedBooleanUnionIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSourceResolver, metrics *sqlExecutionMetrics, hint SQLIndexHint) ([]SQLRow, bool, error) {
+	if condition.kind != "binary" || condition.op != "OR" || condition.left == nil || condition.right == nil {
+		return nil, false, nil
+	}
+	indexed, ok := resolver.(TextProximityUnionIndexedSourceResolver)
+	if !ok || !sqlTextProximityBooleanCovered(source, condition, hint) {
+		return nil, false, nil
+	}
+	fieldName := ""
+	sameField := true
+	queries := make([]SQLTextProximityQuery, 0, 2)
+	seen := make(map[SQLTextProximityQuery]struct{}, 2)
+	var collect func(sqlExpr) error
+	collect = func(expression sqlExpr) error {
+		if expression.kind == "binary" && (expression.op == "AND" || expression.op == "OR") && expression.left != nil && expression.right != nil {
+			if err := collect(*expression.left); err != nil {
+				return err
+			}
+			return collect(*expression.right)
+		}
+		field, query, matched, err := sqlTextProximityPredicate(source, expression, hint)
+		if err != nil {
+			return err
+		}
+		if !matched {
+			return nil
+		}
+		if fieldName == "" {
+			fieldName = field
+		} else if fieldName != field {
+			sameField = false
+			return nil
+		}
+		if _, duplicate := seen[query]; duplicate {
+			return nil
+		}
+		seen[query] = struct{}{}
+		queries = append(queries, query)
+		return nil
+	}
+	if err := collect(condition); err != nil {
+		return nil, false, err
+	}
+	if !sameField || fieldName == "" || len(queries) < 2 || !hint.allowsField(source, fieldName) {
+		return nil, false, nil
+	}
+	started := time.Now()
+	rows, available, err := indexed.ResolveSQLTextProximityUnionSource(source.kind, source.key, fieldName, queries)
+	if available && metrics != nil {
+		metrics.record("TEXT PROXIMITY MIXED UNION", sqlExplainSource(source)+" field="+fieldName, len(queries), len(rows), started)
+	}
+	return rows, available, err
+}
+
+func sqlTextProximityBooleanCovered(source sqlSource, expression sqlExpr, hint SQLIndexHint) bool {
+	if _, _, matched, _ := sqlTextProximityPredicate(source, expression, hint); matched {
+		return true
+	}
+	if expression.kind != "binary" || expression.left == nil || expression.right == nil {
+		return false
+	}
+	switch expression.op {
+	case "AND":
+		return sqlTextProximityBooleanCovered(source, *expression.left, hint) || sqlTextProximityBooleanCovered(source, *expression.right, hint)
+	case "OR":
+		return sqlTextProximityBooleanCovered(source, *expression.left, hint) && sqlTextProximityBooleanCovered(source, *expression.right, hint)
+	default:
+		return false
+	}
+}

@@ -28565,3 +28565,28 @@ deliver-ch048-not-between:
 .PHONY: deliver-ch039-grouped-topk
 deliver-ch039-grouped-topk:
 	bash ./scripts/deliver-ch039-grouped-topk.sh
+
+.PHONY: test-tt024-text
+test-tt024-text:
+\tbash ./scripts/test-tt024-text.sh
+.PHONY: cleanup-tt024-tmp-preview cleanup-tt024-tmp
+cleanup-tt024-tmp-preview:
+\tbash ./scripts/cleanup-tt024-tmp.sh preview
+cleanup-tt024-tmp:
+\tbash ./scripts/cleanup-tt024-tmp.sh apply
+.PHONY: format-tt024-text
+format-tt024-text:
+\tbash ./scripts/format-tt024-text.sh
+.PHONY: benchmark-tt024-text
+benchmark-tt024-text:
+\tbash ./scripts/benchmark-tt024-text.sh
+.PHONY: race-tt024-text vet-tt024-text test-tt024-package
+race-tt024-text:
+\tbash ./scripts/race-tt024-text.sh
+vet-tt024-text:
+\tbash ./scripts/vet-tt024-text.sh
+test-tt024-package:
+\tbash ./scripts/test-tt024-package.sh
+.PHONY: deliver-tt024-mixed-boolean
+deliver-tt024-mixed-boolean:
+\tbash ./scripts/deliver-tt024-mixed-boolean.sh deliver
