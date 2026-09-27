@@ -6400,7 +6400,7 @@ func (p *sqlQueryParser) parseQueryInternal(stopRight bool) (*sqlQuery, error) {
 				return nil, err
 			}
 			q.joins = append(q.joins, join)
-		case p.keyword("JOIN") || p.keyword("INNER") || p.keyword("LEFT") || p.keyword("RIGHT") || p.keyword("FULL") || p.keyword("CROSS"):
+		case p.keyword("JOIN") || p.keyword("INNER") || p.keyword("LEFT") || p.keyword("RIGHT") || p.keyword("FULL") || p.keyword("CROSS") || p.keyword("SEMI") || p.keyword("ANTI"):
 			if q.from == nil {
 				return nil, p.diagnostic(p.current(), "JOIN requires FROM first")
 			}
@@ -7050,11 +7050,25 @@ func (p *sqlQueryParser) parseJoin() (sqlJoin, error) {
 			return sqlJoin{}, err
 		}
 	} else if p.keyword("LEFT") {
-		kind = "LEFT"
 		p.next()
-		if p.keyword("OUTER") {
+		if p.keyword("SEMI") || p.keyword("ANTI") {
+			kind = strings.ToUpper(p.current().text)
+			p.next()
+		} else {
+			kind = "LEFT"
+			if p.keyword("OUTER") {
+				p.next()
+			}
+		}
+		if kind == "LEFT" && p.keyword("OUTER") {
 			p.next()
 		}
+		if err := p.expectKeyword("JOIN"); err != nil {
+			return sqlJoin{}, err
+		}
+	} else if p.keyword("SEMI") || p.keyword("ANTI") {
+		kind = strings.ToUpper(p.current().text)
+		p.next()
 		if err := p.expectKeyword("JOIN"); err != nil {
 			return sqlJoin{}, err
 		}
@@ -8275,7 +8289,7 @@ func (p *sqlQueryParser) diagnostic(token sqlToken, message string) error {
 }
 func sqlClauseKeyword(value string) bool {
 	switch strings.ToUpper(value) {
-	case "EXPLAIN", "PIPELINE", "COST", "ESTIMATE", "ANALYZE", "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "TABLESAMPLE", "ARRAY", "WHERE", "PREWHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "FETCH", "OFFSET", "SETTINGS", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL", "RECURSIVE", "EXTERNAL", "TABLE":
+	case "EXPLAIN", "PIPELINE", "COST", "ESTIMATE", "ANALYZE", "SELECT", "DISTINCT", "FROM", "JOIN", "LEFT", "RIGHT", "FULL", "CROSS", "SEMI", "ANTI", "TABLESAMPLE", "ARRAY", "WHERE", "PREWHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "FETCH", "OFFSET", "SETTINGS", "ON", "AS", "INNER", "OUTER", "ASC", "DESC", "UNION", "INTERSECT", "EXCEPT", "ALL", "RECURSIVE", "EXTERNAL", "TABLE":
 		return true
 	}
 	return false
@@ -12111,6 +12125,16 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 				metrics.record("ASOF JOIN", joinDescription(join), inputRows, len(next), started)
 				rows = next
 				leftAliases = append(leftAliases, join.source.alias)
+				continue
+			}
+			if join.kind == "SEMI" || join.kind == "ANTI" {
+				inputRows := len(rows)
+				next, err := executeSQLSemiAntiJoin(rows, join, leftAliases, resolver, ctes, control, maxRows)
+				if err != nil {
+					return SQLQueryResult{}, err
+				}
+				metrics.record(join.kind+" JOIN", joinDescription(join), inputRows, len(next), started)
+				rows = next
 				continue
 			}
 			if join.source.lateral {

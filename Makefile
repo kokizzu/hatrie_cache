@@ -29066,3 +29066,63 @@ deliver-c154-replication-rollout-next10:
 	@bash ./scripts/deliver-c154-replication-rollout-next10.sh deliver
 
 # C154_REPLICATION_SCHEMA_ROLLOUT_DELIVERY_NEXT10_END
+
+.PHONY: format-ch052-semi-anti-join test-ch052-semi-anti-join benchmark-ch052-semi-anti-join
+
+format-ch052-semi-anti-join:
+
+	@bash scripts/test-ch052-semi-anti-join.sh format
+
+
+
+test-ch052-semi-anti-join:
+
+	@bash scripts/test-ch052-semi-anti-join.sh test
+
+
+
+benchmark-ch052-semi-anti-join:
+
+	@bash scripts/test-ch052-semi-anti-join.sh benchmark
+
+.PHONY: test-ch052-hatsql
+
+test-ch052-hatsql:
+
+	@bash scripts/test-ch052-semi-anti-join.sh package
+
+
+
+.PHONY: race-ch052-semi-anti-join
+
+race-ch052-semi-anti-join:
+
+	@bash scripts/test-ch052-semi-anti-join.sh race
+
+
+
+.PHONY: vet-ch052-semi-anti-join
+
+vet-ch052-semi-anti-join:
+
+	@bash scripts/test-ch052-semi-anti-join.sh vet
+
+
+
+.PHONY: stage-ch052-semi-anti-join commit-ch052-semi-anti-join push-ch052-semi-anti-join deliver-ch052-semi-anti-join
+
+stage-ch052-semi-anti-join:
+
+	@bash scripts/deliver-ch052-semi-anti-join.sh stage
+
+commit-ch052-semi-anti-join:
+
+	@bash scripts/deliver-ch052-semi-anti-join.sh commit
+
+push-ch052-semi-anti-join:
+
+	@bash scripts/deliver-ch052-semi-anti-join.sh push
+
+deliver-ch052-semi-anti-join:
+
+	@bash scripts/deliver-ch052-semi-anti-join.sh deliver
