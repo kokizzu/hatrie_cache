@@ -28529,3 +28529,35 @@ vet-ch004-final-schema-registry:
 .PHONY: test-ch004-final-schema-registry-package
 test-ch004-final-schema-registry-package:
 	bash ./scripts/test-ch004-final-schema-registry-package.sh
+
+.PHONY: format-ch048-not-between
+format-ch048-not-between:
+	bash ./scripts/format-ch048-not-between.sh
+
+.PHONY: test-ch048-not-between
+test-ch048-not-between:
+	bash ./scripts/test-ch048-not-between.sh
+
+.PHONY: benchmark-ch048-not-between
+benchmark-ch048-not-between:
+	bash ./scripts/benchmark-ch048-not-between.sh
+
+.PHONY: test-ch048-not-between-package
+test-ch048-not-between-package:
+	bash ./scripts/test-ch048-package.sh
+
+.PHONY: race-ch048-not-between-package
+race-ch048-not-between-package:
+	bash ./scripts/race-ch048-package.sh
+
+.PHONY: vet-ch048-not-between-package
+vet-ch048-not-between-package:
+	bash ./scripts/vet-ch048-package.sh
+
+.PHONY: test-ch048-not-between-all
+test-ch048-not-between-all:
+	bash ./scripts/test-ch048-all.sh
+
+.PHONY: deliver-ch048-not-between
+deliver-ch048-not-between:
+	bash ./scripts/deliver-ch048-not-between.sh

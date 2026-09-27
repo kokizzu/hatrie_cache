@@ -12,16 +12,17 @@ dictionaries. Numeric ranges are lowered to the existing packed `>=` and `<=`
 kernels. The row loop performs no interface boxing or allocation on either
 fast path.
 
-The following intentionally retain the general evaluator: `NOT BETWEEN`,
-dynamic bounds, NULL bounds, malformed packed columns, and non-binary string
-collations. This preserves SQL UNKNOWN behavior and avoids making a broad
-proof about collation or expression evaluation.
+Literal numeric `NOT BETWEEN` also uses a packed numeric kernel; see
+[CH048_NOT_BETWEEN.md](CH048_NOT_BETWEEN.md). Dynamic bounds, NULL bounds,
+malformed packed columns, and non-binary string collations intentionally retain
+the general evaluator. This preserves SQL UNKNOWN behavior and avoids making a
+broad proof about collation or expression evaluation.
 
 ## Verification
 
 Focused tests cover dictionary and numeric recognizer validation, inclusive
-bounds, packed and legacy data, nullable values, `NOT BETWEEN` fallback, and
-end-to-end query materialization:
+bounds, packed and legacy data, nullable values, the `NOT BETWEEN` fast path
+and fallback, and end-to-end query materialization:
 
 ```text
 make format-ch048-between

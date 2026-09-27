@@ -1358,6 +1358,18 @@ func sqlColumnarQueryRowsMatcher(query *sqlQuery, batch ColumnarBatch, functions
 			return ok && expression.MatchString(text) != inverted, nil
 		}
 	}
+	if predicate, numeric := sqlColumnarNumericNotBetweenPredicate(query.where, query.from.alias); numeric {
+		column, packedNumeric := batch.NumericColumns[predicate.field]
+		kernel, packedNumeric := newSQLColumnarNumericNotBetweenKernel(column, predicate.lower, predicate.upper)
+		return func(rowIndex int) (bool, error) {
+			if packedNumeric {
+				return kernel.matches(rowIndex), nil
+			}
+			candidate, _ := batch.Value(predicate.field, rowIndex)
+			number, ok := sqlNumber(candidate)
+			return ok && sqlColumnarNumericNotBetweenMatches(number, predicate.lower, predicate.upper), nil
+		}
+	}
 	if predicates, numeric := sqlColumnarNumericBetweenPredicate(query.where, query.from.alias); numeric {
 		kernels, packedNumeric := sqlColumnarNumericPredicateKernels(batch, predicates)
 		return func(rowIndex int) (bool, error) {
@@ -9164,6 +9176,14 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
 		}
 		return result, true, nil
+	} else if predicate, numeric := sqlColumnarNumericNotBetweenPredicate(q.where, q.from.alias); numeric {
+		filterStarted := time.Now()
+		result, matched, scanned := sqlColumnarNumericNotBetweenMaterialize(q, batch, projectionFields, predicate, metrics != nil)
+		if metrics != nil {
+			metrics.record("COLUMNAR NUMERIC NOT BETWEEN FILTER", sqlExplainExpression(q.where), scanned, matched, filterStarted)
+			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
+		}
+		return result, true, nil
 	} else if predicates, numeric := sqlColumnarNumericBetweenPredicate(q.where, q.from.alias); numeric {
 		predicates = sqlColumnarOrderNumericPredicates(segments, predicates)
 		filterStarted := time.Now()
@@ -10233,6 +10253,40 @@ func sqlColumnarStringNGramMaterialize(q *sqlQuery, batch ColumnarBatch, project
 			}
 			result.Rows = append(result.Rows, row)
 		}
+	}
+	return result, matched, scanned
+}
+
+func sqlColumnarNumericNotBetweenMaterialize(q *sqlQuery, batch ColumnarBatch, projectionFields []string, predicate sqlColumnarNumericNotBetweenFilter, scanAll bool) (SQLQueryResult, int, int) {
+	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: []SQLRow{}}
+	kernel, packedNumeric := newSQLColumnarNumericNotBetweenKernel(batch.NumericColumns[predicate.field], predicate.lower, predicate.upper)
+	matched, scanned := 0, 0
+	for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
+		if !scanAll && q.limit >= 0 && len(result.Rows) >= q.limit {
+			break
+		}
+		scanned++
+		matches := false
+		if packedNumeric {
+			matches = kernel.matches(rowIndex)
+		} else {
+			candidate, _ := batch.Value(predicate.field, rowIndex)
+			number, ok := sqlNumber(candidate)
+			matches = ok && sqlColumnarNumericNotBetweenMatches(number, predicate.lower, predicate.upper)
+		}
+		if !matches {
+			continue
+		}
+		position := matched
+		matched++
+		if position < q.offset || q.limit >= 0 && len(result.Rows) >= q.limit {
+			continue
+		}
+		row := make(SQLRow, len(projectionFields))
+		for selectIndex, item := range q.selects {
+			row[result.Columns[selectIndex]], _ = batch.Value(item.expr.name, rowIndex)
+		}
+		result.Rows = append(result.Rows, row)
 	}
 	return result, matched, scanned
 }
@@ -11487,7 +11541,7 @@ func sqlColumnarPredicateFields(expr sqlExpr, alias string, add func(string)) bo
 		}
 		return true
 	case "between":
-		if expr.op != "BETWEEN" || expr.left == nil || expr.left.kind != "field" || (expr.left.qualifier != "" && expr.left.qualifier != alias) || len(expr.args) != 2 {
+		if expr.op != "BETWEEN" && expr.op != "NOT BETWEEN" || expr.left == nil || expr.left.kind != "field" || (expr.left.qualifier != "" && expr.left.qualifier != alias) || len(expr.args) != 2 {
 			return false
 		}
 		if add != nil {
@@ -11533,6 +11587,24 @@ func sqlColumnarNumericBetweenPredicate(expr sqlExpr, alias string) ([]sqlColumn
 		{field: expr.left.name, operator: ">=", value: lower},
 		{field: expr.left.name, operator: "<=", value: upper},
 	}, true
+}
+
+type sqlColumnarNumericNotBetweenFilter struct {
+	field string
+	lower float64
+	upper float64
+}
+
+func sqlColumnarNumericNotBetweenPredicate(expr sqlExpr, alias string) (sqlColumnarNumericNotBetweenFilter, bool) {
+	if expr.kind != "between" || expr.op != "NOT BETWEEN" || expr.left == nil || expr.left.kind != "field" || (expr.left.qualifier != "" && expr.left.qualifier != alias) || len(expr.args) != 2 || expr.args[0].kind != "literal" || expr.args[1].kind != "literal" {
+		return sqlColumnarNumericNotBetweenFilter{}, false
+	}
+	lower, lowerOK := sqlNumber(expr.args[0].value)
+	upper, upperOK := sqlNumber(expr.args[1].value)
+	if !lowerOK || !upperOK {
+		return sqlColumnarNumericNotBetweenFilter{}, false
+	}
+	return sqlColumnarNumericNotBetweenFilter{field: expr.left.name, lower: lower, upper: upper}, true
 }
 
 type sqlColumnarNumericFilter struct {
