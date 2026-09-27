@@ -28472,3 +28472,36 @@ stage-mz004-durable-jobs:
 .PHONY: deliver-mz004-durable-jobs
 deliver-mz004-durable-jobs:
 	bash ./scripts/deliver-mz004-durable-jobs.sh deliver
+.PHONY: benchmark-c154g-rollout
+benchmark-c154g-rollout:
+	@bash scripts/benchmark-c154g-rollout.sh
+.PHONY: test-c154g-rollout
+test-c154g-rollout:
+	@bash scripts/test-c154g-rollout.sh
+.PHONY: format-c154g-rollout
+format-c154g-rollout:
+	@bash scripts/format-c154g-rollout.sh
+.PHONY: test-c154g-package
+test-c154g-package:
+	@bash scripts/test-c154g-package.sh
+.PHONY: race-c154g-rollout
+race-c154g-rollout:
+	@bash scripts/race-c154g-rollout.sh
+.PHONY: vet-c154g-rollout
+vet-c154g-rollout:
+	@bash scripts/vet-c154g-rollout.sh
+.PHONY: test-all-c154g-isolated
+test-all-c154g-isolated:
+	@bash scripts/test-all-c154g-isolated.sh
+.PHONY: stage-c154g-rollout
+stage-c154g-rollout:
+	@bash scripts/deliver-c154g-rollout.sh stage
+.PHONY: commit-c154g-rollout
+commit-c154g-rollout:
+	@bash scripts/deliver-c154g-rollout.sh commit
+.PHONY: push-c154g-rollout
+push-c154g-rollout:
+	@bash scripts/deliver-c154g-rollout.sh push
+.PHONY: deliver-c154g-rollout
+deliver-c154g-rollout:
+	@bash scripts/deliver-c154g-rollout.sh deliver

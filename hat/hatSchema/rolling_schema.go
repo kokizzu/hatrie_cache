@@ -164,6 +164,11 @@ type RollingSchemaInstallFunc func(context.Context, string, Schema) error
 // RollingSchemaActivateFunc switches one prepared replica to the next schema.
 type RollingSchemaActivateFunc func(context.Context, string, Schema) error
 
+// RollingSchemaCheckpointPersistFunc durably records one stable rollout
+// checkpoint. The checkpoint is detached from the deployment and is emitted
+// after each successful prepare or activate transition.
+type RollingSchemaCheckpointPersistFunc func(context.Context, RollingSchemaCheckpoint) error
+
 // Run coordinates a sequential rolling deployment through caller-supplied
 // transport hooks. Successful phases are recorded before returning, so a
 // failed or canceled run can be retried without repeating completed work.
@@ -171,6 +176,22 @@ type RollingSchemaActivateFunc func(context.Context, string, Schema) error
 // deployment state lock is held. Concurrent runs that reach the same node
 // while its hook is active are rejected as an invalid phase transition.
 func (plan RollingSchemaPlan) Run(ctx context.Context, deployment *RollingSchemaDeployment, install RollingSchemaInstallFunc, activate RollingSchemaActivateFunc) error {
+	return plan.run(ctx, deployment, nil, install, activate)
+}
+
+// RunWithCheckpoint coordinates a rolling deployment and persists the last
+// stable phase after every successful prepare or activate transition. A
+// persistence error is returned after the in-memory transition has completed;
+// restoring the last successfully persisted checkpoint safely retries that
+// idempotent phase after a process restart.
+func (plan RollingSchemaPlan) RunWithCheckpoint(ctx context.Context, deployment *RollingSchemaDeployment, persist RollingSchemaCheckpointPersistFunc, install RollingSchemaInstallFunc, activate RollingSchemaActivateFunc) error {
+	if persist == nil {
+		return fmt.Errorf("%w: checkpoint persistence callback is required", ErrRollingSchemaCoordinatorInvalid)
+	}
+	return plan.run(ctx, deployment, persist, install, activate)
+}
+
+func (plan RollingSchemaPlan) run(ctx context.Context, deployment *RollingSchemaDeployment, persist RollingSchemaCheckpointPersistFunc, install RollingSchemaInstallFunc, activate RollingSchemaActivateFunc) error {
 	if deployment == nil {
 		return ErrRollingSchemaCoordinatorInvalid
 	}
@@ -215,6 +236,9 @@ func (plan RollingSchemaPlan) Run(ctx context.Context, deployment *RollingSchema
 			if err := deployment.finishPhase(node, rollingSchemaPhaseInstalling, RollingSchemaPhasePrepared); err != nil {
 				return err
 			}
+			if err := plan.persistCheckpoint(ctx, deployment, persist); err != nil {
+				return fmt.Errorf("hatSchema: persist prepared checkpoint %q: %w", node, err)
+			}
 		}
 		if err := ctx.Err(); err != nil {
 			return err
@@ -234,9 +258,23 @@ func (plan RollingSchemaPlan) Run(ctx context.Context, deployment *RollingSchema
 			if err := deployment.finishPhase(node, rollingSchemaPhaseActivating, RollingSchemaPhaseActive); err != nil {
 				return err
 			}
+			if err := plan.persistCheckpoint(ctx, deployment, persist); err != nil {
+				return fmt.Errorf("hatSchema: persist active checkpoint %q: %w", node, err)
+			}
 		}
 	}
 	return nil
+}
+
+func (plan RollingSchemaPlan) persistCheckpoint(ctx context.Context, deployment *RollingSchemaDeployment, persist RollingSchemaCheckpointPersistFunc) error {
+	if persist == nil {
+		return nil
+	}
+	checkpoint, err := plan.Checkpoint(deployment)
+	if err != nil {
+		return err
+	}
+	return persist(ctx, checkpoint)
 }
 
 func (deployment *RollingSchemaDeployment) claimPhase(node string, expected, inProgress RollingSchemaPhase) error {
