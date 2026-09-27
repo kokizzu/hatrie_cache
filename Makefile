@@ -28780,3 +28780,32 @@ test-ch038-ornull-native-package:
 deliver-ch038-ornull-native:
 	bash ./scripts/deliver-ch038-ornull-native.sh deliver
 # CH038_NATIVE_DATAFLOW_FEATURE_TARGETS_END
+# M090D_FILTERED_PROJECTED_SOURCE_TARGETS_BEGIN
+.PHONY: test-m090d-filtered-projected-source
+test-m090d-filtered-projected-source:
+	bash ./scripts/test-m090d-filtered-projected-source.sh
+
+.PHONY: format-m090d-filtered-projected-source
+format-m090d-filtered-projected-source:
+	bash ./scripts/format-m090d-filtered-projected-source.sh
+
+.PHONY: race-m090d-filtered-projected-source
+race-m090d-filtered-projected-source:
+	bash ./scripts/race-m090d-filtered-projected-source.sh
+
+.PHONY: vet-m090d-filtered-projected-source
+vet-m090d-filtered-projected-source:
+	bash ./scripts/vet-m090d-filtered-projected-source.sh
+
+.PHONY: benchmark-m090d-filtered-projected-source
+benchmark-m090d-filtered-projected-source:
+	bash ./scripts/benchmark-m090d-filtered-projected-source.sh
+
+.PHONY: test-m090d-filtered-projected-source-package
+test-m090d-filtered-projected-source-package:
+	bash ./scripts/test-m090d-filtered-projected-source-package.sh
+
+.PHONY: deliver-m090d-filtered-projected-source
+deliver-m090d-filtered-projected-source:
+	bash ./scripts/deliver-m090d-filtered-projected-source.sh deliver
+# M090D_FILTERED_PROJECTED_SOURCE_TARGETS_END

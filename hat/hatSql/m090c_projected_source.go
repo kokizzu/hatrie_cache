@@ -17,16 +17,33 @@ func resolveSQLProjectedSourceRows(query *sqlQuery, resolver SQLSourceResolver, 
 		return nil, nil, false, nil
 	}
 	if len(predicates) != 0 {
-		if _, ok := resolver.(PartitionPruningSourceResolver); ok {
-			return nil, nil, false, nil
+		_, predicateProjected := resolver.(ContextPredicateProjectedSourceResolver)
+		if !predicateProjected {
+			_, predicateProjected = resolver.(PredicateProjectedSourceResolver)
 		}
-		if _, ok := resolver.(PartitionedSourceResolver); ok {
-			return nil, nil, false, nil
+		if !predicateProjected {
+			if _, ok := resolver.(PartitionPruningSourceResolver); ok {
+				return nil, nil, false, nil
+			}
+			if _, ok := resolver.(PartitionedSourceResolver); ok {
+				return nil, nil, false, nil
+			}
 		}
 	}
 	fields, ok := sqlProjectedSourceFields(query)
 	if !ok {
 		return nil, nil, false, nil
+	}
+	if len(predicates) != 0 {
+		if rows, handled, err := resolveSQLPredicateProjectedSource(query, resolver, control, fields, predicates); handled || err != nil {
+			return rows, fields, handled, err
+		}
+		if _, ok := resolver.(PartitionPruningSourceResolver); ok {
+			return nil, fields, false, nil
+		}
+		if _, ok := resolver.(PartitionedSourceResolver); ok {
+			return nil, fields, false, nil
+		}
 	}
 	cacheKey := query.from.kind + "\x00" + query.from.key
 	if control != nil {

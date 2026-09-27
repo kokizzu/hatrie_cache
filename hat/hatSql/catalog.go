@@ -135,6 +135,32 @@ func (resolver CatalogResolver) ResolveSQLProjectedSourceContext(ctx context.Con
 	return projected.ResolveSQLProjectedSourceContext(ctx, name, key, fields)
 }
 
+// ResolveSQLProjectedSourceWithPredicates forwards the optional predicate
+// pushdown contract while keeping catalog-owned virtual sources local.
+func (resolver CatalogResolver) ResolveSQLProjectedSourceWithPredicates(name, key string, fields []string, predicates []SQLPartitionPredicate) ([]Row, bool, error) {
+	if catalogOwnsVirtualSource(name, key) || resolver.Source == nil {
+		return nil, false, nil
+	}
+	filtered, ok := resolver.Source.(PredicateProjectedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return filtered.ResolveSQLProjectedSourceWithPredicates(name, key, fields, predicates)
+}
+
+// ResolveSQLProjectedSourceContextWithPredicates forwards the context-aware
+// predicate pushdown contract while keeping catalog-owned virtual sources local.
+func (resolver CatalogResolver) ResolveSQLProjectedSourceContextWithPredicates(ctx context.Context, name, key string, fields []string, predicates []SQLPartitionPredicate) ([]Row, bool, error) {
+	if catalogOwnsVirtualSource(name, key) || resolver.Source == nil {
+		return nil, false, nil
+	}
+	filtered, ok := resolver.Source.(ContextPredicateProjectedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return filtered.ResolveSQLProjectedSourceContextWithPredicates(ctx, name, key, fields, predicates)
+}
+
 func (resolver CatalogResolver) resolveSQLSource(ctx context.Context, name, key string) ([]Row, error) {
 	if strings.EqualFold(name, "CACHE") {
 		switch strings.ToLower(key) {

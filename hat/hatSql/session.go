@@ -413,6 +413,32 @@ func (session *SQLSession) ResolveSQLProjectedSourceContext(ctx context.Context,
 	return projected.ResolveSQLProjectedSourceContext(ctx, name, key, fields)
 }
 
+// ResolveSQLProjectedSourceWithPredicates forwards the optional predicate
+// pushdown contract after preserving session-local source precedence.
+func (session *SQLSession) ResolveSQLProjectedSourceWithPredicates(name, key string, fields []string, predicates []SQLPartitionPredicate) ([]Row, bool, error) {
+	if session == nil || session.hasLocalSQLSource(name, key) || session.source == nil {
+		return nil, false, nil
+	}
+	filtered, ok := session.source.(PredicateProjectedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return filtered.ResolveSQLProjectedSourceWithPredicates(name, key, fields, predicates)
+}
+
+// ResolveSQLProjectedSourceContextWithPredicates forwards the context-aware
+// predicate pushdown contract after preserving session-local source precedence.
+func (session *SQLSession) ResolveSQLProjectedSourceContextWithPredicates(ctx context.Context, name, key string, fields []string, predicates []SQLPartitionPredicate) ([]Row, bool, error) {
+	if session == nil || session.hasLocalSQLSource(name, key) || session.source == nil {
+		return nil, false, nil
+	}
+	filtered, ok := session.source.(ContextPredicateProjectedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return filtered.ResolveSQLProjectedSourceContextWithPredicates(ctx, name, key, fields, predicates)
+}
+
 func (session *SQLSession) resolveSQLSource(ctx context.Context, name, key string) ([]Row, error) {
 	if strings.EqualFold(name, "CACHE") {
 		session.mu.RLock()

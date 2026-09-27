@@ -78,6 +78,21 @@ type ContextProjectedSourceResolver interface {
 	ResolveSQLProjectedSourceContext(ctx context.Context, name string, key string, fields []string) ([]Row, bool, error)
 }
 
+// PredicateProjectedSourceResolver optionally resolves a materialized source
+// with projected fields and planner-proven literal predicates. The resolver
+// may omit only rows that cannot satisfy every predicate; the SQL executor
+// still evaluates the original WHERE expression after the fetch.
+type PredicateProjectedSourceResolver interface {
+	ResolveSQLProjectedSourceWithPredicates(name string, key string, fields []string, predicates []SQLPartitionPredicate) ([]Row, bool, error)
+}
+
+// ContextPredicateProjectedSourceResolver is the context-aware form of
+// PredicateProjectedSourceResolver. It is preferred when both contracts are
+// implemented.
+type ContextPredicateProjectedSourceResolver interface {
+	ResolveSQLProjectedSourceContextWithPredicates(ctx context.Context, name string, key string, fields []string, predicates []SQLPartitionPredicate) ([]Row, bool, error)
+}
+
 // SourceCardinalityResolver optionally exposes a current row-count estimate
 // without materializing source rows. The estimate is a planning hint only;
 // the executor always resolves and rechecks the source rows before producing
