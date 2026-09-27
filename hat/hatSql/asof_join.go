@@ -113,13 +113,7 @@ func executeSQLAsofJoin(rows []sqlExecRow, join sqlJoin, leftAliases []string, r
 		}
 		buckets[key] = append(buckets[key], sqlAsofJoinCandidate{row: candidate, time: timeValue})
 	}
-	for key := range buckets {
-		bucket := buckets[key]
-		sort.SliceStable(bucket, func(left, right int) bool {
-			return sqlCompare(bucket[left].time, bucket[right].time) < 0
-		})
-		buckets[key] = bucket
-	}
+	prepareSQLAsofJoinBuckets(buckets)
 
 	next := make([]sqlExecRow, 0, len(rows))
 	for _, left := range rows {
@@ -149,6 +143,27 @@ func executeSQLAsofJoin(rows []sqlExecRow, join sqlJoin, leftAliases []string, r
 		}
 	}
 	return next, nil
+}
+
+func prepareSQLAsofJoinBuckets(buckets map[string][]sqlAsofJoinCandidate) {
+	for key, bucket := range buckets {
+		if sqlAsofJoinCandidatesSorted(bucket) {
+			continue
+		}
+		sort.SliceStable(bucket, func(left, right int) bool {
+			return sqlCompare(bucket[left].time, bucket[right].time) < 0
+		})
+		buckets[key] = bucket
+	}
+}
+
+func sqlAsofJoinCandidatesSorted(candidates []sqlAsofJoinCandidate) bool {
+	for index := 1; index < len(candidates); index++ {
+		if sqlCompare(candidates[index-1].time, candidates[index].time) > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func sqlAsofJoinCandidateIndex(candidates []sqlAsofJoinCandidate, leftTime interface{}, operator string) (int, bool) {

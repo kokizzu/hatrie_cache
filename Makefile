@@ -28696,3 +28696,18 @@ vet-mz011-file-sink:
 .PHONY: deliver-mz011-file-sink
 deliver-mz011-file-sink:
 	@bash scripts/deliver-mz011-file-sink.sh
+
+test-ch036-asof-sorted-fastpath:
+	@bash scripts/test-ch036-asof-sorted-fastpath.sh
+
+benchmark-ch036-asof-sorted-fastpath:
+	@bash scripts/benchmark-ch036-asof-sorted-fastpath.sh
+
+format-ch036-asof-sorted-fastpath:
+	@bash scripts/format-ch036-asof-sorted-fastpath.sh
+
+verify-ch036-asof-sorted-fastpath:
+	@bash scripts/verify-ch036-asof-sorted-fastpath.sh
+
+deliver-ch036-asof-sorted-fastpath:
+	@bash scripts/deliver-ch036-asof-sorted-fastpath.sh
