@@ -29366,3 +29366,35 @@ push-mz034-incremental-sql-filter:
 
 deliver-mz034-incremental-sql-filter:
 	bash ./scripts/deliver-mz034-incremental-sql-filter.sh deliver
+baseline-mz034-incremental-sql-projection:
+	bash ./scripts/test-mz034-incremental-sql-projection.sh baseline
+
+format-mz034-incremental-sql-projection:
+	bash ./scripts/test-mz034-incremental-sql-projection.sh format
+
+test-mz034-incremental-sql-projection:
+	bash ./scripts/test-mz034-incremental-sql-projection.sh test
+
+benchmark-mz034-incremental-sql-projection:
+	bash ./scripts/test-mz034-incremental-sql-projection.sh benchmark
+
+test-mz034-incremental-sql-projection-package:
+	bash ./scripts/test-mz034-incremental-sql-projection.sh package
+
+race-mz034-incremental-sql-projection:
+	bash ./scripts/test-mz034-incremental-sql-projection.sh race
+
+vet-mz034-incremental-sql-projection:
+	bash ./scripts/test-mz034-incremental-sql-projection.sh vet
+
+stage-mz034-incremental-sql-projection:
+	bash ./scripts/deliver-mz034-incremental-sql-projection.sh stage
+
+commit-mz034-incremental-sql-projection:
+	bash ./scripts/deliver-mz034-incremental-sql-projection.sh commit
+
+push-mz034-incremental-sql-projection:
+	bash ./scripts/deliver-mz034-incremental-sql-projection.sh push
+
+deliver-mz034-incremental-sql-projection:
+	bash ./scripts/deliver-mz034-incremental-sql-projection.sh deliver

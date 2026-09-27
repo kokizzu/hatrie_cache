@@ -118,3 +118,11 @@ BenchmarkDifferentialOperators/join: 48.171, 48.896, 48.591, 48.108, 49.245 us/o
 The incremental intersection path is the clear win for update-heavy workloads,
 but its higher allocation count is a real tradeoff. It should not be treated as
 a universal replacement for a one-shot rebuild.
+## SQL projection lowering
+
+`CompiledSQLQuery.CompileIncrementalProjection` now lowers bounded explicit
+scalar `SELECT` projections, with optional scalar `WHERE`, into signed row
+updates. It preserves input identity, timestamps, and weights, rejects global
+or custom-function semantics explicitly, and is documented with a full
+rebuild-versus-incremental benchmark in
+[MZ034_INCREMENTAL_SQL_PROJECTION.md](MZ034_INCREMENTAL_SQL_PROJECTION.md).
