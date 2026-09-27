@@ -3487,6 +3487,8 @@ type sqlStreamAggregate struct {
 	arg                  *sqlExpr
 	order                *sqlExpr
 	filter               *sqlExpr
+	distinct             bool
+	distinctValues       map[nativeSQLDataflowDistinctKey]struct{}
 	approximate          *sqlApproximateStreamState
 	state                *sqlAggregateStateAccumulator
 	stateMerge           bool
@@ -3595,6 +3597,27 @@ func (aggregate *sqlStreamAggregate) addWithGroup(group []sqlExecRow, row sqlExe
 		if !sqlTruthy(value) {
 			return nil
 		}
+	}
+	if aggregate.distinct {
+		if aggregate.arg == nil {
+			return fmt.Errorf("%s aggregate is missing its DISTINCT argument", aggregate.name)
+		}
+		value := evalSQLExpr(*aggregate.arg, group, row)
+		if err := sqlExpressionError(value); err != nil {
+			return err
+		}
+		if value == nil {
+			return nil
+		}
+		key, ok := nativeSQLDataflowDistinctKeyFor(value)
+		if !ok {
+			return fmt.Errorf("%w: COUNT(DISTINCT) key type %T", ErrSQLNativeDataflowUnsupported, value)
+		}
+		if aggregate.distinctValues == nil {
+			aggregate.distinctValues = make(map[nativeSQLDataflowDistinctKey]struct{})
+		}
+		aggregate.distinctValues[key] = struct{}{}
+		return nil
 	}
 	if aggregate.approximate != nil {
 		return aggregate.approximate.add(group, row)
@@ -3714,6 +3737,12 @@ func (aggregate sqlStreamAggregate) result() interface{} {
 	orNull := false
 	if base, ok := sqlAggregateOrNullBase(name); ok {
 		name, orNull = base, true
+	}
+	if aggregate.distinct {
+		if orNull && len(aggregate.distinctValues) == 0 {
+			return nil
+		}
+		return int64(len(aggregate.distinctValues))
 	}
 	switch name {
 	case "COUNT":

@@ -4944,6 +4944,16 @@ scope, and measured cost.
 Run `make test-tu22`, `make race-tu22`, `make vet-tu22`, and
 `make benchmark-tu22` for focused verification.
 
+## Automatic Native `COUNT(DISTINCT)`
+
+Ordinary row-resolver SQL queries now automatically use typed native dataflow
+state for global and grouped `COUNT(DISTINCT scalar)` aggregates. Integer and
+string keys are exact, NULL is ignored, and unsupported automatic runtime keys
+fall back to the general executor. Set `SQLQueryOptions.DisableNativeDataflow`
+to force the compatibility path. See
+[M052AH_AUTO_NATIVE_COUNT_DISTINCT.md](M052AH_AUTO_NATIVE_COUNT_DISTINCT.md)
+for semantics, limits, raw benchmark samples, and verification commands.
+
 ## Named Space Changefeed
 
 The opt-in `hatReplication.SpaceChangefeed` primitive provides bounded

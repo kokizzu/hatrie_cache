@@ -1190,6 +1190,13 @@ SQL shape. See [CH035_REMOTE_SHARD_PRUNING.md](CH035_REMOTE_SHARD_PRUNING.md).
   allocations; see
   [M052AG_NATIVE_QUAD_GROUPED_ORDERED.md](M052AG_NATIVE_QUAD_GROUPED_ORDERED.md)
   and [BENCHMARK.md](BENCHMARK.md#m052ag-native-four-field-grouped-ordered-top-n).
+- [x] M052ah Automatic native `COUNT(DISTINCT)` for ordinary row resolvers.
+  Global and grouped scalar counts reuse the existing typed integer/string
+  distinct-key state, ignore SQL NULL, and preserve exact fallback behavior for
+  unsupported runtime keys. The paired benchmark is 6.31x faster with 8.69x
+  fewer bytes and 11.39x fewer allocations; see
+  [M052AH_AUTO_NATIVE_COUNT_DISTINCT.md](M052AH_AUTO_NATIVE_COUNT_DISTINCT.md)
+  and [BENCHMARK.md](BENCHMARK.md#m052ah-automatic-native-count-distinct).
 
 - [x] M065ag SQL `FIRST_VALUE`/`LAST_VALUE` support in the materialized
   executor plus automatic O(1)-state streaming for unpartitioned, unordered

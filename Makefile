@@ -29459,3 +29459,34 @@ push-m039-incremental-sql-group-count-distinct:
 .PHONY: deliver-m039-incremental-sql-group-count-distinct
 deliver-m039-incremental-sql-group-count-distinct:
 	bash scripts/deliver-m039-incremental-sql-group-count-distinct.sh deliver
+.PHONY: test-m052ah-auto-native-count-distinct
+test-m052ah-auto-native-count-distinct:
+	bash scripts/test-m052ah-auto-native-count-distinct.sh
+
+.PHONY: format-m052ah-auto-native-count-distinct
+format-m052ah-auto-native-count-distinct:
+	bash scripts/format-m052ah-auto-native-count-distinct.sh
+
+.PHONY: baseline-m052ah-auto-native-count-distinct
+baseline-m052ah-auto-native-count-distinct:
+	bash scripts/baseline-m052ah-auto-native-count-distinct.sh
+
+.PHONY: verify-m052ah-auto-native-count-distinct
+verify-m052ah-auto-native-count-distinct:
+	bash scripts/verify-m052ah-auto-native-count-distinct.sh
+
+.PHONY: stage-m052ah-auto-native-count-distinct
+stage-m052ah-auto-native-count-distinct:
+	bash scripts/deliver-m052ah-auto-native-count-distinct.sh stage
+
+.PHONY: commit-m052ah-auto-native-count-distinct
+commit-m052ah-auto-native-count-distinct:
+	bash scripts/deliver-m052ah-auto-native-count-distinct.sh commit
+
+.PHONY: push-m052ah-auto-native-count-distinct
+push-m052ah-auto-native-count-distinct:
+	bash scripts/deliver-m052ah-auto-native-count-distinct.sh push
+
+.PHONY: deliver-m052ah-auto-native-count-distinct
+deliver-m052ah-auto-native-count-distinct:
+	bash scripts/deliver-m052ah-auto-native-count-distinct.sh deliver

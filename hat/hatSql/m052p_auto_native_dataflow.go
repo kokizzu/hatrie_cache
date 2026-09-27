@@ -2,6 +2,7 @@ package hatSql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -56,6 +57,9 @@ func executeSQLAutoNativeDataflow(ctx context.Context, query *sqlQuery, resolver
 		resultRows, err = executeNativeSQLDataflow(nativeContext, query, rows)
 	}
 	if err != nil {
+		if errors.Is(err, ErrSQLNativeDataflowUnsupported) {
+			return SQLQueryResult{}, false, nil
+		}
 		return SQLQueryResult{}, true, err
 	}
 	if err := control.check(); err != nil {

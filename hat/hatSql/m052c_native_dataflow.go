@@ -424,7 +424,7 @@ func nativeSQLDataflowRewriteGroupedHaving(expr sqlExpr, query *sqlQuery, column
 }
 
 func nativeSQLDataflowAggregateExpression(expr sqlExpr) (sqlStreamAggregate, bool) {
-	if expr.kind != "func" || expr.distinct || expr.window != nil || sqlExprHasCustomFunction(expr, nil) {
+	if expr.kind != "func" || expr.window != nil || sqlExprHasCustomFunction(expr, nil) {
 		return sqlStreamAggregate{}, false
 	}
 	name := strings.ToUpper(expr.name)
@@ -432,14 +432,17 @@ func nativeSQLDataflowAggregateExpression(expr sqlExpr) (sqlStreamAggregate, boo
 	if base, ok := sqlAggregateOrNullBase(name); ok {
 		baseName = base
 	}
+	if expr.distinct && baseName != "COUNT" {
+		return sqlStreamAggregate{}, false
+	}
 	conditional := nativeSQLDataflowConditionalAggregate(expr)
 	if expr.filter != nil && !conditional {
 		return sqlStreamAggregate{}, false
 	}
-	aggregate := sqlStreamAggregate{name: name}
+	aggregate := sqlStreamAggregate{name: name, distinct: expr.distinct}
 	switch baseName {
 	case "COUNT":
-		if len(expr.args) > 1 {
+		if len(expr.args) > 1 || expr.distinct && (len(expr.args) != 1 || expr.args[0].kind == "star") {
 			return sqlStreamAggregate{}, false
 		}
 		if len(expr.args) == 1 && expr.args[0].kind != "star" {
@@ -496,6 +499,13 @@ func nativeSQLDataflowAggregateExpression(expr sqlExpr) (sqlStreamAggregate, boo
 }
 
 func cloneNativeSQLDataflowAggregate(aggregate sqlStreamAggregate) sqlStreamAggregate {
+	if aggregate.distinct {
+		values := make(map[nativeSQLDataflowDistinctKey]struct{}, len(aggregate.distinctValues))
+		for key := range aggregate.distinctValues {
+			values[key] = struct{}{}
+		}
+		aggregate.distinctValues = values
+	}
 	if aggregate.approximate == nil {
 		return aggregate
 	}

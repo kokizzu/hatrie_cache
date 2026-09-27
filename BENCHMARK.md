@@ -38406,6 +38406,26 @@ Five-field groups, `WITH TIES`, unsupported order expressions, and richer SQL
 remain on the established fallback. See
 [M052AG_NATIVE_QUAD_GROUPED_ORDERED.md](M052AG_NATIVE_QUAD_GROUPED_ORDERED.md).
 
+<a id="m052ah-automatic-native-count-distinct"></a>
+## M052ah Automatic Native `COUNT(DISTINCT)`
+
+Command: `make baseline-m052ah-auto-native-count-distinct`.
+
+Linux/amd64, AMD Ryzen 9 5950X; 8,192 rows, 128 groups, 64 repeated integer
+values; five samples with `-benchtime=100ms -benchmem`.
+
+| Path | Median ns/op | B/op | Allocs/op | Improvement vs fallback |
+| --- | ---: | ---: | ---: | ---: |
+| Automatic native | 1,898,469 | 1,371,958 | 8,770 | 6.31x CPU, 8.69x bytes, 11.39x allocs |
+| Explicit fallback | 11,984,532 | 11,928,431 | 99,893 | 1.00x |
+
+The pre-change automatic path was the same fallback at 11,961,020 ns/op,
+11,928,290 B/op, and 99,892 allocs/op. The native path is fail-closed for
+unsupported runtime key types; automatic execution retries through the general
+executor, while direct native callers receive `ErrSQLNativeDataflowUnsupported`.
+Full raw samples and the semantics matrix are in
+[M052AH_AUTO_NATIVE_COUNT_DISTINCT.md](M052AH_AUTO_NATIVE_COUNT_DISTINCT.md).
+
 <a id="rejected-t042-independent-setint-parallel-replay"></a>
 ## Rejected T042: Independent-Key Parallel Journal Replay
 
