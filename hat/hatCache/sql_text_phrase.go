@@ -61,6 +61,82 @@ func (ht *HatTrie) ResolveSQLTextProximityUnionSource(name, key, field string, q
 	return ht.resolveSQLTextProximityUnionSource(name, key, field, queries)
 }
 
+// ResolveSQLTextProximityMultiFieldUnionSource resolves an OR of phrase or
+// proximity predicates across positional sidecars. Each sidecar contributes
+// source-row indexes, which are deduplicated and materialized in source order.
+// The SQL executor still evaluates the complete Boolean expression, so the
+// returned rows are conservative candidates.
+func (ht *HatTrie) ResolveSQLTextProximityMultiFieldUnionSource(name, key string, queries []hatSql.SQLTextProximityFieldQuery) ([]SQLRow, bool, error) {
+	if name != "CACHE" {
+		return nil, false, nil
+	}
+	if len(queries) == 0 {
+		return nil, false, nil
+	}
+	for _, query := range queries {
+		if query.Query.MaxGap < 0 || query.Query.MaxGap > maxSQLTextProximityGap {
+			return nil, false, fmt.Errorf("CONTAINS_PROXIMITY distance must be a non-negative integer no larger than %d", maxSQLTextProximityGap)
+		}
+	}
+	source, err := ht.sqlJSONSource(key)
+	if err != nil {
+		return nil, false, err
+	}
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
+	if err != nil {
+		if err == errSQLJSONIndexAdmissionDenied {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	indexes := make(map[string]*sqlJSONTextIndex, len(queries))
+	var sourceRows []SQLRow
+	for _, query := range queries {
+		if _, exists := indexes[query.Field]; exists {
+			continue
+		}
+		index := ht.sqlJSONTextIndexes[key][query.Field]
+		if index == nil {
+			return nil, false, nil
+		}
+		if err := refreshSQLJSONTextIndexSourceRows(index, query.Field, source, snapshot.rows); err != nil {
+			return nil, false, err
+		}
+		ensureSQLJSONTextPositions(index, query.Field)
+		if len(index.rows) != len(snapshot.rows) {
+			return nil, false, nil
+		}
+		if sourceRows == nil {
+			sourceRows = index.rows
+		}
+		indexes[query.Field] = index
+	}
+	matched := make([]bool, len(snapshot.rows))
+	var matchedRows []int
+	for _, query := range queries {
+		queryPositions := hatSql.TextTokenPositions(query.Query.Query)
+		if len(queryPositions) == 0 {
+			continue
+		}
+		index := indexes[query.Field]
+		matchedRows = sqlJSONTextProximityMatchingRows(index, queryPositions, query.Query.MaxGap, matchedRows)
+		for _, rowIndex := range matchedRows {
+			if rowIndex >= 0 && rowIndex < len(matched) {
+				matched[rowIndex] = true
+			}
+		}
+	}
+	rows := make([]SQLRow, 0)
+	for rowIndex, rowMatched := range matched {
+		if rowMatched {
+			rows = append(rows, sourceRows[rowIndex])
+		}
+	}
+	return rows, true, nil
+}
+
 // ResolveSQLTextProximityMultiFieldIntersectionSource resolves an AND of
 // phrases or proximity predicates against positional sidecars. Each sidecar
 // contributes source-order row IDs, which are intersected before rows are

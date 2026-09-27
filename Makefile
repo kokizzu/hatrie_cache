@@ -28942,3 +28942,31 @@ push-mz004-compaction-coalescing:
 deliver-mz004-compaction-coalescing:
 	bash ./scripts/deliver-mz004-compaction-coalescing.sh deliver
 # MZ004_COMPACTION_COALESCING_TARGETS_END
+
+# TT024_CACHE_CROSS_FIELD_BEGIN
+.PHONY: format-tt024-cache-cross-field test-tt024-cache-cross-field test-tt024-sql-cross-field benchmark-tt024-cache-cross-field race-tt024-cache-cross-field vet-tt024-cache-cross-field unstage-tt024-cache-cross-field
+format-tt024-cache-cross-field:
+	bash scripts/format-tt024-cross-field.sh
+test-tt024-cache-cross-field:
+	bash scripts/test-tt024-cross-field.sh
+test-tt024-sql-cross-field:
+	bash scripts/test-tt024-sql-cross-field.sh
+benchmark-tt024-cache-cross-field:
+	bash scripts/benchmark-tt024-cache-cross-field.sh
+race-tt024-cache-cross-field:
+	bash scripts/race-tt024-cache-cross-field.sh
+vet-tt024-cache-cross-field:
+	bash scripts/vet-tt024-cache-cross-field.sh
+status-tt024-cache-cross-field:
+	bash scripts/deliver-tt024-cache-cross-field.sh status
+unstage-tt024-cache-cross-field:
+	bash scripts/deliver-tt024-cache-cross-field.sh unstage
+stage-tt024-cache-cross-field:
+	bash scripts/deliver-tt024-cache-cross-field.sh stage
+commit-tt024-cache-cross-field:
+	bash scripts/deliver-tt024-cache-cross-field.sh commit
+push-tt024-cache-cross-field:
+	bash scripts/deliver-tt024-cache-cross-field.sh push
+deliver-tt024-cache-cross-field:
+	bash scripts/deliver-tt024-cache-cross-field.sh deliver
+# TT024_CACHE_CROSS_FIELD_END
