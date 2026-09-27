@@ -1555,6 +1555,23 @@ type TextProximityUnionIndexedSourceResolver interface {
 	ResolveSQLTextProximityUnionSource(name, key, field string, queries []SQLTextProximityQuery) ([]Row, bool, error)
 }
 
+// SQLTextProximityFieldQuery associates one phrase or proximity predicate
+// with the indexed field that owns it. It is used by multi-field Boolean
+// unions whose branches can search different text columns.
+type SQLTextProximityFieldQuery struct {
+	Field string
+	Query SQLTextProximityQuery
+}
+
+// TextProximityMultiFieldUnionIndexedSourceResolver optionally resolves a
+// mixed Boolean OR whose indexed text predicates span multiple fields.
+// Implementations must deduplicate rows and return them in source order. The
+// SQL executor still evaluates the complete Boolean expression before
+// publishing results, so conservative candidates remain correct.
+type TextProximityMultiFieldUnionIndexedSourceResolver interface {
+	ResolveSQLTextProximityMultiFieldUnionSource(name, key string, queries []SQLTextProximityFieldQuery) ([]Row, bool, error)
+}
+
 // ExternalSourceResolver supplies a named, imported external table. It is
 // used only by EXTERNAL('name') sources and never receives a filesystem path.
 type ExternalSourceResolver interface {

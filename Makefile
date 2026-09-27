@@ -1,3 +1,13 @@
+.PHONY: inspect-tt024-cross-field benchmark-tt024-cross-field deliver-tt024-cross-field
+
+inspect-tt024-cross-field:
+\tbash ./scripts/inspect-tt024-cross-field.sh
+
+benchmark-tt024-cross-field:
+\tbash ./scripts/benchmark-tt024-cross-field.sh
+
+deliver-tt024-cross-field:
+\tbash ./scripts/deliver-tt024-cross-field.sh
 .PHONY: test-c153g-ownership-grpc
 test-c153g-ownership-grpc:
 	@bash scripts/test-c153g-ownership-grpc.sh

@@ -125,14 +125,20 @@ func resolveSQLTextProximityMixedBooleanUnionIndexedSource(source sqlSource, con
 	if condition.kind != "binary" || condition.op != "OR" || condition.left == nil || condition.right == nil {
 		return nil, false, nil
 	}
-	indexed, ok := resolver.(TextProximityUnionIndexedSourceResolver)
-	if !ok || !sqlTextProximityBooleanCovered(source, condition, hint) {
+	indexed, hasSingleFieldUnion := resolver.(TextProximityUnionIndexedSourceResolver)
+	multiField, hasMultiFieldUnion := resolver.(TextProximityMultiFieldUnionIndexedSourceResolver)
+	if !hasSingleFieldUnion && !hasMultiFieldUnion || !sqlTextProximityBooleanCovered(source, condition, hint) {
 		return nil, false, nil
 	}
 	fieldName := ""
 	sameField := true
 	queries := make([]SQLTextProximityQuery, 0, 2)
-	seen := make(map[SQLTextProximityQuery]struct{}, 2)
+	fieldQueries := make([]SQLTextProximityFieldQuery, 0, 2)
+	type queryKey struct {
+		field string
+		query SQLTextProximityQuery
+	}
+	seen := make(map[queryKey]struct{}, 2)
 	var collect func(sqlExpr) error
 	collect = func(expression sqlExpr) error {
 		if expression.kind == "binary" && (expression.op == "AND" || expression.op == "OR") && expression.left != nil && expression.right != nil {
@@ -152,25 +158,46 @@ func resolveSQLTextProximityMixedBooleanUnionIndexedSource(source sqlSource, con
 			fieldName = field
 		} else if fieldName != field {
 			sameField = false
+		}
+		key := queryKey{field: field, query: query}
+		if _, duplicate := seen[key]; duplicate {
 			return nil
 		}
-		if _, duplicate := seen[query]; duplicate {
-			return nil
-		}
-		seen[query] = struct{}{}
+		seen[key] = struct{}{}
 		queries = append(queries, query)
+		fieldQueries = append(fieldQueries, SQLTextProximityFieldQuery{Field: field, Query: query})
 		return nil
 	}
 	if err := collect(condition); err != nil {
 		return nil, false, err
 	}
-	if !sameField || fieldName == "" || len(queries) < 2 || !hint.allowsField(source, fieldName) {
+	if fieldName == "" || len(queries) < 2 {
 		return nil, false, nil
 	}
 	started := time.Now()
-	rows, available, err := indexed.ResolveSQLTextProximityUnionSource(source.kind, source.key, fieldName, queries)
+	if sameField {
+		if !hint.allowsField(source, fieldName) {
+			return nil, false, nil
+		}
+		if hasSingleFieldUnion {
+			rows, available, err := indexed.ResolveSQLTextProximityUnionSource(source.kind, source.key, fieldName, queries)
+			if available && metrics != nil {
+				metrics.record("TEXT PROXIMITY MIXED UNION", sqlExplainSource(source)+" field="+fieldName, len(queries), len(rows), started)
+			}
+			return rows, available, err
+		}
+	}
+	if !hasMultiFieldUnion {
+		return nil, false, nil
+	}
+	for _, fieldQuery := range fieldQueries {
+		if !hint.allowsField(source, fieldQuery.Field) {
+			return nil, false, nil
+		}
+	}
+	rows, available, err := multiField.ResolveSQLTextProximityMultiFieldUnionSource(source.kind, source.key, fieldQueries)
 	if available && metrics != nil {
-		metrics.record("TEXT PROXIMITY MIXED UNION", sqlExplainSource(source)+" field="+fieldName, len(queries), len(rows), started)
+		metrics.record("TEXT PROXIMITY MIXED MULTI-FIELD UNION", sqlExplainSource(source), len(fieldQueries), len(rows), started)
 	}
 	return rows, available, err
 }
