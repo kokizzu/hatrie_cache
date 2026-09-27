@@ -49,6 +49,10 @@ type SpillableArrangementOptions struct {
 	MaxDiskBytes     int64
 	MaxKeyBytes      int64
 	MaxValueBytes    int64
+	// DiskResidentIndex keeps the persisted sidecar on disk after reopen and
+	// uses sparse byte anchors for point lookups. The first mutation or
+	// compaction materializes the normal in-memory index.
+	DiskResidentIndex bool
 }
 
 // SpillableArrangementEntry is an independent key/value snapshot entry.
@@ -61,11 +65,13 @@ type SpillableArrangementEntry struct {
 // HotBytes counts value payload bytes only; key and index metadata remain in
 // memory so point lookups do not require a full segment scan.
 type SpillableArrangementStats struct {
-	Entries      int
-	ColdEntries  int
-	HotBytes     int64
-	DiskBytes    int64
-	SpillRecords uint64
+	Entries              int
+	ColdEntries          int
+	HotBytes             int64
+	DiskBytes            int64
+	SpillRecords         uint64
+	IndexResidentEntries int
+	DiskResidentIndex    bool
 }
 
 // SpillableArrangement keeps keyed byte values in memory until the configured
@@ -87,6 +93,7 @@ type SpillableArrangement struct {
 	diskBytes      int64
 	spillRecords   uint64
 	persistedIndex bool
+	diskIndex      *spillableArrangementDiskIndex
 	coldEntries    int
 	generation     uint64
 	entries        map[string]*spillableArrangementEntry
@@ -193,6 +200,12 @@ func OpenSpillableArrangement(path string, options SpillableArrangementOptions) 
 		maxKeyBytes:   options.MaxKeyBytes,
 		maxValueBytes: options.MaxValueBytes,
 		entries:       make(map[string]*spillableArrangementEntry),
+	}
+	if options.DiskResidentIndex {
+		if arrangement.restoreDiskResidentIndex(info.Size()) {
+			return arrangement, nil
+		}
+		arrangement.entries = make(map[string]*spillableArrangementEntry)
 	}
 	if !arrangement.restorePersistedIndex(info.Size()) {
 		if err := arrangement.recoverSegment(info.Size()); err != nil {
@@ -320,6 +333,9 @@ func (arrangement *SpillableArrangement) Set(key string, value []byte) error {
 	if int64(len(value)) > arrangement.maxValueBytes {
 		return ErrSpillableArrangementValueTooLarge
 	}
+	if err := arrangement.materializeDiskIndexLocked(); err != nil {
+		return err
+	}
 	previous, existed := arrangement.entries[key]
 	previousHotBytes := arrangement.hotBytes
 	previousColdEntries := arrangement.coldEntries
@@ -360,13 +376,32 @@ func (arrangement *SpillableArrangement) Get(key string) ([]byte, bool, error) {
 		return nil, false, err
 	}
 	entry, found := arrangement.entries[key]
+	if found {
+		if entry.valueHot {
+			return append([]byte(nil), entry.value...), true, nil
+		}
+		value, err := arrangement.readColdValueLocked(entry)
+		if err != nil {
+			return nil, false, err
+		}
+		return value, true, nil
+	}
+	if arrangement.diskIndex == nil {
+		return nil, false, nil
+	}
+	ref, generation, found, err := arrangement.diskIndex.lookup(key, arrangement.maxKeyBytes, arrangement.diskBytes)
+	if err != nil {
+		return nil, false, err
+	}
 	if !found {
 		return nil, false, nil
 	}
-	if entry.valueHot {
-		return append([]byte(nil), entry.value...), true, nil
-	}
-	value, err := arrangement.readColdValueLocked(entry)
+	value, err := arrangement.readColdValueLocked(&spillableArrangementEntry{
+		key:      key,
+		ref:      ref,
+		gen:      generation,
+		valueHot: false,
+	})
 	if err != nil {
 		return nil, false, err
 	}
@@ -381,6 +416,9 @@ func (arrangement *SpillableArrangement) Delete(key string) bool {
 	arrangement.mu.Lock()
 	defer arrangement.mu.Unlock()
 	if arrangement.closed {
+		return false
+	}
+	if err := arrangement.materializeDiskIndexLocked(); err != nil {
 		return false
 	}
 	entry, found := arrangement.entries[key]
@@ -407,6 +445,9 @@ func (arrangement *SpillableArrangement) Flush() error {
 	if err := arrangement.ensureOpenLocked(); err != nil {
 		return err
 	}
+	if arrangement.diskIndex != nil {
+		return arrangement.file.Sync()
+	}
 	hot := arrangement.hotEntriesLocked()
 	if err := arrangement.checkSpillDiskLimitLocked(hot); err != nil {
 		return err
@@ -432,6 +473,9 @@ func (arrangement *SpillableArrangement) Sync() error {
 	if err := arrangement.ensureOpenLocked(); err != nil {
 		return err
 	}
+	if arrangement.diskIndex != nil {
+		return arrangement.file.Sync()
+	}
 	if err := arrangement.file.Sync(); err != nil {
 		return err
 	}
@@ -448,6 +492,9 @@ func (arrangement *SpillableArrangement) Compact() error {
 	arrangement.mu.Lock()
 	defer arrangement.mu.Unlock()
 	if err := arrangement.ensureOpenLocked(); err != nil {
+		return err
+	}
+	if err := arrangement.materializeDiskIndexLocked(); err != nil {
 		return err
 	}
 	cold := arrangement.coldEntriesLocked()
@@ -530,6 +577,9 @@ func (arrangement *SpillableArrangement) Snapshot() ([]SpillableArrangementEntry
 	if err := arrangement.ensureOpenLocked(); err != nil {
 		return nil, err
 	}
+	if arrangement.diskIndex != nil {
+		return arrangement.snapshotDiskIndexLocked()
+	}
 	keys := make([]string, 0, len(arrangement.entries))
 	for key := range arrangement.entries {
 		keys = append(keys, key)
@@ -561,12 +611,23 @@ func (arrangement *SpillableArrangement) Stats() SpillableArrangementStats {
 	}
 	arrangement.mu.RLock()
 	defer arrangement.mu.RUnlock()
+	entries := len(arrangement.entries)
+	coldEntries := arrangement.coldEntries
+	indexResidentEntries := entries
+	diskResidentIndex := arrangement.diskIndex != nil
+	if diskResidentIndex {
+		entries = int(arrangement.diskIndex.entryCount)
+		coldEntries = entries
+		indexResidentEntries = 0
+	}
 	return SpillableArrangementStats{
-		Entries:      len(arrangement.entries),
-		ColdEntries:  arrangement.coldEntries,
-		HotBytes:     arrangement.hotBytes,
-		DiskBytes:    arrangement.diskBytes,
-		SpillRecords: arrangement.spillRecords,
+		Entries:              entries,
+		ColdEntries:          coldEntries,
+		HotBytes:             arrangement.hotBytes,
+		DiskBytes:            arrangement.diskBytes,
+		SpillRecords:         arrangement.spillRecords,
+		IndexResidentEntries: indexResidentEntries,
+		DiskResidentIndex:    diskResidentIndex,
 	}
 }
 
@@ -607,6 +668,11 @@ func (arrangement *SpillableArrangement) Close() error {
 	}
 	arrangement.closed = true
 	fileErr := arrangement.file.Close()
+	indexErr := error(nil)
+	if arrangement.diskIndex != nil {
+		indexErr = arrangement.diskIndex.close()
+		arrangement.diskIndex = nil
+	}
 	ownedDirectory := arrangement.ownedDirectory
 	directory := arrangement.directory
 	arrangement.mu.Unlock()
@@ -614,6 +680,9 @@ func (arrangement *SpillableArrangement) Close() error {
 		if err := os.RemoveAll(directory); fileErr == nil {
 			fileErr = err
 		}
+	}
+	if fileErr == nil {
+		fileErr = indexErr
 	}
 	return fileErr
 }

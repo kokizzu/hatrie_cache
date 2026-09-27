@@ -1,5 +1,8 @@
 # MZ-029 Persisted Reopen Index
 
+For the explicit sparse-anchor mode that keeps this sidecar on disk instead of
+retaining every key in a Go map, see [MZ029_DISK_RESIDENT_INDEX.md](MZ029_DISK_RESIDENT_INDEX.md).
+
 The spillable arrangement now writes an advisory sidecar index next to the
 binary spill segment when `Flush` or `Sync` succeeds:
 

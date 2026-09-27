@@ -7,4 +7,4 @@ cleanup() {
 }
 trap cleanup EXIT
 
-GOCACHE="$cache_dir" go test ./hat/hatDataStructure -run '^$' -bench '^BenchmarkMZ029ReopenSpillableArrangement$' -benchmem -count=5
+GOCACHE="$cache_dir" go test ./hat/hatDataStructure -run '^$' -bench '^BenchmarkMZ029(ReopenSpillableArrangement|DiskResidentReopenSpillableArrangement|DiskResidentGet|MapResidentGet)$' -benchmem -count=5
