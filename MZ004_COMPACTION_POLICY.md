@@ -30,5 +30,7 @@ Command: `make benchmark-mz004-compaction-policy` on Linux/amd64, AMD Ryzen 9
 
 The policy is a concurrency and fairness control, not a single-task speedup.
 It costs about 200 B and 4 allocations per configured submission in this
-fixture. The default path has no measured change. Durable compaction jobs and
-priority ordering remain future work.
+fixture. The default path has no measured change. Durable compaction jobs are
+documented in [MZ004_DURABLE_COMPACTION_JOBS.md](MZ004_DURABLE_COMPACTION_JOBS.md),
+and opt-in priority ordering is documented in
+[MZ004_COMPACTION_PRIORITY.md](MZ004_COMPACTION_PRIORITY.md).

@@ -28891,3 +28891,26 @@ status-tt024-text-intersection:
 	bash ./scripts/deliver-tt024-text-intersection.sh status
 
 # TT024_TEXT_INTERSECTION_TARGETS_END
+# MZ004_COMPACTION_PRIORITY_TARGETS_BEGIN
+.PHONY: format-mz004-compaction-priority test-mz004-compaction-priority test-mz004-compaction-priority-package race-mz004-compaction-priority vet-mz004-compaction-priority benchmark-mz004-compaction-priority stage-mz004-compaction-priority commit-mz004-compaction-priority push-mz004-compaction-priority deliver-mz004-compaction-priority
+format-mz004-compaction-priority:
+	bash ./scripts/format-mz004-compaction-priority.sh
+test-mz004-compaction-priority:
+	bash ./scripts/test-mz004-compaction-priority.sh
+test-mz004-compaction-priority-package:
+	bash ./scripts/test-mz004-compaction-priority-package.sh
+race-mz004-compaction-priority:
+	bash ./scripts/race-mz004-compaction-priority.sh
+vet-mz004-compaction-priority:
+	bash ./scripts/vet-mz004-compaction-priority.sh
+benchmark-mz004-compaction-priority:
+	bash ./scripts/benchmark-mz004-compaction-priority.sh
+stage-mz004-compaction-priority:
+	bash ./scripts/deliver-mz004-compaction-priority.sh stage
+commit-mz004-compaction-priority:
+	bash ./scripts/deliver-mz004-compaction-priority.sh commit
+push-mz004-compaction-priority:
+	bash ./scripts/deliver-mz004-compaction-priority.sh push
+deliver-mz004-compaction-priority:
+	bash ./scripts/deliver-mz004-compaction-priority.sh deliver
+# MZ004_COMPACTION_PRIORITY_TARGETS_END
