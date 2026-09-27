@@ -29126,3 +29126,25 @@ push-ch052-semi-anti-join:
 deliver-ch052-semi-anti-join:
 
 	@bash scripts/deliver-ch052-semi-anti-join.sh deliver
+
+.PHONY: format-m037-incremental-left-join test-m037-incremental-left-join benchmark-m037-incremental-left-join test-m037-left-join-package race-m037-incremental-left-join vet-m037-incremental-left-join
+format-m037-incremental-left-join:
+	@bash scripts/test-m037-incremental-left-join.sh format
+test-m037-incremental-left-join:
+	@bash scripts/test-m037-incremental-left-join.sh test
+benchmark-m037-incremental-left-join:
+	@bash scripts/test-m037-incremental-left-join.sh benchmark
+test-m037-left-join-package:
+	@bash scripts/test-m037-incremental-left-join.sh package
+race-m037-incremental-left-join:
+	@bash scripts/test-m037-incremental-left-join.sh race
+vet-m037-incremental-left-join:
+	@bash scripts/test-m037-incremental-left-join.sh vet
+stage-m037-incremental-left-join:
+	@bash scripts/deliver-m037-incremental-left-join.sh stage
+commit-m037-incremental-left-join:
+	@bash scripts/deliver-m037-incremental-left-join.sh commit
+push-m037-incremental-left-join:
+	@bash scripts/deliver-m037-incremental-left-join.sh push
+deliver-m037-incremental-left-join:
+	@bash scripts/deliver-m037-incremental-left-join.sh deliver
