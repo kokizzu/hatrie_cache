@@ -105,7 +105,6 @@ case "$mode" in
     commit_feature
     ;;
   push)
-    commit_feature
     git push origin HEAD
     ;;
   deliver)
