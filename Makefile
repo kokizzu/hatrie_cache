@@ -29042,6 +29042,8 @@ vet-c154-replication-rollout-next10:
 	bash scripts/vet-c154-replication-rollout-next10.sh
 # C154_REPLICATION_SCHEMA_ROLLOUT_VERIFY_NEXT10_END
 
+test-c154-delivery-cleanup-next10:
+	@bash scripts/test-c154-delivery-cleanup-next10.sh
 # C154_REPLICATION_SCHEMA_ROLLOUT_DELIVERY_NEXT10_BEGIN
 .PHONY: status-c154-replication-rollout-next10 stage-c154-replication-rollout-next10 unstage-c154-replication-rollout-next10 commit-c154-replication-rollout-next10 push-c154-replication-rollout-next10 deliver-c154-replication-rollout-next10
 

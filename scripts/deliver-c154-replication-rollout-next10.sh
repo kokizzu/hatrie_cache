@@ -18,6 +18,7 @@ feature_paths=(
   "scripts/test-c154-replication-rollout-package-next10.sh"
   "scripts/race-c154-replication-rollout-next10.sh"
   "scripts/vet-c154-replication-rollout-next10.sh"
+  "scripts/test-c154-delivery-cleanup-next10.sh"
   "scripts/deliver-c154-replication-rollout-next10.sh"
 )
 
@@ -31,6 +32,7 @@ new_paths=(
   "scripts/test-c154-replication-rollout-package-next10.sh"
   "scripts/race-c154-replication-rollout-next10.sh"
   "scripts/vet-c154-replication-rollout-next10.sh"
+  "scripts/test-c154-delivery-cleanup-next10.sh"
   "scripts/deliver-c154-replication-rollout-next10.sh"
 )
 
@@ -49,6 +51,13 @@ readonly benchmark_section_start="<a id=\"c154g-replication-schema-rollout\"></a
 readonly benchmark_section_end="<a id=\"m065ag-sql-first_value-last_value-streaming\"></a>"
 readonly make_section_start="# C154_REPLICATION_SCHEMA_ROLLOUT_NEXT10_BEGIN"
 readonly make_section_end="# C154_REPLICATION_SCHEMA_ROLLOUT_DELIVERY_NEXT10_END"
+delivery_tmp_dir=""
+
+cleanup_delivery_tmp_dir() {
+  if [[ -n "$delivery_tmp_dir" ]]; then
+    rm -rf -- "$delivery_tmp_dir"
+  fi
+}
 
 die() {
   printf 'delivery error: %s\n' "$*" >&2
@@ -188,8 +197,9 @@ stage_feature() {
   assert_no_feature_paths_staged
 
   local tmp_dir
-  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/hatrie-c154-delivery.XXXXXX")"
-  trap 'rm -rf "$tmp_dir"' RETURN
+  delivery_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/hatrie-c154-delivery.XXXXXX")"
+  tmp_dir="$delivery_tmp_dir"
+  trap cleanup_delivery_tmp_dir EXIT
 
   git add -- "${new_paths[@]}"
   stage_shared_line CLICKHOUSE_MATERIALIZE_TARANTOOL_AUDIT.md "$audit_marker" "$audit_addition" "$tmp_dir"
