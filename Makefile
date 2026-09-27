@@ -35,13 +35,13 @@ deliver-hatrie-tmp-audit:
 .PHONY: inspect-tt024-cross-field benchmark-tt024-cross-field deliver-tt024-cross-field
 
 inspect-tt024-cross-field:
-\tbash ./scripts/inspect-tt024-cross-field.sh
+	bash ./scripts/inspect-tt024-cross-field.sh
 
 benchmark-tt024-cross-field:
-\tbash ./scripts/benchmark-tt024-cross-field.sh
+	bash ./scripts/benchmark-tt024-cross-field.sh
 
 deliver-tt024-cross-field:
-\tbash ./scripts/deliver-tt024-cross-field.sh
+	bash ./scripts/deliver-tt024-cross-field.sh
 .PHONY: test-c153g-ownership-grpc
 test-c153g-ownership-grpc:
 	@bash scripts/test-c153g-ownership-grpc.sh
@@ -28131,33 +28131,33 @@ test-all-temp-cache:
 
 .PHONY: test-t047-grpc-transport
 test-t047-grpc-transport:
-\tbash ./scripts/test-t047-grpc-transport.sh
+	bash ./scripts/test-t047-grpc-transport.sh
 
 .PHONY: race-t047-grpc-transport
 race-t047-grpc-transport:
-\tbash ./scripts/test-t047-grpc-transport.sh race
+	bash ./scripts/test-t047-grpc-transport.sh race
 
 .PHONY: test-t047-grpc-transport-package
 test-t047-grpc-transport-package:
-\tbash ./scripts/test-t047-grpc-transport.sh package
+	bash ./scripts/test-t047-grpc-transport.sh package
 
 .PHONY: format-t047-grpc-transport
 format-t047-grpc-transport:
-\tbash ./scripts/test-t047-grpc-transport.sh format
+	bash ./scripts/test-t047-grpc-transport.sh format
 
 .PHONY: benchmark-t047-grpc-transport
 benchmark-t047-grpc-transport:
-\tbash ./scripts/test-t047-grpc-transport.sh benchmark
+	bash ./scripts/test-t047-grpc-transport.sh benchmark
 
 .PHONY: stage-t047-grpc-transport commit-t047-grpc-transport push-t047-grpc-transport
 stage-t047-grpc-transport:
-\tbash ./scripts/deliver-t047-grpc-transport.sh stage
+	bash ./scripts/deliver-t047-grpc-transport.sh stage
 
 commit-t047-grpc-transport:
-\tbash ./scripts/deliver-t047-grpc-transport.sh commit
+	bash ./scripts/deliver-t047-grpc-transport.sh commit
 
 push-t047-grpc-transport:
-\tbash ./scripts/deliver-t047-grpc-transport.sh push
+	bash ./scripts/deliver-t047-grpc-transport.sh push
 
 stage-m033c-global-timestamp-grpc:
 	@bash ./scripts/deliver-m033c-global-timestamp-grpc.sh stage
@@ -28612,34 +28612,34 @@ deliver-ch039-grouped-topk:
 
 .PHONY: test-tt024-text
 test-tt024-text:
-\tbash ./scripts/test-tt024-text.sh
+	bash ./scripts/test-tt024-text.sh
 .PHONY: cleanup-tt024-tmp-preview cleanup-tt024-tmp
 cleanup-tt024-tmp-preview:
-\tbash ./scripts/cleanup-tt024-tmp.sh preview
+	bash ./scripts/cleanup-tt024-tmp.sh preview
 cleanup-tt024-tmp:
-\tbash ./scripts/cleanup-tt024-tmp.sh apply
+	bash ./scripts/cleanup-tt024-tmp.sh apply
 .PHONY: format-tt024-text
 format-tt024-text:
-\tbash ./scripts/format-tt024-text.sh
+	bash ./scripts/format-tt024-text.sh
 .PHONY: benchmark-tt024-text
 benchmark-tt024-text:
-\tbash ./scripts/benchmark-tt024-text.sh
+	bash ./scripts/benchmark-tt024-text.sh
 .PHONY: race-tt024-text vet-tt024-text test-tt024-package
 race-tt024-text:
-\tbash ./scripts/race-tt024-text.sh
+	bash ./scripts/race-tt024-text.sh
 vet-tt024-text:
-\tbash ./scripts/vet-tt024-text.sh
+	bash ./scripts/vet-tt024-text.sh
 test-tt024-package:
-\tbash ./scripts/test-tt024-package.sh
+	bash ./scripts/test-tt024-package.sh
 .PHONY: deliver-tt024-mixed-boolean
 deliver-tt024-mixed-boolean:
-\tbash ./scripts/deliver-tt024-mixed-boolean.sh deliver
+	bash ./scripts/deliver-tt024-mixed-boolean.sh deliver
 
 .PHONY: cleanup-empty-tmp-plan-preview cleanup-empty-tmp-plan
 cleanup-empty-tmp-plan-preview:
-\tbash ./scripts/cleanup-empty-tmp-plan-artifacts.sh preview
+	bash ./scripts/cleanup-empty-tmp-plan-artifacts.sh preview
 cleanup-empty-tmp-plan:
-\tbash ./scripts/cleanup-empty-tmp-plan-artifacts.sh apply
+	bash ./scripts/cleanup-empty-tmp-plan-artifacts.sh apply
 
 .PHONY: test-ch004-final-schema-store
 test-ch004-final-schema-store:

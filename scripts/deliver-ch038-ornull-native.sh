@@ -15,13 +15,23 @@ if ! rg -q "$marker" Makefile; then
 fi
 
 staged_makefile="/tmp/hatrie-ch038-ornull-native-Makefile"
-trap 'rm -f "$staged_makefile"' EXIT
+normalized_makefile="${staged_makefile}.normalized"
+trap 'rm -f "$staged_makefile" "$normalized_makefile"' EXIT
 git show HEAD:Makefile > "$staged_makefile"
-awk -v marker="$marker" -v end_marker="$end_marker" '
-$0 == marker { in_block = 1 }
-in_block { print }
-$0 == end_marker { exit }
-' Makefile >> "$staged_makefile"
+if ! rg -q "$marker" "$staged_makefile"; then
+  awk -v marker="$marker" -v end_marker="$end_marker" '
+  $0 == marker { in_block = 1 }
+  in_block { print }
+  $0 == end_marker { exit }
+  ' Makefile >> "$staged_makefile"
+fi
+awk '{
+  if (substr($0, 1, 2) == "\\t") {
+    sub(/^\\t/, "\t")
+  }
+  print
+}' "$staged_makefile" > "$normalized_makefile"
+mv "$normalized_makefile" "$staged_makefile"
 mv "$staged_makefile" Makefile
 
 git add Makefile ENGINE_IDEAS.md CH038_OR_NULL_NATIVE_DATAFLOW.md \
