@@ -88,6 +88,20 @@ WHERE events.id >= 3`, resolver)
 	}
 }
 
+func TestCH037ColumnarArrayJoinNativeSliceElements(t *testing.T) {
+	values, reflected, native, valid := sqlColumnarArrayJoinElementsForBatch([]interface{}{"a", "b"})
+	if !valid || !native || reflected.IsValid() {
+		t.Fatalf("native slice result = values=%#v reflected=%v native=%t valid=%t, want native slice", values, reflected.IsValid(), native, valid)
+	}
+	if want := []interface{}{"a", "b"}; !reflect.DeepEqual(values, want) {
+		t.Fatalf("native slice values = %#v, want %#v", values, want)
+	}
+	values, reflected, native, valid = sqlColumnarArrayJoinElementsForBatch([]string{"a", "b"})
+	if !valid || native || !reflected.IsValid() || reflected.Len() != 2 {
+		t.Fatalf("typed slice result = values=%#v reflected=%v native=%t valid=%t, want reflection fallback", values, reflected.IsValid(), native, valid)
+	}
+}
+
 func ch037ColumnarArrayJoinBatch() ColumnarBatch {
 	return ColumnarBatch{
 		Columns: map[string][]interface{}{

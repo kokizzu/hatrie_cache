@@ -28833,3 +28833,27 @@ vet-m090e-predicate-columnar-source:
 deliver-m090e-predicate-columnar-source:
 	bash ./scripts/deliver-m090e-predicate-columnar-source.sh deliver
 # M090E_PREDICATE_COLUMNAR_SOURCE_TARGETS_END
+
+# CH037_NATIVE_ARRAY_FASTPATH_TARGETS_BEGIN
+.PHONY: test-ch037-native-array-fastpath
+test-ch037-native-array-fastpath:
+	bash ./scripts/test-ch037-native-array-fastpath.sh
+.PHONY: benchmark-ch037-native-array-fastpath
+benchmark-ch037-native-array-fastpath:
+	bash ./scripts/benchmark-ch037-native-array-fastpath.sh
+.PHONY: format-ch037-native-array-fastpath
+format-ch037-native-array-fastpath:
+	bash ./scripts/format-ch037-native-array-fastpath.sh
+.PHONY: test-ch037-native-array-fastpath-package
+test-ch037-native-array-fastpath-package:
+	bash ./scripts/test-ch037-native-array-fastpath-package.sh
+.PHONY: race-ch037-native-array-fastpath
+race-ch037-native-array-fastpath:
+	bash ./scripts/race-ch037-native-array-fastpath.sh
+.PHONY: vet-ch037-native-array-fastpath
+vet-ch037-native-array-fastpath:
+	bash ./scripts/vet-ch037-native-array-fastpath.sh
+.PHONY: deliver-ch037-native-array-fastpath
+deliver-ch037-native-array-fastpath:
+	bash ./scripts/deliver-ch037-native-array-fastpath.sh deliver
+# CH037_NATIVE_ARRAY_FASTPATH_TARGETS_END

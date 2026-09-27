@@ -2,6 +2,7 @@ package hatSql
 
 import (
 	"fmt"
+	"reflect"
 	"time"
 )
 
@@ -17,6 +18,14 @@ type sqlColumnarArrayJoinPlan struct {
 	joinAlias   string
 	left        bool
 	projections []sqlColumnarArrayJoinProjection
+}
+
+func sqlColumnarArrayJoinElementsForBatch(value interface{}) ([]interface{}, reflect.Value, bool, bool) {
+	if elements, ok := value.([]interface{}); ok {
+		return elements, reflect.Value{}, true, true
+	}
+	reflected, valid := sqlArrayJoinElements(value)
+	return nil, reflected, false, valid
 }
 
 func sqlColumnarArrayJoinPlanFor(q *sqlQuery, outer *sqlExecRow) (sqlColumnarArrayJoinPlan, bool) {
@@ -95,16 +104,20 @@ func executeSQLColumnarArrayJoin(q *sqlQuery, columnar SQLColumnarSourceResolver
 			}
 			continue
 		}
-		elements, valid := sqlArrayJoinElements(value)
+		nativeElements, reflectedElements, native, valid := sqlColumnarArrayJoinElementsForBatch(value)
 		if !valid {
 			return SQLQueryResult{}, true, fmt.Errorf("ARRAY JOIN expression must evaluate to an array, got %T", value)
 		}
-		if elements.Len() == 0 {
+		elementCount := len(nativeElements)
+		if !native {
+			elementCount = reflectedElements.Len()
+		}
+		if elementCount == 0 {
 			if plan.left {
 				capacity++
 			}
 		} else {
-			capacity += elements.Len()
+			capacity += elementCount
 		}
 		if capacity > maxRows {
 			return SQLQueryResult{}, true, fmt.Errorf("SQL ARRAY JOIN exceeds the %d row limit", maxRows)
@@ -125,8 +138,12 @@ func executeSQLColumnarArrayJoin(q *sqlQuery, columnar SQLColumnarSourceResolver
 			}
 			continue
 		}
-		elements, _ := sqlArrayJoinElements(value)
-		if elements.Len() == 0 {
+		nativeElements, reflectedElements, native, _ := sqlColumnarArrayJoinElementsForBatch(value)
+		elementCount := len(nativeElements)
+		if !native {
+			elementCount = reflectedElements.Len()
+		}
+		if elementCount == 0 {
 			if plan.left {
 				if err := appendSQLColumnarArrayJoinRow(&rows, plan, batch, row, nil, control); err != nil {
 					return SQLQueryResult{}, true, err
@@ -134,8 +151,12 @@ func executeSQLColumnarArrayJoin(q *sqlQuery, columnar SQLColumnarSourceResolver
 			}
 			continue
 		}
-		for index := 0; index < elements.Len(); index++ {
-			if err := appendSQLColumnarArrayJoinRow(&rows, plan, batch, row, elements.Index(index).Interface(), control); err != nil {
+		for index := 0; index < elementCount; index++ {
+			element := nativeElements[index]
+			if !native {
+				element = reflectedElements.Index(index).Interface()
+			}
+			if err := appendSQLColumnarArrayJoinRow(&rows, plan, batch, row, element, control); err != nil {
 				return SQLQueryResult{}, true, err
 			}
 		}
