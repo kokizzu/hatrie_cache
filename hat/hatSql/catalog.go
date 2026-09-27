@@ -231,6 +231,19 @@ func (resolver CatalogResolver) ResolveSQLColumnarSource(name, key string, field
 	return columnar.ResolveSQLColumnarSource(name, key, fields)
 }
 
+// ResolveSQLColumnarSourceWithPredicates forwards the optional columnar
+// predicate pushdown contract while keeping information-schema sources local.
+func (resolver CatalogResolver) ResolveSQLColumnarSourceWithPredicates(name, key string, fields []string, predicates []SQLPartitionPredicate) (ColumnarBatch, bool, error) {
+	if catalogOwnsVirtualSource(name, key) || resolver.Source == nil {
+		return ColumnarBatch{}, false, nil
+	}
+	filtered, ok := resolver.Source.(PredicateColumnarSourceResolver)
+	if !ok {
+		return ColumnarBatch{}, false, nil
+	}
+	return filtered.ResolveSQLColumnarSourceWithPredicates(name, key, fields, predicates)
+}
+
 // ResolveSQLColumnarMapSubcolumns forwards the optional map-subcolumn
 // contract for application sources while keeping information-schema sources
 // local.

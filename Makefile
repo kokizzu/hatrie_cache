@@ -28809,3 +28809,27 @@ test-m090d-filtered-projected-source-package:
 deliver-m090d-filtered-projected-source:
 	bash ./scripts/deliver-m090d-filtered-projected-source.sh deliver
 # M090D_FILTERED_PROJECTED_SOURCE_TARGETS_END
+
+# M090E_PREDICATE_COLUMNAR_SOURCE_TARGETS_BEGIN
+.PHONY: test-m090e-predicate-columnar-source
+test-m090e-predicate-columnar-source:
+	bash ./scripts/test-m090e-predicate-columnar-source.sh
+.PHONY: benchmark-m090e-predicate-columnar-source
+benchmark-m090e-predicate-columnar-source:
+	bash ./scripts/benchmark-m090e-predicate-columnar-source.sh
+.PHONY: format-m090e-predicate-columnar-source
+format-m090e-predicate-columnar-source:
+	bash ./scripts/format-m090e-predicate-columnar-source.sh
+.PHONY: test-m090e-predicate-columnar-source-package
+test-m090e-predicate-columnar-source-package:
+	bash ./scripts/test-m090e-predicate-columnar-source-package.sh
+.PHONY: race-m090e-predicate-columnar-source
+race-m090e-predicate-columnar-source:
+	bash ./scripts/race-m090e-predicate-columnar-source.sh
+.PHONY: vet-m090e-predicate-columnar-source
+vet-m090e-predicate-columnar-source:
+	bash ./scripts/vet-m090e-predicate-columnar-source.sh
+.PHONY: deliver-m090e-predicate-columnar-source
+deliver-m090e-predicate-columnar-source:
+	bash ./scripts/deliver-m090e-predicate-columnar-source.sh deliver
+# M090E_PREDICATE_COLUMNAR_SOURCE_TARGETS_END

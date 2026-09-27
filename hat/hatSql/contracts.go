@@ -1270,6 +1270,16 @@ type ColumnarSourceResolver interface {
 	ResolveSQLColumnarSource(name, key string, fields []string) (ColumnarBatch, bool, error)
 }
 
+// PredicateColumnarSourceResolver optionally supplies a columnar batch after
+// applying planner-proven literal predicates in the storage layer. The SQL
+// executor still evaluates the original WHERE expression on the returned
+// batch, so implementations may return conservative false positives but must
+// never omit a row that can satisfy every predicate. Returning available=false
+// preserves the ordinary parts, borrowed, or full columnar resolver path.
+type PredicateColumnarSourceResolver interface {
+	ResolveSQLColumnarSourceWithPredicates(name, key string, fields []string, predicates []SQLPartitionPredicate) (ColumnarBatch, bool, error)
+}
+
 // ColumnarMapSubcolumn identifies one restricted JSON path rooted at a map
 // field. A resolver may use the request to load only the selected map keys;
 // the executor still applies the complete SQL expression to the returned

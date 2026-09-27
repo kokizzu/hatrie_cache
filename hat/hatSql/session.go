@@ -492,6 +492,19 @@ func (session *SQLSession) ResolveSQLColumnarSource(name, key string, fields []s
 	return columnar.ResolveSQLColumnarSource(name, key, fields)
 }
 
+// ResolveSQLColumnarSourceWithPredicates forwards the optional columnar
+// predicate pushdown contract while preserving session-local source precedence.
+func (session *SQLSession) ResolveSQLColumnarSourceWithPredicates(name, key string, fields []string, predicates []SQLPartitionPredicate) (ColumnarBatch, bool, error) {
+	if session == nil || session.hasLocalSQLSource(name, key) || session.source == nil {
+		return ColumnarBatch{}, false, nil
+	}
+	filtered, ok := session.source.(PredicateColumnarSourceResolver)
+	if !ok {
+		return ColumnarBatch{}, false, nil
+	}
+	return filtered.ResolveSQLColumnarSourceWithPredicates(name, key, fields, predicates)
+}
+
 // BorrowSQLColumnarSource forwards the optional immutable columnar contract
 // to the external source after preserving session-local source precedence.
 func (session *SQLSession) BorrowSQLColumnarSource(name, key string, fields []string) (ColumnarBatch, bool, error) {

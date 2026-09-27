@@ -110,6 +110,9 @@ func sqlColumnarSourceBoundsOrdered(bounds []ColumnarNumericSegment) bool {
 }
 
 func resolveSQLColumnarQuerySource(query *sqlQuery, resolver ColumnarSourceResolver, fields []string) (ColumnarBatch, *ColumnarNumericSegments, bool, error) {
+	if batch, available, err := resolveSQLPredicateColumnarSource(query, resolver, fields); available || err != nil {
+		return batch, nil, available, err
+	}
 	if partsResolver, ok := resolver.(ColumnarPartsSourceResolver); ok {
 		parts, available, err := partsResolver.BorrowSQLColumnarSourceParts(query.from.kind, query.from.key, fields)
 		if err != nil {
