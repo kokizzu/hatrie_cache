@@ -29170,3 +29170,47 @@ push-m037-incremental-full-join:
 	@bash scripts/deliver-m037-incremental-full-join.sh push
 deliver-m037-incremental-full-join:
 	@bash scripts/deliver-m037-incremental-full-join.sh deliver
+
+.PHONY: baseline-m038-incremental-group-count
+baseline-m038-incremental-group-count:
+	@bash scripts/test-m038-incremental-group-count.sh baseline
+
+.PHONY: format-m038-incremental-group-count
+format-m038-incremental-group-count:
+	@bash scripts/test-m038-incremental-group-count.sh format
+
+.PHONY: test-m038-incremental-group-count
+test-m038-incremental-group-count:
+	@bash scripts/test-m038-incremental-group-count.sh test
+
+.PHONY: benchmark-m038-incremental-group-count
+benchmark-m038-incremental-group-count:
+	@bash scripts/test-m038-incremental-group-count.sh benchmark
+
+.PHONY: test-m038-incremental-group-count-package
+test-m038-incremental-group-count-package:
+	@bash scripts/test-m038-incremental-group-count.sh package
+
+.PHONY: race-m038-incremental-group-count
+race-m038-incremental-group-count:
+	@bash scripts/test-m038-incremental-group-count.sh race
+
+.PHONY: vet-m038-incremental-group-count
+vet-m038-incremental-group-count:
+	@bash scripts/test-m038-incremental-group-count.sh vet
+
+.PHONY: stage-m038-incremental-group-count
+stage-m038-incremental-group-count:
+	@bash scripts/deliver-m038-incremental-group-count.sh stage
+
+.PHONY: commit-m038-incremental-group-count
+commit-m038-incremental-group-count:
+	@bash scripts/deliver-m038-incremental-group-count.sh commit
+
+.PHONY: push-m038-incremental-group-count
+push-m038-incremental-group-count:
+	@bash scripts/deliver-m038-incremental-group-count.sh push
+
+.PHONY: deliver-m038-incremental-group-count
+deliver-m038-incremental-group-count:
+	@bash scripts/deliver-m038-incremental-group-count.sh deliver
