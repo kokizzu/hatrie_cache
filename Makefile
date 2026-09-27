@@ -28914,3 +28914,31 @@ push-mz004-compaction-priority:
 deliver-mz004-compaction-priority:
 	bash ./scripts/deliver-mz004-compaction-priority.sh deliver
 # MZ004_COMPACTION_PRIORITY_TARGETS_END
+# MZ004_COMPACTION_COALESCING_TARGETS_BEGIN
+.PHONY: benchmark-mz004-compaction-coalescing
+benchmark-mz004-compaction-coalescing:
+	bash ./scripts/benchmark-mz004-compaction-coalescing.sh
+
+.PHONY: format-mz004-compaction-coalescing test-mz004-compaction-coalescing test-mz004-compaction-coalescing-package race-mz004-compaction-coalescing vet-mz004-compaction-coalescing
+format-mz004-compaction-coalescing:
+	bash ./scripts/format-mz004-compaction-coalescing.sh
+test-mz004-compaction-coalescing:
+	bash ./scripts/test-mz004-compaction-coalescing.sh
+test-mz004-compaction-coalescing-package:
+	bash ./scripts/test-mz004-compaction-coalescing-package.sh
+race-mz004-compaction-coalescing:
+	bash ./scripts/race-mz004-compaction-coalescing.sh
+vet-mz004-compaction-coalescing:
+	bash ./scripts/vet-mz004-compaction-coalescing.sh
+.PHONY: status-mz004-compaction-coalescing stage-mz004-compaction-coalescing commit-mz004-compaction-coalescing push-mz004-compaction-coalescing deliver-mz004-compaction-coalescing
+status-mz004-compaction-coalescing:
+	bash ./scripts/deliver-mz004-compaction-coalescing.sh status
+stage-mz004-compaction-coalescing:
+	bash ./scripts/deliver-mz004-compaction-coalescing.sh stage
+commit-mz004-compaction-coalescing:
+	bash ./scripts/deliver-mz004-compaction-coalescing.sh commit
+push-mz004-compaction-coalescing:
+	bash ./scripts/deliver-mz004-compaction-coalescing.sh push
+deliver-mz004-compaction-coalescing:
+	bash ./scripts/deliver-mz004-compaction-coalescing.sh deliver
+# MZ004_COMPACTION_COALESCING_TARGETS_END

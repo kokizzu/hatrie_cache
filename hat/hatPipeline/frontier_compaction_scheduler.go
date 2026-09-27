@@ -12,6 +12,7 @@ type FrontierCompactionScheduler struct {
 	retention         *FrontierRetentionRegistry
 	scheduler         *Scheduler
 	priorityScheduler *PriorityScheduler
+	coalescer         *frontierCompactionCoalescer
 	ctx               context.Context
 	cancel            context.CancelFunc
 	policies          atomic.Pointer[frontierCompactionPolicyRegistry]
@@ -21,6 +22,18 @@ type FrontierCompactionScheduler struct {
 // frontier retention registry. workers and queueCapacity have the same
 // meaning as NewScheduler.
 func NewFrontierCompactionScheduler(parent context.Context, retention *FrontierRetentionRegistry, workers, queueCapacity int) (*FrontierCompactionScheduler, error) {
+	return newFrontierCompactionScheduler(parent, retention, workers, queueCapacity, false, false)
+}
+
+// NewCoalescingFrontierCompactionScheduler creates a bounded FIFO frontier
+// scheduler with opt-in exact duplicate coalescing. A request with the same
+// frontier and boundary as pending or running work returns accepted=false
+// instead of enqueueing another task.
+func NewCoalescingFrontierCompactionScheduler(parent context.Context, retention *FrontierRetentionRegistry, workers, queueCapacity int) (*FrontierCompactionScheduler, error) {
+	return newFrontierCompactionScheduler(parent, retention, workers, queueCapacity, false, true)
+}
+
+func newFrontierCompactionScheduler(parent context.Context, retention *FrontierRetentionRegistry, workers, queueCapacity int, priority, coalescing bool) (*FrontierCompactionScheduler, error) {
 	if retention == nil {
 		return nil, ErrFrontierRetentionRegistryNil
 	}
@@ -28,41 +41,39 @@ func NewFrontierCompactionScheduler(parent context.Context, retention *FrontierR
 		parent = context.Background()
 	}
 	ctx, cancel := context.WithCancel(parent)
-	scheduler, err := NewScheduler(ctx, workers, queueCapacity)
+	frontierScheduler := &FrontierCompactionScheduler{
+		retention: retention,
+		ctx:       ctx,
+		cancel:    cancel,
+	}
+	var err error
+	if priority {
+		frontierScheduler.priorityScheduler, err = NewPriorityScheduler(ctx, workers, queueCapacity)
+	} else {
+		frontierScheduler.scheduler, err = NewScheduler(ctx, workers, queueCapacity)
+	}
 	if err != nil {
 		cancel()
 		return nil, err
 	}
-	return &FrontierCompactionScheduler{
-		retention: retention,
-		scheduler: scheduler,
-		ctx:       ctx,
-		cancel:    cancel,
-	}, nil
+	if coalescing {
+		frontierScheduler.coalescer = newFrontierCompactionCoalescer()
+		context.AfterFunc(ctx, frontierScheduler.coalescer.clear)
+	}
+	return frontierScheduler, nil
 }
 
 // NewPriorityFrontierCompactionScheduler creates a bounded frontier scheduler
 // with opt-in priority ordering. Higher priority values run first and equal
 // priorities retain submission order. The legacy constructor remains FIFO.
 func NewPriorityFrontierCompactionScheduler(parent context.Context, retention *FrontierRetentionRegistry, workers, queueCapacity int) (*FrontierCompactionScheduler, error) {
-	if retention == nil {
-		return nil, ErrFrontierRetentionRegistryNil
-	}
-	if parent == nil {
-		parent = context.Background()
-	}
-	ctx, cancel := context.WithCancel(parent)
-	scheduler, err := NewPriorityScheduler(ctx, workers, queueCapacity)
-	if err != nil {
-		cancel()
-		return nil, err
-	}
-	return &FrontierCompactionScheduler{
-		retention:         retention,
-		priorityScheduler: scheduler,
-		ctx:               ctx,
-		cancel:            cancel,
-	}, nil
+	return newFrontierCompactionScheduler(parent, retention, workers, queueCapacity, true, false)
+}
+
+// NewPriorityCoalescingFrontierCompactionScheduler creates a bounded priority
+// frontier scheduler with exact duplicate coalescing enabled.
+func NewPriorityCoalescingFrontierCompactionScheduler(parent context.Context, retention *FrontierRetentionRegistry, workers, queueCapacity int) (*FrontierCompactionScheduler, error) {
+	return newFrontierCompactionScheduler(parent, retention, workers, queueCapacity, true, true)
 }
 
 // SetPolicy installs or replaces the per-frontier outstanding-task policy.
@@ -111,6 +122,45 @@ func (scheduler *FrontierCompactionScheduler) Submit(ctx context.Context, fronti
 // NewPriorityFrontierCompactionScheduler.
 func (scheduler *FrontierCompactionScheduler) SubmitPriority(ctx context.Context, frontierID string, boundary uint64, priority int, task Task) error {
 	return scheduler.submit(ctx, frontierID, boundary, priority, true, task)
+}
+
+// SubmitCoalesced submits a FIFO compaction task unless the same frontier and
+// boundary already has pending or running work. It returns accepted=false
+// when the request was merged into that existing task. This method is
+// available only on schedulers created by NewCoalescingFrontierCompactionScheduler
+// or NewPriorityCoalescingFrontierCompactionScheduler.
+func (scheduler *FrontierCompactionScheduler) SubmitCoalesced(ctx context.Context, frontierID string, boundary uint64, task Task) (accepted bool, err error) {
+	return scheduler.submitCoalesced(ctx, frontierID, boundary, 0, false, task)
+}
+
+// SubmitPriorityCoalesced is the priority equivalent of SubmitCoalesced.
+func (scheduler *FrontierCompactionScheduler) SubmitPriorityCoalesced(ctx context.Context, frontierID string, boundary uint64, priority int, task Task) (accepted bool, err error) {
+	return scheduler.submitCoalesced(ctx, frontierID, boundary, priority, true, task)
+}
+
+func (scheduler *FrontierCompactionScheduler) submitCoalesced(ctx context.Context, frontierID string, boundary uint64, priority int, requirePriority bool, task Task) (bool, error) {
+	if scheduler == nil || scheduler.retention == nil || !scheduler.hasScheduler() || task == nil {
+		return false, ErrSchedulerInvalid
+	}
+	if requirePriority && scheduler.priorityScheduler == nil {
+		return false, ErrSchedulerPriorityUnavailable
+	}
+	if scheduler.coalescer == nil {
+		return false, ErrSchedulerCoalescingUnavailable
+	}
+	key := frontierCompactionKey{frontierID: frontierID, boundary: boundary}
+	if !scheduler.coalescer.reserve(key) {
+		return false, nil
+	}
+	err := scheduler.submit(ctx, frontierID, boundary, priority, requirePriority, func(taskCtx context.Context) error {
+		defer scheduler.coalescer.release(key)
+		return task(taskCtx)
+	})
+	if err != nil {
+		scheduler.coalescer.release(key)
+		return false, err
+	}
+	return true, nil
 }
 
 func (scheduler *FrontierCompactionScheduler) submit(ctx context.Context, frontierID string, boundary uint64, priority int, requirePriority bool, task Task) error {
@@ -185,6 +235,9 @@ func (scheduler *FrontierCompactionScheduler) Cancel() {
 	}
 	if scheduler.cancel != nil {
 		scheduler.cancel()
+	}
+	if scheduler.coalescer != nil {
+		scheduler.coalescer.clear()
 	}
 	if scheduler.scheduler != nil {
 		scheduler.scheduler.Cancel()

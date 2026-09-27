@@ -33,4 +33,7 @@ It costs about 200 B and 4 allocations per configured submission in this
 fixture. The default path has no measured change. Durable compaction jobs are
 documented in [MZ004_DURABLE_COMPACTION_JOBS.md](MZ004_DURABLE_COMPACTION_JOBS.md),
 and opt-in priority ordering is documented in
-[MZ004_COMPACTION_PRIORITY.md](MZ004_COMPACTION_PRIORITY.md).
+[MZ004_COMPACTION_PRIORITY.md](MZ004_COMPACTION_PRIORITY.md). Exact duplicate
+coalescing is available separately through
+`NewCoalescingFrontierCompactionScheduler`; see
+[MZ004_COMPACTION_COALESCING.md](MZ004_COMPACTION_COALESCING.md).

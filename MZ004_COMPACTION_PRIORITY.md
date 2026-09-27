@@ -73,8 +73,10 @@ comparison for this feature.
   callers should use finite, meaningful priority bands.
 - Priority mode is opt-in. Existing FIFO users pay no priority-heap or
   notification overhead and keep their established behavior.
-- Automatic SQL planner wiring and compaction coalescing are not part of this
-  change; they remain separate MZ-004 follow-up work.
+- Automatic SQL planner wiring remains separate MZ-004 follow-up work. Exact
+	duplicate coalescing is available through
+	`NewCoalescingFrontierCompactionScheduler`; see
+	[MZ004_COMPACTION_COALESCING.md](MZ004_COMPACTION_COALESCING.md).
 
 ## Verification
 
