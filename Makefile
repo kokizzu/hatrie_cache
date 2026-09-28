@@ -29647,3 +29647,29 @@ push-hatrie-tmp-full-cleanup:
 
 status-hatrie-tmp-full-cleanup:
 	bash scripts/deliver-hatrie-tmp-cleanup.sh status
+
+.PHONY: format-m038-sql-incremental-distinct test-m038-sql-incremental-distinct benchmark-m038-sql-distinct-baseline race-m038-sql-incremental-distinct
+format-m038-sql-incremental-distinct:
+	bash scripts/format-m038-sql-incremental-distinct.sh
+
+test-m038-sql-incremental-distinct:
+	bash scripts/test-m038-sql-incremental-distinct.sh
+
+benchmark-m038-sql-distinct-baseline:
+	bash scripts/benchmark-m038-sql-distinct-baseline.sh
+
+race-m038-sql-incremental-distinct:
+	bash scripts/race-m038-sql-incremental-distinct.sh
+
+.PHONY: stage-m038-sql-incremental-distinct commit-m038-sql-incremental-distinct push-m038-sql-incremental-distinct status-m038-sql-incremental-distinct
+stage-m038-sql-incremental-distinct:
+	bash scripts/deliver-m038-sql-incremental-distinct.sh stage
+
+commit-m038-sql-incremental-distinct:
+	bash scripts/deliver-m038-sql-incremental-distinct.sh commit
+
+push-m038-sql-incremental-distinct:
+	bash scripts/deliver-m038-sql-incremental-distinct.sh push
+
+status-m038-sql-incremental-distinct:
+	bash scripts/deliver-m038-sql-incremental-distinct.sh status

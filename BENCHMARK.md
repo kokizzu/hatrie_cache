@@ -39176,3 +39176,22 @@ and 0.86% more allocations because the projection batch is compacted to
 matching row indexes. Sources opt in through `ColumnarPrewhereSourceResolver`;
 all existing resolvers retain the legacy path unchanged. Raw samples are in
 [`BENCHMARK_CHG001_RAW.txt`](BENCHMARK_CHG001_RAW.txt).
+
+## M038i SQL Incremental DISTINCT
+
+Command: `make benchmark-m038-sql-distinct-baseline`
+
+One `-benchmem` sample on Linux/amd64, AMD Ryzen 9 5950X, using 4,096 source
+rows with 256 repeated projected values:
+
+| Path | ns/op | B/op | allocs/op | Relative |
+| --- | ---: | ---: | ---: | --- |
+| Rebuild `SELECT DISTINCT` over 4,096 rows | 295,263 | 270,043 | 541 | baseline |
+| Warm incremental two-row insert/retract delta | 2,979 | 2,437 | 23 | 99.1x faster, 110.8x lower bytes, 23.5x fewer allocs |
+
+The incremental path retains exact duplicate multiplicity and pays persistent
+state memory for projected rows and typed canonical keys. It is opt-in through
+`CompiledSQLQuery.CompileIncrementalDistinct`; unsupported global query shapes
+remain on the normal executor path. Full semantics are documented in
+[M038_SQL_INCREMENTAL_DISTINCT.md](M038_SQL_INCREMENTAL_DISTINCT.md).
+

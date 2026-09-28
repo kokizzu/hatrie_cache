@@ -429,6 +429,11 @@ Materialize's Timely/Differential Dataflow runtime.
   [M037L_DIFFERENTIAL_STRING_COUNT_DISTINCT.md](M037L_DIFFERENTIAL_STRING_COUNT_DISTINCT.md)
   and [BENCHMARK.md](BENCHMARK.md#m037l-differential-string-count-distinct).
 - [ ] M038 Generic multiset duplicate preservation across all operators.
+- [x] M038i Compiled SQL `SELECT DISTINCT` supports exact signed incremental
+  maintenance for restricted row-source projections, including duplicate
+  suppression, final retractions, typed canonical keys, and atomic failures;
+  broader operator coverage remains open. See
+  [M038_SQL_INCREMENTAL_DISTINCT.md](M038_SQL_INCREMENTAL_DISTINCT.md).
 - [x] M038a Duplicate multiplicity retained as signed diff weights.
 - [x] M038b Multiset-preserving expansion, union, and weighted join composition; see [DIFFERENTIAL_OPERATORS.md](DIFFERENTIAL_OPERATORS.md).
 - [x] M038c Weighted duplicate-preserving differential SUM maintenance for callback-defined groups; see [DIFFERENTIAL_GROUP_BY.md](DIFFERENTIAL_GROUP_BY.md).

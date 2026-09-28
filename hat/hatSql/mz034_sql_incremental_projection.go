@@ -39,6 +39,10 @@ func (query *CompiledSQLQuery) CompileIncrementalProjection() (*SQLIncrementalPr
 	if err := validateSQLIncrementalProjectionQuery(query); err != nil {
 		return nil, err
 	}
+	return newSQLIncrementalProjection(query), nil
+}
+
+func newSQLIncrementalProjection(query *CompiledSQLQuery) *SQLIncrementalProjection {
 	selects := query.template.selects
 	columns := sqlColumns(selects)
 	expressions := make([]sqlExpr, len(selects))
@@ -50,10 +54,14 @@ func (query *CompiledSQLQuery) CompileIncrementalProjection() (*SQLIncrementalPr
 		expressions: expressions,
 		columns:     columns,
 		alias:       query.template.from.alias,
-	}, nil
+	}
 }
 
 func validateSQLIncrementalProjectionQuery(query *CompiledSQLQuery) error {
+	return validateSQLIncrementalProjectionQueryWithDistinct(query, false)
+}
+
+func validateSQLIncrementalProjectionQueryWithDistinct(query *CompiledSQLQuery, allowDistinct bool) error {
 	unsupported := func(reason string) error {
 		return fmt.Errorf("%w: %s", ErrSQLIncrementalProjectionUnsupported, reason)
 	}
@@ -79,7 +87,7 @@ func validateSQLIncrementalProjectionQuery(query *CompiledSQLQuery) error {
 	if template.having.kind != "" || template.qualify.kind != "" || template.prewhere.kind != "" || template.limitBy != nil {
 		return unsupported("query contains an unsupported filtering stage")
 	}
-	if template.distinct || template.limitWithTies || template.offset != 0 || template.limit >= 0 || len(template.orderBy) != 0 || len(template.windows) != 0 {
+	if (!allowDistinct && template.distinct) || template.limitWithTies || template.offset != 0 || template.limit >= 0 || len(template.orderBy) != 0 || len(template.windows) != 0 {
 		return unsupported("query contains DISTINCT, LIMIT, ORDER BY, OFFSET, or window semantics")
 	}
 	if len(template.selects) == 0 {

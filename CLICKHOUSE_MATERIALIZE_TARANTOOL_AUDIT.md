@@ -242,6 +242,11 @@ records a separate implementation boundary.
 - [ ] M037 Generic negative-diff support for every SQL operator.
 - [ ] M037e Generic keyed differential reduction was benchmarked and rolled back because the arbitrary callback path was about 7.97x slower, 6.36x larger in transient bytes, and 5.67x more allocation-heavy than the existing specialized reducer; see [BENCHMARK.md](BENCHMARK.md#rejected-generic-keyed-differential-reduction).
 - [ ] M038 Generic multiset duplicate preservation across all operators.
+- [x] M038i Compiled SQL `SELECT DISTINCT` supports exact signed incremental
+  maintenance for restricted row-source projections, including duplicate
+  suppression, final retractions, typed canonical keys, and atomic failures;
+  broader operator coverage remains open. See
+  [M038_SQL_INCREMENTAL_DISTINCT.md](M038_SQL_INCREMENTAL_DISTINCT.md).
 - [ ] M052 Lowering SQL plans into reusable dataflow fragments.
 - [x] M052ac Native scalar set-operation fragments compose eligible `UNION`,
   `INTERSECT`, and `EXCEPT` branches through the existing native dataflow
