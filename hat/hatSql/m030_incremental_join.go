@@ -91,6 +91,12 @@ type incrementalJoinMatch struct {
 	count   int64
 }
 
+type incrementalJoinConsolidatedPair struct {
+	time uint64
+	diff int64
+	row  Row
+}
+
 // NewIncrementalJoin creates an empty exact inner join.
 func NewIncrementalJoin(definition IncrementalJoinDefinition) (*IncrementalJoin, error) {
 	if definition.LeftKey == nil {
@@ -201,6 +207,191 @@ func (join *IncrementalJoin) Apply(updates []IncrementalJoinUpdate) ([]Different
 	join.commitPending(IncrementalJoinLeft, leftPending)
 	join.commitPending(IncrementalJoinRight, rightPending)
 	return output, nil
+}
+
+// ApplyConsolidated applies a high-churn batch as one net state transition.
+// Unlike Apply, it does not emit intermediate retractions and insertions for
+// updates that cancel within the batch. The returned rows are the net
+// difference between the join result before and after the batch, ordered by
+// joined-row key. Existing Apply semantics remain unchanged for callers that
+// need every intermediate update.
+func (join *IncrementalJoin) ApplyConsolidated(updates []IncrementalJoinUpdate) ([]DifferentialRow, error) {
+	if join == nil {
+		return nil, ErrIncrementalJoinNil
+	}
+	if len(updates) == 0 {
+		return nil, nil
+	}
+	leftPending := make(map[string]*incrementalJoinPendingEntry, len(updates))
+	rightPending := make(map[string]*incrementalJoinPendingEntry, len(updates))
+	for index, update := range updates {
+		if update.Side != IncrementalJoinLeft && update.Side != IncrementalJoinRight {
+			return nil, fmt.Errorf("incremental join update %d: %w", index, ErrIncrementalJoinSideInvalid)
+		}
+		if update.Row.Key == "" {
+			return nil, fmt.Errorf("incremental join update %d: %w", index, ErrIncrementalJoinKeyRequired)
+		}
+		if strings.IndexByte(update.Row.Key, 0) >= 0 {
+			return nil, fmt.Errorf("incremental join update %d key %q: %w", index, update.Row.Key, ErrIncrementalJoinKeyInvalid)
+		}
+		if update.Row.Diff == 0 {
+			continue
+		}
+
+		pending := join.pendingEntry(update.Side, update.Row.Key, leftPending, rightPending)
+		if update.Row.Diff < 0 && pending.count == 0 {
+			return nil, fmt.Errorf("incremental join update %d key %q: %w", index, update.Row.Key, ErrIncrementalJoinNegativeMultiplicity)
+		}
+		if update.Row.Diff > 0 {
+			if err := join.preparePositive(index, update.Side, update.Row, pending); err != nil {
+				return nil, err
+			}
+		}
+		nextCount, ok := incrementalJoinAddCount(pending.count, update.Row.Diff)
+		if !ok {
+			return nil, fmt.Errorf("incremental join update %d key %q: %w", index, update.Row.Key, ErrIncrementalJoinNegativeMultiplicity)
+		}
+		pending.count = nextCount
+	}
+
+	changedLeft := make(map[string]*incrementalJoinPendingEntry)
+	changedRight := make(map[string]*incrementalJoinPendingEntry)
+	for key, pending := range leftPending {
+		if incrementalJoinPendingChanged(join.left[key], pending) {
+			changedLeft[key] = pending
+		}
+	}
+	for key, pending := range rightPending {
+		if incrementalJoinPendingChanged(join.right[key], pending) {
+			changedRight[key] = pending
+		}
+	}
+	if len(changedLeft) == 0 && len(changedRight) == 0 {
+		return nil, nil
+	}
+
+	oldPairs := make(map[string]incrementalJoinConsolidatedPair)
+	newPairs := make(map[string]incrementalJoinConsolidatedPair)
+	for _, key := range incrementalJoinSortedPendingKeys(changedLeft) {
+		pending := changedLeft[key]
+		if current := join.left[key]; current != nil && current.count > 0 {
+			left := incrementalJoinMatch{key: current.key, time: current.time, row: current.row, joinKey: current.joinKey, count: current.count}
+			for _, right := range join.matches(IncrementalJoinRight, current.joinKey, nil, nil) {
+				if err := join.addConsolidatedPair(oldPairs, left, right); err != nil {
+					return nil, err
+				}
+			}
+		}
+		if pending.count > 0 {
+			left := incrementalJoinMatch{key: pending.key, time: pending.time, row: pending.row, joinKey: pending.joinKey, count: pending.count}
+			for _, right := range join.matches(IncrementalJoinRight, pending.joinKey, leftPending, rightPending) {
+				if err := join.addConsolidatedPair(newPairs, left, right); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	for _, key := range incrementalJoinSortedPendingKeys(changedRight) {
+		pending := changedRight[key]
+		if current := join.right[key]; current != nil && current.count > 0 {
+			right := incrementalJoinMatch{key: current.key, time: current.time, row: current.row, joinKey: current.joinKey, count: current.count}
+			for _, left := range join.matches(IncrementalJoinLeft, current.joinKey, nil, nil) {
+				if err := join.addConsolidatedPair(oldPairs, left, right); err != nil {
+					return nil, err
+				}
+			}
+		}
+		if pending.count > 0 {
+			right := incrementalJoinMatch{key: pending.key, time: pending.time, row: pending.row, joinKey: pending.joinKey, count: pending.count}
+			for _, left := range join.matches(IncrementalJoinLeft, pending.joinKey, leftPending, rightPending) {
+				if err := join.addConsolidatedPair(newPairs, left, right); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+
+	output := incrementalJoinConsolidatedOutput(oldPairs, newPairs)
+	join.commitPending(IncrementalJoinLeft, leftPending)
+	join.commitPending(IncrementalJoinRight, rightPending)
+	return output, nil
+}
+
+func incrementalJoinPendingChanged(current *incrementalJoinEntry, pending *incrementalJoinPendingEntry) bool {
+	if current == nil {
+		return pending.count > 0
+	}
+	if current.count != pending.count {
+		return true
+	}
+	if pending.count == 0 {
+		return false
+	}
+	return current.time != pending.time || current.joinKey != pending.joinKey || !reflect.DeepEqual(current.row, pending.row)
+}
+
+func incrementalJoinSortedPendingKeys(entries map[string]*incrementalJoinPendingEntry) []string {
+	keys := make([]string, 0, len(entries))
+	for key := range entries {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func (join *IncrementalJoin) addConsolidatedPair(pairs map[string]incrementalJoinConsolidatedPair, left, right incrementalJoinMatch) error {
+	key := incrementalJoinPairKey(left.key, right.key)
+	if _, exists := pairs[key]; exists {
+		return nil
+	}
+	diff, ok := incrementalJoinMultiplyCounts(left.count, right.count)
+	if !ok {
+		return fmt.Errorf("incremental join pair %q: %w", key, ErrIncrementalJoinOverflow)
+	}
+	merged, err := join.merge(left.row, right.row)
+	if err != nil {
+		return fmt.Errorf("incremental join pair %q: %w", key, err)
+	}
+	pairs[key] = incrementalJoinConsolidatedPair{
+		time: incrementalJoinTime(left.time, right.time),
+		diff: diff,
+		row:  cloneDifferentialRow(merged),
+	}
+	return nil
+}
+
+func incrementalJoinConsolidatedOutput(oldPairs, newPairs map[string]incrementalJoinConsolidatedPair) []DifferentialRow {
+	keys := make(map[string]struct{}, len(oldPairs)+len(newPairs))
+	for key := range oldPairs {
+		keys[key] = struct{}{}
+	}
+	for key := range newPairs {
+		keys[key] = struct{}{}
+	}
+	orderedKeys := make([]string, 0, len(keys))
+	for key := range keys {
+		orderedKeys = append(orderedKeys, key)
+	}
+	sort.Strings(orderedKeys)
+	var output []DifferentialRow
+	for _, key := range orderedKeys {
+		oldPair, oldOK := oldPairs[key]
+		newPair, newOK := newPairs[key]
+		if oldOK && newOK && oldPair.time == newPair.time && reflect.DeepEqual(oldPair.row, newPair.row) {
+			diff := newPair.diff - oldPair.diff
+			if diff != 0 {
+				output = append(output, DifferentialRow{Key: key, Time: newPair.time, Diff: diff, Row: cloneDifferentialRow(newPair.row)})
+			}
+			continue
+		}
+		if oldOK {
+			output = append(output, DifferentialRow{Key: key, Time: oldPair.time, Diff: -oldPair.diff, Row: cloneDifferentialRow(oldPair.row)})
+		}
+		if newOK {
+			output = append(output, DifferentialRow{Key: key, Time: newPair.time, Diff: newPair.diff, Row: cloneDifferentialRow(newPair.row)})
+		}
+	}
+	return output
 }
 
 func (join *IncrementalJoin) applyReplacement(updates []IncrementalJoinUpdate) ([]DifferentialRow, error) {

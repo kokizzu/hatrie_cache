@@ -103,7 +103,7 @@ operator control remain the preferred deployment model.
 - [x] M212 logical compaction with a monotone frontier; see `M212_LOGICAL_COMPACTION.md`.
 - [x] M213 Consolidation of equal updates before forwarding to downstream consumers; see [M213_DIFFERENTIAL_CONSOLIDATION.md](M213_DIFFERENTIAL_CONSOLIDATION.md).
 - [x] M214 Arrangement metadata reuse across compatible query plans; see [M214_ARRANGEMENT_REUSE.md](M214_ARRANGEMENT_REUSE.md) and [BENCHMARK.md#m214-cross-plan-arrangement-metadata-reuse](BENCHMARK.md#m214-cross-plan-arrangement-metadata-reuse).
-- [ ] M215 Delta-join maintenance for high-churn join inputs.
+- [x] M215 Delta-join maintenance for high-churn join inputs; see [M215_DELTA_JOIN.md](M215_DELTA_JOIN.md) and [BENCHMARK.md#m215-high-churn-delta-join-maintenance](BENCHMARK.md#m215-high-churn-delta-join-maintenance).
 - [ ] M216 Incremental top-K arrangements with bounded replacement state.
 - [ ] M217 Indexes that store complete maintained view results for point lookups.
 - [ ] M218 Planner selection of point lookup versus arrangement scan.

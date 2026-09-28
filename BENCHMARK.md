@@ -37692,6 +37692,47 @@ M214 remains opt-in and metadata-only; it does not automatically create or
 hydrate live arrangements. The exact-hit control above shows the small cost
 of per-query recommendation reapplication; the two-compatible-plan workload
 is the intended cross-plan optimization.
+
+<a id="m215-high-churn-delta-join-maintenance"></a>
+## M215 High-Churn Delta Join Maintenance
+
+Command: `make benchmark-m215-baseline` before the implementation and
+`make benchmark-m215-after` after it. Linux amd64, AMD Ryzen 9 5950X, five
+samples per benchmark, `-benchtime=200ms`.
+
+The fixture retains 512 counterpart rows in one equality bucket and applies
+eight delete/insert cycles to one source key. The old `Apply` path emits every
+intermediate retraction and insertion; `ApplyConsolidated` emits only the net
+before/after result, which is empty for this net-zero fixture.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative |
+| --- | ---: | ---: | ---: | --- |
+| Existing `Apply` intermediate deltas | 13,762,744 | 7,766,384 | 41,037 | 1.00x |
+| `ApplyConsolidated` net delta | 7,332 | 4,720 | 29 | 1,877.1x faster; 1,645.4x lower B/op; 1,415.1x fewer allocs |
+
+This is an opt-in semantic choice, not a claim that intermediate output is
+free. Callers that require every signed transition retain the unchanged
+`Apply` behavior.
+
+Raw results from the before run:
+
+```text
+BenchmarkM215DeltaJoinHighChurnBaseline-32  16 13524435 ns/op 131072 output_rows 7766704 B/op 41037 allocs/op
+BenchmarkM215DeltaJoinHighChurnBaseline-32  14 14354709 ns/op 114688 output_rows 7766384 B/op 41037 allocs/op
+BenchmarkM215DeltaJoinHighChurnBaseline-32  33 13961826 ns/op 270336 output_rows 7766548 B/op 41037 allocs/op
+BenchmarkM215DeltaJoinHighChurnBaseline-32  18 13248852 ns/op 147456 output_rows 7766299 B/op 41036 allocs/op
+BenchmarkM215DeltaJoinHighChurnBaseline-32  18 13762744 ns/op 147456 output_rows 7766375 B/op 41036 allocs/op
+```
+
+Raw results from the after run:
+
+```text
+BenchmarkM215DeltaJoinHighChurnConsolidated-32  31368 8008 ns/op 0 output_rows 4720 B/op 29 allocs/op
+BenchmarkM215DeltaJoinHighChurnConsolidated-32  35114 7104 ns/op 0 output_rows 4720 B/op 29 allocs/op
+BenchmarkM215DeltaJoinHighChurnConsolidated-32  30248 7299 ns/op 0 output_rows 4720 B/op 29 allocs/op
+BenchmarkM215DeltaJoinHighChurnConsolidated-32  29050 7332 ns/op 0 output_rows 4720 B/op 29 allocs/op
+BenchmarkM215DeltaJoinHighChurnConsolidated-32  29533 7750 ns/op 0 output_rows 4720 B/op 29 allocs/op
+```
 ## CH-025: Compaction-Pool Priority Policy
 
 Command: `make benchmark-ch025-priority` on AMD Ryzen 9 5950X, linux/amd64.
