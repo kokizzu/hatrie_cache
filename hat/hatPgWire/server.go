@@ -152,6 +152,43 @@ func (connection *reusableMessageConnection) writeDataRow(row []*string) error {
 	return writeRaw(connection.Conn, packet)
 }
 
+func (connection *reusableMessageConnection) writeRowDescription(fields []Field) error {
+	bodyLength := 2
+	for _, field := range fields {
+		bodyLength += 19 + len(field.Name)
+	}
+	packet, reusable := connection.beginMessage('T', bodyLength)
+	if !reusable {
+		return writeRowDescription(connection.Conn, fields)
+	}
+	body := packet[5:]
+	binary.BigEndian.PutUint16(body, uint16(len(fields)))
+	offset := 2
+	for _, field := range fields {
+		copy(body[offset:], field.Name)
+		offset += len(field.Name)
+		body[offset] = 0
+		offset++
+		binary.BigEndian.PutUint32(body[offset:], 0)
+		offset += 4
+		binary.BigEndian.PutUint16(body[offset:], 0)
+		offset += 2
+		dataTypeOID := field.DataTypeOID
+		if dataTypeOID == 0 {
+			dataTypeOID = OIDText
+		}
+		binary.BigEndian.PutUint32(body[offset:], dataTypeOID)
+		offset += 4
+		binary.BigEndian.PutUint16(body[offset:], 0xffff)
+		offset += 2
+		binary.BigEndian.PutUint32(body[offset:], 0xffffffff)
+		offset += 4
+		binary.BigEndian.PutUint16(body[offset:], 0)
+		offset += 2
+	}
+	return writeRaw(connection.Conn, packet)
+}
+
 // ServeConn serves one PostgreSQL v3 connection until the client terminates,
 // the context is cancelled, or the connection fails. It supports startup,
 // optional clear-text password authentication, simple queries, text-format
@@ -984,6 +1021,9 @@ func validateQueryResult(result QueryResult) error {
 }
 
 func writeRowDescription(connection net.Conn, fields []Field) error {
+	if reusable, ok := connection.(*reusableMessageConnection); ok {
+		return reusable.writeRowDescription(fields)
+	}
 	body := make([]byte, 2)
 	binary.BigEndian.PutUint16(body, uint16(len(fields)))
 	for _, field := range fields {

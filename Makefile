@@ -28168,3 +28168,23 @@ commit-pgwire-row-encoding:
 	bash scripts/deliver-pgwire-row-encoding.sh commit
 push-pgwire-row-encoding:
 	bash scripts/deliver-pgwire-row-encoding.sh push
+
+.PHONY: format-pgwire-row-description test-pgwire-row-description benchmark-pgwire-row-description-baseline benchmark-pgwire-row-description race-pgwire-row-description
+format-pgwire-row-description:
+	bash scripts/format-pgwire-row-description.sh
+test-pgwire-row-description:
+	bash scripts/test-pgwire-row-description.sh
+benchmark-pgwire-row-description-baseline:
+	bash scripts/benchmark-pgwire-row-description-baseline.sh
+benchmark-pgwire-row-description:
+	bash scripts/benchmark-pgwire-row-description.sh
+race-pgwire-row-description:
+	bash scripts/race-pgwire-row-description.sh
+
+.PHONY: stage-pgwire-row-description commit-pgwire-row-description push-pgwire-row-description
+stage-pgwire-row-description:
+	bash scripts/deliver-pgwire-row-description.sh stage
+commit-pgwire-row-description:
+	bash scripts/deliver-pgwire-row-description.sh commit
+push-pgwire-row-description:
+	bash scripts/deliver-pgwire-row-description.sh push
