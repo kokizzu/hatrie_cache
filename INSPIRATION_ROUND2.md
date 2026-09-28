@@ -48,20 +48,20 @@ operator control remain the preferred deployment model.
 - [x] C216 Dictionary layout selection based on key cardinality and lookup shape; see [C216_COLUMNAR_DICTIONARY_SHAPES.md](C216_COLUMNAR_DICTIONARY_SHAPES.md).
 - [x] C217 Time-series `WITH FILL` gap generation over ordered results; see [WITH_FILL.md](WITH_FILL.md).
 - [x] C218 Interpolation policies for filled time-series values; see [C218_WITH_FILL_INTERPOLATION.md](C218_WITH_FILL_INTERPOLATION.md).
-- [ ] C219 Per-group `LIMIT BY` execution with bounded memory.
+- [x] C219 Per-group `LIMIT BY` execution with bounded memory; see [SQL_LIMIT_BY.md](SQL_LIMIT_BY.md) and [BENCHMARK.md#sql-limit-by](BENCHMARK.md#sql-limit-by).
 - [x] C220 Post-window `QUALIFY` filtering over projected window rows; selected window aliases are evaluated before `DISTINCT`, `ORDER BY`, and `LIMIT`; see [C220_QUALIFY.md](C220_QUALIFY.md).
-- [ ] C221 `WITH TIES` limit semantics for deterministic boundary results.
+- [x] C221 `WITH TIES` limit semantics for deterministic boundary results; see [LIMIT_WITH_TIES.md](LIMIT_WITH_TIES.md) and [BENCHMARK.md#limit-with-ties](BENCHMARK.md#limit-with-ties).
 - [x] C222 Approximate top-K aggregation with mergeable bounded state; importable `hatCache.TopK.Merge`, HAG1 aggregate-state round trips, and `HatTrie.MergeTopK` provide bounded partition-state union without changing existing command defaults. SQL planner integration remains open.
 - [x] C223 Mergeable approximate distinct and quantile aggregate states; importable HLL, Count-Min, and TDigest states support validated partition merges and compact transfer. SQL aggregate `State`/`Merge` syntax remains open.
 - [x] C223a Mergeable HyperLogLog partial state; `HyperLogLog.Merge` combines same-precision partition states with per-register maxima, supports zero-value receiver adoption, and rejects invalid or mismatched states without mutation. SQL `State`/`Merge` syntax remains open under C223.
 - [x] C223b Compact mergeable TDigest aggregate state; fixed-width centroid payloads use HAG1 framing, validate compression/count/order/finite values, and support atomic merge-from-wire without changing existing defaults. An existing large-input centroid-bound mismatch remains a separate compaction task.
 - [x] C223b Mergeable Count-Min Sketch partial state; exported `CountMinSketch` snapshots merge same-shape counter matrices with saturating addition, and `HatTrie.MergeCountMinSketch` imports an owned state without changing existing command defaults. SQL `State`/`Merge` syntax remains open under C223.
 - [x] C223c Versioned partial aggregate envelopes; importable HLL and Count-Min state APIs now use bounded, checksummed HAG1 frames with compact raw-register/counter payloads, explicit kind/version metadata, and strict decoder validation. SQL `State`/`Merge` integration remains open under C223.
-- [ ] C224 `argMax` and `argMin` aggregate states with deterministic tie handling.
-- [ ] C225 Incremental window-frame state for repeated ordered windows.
-- [ ] C226 Grace-hash join spilling with bounded disk runs.
+- [x] C224 `argMax` and `argMin` aggregate states with deterministic tie handling; see [SQL_ARG_EXTREME.md](SQL_ARG_EXTREME.md) and [BENCHMARK.md#sql-argmax-and-argmin](BENCHMARK.md#sql-argmax-and-argmin).
+- [x] C225 Incremental window-frame state for repeated ordered windows; see [INCREMENTAL_FRAME_WINDOW.md](INCREMENTAL_FRAME_WINDOW.md) and [BENCHMARK.md#m065d-incremental-frame-windows](BENCHMARK.md#m065d-incremental-frame-windows).
+- [x] C226 Grace-hash join spilling with bounded disk runs is covered by the partitioned spill hash-join path; see [C229_JOIN_OVERFLOW_POLICY.md](C229_JOIN_OVERFLOW_POLICY.md) and [BENCHMARK.md#c229-join-overflow-policy](BENCHMARK.md#c229-join-overflow-policy).
 - [x] C227 External aggregation spilling with merge-time memory limits; `SQLQueryOptions.MaxGroupMergeBytes` bounds the decoded spill-reader frontier, stays off by default, and cleans temporary files on rejection. See [C227_GROUP_MERGE_BUDGET.md](C227_GROUP_MERGE_BUDGET.md) and [BENCHMARK.md#c227-external-group-merge-memory-budget](BENCHMARK.md#c227-external-group-merge-memory-budget).
-- [ ] C228 External sort spilling with stable run ordering.
+- [x] C228 External sort spilling with stable run ordering; see [CHU02_EXTERNAL_ORDER_SPILL.md](CHU02_EXTERNAL_ORDER_SPILL.md) and [BENCHMARK.md#ch-u02-external-order-by-spill](BENCHMARK.md#ch-u02-external-order-by-spill).
 - [x] C229 Explicit join overflow policy for auto, reject, and bounded spill; truncation remains intentionally unsupported to preserve SQL correctness. See [C229_JOIN_OVERFLOW_POLICY.md](C229_JOIN_OVERFLOW_POLICY.md) and [BENCHMARK.md#c229-join-overflow-policy](BENCHMARK.md#c229-join-overflow-policy).
 - [x] C230 Memory-overcommit wait queues before query cancellation; see
   [C230_MEMORY_OVERCOMMIT.md](C230_MEMORY_OVERCOMMIT.md) and the measurements in
@@ -71,7 +71,7 @@ operator control remain the preferred deployment model.
 - [x] C233 Per-query CPU-time budgets with cooperative cancellation; see [C233_CPU_TIME_BUDGET.md](C233_CPU_TIME_BUDGET.md) and [BENCHMARK.md](BENCHMARK.md#c233-cpu-time-budget).
 - [x] C234 Query profiler records for stage elapsed time, bytes, and optional query-boundary allocations; see [C234_QUERY_PROFILER.md](C234_QUERY_PROFILER.md) and [BENCHMARK.md](BENCHMARK.md#c234-automatic-query-profiler).
 - [x] C235 Read/write task profiler aggregation by table part and column. See [C235_TASK_PROFILER.md](C235_TASK_PROFILER.md).
-- [ ] C236 Explain output for data-skipping-index decisions and rejected marks.
+- [x] C236 Explain output for data-skipping-index decisions and rejected marks is implemented for selected JSON-path skip indexes; see [CHU49_SKIP_INDEX_EXPLAIN.md](CHU49_SKIP_INDEX_EXPLAIN.md) and [BENCHMARK.md#ch-u49-skip-index-explain-diagnostics](BENCHMARK.md#ch-u49-skip-index-explain-diagnostics).
 - [x] C237 Explain output for projection selection and estimated I/O cost; see [C237_PROJECTION_EXPLAIN.md](C237_PROJECTION_EXPLAIN.md) and [BENCHMARK.md](BENCHMARK.md#c237-projection-selection-explain).
 - [x] C238 Mutation queue progress with rows remaining and elapsed estimates is implemented as derived, read-time fields on `hatSql.MutationSnapshot`; the opt-in controller hot path and defaults remain unchanged. See [C238_MUTATION_PROGRESS.md](C238_MUTATION_PROGRESS.md).
 - [x] C239 Part-merge backlog, amplification, and age metrics. See [C239_COMPACTION_METRICS.md](C239_COMPACTION_METRICS.md).
@@ -96,10 +96,10 @@ operator control remain the preferred deployment model.
 - [x] M205 Deterministic within-timestamp ordering for changefeed batches. Opt-in `QuerySubscriptionDefinition.DeterministicOrder` sorts differential initial, update, progress-safe, and reset batch phases by canonical row key without changing default behavior; see [M205_DETERMINISTIC_SUBSCRIPTION_ORDER.md](M205_DETERMINISTIC_SUBSCRIPTION_ORDER.md).
 - [x] M206 Upsert envelopes that expose a stable key and current row image. `hatSql.UpsertEnvelope` validates a stable key, current row image, and explicit tombstone; JSON decoding is strict and row maps remain borrowed. See [M206_UPSERT_ENVELOPES.md](M206_UPSERT_ENVELOPES.md) and [BENCHMARK.md#M206-upsert-envelopes](BENCHMARK.md#M206-upsert-envelopes).
 - [x] M207 Debezium envelopes with before/after images and operation type. `hatSql.DebeziumChangefeed` requires declared unique key columns, emits snapshot/create/update/delete payloads, preserves subscription frontier metadata, and rejects ambiguous multiplicity; the optimized adapter measured about 16x lower latency, 18x lower allocated bytes, and 10x fewer allocations than its full-state-copy baseline; see [M207_DEBEZIUM_CHANGEFEED.md](M207_DEBEZIUM_CHANGEFEED.md).
-- [ ] M208 Differential multiplicity folding for insert/delete update streams.
-- [ ] M209 Monotone logical timestamp frontiers for read and stream APIs.
-- [ ] M210 Historical `AS OF` reads against retained logical state.
-- [ ] M211 Explicit rejection of reads before `since` or at/after `upper` frontiers.
+- [x] M208 Differential multiplicity folding for insert/delete update streams; see [DIFFERENTIAL_ROWS.md](DIFFERENTIAL_ROWS.md) and [M213_DIFFERENTIAL_CONSOLIDATION.md](M213_DIFFERENTIAL_CONSOLIDATION.md).
+- [x] M209 Monotone logical timestamp frontiers for read and stream APIs; see [CHANGEFEED_PROGRESS.md](CHANGEFEED_PROGRESS.md) and [SUBSCRIPTION_FRONTIERS.md](SUBSCRIPTION_FRONTIERS.md).
+- [x] M210 Historical `AS OF` reads against retained logical state; see [SQL_AS_OF.md](SQL_AS_OF.md) and [BENCHMARK.md#mz-008-sql-as-of-historical-reads](BENCHMARK.md#mz-008-sql-as-of-historical-reads).
+- [x] M211 Explicit rejection of reads before `since` or at/after `upper` frontiers; see [SQL_AS_OF.md](SQL_AS_OF.md).
 - [x] M212 logical compaction with a monotone frontier; see `M212_LOGICAL_COMPACTION.md`.
 - [x] M213 Consolidation of equal updates before forwarding to downstream consumers; see [M213_DIFFERENTIAL_CONSOLIDATION.md](M213_DIFFERENTIAL_CONSOLIDATION.md).
 - [ ] M214 Arrangement reuse across indexes and compatible query plans.
