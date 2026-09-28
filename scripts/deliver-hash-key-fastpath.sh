@@ -5,6 +5,7 @@ mode="${1:-stage}"
 commit_message="feat(hash): add typed numeric hash fast paths [skip ci]"
 tmp_index=""
 tmp_makefile=""
+tmp_worktree=""
 
 cleanup() {
 	if [ -n "$tmp_index" ]; then
@@ -12,6 +13,10 @@ cleanup() {
 	fi
 	if [ -n "$tmp_makefile" ]; then
 		rm -f -- "$tmp_makefile"
+	fi
+	if [ -n "$tmp_worktree" ]; then
+		git worktree remove --force "$tmp_worktree" >/dev/null 2>&1 || true
+		rm -rf -- "$tmp_worktree"
 	fi
 }
 trap cleanup EXIT
@@ -71,7 +76,9 @@ prepare_index() {
 	done
 	tmp_makefile=$(mktemp /tmp/hatrie-hash-key-makefile.XXXXXX)
 	GIT_INDEX_FILE="$tmp_index" git show HEAD:Makefile > "$tmp_makefile"
-	printf '%s\n' "$makefile_block" >> "$tmp_makefile"
+	if ! grep -q '^format-hash-key-fastpath:' "$tmp_makefile"; then
+		printf '%s\n' "$makefile_block" >> "$tmp_makefile"
+	fi
 	makefile_blob=$(git hash-object -w "$tmp_makefile")
 	GIT_INDEX_FILE="$tmp_index" git update-index --add --cacheinfo "100644,$makefile_blob,Makefile"
 }
@@ -105,7 +112,24 @@ case "$mode" in
 		GIT_INDEX_FILE="$tmp_index" git commit --no-verify -m "$commit_message"
 		;;
 	push)
-		git push
+		local_commit=$(git rev-parse HEAD)
+		git fetch origin master
+		remote_commit=$(git rev-parse origin/master)
+		if git merge-base --is-ancestor "$remote_commit" "$local_commit"; then
+			git push
+		else
+			tmp_worktree=$(mktemp -d /tmp/hatrie-hash-push.XXXXXX)
+			git worktree add --detach "$tmp_worktree" "$remote_commit"
+			if ! git -C "$tmp_worktree" cherry-pick "$local_commit"; then
+				git -C "$tmp_worktree" checkout --ours -- Makefile
+				if ! grep -q '^format-hash-key-fastpath:' "$tmp_worktree/Makefile"; then
+					printf '%s\n' "$makefile_block" >> "$tmp_worktree/Makefile"
+				fi
+				git -C "$tmp_worktree" add -- Makefile
+				GIT_EDITOR=true git -C "$tmp_worktree" cherry-pick --continue
+			fi
+			git -C "$tmp_worktree" push origin HEAD:master
+		fi
 		;;
 	*)
 		printf 'usage: %s [stage|commit|push]\n' "$0" >&2
