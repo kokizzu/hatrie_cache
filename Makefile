@@ -28261,3 +28261,16 @@ race-codec-default-value-suppression:
 	bash scripts/race-codec-default-value-suppression.sh
 deliver-codec-default-value-suppression:
 	bash scripts/deliver-default-value-suppression.sh
+# low-cardinality-string-feature
+benchmark-codec-low-cardinality:
+	bash scripts/benchmark-codec-low-cardinality.sh
+format-codec-low-cardinality:
+	bash scripts/format-codec-low-cardinality.sh
+test-codec-low-cardinality:
+	bash scripts/test-codec-low-cardinality.sh
+test-codec-low-cardinality-package:
+	bash scripts/test-codec-low-cardinality-package.sh
+race-codec-low-cardinality:
+	bash scripts/race-codec-low-cardinality.sh
+deliver-codec-low-cardinality:
+	bash scripts/deliver-low-cardinality.sh
