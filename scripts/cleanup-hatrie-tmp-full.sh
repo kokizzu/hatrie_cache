@@ -37,6 +37,7 @@ size_bytes() {
 
 describe_path() {
   local path="$1"
+  [[ -e "$path" ]] || return 0
   local age size kind
   age="$(age_seconds "$path")"
   size="$(size_bytes "$path")"
@@ -51,6 +52,7 @@ describe_path() {
 list_candidates() {
   local path
   while IFS= read -r -d '' path; do
+    [[ -e "$path" ]] || continue
     is_hatrie_name "$path" || continue
     is_protected "$path" && continue
     [[ "$(age_seconds "$path")" -ge "$min_age_seconds" ]] || continue
@@ -65,6 +67,7 @@ list_inventory() {
   printf 'Candidate rule: top-level Hatrie-named entries older than %ss.\n' "$min_age_seconds"
   printf 'Review-only rule: generic go-build* entries are listed but never deleted.\n'
   while IFS= read -r -d '' path; do
+    [[ -e "$path" ]] || continue
     is_hatrie_name "$path" || continue
     if is_protected "$path"; then
       printf 'PROTECTED\t%s\n' "$path"
@@ -73,6 +76,7 @@ list_inventory() {
     fi
   done < <(find -P "$tmp_root" -mindepth 1 -maxdepth 1 -print0)
   while IFS= read -r -d '' path; do
+    [[ -e "$path" ]] || continue
     [[ "$(basename "$path")" == go-build* ]] || continue
     describe_path "$path"
   done < <(find -P "$tmp_root" -mindepth 1 -maxdepth 1 -print0)
@@ -136,7 +140,7 @@ apply_plan() {
 self_test() {
   local fixture stale recent protected generic output plan_content
   fixture="$(mktemp -d "${tmp_root%/}/hatrie-cache-cleanup-self-test.XXXXXX")"
-  trap 'rm -rf -- "${fixture:-}"' EXIT
+  trap "rm -rf -- \"$fixture\"" EXIT
   stale="${fixture}/hatrie-cache-cleanup-stale"
   recent="${fixture}/hatrie-cache-cleanup-recent"
   protected="${fixture}/hatrie-cache-cleanup-protected"
@@ -177,6 +181,17 @@ self_test() {
   printf 'Hatrie /tmp cleanup self-test passed.\n'
 }
 
+cleanup_self_test_fixtures() {
+  local path
+  while IFS= read -r -d '' path; do
+    [[ "$(basename "$path")" == hatrie-cache-cleanup-self-test.* ]] || continue
+    is_protected "$path" && continue
+    printf 'DELETE\t%s\n' "$path"
+    rm -rf --one-file-system -- "$path"
+  done < <(find -P "$tmp_root" -mindepth 1 -maxdepth 1 -print0)
+  printf 'Interrupted self-test fixture cleanup complete.\n'
+}
+
 main() {
   [[ "$#" -eq 1 ]] || {
     usage >&2
@@ -196,6 +211,9 @@ main() {
       ;;
     self-test)
       self_test
+      ;;
+    cleanup-self-test-fixtures)
+      cleanup_self_test_fixtures
       ;;
     *)
       usage >&2

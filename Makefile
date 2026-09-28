@@ -29618,3 +29618,32 @@ cleanup-hatrie-tmp-full-audit:
 
 cleanup-hatrie-tmp-full-self-test:
 	bash scripts/cleanup-hatrie-tmp-full.sh self-test
+
+.PHONY: cleanup-hatrie-tmp-full-plan cleanup-hatrie-tmp-full-apply cleanup-hatrie-tmp-full-audit cleanup-hatrie-tmp-full-self-test cleanup-hatrie-tmp-full-self-test-fixtures
+cleanup-hatrie-tmp-full-plan:
+	bash scripts/cleanup-hatrie-tmp-full.sh plan
+
+cleanup-hatrie-tmp-full-apply:
+	bash scripts/cleanup-hatrie-tmp-full.sh apply
+
+cleanup-hatrie-tmp-full-audit:
+	bash scripts/cleanup-hatrie-tmp-full.sh audit
+
+cleanup-hatrie-tmp-full-self-test:
+	bash scripts/cleanup-hatrie-tmp-full.sh self-test
+
+cleanup-hatrie-tmp-full-self-test-fixtures:
+	bash scripts/cleanup-hatrie-tmp-full.sh cleanup-self-test-fixtures
+
+.PHONY: stage-hatrie-tmp-full-cleanup commit-hatrie-tmp-full-cleanup push-hatrie-tmp-full-cleanup status-hatrie-tmp-full-cleanup
+stage-hatrie-tmp-full-cleanup:
+	bash scripts/deliver-hatrie-tmp-cleanup.sh stage
+
+commit-hatrie-tmp-full-cleanup:
+	bash scripts/deliver-hatrie-tmp-cleanup.sh commit
+
+push-hatrie-tmp-full-cleanup:
+	bash scripts/deliver-hatrie-tmp-cleanup.sh push
+
+status-hatrie-tmp-full-cleanup:
+	bash scripts/deliver-hatrie-tmp-cleanup.sh status
