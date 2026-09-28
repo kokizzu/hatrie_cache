@@ -1,5 +1,28 @@
 # Benchmark
 
+## M246 Per-Frontier History Retention Policy
+
+Command: `make benchmark-m246-before-after`
+
+The baseline is `origin/master` with the same legacy acquire/release benchmark
+file. The candidate is measured from the M246 worktree. Five samples were run
+with `-benchmem`; the policy benchmark is a separate configured-path workload.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Origin legacy acquire/release | 412 | 424 | 3 | baseline |
+| M246 legacy acquire/release | 417 | 424 | 3 | 0.99x, same memory |
+| M246 policy acquire/release | 213 | 0 | 0 | configured path, not an apples-to-apples speed comparison |
+
+The configured path retains its per-frontier lease map, which removes the
+legacy map recreation between cycles. The feature is disabled by default, so
+the relevant compatibility comparison is the first two rows: no additional
+per-operation memory and no measurable CPU regression in the repeated sample.
+The policy path spends one lazily allocated policy state per configured
+frontier and rejects age or byte-limit violations before creating a lease.
+See [M246_HISTORY_RETENTION_POLICY.md](M246_HISTORY_RETENTION_POLICY.md) for
+the API contract and limitations.
+
 ## MZ-010 SQL Subscription Statement Grammar
 
 Command: `make benchmark-mz010-statement`

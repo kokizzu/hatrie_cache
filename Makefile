@@ -28505,3 +28505,30 @@ race-c233:
 
 benchmark-c233:
 	@bash scripts/benchmark-c233.sh
+.PHONY: format-m246
+format-m246:
+	@bash scripts/format-m246.sh
+
+.PHONY: test-m246
+test-m246:
+	@bash scripts/test-m246.sh
+
+.PHONY: race-m246
+race-m246:
+	@bash scripts/race-m246.sh
+
+.PHONY: benchmark-m246
+benchmark-m246:
+	@bash scripts/benchmark-m246.sh
+
+.PHONY: benchmark-m246-before-after
+benchmark-m246-before-after:
+	@bash scripts/benchmark-m246-before-after.sh
+
+.PHONY: verify-m246
+verify-m246:
+	@bash scripts/verify-m246.sh
+
+.PHONY: vet-m246
+vet-m246:
+	@bash scripts/vet-m246.sh

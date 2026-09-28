@@ -28,6 +28,9 @@ var (
 	// ErrFrontierRetentionLeaseNotFound indicates an unknown or already
 	// released lease.
 	ErrFrontierRetentionLeaseNotFound = errors.New("hatPipeline: frontier retention lease is not found")
+	// ErrFrontierRetentionPolicyViolation indicates that a requested history
+	// age or observed storage size exceeds the configured policy.
+	ErrFrontierRetentionPolicyViolation = errors.New("hatPipeline: frontier retention policy violation")
 )
 
 const (
@@ -41,6 +44,15 @@ type FrontierRetentionOptions struct {
 	// MaxLeases is the maximum number of active leases. Zero uses
 	// DefaultFrontierRetentionMaxLeases.
 	MaxLeases int
+}
+
+// FrontierRetentionPolicy bounds one frontier's retained history. MaxAge is
+// measured in logical timestamp units from the current upper frontier; zero
+// disables the age bound. MaxBytes is caller-reported retained history size;
+// zero disables the storage bound.
+type FrontierRetentionPolicy struct {
+	MaxAge   uint64
+	MaxBytes uint64
 }
 
 // FrontierRetentionLease identifies one active as-of retention request.
@@ -63,12 +75,19 @@ type FrontierRetentionSnapshot struct {
 	CompactionDebt       uint64
 	BlockedByLease       bool
 	BlockingLeaseCount   int
+	Policy               FrontierRetentionPolicy
+	StoredBytes          uint64
 }
 
 type frontierRetentionState struct {
 	leases             map[uint64]FrontierRetentionLease
 	minimum            uint64
 	blockingLeaseCount int
+}
+
+type frontierRetentionPolicyState struct {
+	policy      FrontierRetentionPolicy
+	storedBytes uint64
 }
 
 // FrontierRetentionRegistry coordinates bounded historical-read leases with a
@@ -82,6 +101,7 @@ type FrontierRetentionRegistry struct {
 	leaseCount int
 	closed     bool
 	states     map[string]*frontierRetentionState
+	policies   map[string]*frontierRetentionPolicyState
 	notify     chan struct{}
 }
 
@@ -137,6 +157,8 @@ func (registry *FrontierRetentionRegistry) Acquire(frontierID string, asOf uint6
 	if state == nil {
 		state = &frontierRetentionState{leases: make(map[uint64]FrontierRetentionLease)}
 		registry.states[frontierID] = state
+	} else if err := registry.checkPolicyLocked(frontierID, asOf); err != nil {
+		return FrontierRetentionLease{}, err
 	}
 	state.leases[lease.ID] = lease
 	if len(state.leases) == 1 || asOf < state.minimum {
@@ -147,6 +169,114 @@ func (registry *FrontierRetentionRegistry) Acquire(frontierID string, asOf uint6
 	}
 	registry.leaseCount++
 	return lease, nil
+}
+
+// SetPolicy installs or replaces the bounded retention policy for one
+// frontier. A zero policy clears the policy. It does not rewrite history or
+// change existing leases; future acquisitions observe the new age bound.
+func (registry *FrontierRetentionRegistry) SetPolicy(frontierID string, policy FrontierRetentionPolicy) error {
+	if registry == nil {
+		return ErrFrontierRetentionRegistryNil
+	}
+	if frontierID == "" {
+		return ErrFrontierIDEmpty
+	}
+	if _, err := registry.frontierSnapshot(frontierID); err != nil {
+		return err
+	}
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if registry.closed {
+		return ErrFrontierRetentionClosed
+	}
+	var policyState *frontierRetentionPolicyState
+	if registry.policies != nil {
+		policyState = registry.policies[frontierID]
+	}
+	if policy.MaxAge == 0 && policy.MaxBytes == 0 {
+		if policyState == nil {
+			return nil
+		}
+		policyState.policy = FrontierRetentionPolicy{}
+		if policyState.storedBytes == 0 {
+			delete(registry.policies, frontierID)
+			if len(registry.policies) == 0 {
+				registry.policies = nil
+			}
+		}
+		if state := registry.states[frontierID]; state != nil && len(state.leases) == 0 {
+			delete(registry.states, frontierID)
+		}
+		registry.signalLocked()
+		return nil
+	}
+	if policyState != nil && policy.MaxBytes > 0 && policyState.storedBytes > policy.MaxBytes {
+		return ErrFrontierRetentionPolicyViolation
+	}
+	if policyState == nil {
+		if registry.policies == nil {
+			registry.policies = make(map[string]*frontierRetentionPolicyState)
+		}
+		policyState = &frontierRetentionPolicyState{}
+		registry.policies[frontierID] = policyState
+	}
+	policyState.policy = policy
+	if registry.states[frontierID] == nil {
+		registry.states[frontierID] = &frontierRetentionState{leases: make(map[uint64]FrontierRetentionLease)}
+	}
+	registry.signalLocked()
+	return nil
+}
+
+// ClearPolicy removes a frontier's policy while retaining any active lease or
+// observed storage accounting.
+func (registry *FrontierRetentionRegistry) ClearPolicy(frontierID string) error {
+	return registry.SetPolicy(frontierID, FrontierRetentionPolicy{})
+}
+
+// ObserveStorage records caller-estimated retained history bytes for one
+// frontier. The value is accepted atomically only when it fits MaxBytes.
+func (registry *FrontierRetentionRegistry) ObserveStorage(frontierID string, bytes uint64) error {
+	if registry == nil {
+		return ErrFrontierRetentionRegistryNil
+	}
+	if frontierID == "" {
+		return ErrFrontierIDEmpty
+	}
+	if _, err := registry.frontierSnapshot(frontierID); err != nil {
+		return err
+	}
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if registry.closed {
+		return ErrFrontierRetentionClosed
+	}
+	var policyState *frontierRetentionPolicyState
+	if registry.policies != nil {
+		policyState = registry.policies[frontierID]
+	}
+	if policyState != nil && policyState.policy.MaxBytes > 0 && bytes > policyState.policy.MaxBytes {
+		return ErrFrontierRetentionPolicyViolation
+	}
+	if policyState == nil {
+		if bytes == 0 {
+			return nil
+		}
+		if registry.policies == nil {
+			registry.policies = make(map[string]*frontierRetentionPolicyState)
+		}
+		policyState = &frontierRetentionPolicyState{}
+		registry.policies[frontierID] = policyState
+	}
+	policyState.storedBytes = bytes
+	if policyState.policy == (FrontierRetentionPolicy{}) && bytes == 0 {
+		delete(registry.policies, frontierID)
+		if len(registry.policies) == 0 {
+			registry.policies = nil
+		}
+	}
+	registry.signalLocked()
+	return nil
 }
 
 // Release removes one active lease. Releasing the same lease twice returns
@@ -170,7 +300,15 @@ func (registry *FrontierRetentionRegistry) Release(lease FrontierRetentionLease)
 	delete(state.leases, lease.ID)
 	registry.leaseCount--
 	if len(state.leases) == 0 {
-		delete(registry.states, lease.FrontierID)
+		keepState := false
+		if registry.policies != nil {
+			if policyState := registry.policies[lease.FrontierID]; policyState != nil {
+				keepState = policyState.policy != (FrontierRetentionPolicy{})
+			}
+		}
+		if !keepState {
+			delete(registry.states, lease.FrontierID)
+		}
 		registry.signalLocked()
 		return nil
 	}
@@ -211,7 +349,7 @@ func (registry *FrontierRetentionRegistry) SafeCompactionBefore(frontierID strin
 	}
 	state := registry.states[frontierID]
 	minimum := uint64(0)
-	hasState := state != nil
+	hasState := state != nil && len(state.leases) > 0
 	if hasState {
 		minimum = state.minimum
 	}
@@ -300,11 +438,21 @@ func (registry *FrontierRetentionRegistry) Snapshot(frontierID string) (Frontier
 	leaseCount := 0
 	minimum := uint64(0)
 	blockingLeaseCount := 0
-	hasState := state != nil
+	policy := FrontierRetentionPolicy{}
+	storedBytes := uint64(0)
+	hasState := state != nil && len(state.leases) > 0
+	var policyState *frontierRetentionPolicyState
+	if registry.policies != nil {
+		policyState = registry.policies[frontierID]
+	}
 	if state != nil {
 		leaseCount = len(state.leases)
 		minimum = state.minimum
 		blockingLeaseCount = state.blockingLeaseCount
+	}
+	if policyState != nil {
+		policy = policyState.policy
+		storedBytes = policyState.storedBytes
 	}
 	registry.mu.RUnlock()
 	frontier, err := registry.frontierSnapshot(frontierID)
@@ -312,7 +460,7 @@ func (registry *FrontierRetentionRegistry) Snapshot(frontierID string) (Frontier
 		return FrontierRetentionSnapshot{}, err
 	}
 	safe := frontier.Lower
-	if state != nil && minimum < safe {
+	if hasState && minimum < safe {
 		safe = minimum
 	}
 	if !hasState {
@@ -337,6 +485,8 @@ func (registry *FrontierRetentionRegistry) Snapshot(frontierID string) (Frontier
 		CompactionDebt:       debt,
 		BlockedByLease:       blockedByLease,
 		BlockingLeaseCount:   blockingLeaseCount,
+		Policy:               policy,
+		StoredBytes:          storedBytes,
 	}, nil
 }
 
@@ -401,6 +551,7 @@ func (registry *FrontierRetentionRegistry) Close() error {
 	}
 	registry.closed = true
 	registry.states = nil
+	registry.policies = nil
 	registry.leaseCount = 0
 	registry.signalLocked()
 	registry.mu.Unlock()
@@ -414,7 +565,7 @@ func (registry *FrontierRetentionRegistry) retentionWaitChannel(frontierID strin
 		return nil, false, ErrFrontierRetentionClosed
 	}
 	state := registry.states[frontierID]
-	if state == nil || state.minimum >= boundary {
+	if state == nil || len(state.leases) == 0 || state.minimum >= boundary {
 		return nil, false, nil
 	}
 	if registry.notify == nil {
@@ -428,6 +579,30 @@ func (registry *FrontierRetentionRegistry) signalLocked() {
 		close(registry.notify)
 		registry.notify = nil
 	}
+}
+
+func (registry *FrontierRetentionRegistry) checkPolicyLocked(frontierID string, asOf uint64) error {
+	if registry.policies == nil {
+		return nil
+	}
+	state := registry.policies[frontierID]
+	if state == nil || state.policy == (FrontierRetentionPolicy{}) {
+		return nil
+	}
+	if state.policy.MaxBytes > 0 && state.storedBytes > state.policy.MaxBytes {
+		return ErrFrontierRetentionPolicyViolation
+	}
+	if state.policy.MaxAge == 0 {
+		return nil
+	}
+	snapshot, err := registry.frontierSnapshot(frontierID)
+	if err != nil {
+		return err
+	}
+	if snapshot.Upper >= asOf && snapshot.Upper-asOf > state.policy.MaxAge {
+		return ErrFrontierRetentionPolicyViolation
+	}
+	return nil
 }
 
 func (registry *FrontierRetentionRegistry) checkTimestamp(frontierID string, asOf uint64) error {

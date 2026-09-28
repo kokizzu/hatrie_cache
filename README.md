@@ -73,6 +73,7 @@ security guidance before exposing it on a network.
 - Journal-driven SQL materialized views and recovery: [INCREMENTAL_PROJECTIONS.md](INCREMENTAL_PROJECTIONS.md)
 - Projection refresh lag and failure status: [CH018_PROJECTION_REFRESH_STATUS.md](CH018_PROJECTION_REFRESH_STATUS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-018-projection-refresh-lag-and-failure-state)
 - Coordinated SQL projection retention and recovery: [PROJECTION_FRONTIERS.md](PROJECTION_FRONTIERS.md)
+- Opt-in per-frontier history-retention age and storage policies: [M246_HISTORY_RETENTION_POLICY.md](M246_HISTORY_RETENTION_POLICY.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m246-per-frontier-history-retention-policy)
 - Bounded archived command-journal retention: [JOURNAL_RETENTION.md](JOURNAL_RETENTION.md)
 - Opt-in journal replay progress and ETA: [REPLAY_PROGRESS.md](REPLAY_PROGRESS.md)
 - SDK-neutral OpenTelemetry-compatible SQL query and operator spans: [QUERY_TRACING.md](QUERY_TRACING.md)
