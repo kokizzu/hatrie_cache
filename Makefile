@@ -22192,3 +22192,23 @@ commit-pgwire-response-buffer:
 	bash scripts/deliver-pgwire-response-buffer.sh commit
 push-pgwire-response-buffer:
 	bash scripts/deliver-pgwire-response-buffer.sh push
+
+.PHONY: format-pgwire-row-encoding test-pgwire-row-encoding benchmark-pgwire-row-encoding-baseline benchmark-pgwire-row-encoding race-pgwire-row-encoding
+format-pgwire-row-encoding:
+	bash scripts/format-pgwire-row-encoding.sh
+test-pgwire-row-encoding:
+	bash scripts/test-pgwire-row-encoding.sh
+benchmark-pgwire-row-encoding-baseline:
+	bash scripts/benchmark-pgwire-row-encoding-baseline.sh
+benchmark-pgwire-row-encoding:
+	bash scripts/benchmark-pgwire-row-encoding.sh
+race-pgwire-row-encoding:
+	bash scripts/race-pgwire-row-encoding.sh
+
+.PHONY: stage-pgwire-row-encoding commit-pgwire-row-encoding push-pgwire-row-encoding
+stage-pgwire-row-encoding:
+	bash scripts/deliver-pgwire-row-encoding.sh stage
+commit-pgwire-row-encoding:
+	bash scripts/deliver-pgwire-row-encoding.sh commit
+push-pgwire-row-encoding:
+	bash scripts/deliver-pgwire-row-encoding.sh push

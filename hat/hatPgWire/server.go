@@ -96,14 +96,10 @@ type reusableMessageConnection struct {
 	buffer []byte
 }
 
-func (connection *reusableMessageConnection) writeMessage(messageType byte, body []byte) error {
-	packetLength := 5 + len(body)
+func (connection *reusableMessageConnection) beginMessage(messageType byte, bodyLength int) ([]byte, bool) {
+	packetLength := 5 + bodyLength
 	if packetLength > backendMessageReuseMax {
-		packet := make([]byte, packetLength)
-		packet[0] = messageType
-		binary.BigEndian.PutUint32(packet[1:5], uint32(4+len(body)))
-		copy(packet[5:], body)
-		return writeRaw(connection.Conn, packet)
+		return nil, false
 	}
 	if cap(connection.buffer) < packetLength {
 		connection.buffer = make([]byte, packetLength)
@@ -112,8 +108,47 @@ func (connection *reusableMessageConnection) writeMessage(messageType byte, body
 	}
 	packet := connection.buffer
 	packet[0] = messageType
-	binary.BigEndian.PutUint32(packet[1:5], uint32(4+len(body)))
+	binary.BigEndian.PutUint32(packet[1:5], uint32(4+bodyLength))
+	return packet, true
+}
+
+func (connection *reusableMessageConnection) writeMessage(messageType byte, body []byte) error {
+	packet, reusable := connection.beginMessage(messageType, len(body))
+	if !reusable {
+		packet = make([]byte, 5+len(body))
+		packet[0] = messageType
+		binary.BigEndian.PutUint32(packet[1:5], uint32(4+len(body)))
+	}
 	copy(packet[5:], body)
+	return writeRaw(connection.Conn, packet)
+}
+
+func (connection *reusableMessageConnection) writeDataRow(row []*string) error {
+	bodyLength := 2
+	for _, value := range row {
+		bodyLength += 4
+		if value != nil {
+			bodyLength += len(*value)
+		}
+	}
+	packet, reusable := connection.beginMessage('D', bodyLength)
+	if !reusable {
+		return writeDataRow(connection.Conn, row)
+	}
+	body := packet[5:]
+	binary.BigEndian.PutUint16(body, uint16(len(row)))
+	offset := 2
+	for _, value := range row {
+		if value == nil {
+			binary.BigEndian.PutUint32(body[offset:], 0xffffffff)
+			offset += 4
+			continue
+		}
+		binary.BigEndian.PutUint32(body[offset:], uint32(len(*value)))
+		offset += 4
+		copy(body[offset:], *value)
+		offset += len(*value)
+	}
 	return writeRaw(connection.Conn, packet)
 }
 
@@ -968,6 +1003,9 @@ func writeRowDescription(connection net.Conn, fields []Field) error {
 }
 
 func writeDataRow(connection net.Conn, row []*string) error {
+	if reusable, ok := connection.(*reusableMessageConnection); ok {
+		return reusable.writeDataRow(row)
+	}
 	body := make([]byte, 2)
 	binary.BigEndian.PutUint16(body, uint16(len(row)))
 	for _, value := range row {
