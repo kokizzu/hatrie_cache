@@ -77,15 +77,54 @@ func (limiter *RateLimiter) Allow(key string) bool {
 		shard.clients[key] = client
 		return true
 	}
-	return shard.allowNewClientLocked(key, now, limiter.limit, limiter.window)
+	return shard.allowNewClientLocked(key, now, limiter.limit, limiter.window, 1)
+}
+
+// AllowN atomically reserves count tokens for key. A request is either fully
+// admitted or rejected without consuming a partial batch.
+func (limiter *RateLimiter) AllowN(key string, count int) bool {
+	if limiter == nil || limiter.limit <= 0 || count <= 0 {
+		return true
+	}
+	if count > limiter.limit {
+		return false
+	}
+	if key == "" {
+		key = "global"
+	}
+	required := float64(count)
+	now := limiter.now()
+	shard := limiter.shardFor(key)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+	client, ok := shard.clients[key]
+	if ok && !client.lastSeen.IsZero() {
+		elapsed := now.Sub(client.lastSeen)
+		if elapsed < 0 {
+			elapsed = 0
+		}
+		client.tokens += float64(limiter.limit) * float64(elapsed) / float64(limiter.window)
+		if maxTokens := float64(limiter.limit); client.tokens > maxTokens {
+			client.tokens = maxTokens
+		}
+		client.lastSeen = now
+		if client.tokens < required {
+			shard.clients[key] = client
+			return false
+		}
+		client.tokens -= required
+		shard.clients[key] = client
+		return true
+	}
+	return shard.allowNewClientLocked(key, now, limiter.limit, limiter.window, count)
 }
 
 //go:noinline
-func (shard *rateLimiterShard) allowNewClientLocked(key string, now time.Time, limit int, window time.Duration) bool {
+func (shard *rateLimiterShard) allowNewClientLocked(key string, now time.Time, limit int, window time.Duration, count int) bool {
 	if shard.clients == nil {
 		shard.clients = make(map[string]rateLimitClient)
 	}
-	shard.clients[key] = rateLimitClient{lastSeen: now, tokens: float64(limit - 1)}
+	shard.clients[key] = rateLimitClient{lastSeen: now, tokens: float64(limit - count)}
 	if len(shard.clients) > rateLimiterMaxClientsPerShard {
 		shard.pruneLocked(now, window)
 	}

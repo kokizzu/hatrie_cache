@@ -22086,3 +22086,38 @@ commit-hash-key-fastpath:
 
 push-hash-key-fastpath:
 	bash scripts/deliver-hash-key-fastpath.sh push
+
+.PHONY: format-rate-limiter-allow-n test-rate-limiter-allow-n test-rate-limiter-package benchmark-rate-limiter-single-baseline benchmark-rate-limiter-single benchmark-rate-limiter-allow-n-baseline benchmark-rate-limiter-allow-n race-rate-limiter-allow-n
+format-rate-limiter-allow-n:
+	bash scripts/format-rate-limiter-allow-n.sh
+
+test-rate-limiter-allow-n:
+	bash scripts/test-rate-limiter-allow-n.sh
+
+test-rate-limiter-package:
+	bash scripts/test-rate-limiter-package.sh
+
+benchmark-rate-limiter-single-baseline:
+	bash scripts/benchmark-rate-limiter-single-baseline.sh
+
+benchmark-rate-limiter-single:
+	bash scripts/benchmark-rate-limiter-single.sh
+
+benchmark-rate-limiter-allow-n-baseline:
+	bash scripts/benchmark-rate-limiter-allow-n-baseline.sh
+
+benchmark-rate-limiter-allow-n:
+	bash scripts/benchmark-rate-limiter-allow-n.sh
+
+race-rate-limiter-allow-n:
+	bash scripts/race-rate-limiter-allow-n.sh
+
+.PHONY: stage-rate-limiter-allow-n commit-rate-limiter-allow-n push-rate-limiter-allow-n
+stage-rate-limiter-allow-n:
+	bash scripts/deliver-rate-limiter-allow-n.sh stage
+
+commit-rate-limiter-allow-n:
+	bash scripts/deliver-rate-limiter-allow-n.sh commit
+
+push-rate-limiter-allow-n:
+	bash scripts/deliver-rate-limiter-allow-n.sh push
