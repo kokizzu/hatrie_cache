@@ -99,7 +99,7 @@ operator control remain the preferred deployment model.
 - [ ] M210 Historical `AS OF` reads against retained logical state.
 - [ ] M211 Explicit rejection of reads before `since` or at/after `upper` frontiers.
 - [x] M212 logical compaction with a monotone frontier; see `M212_LOGICAL_COMPACTION.md`.
-- [ ] M213 Consolidation of equal updates before forwarding to downstream consumers.
+- [x] M213 Consolidation of equal updates before forwarding to downstream consumers; see [M213_DIFFERENTIAL_CONSOLIDATION.md](M213_DIFFERENTIAL_CONSOLIDATION.md).
 - [ ] M214 Arrangement reuse across indexes and compatible query plans.
 - [ ] M215 Delta-join maintenance for high-churn join inputs.
 - [ ] M216 Incremental top-K arrangements with bounded replacement state.

@@ -38588,3 +38588,26 @@ The add path is not presented as a speedup. The feature adds bounded-history
 maintenance; it remains opt-in and currently removes old records in place
 without promising immediate map-backing reclamation. Re-run with
 `make benchmark-m212-logical-compaction`.
+
+## M213 Differential Consolidation
+
+Measured on Linux/amd64, AMD Ryzen 9 5950X. The fixture contains 4,096 signed
+updates for 128 distinct rows, with 31 inserts and one delete per row. The
+baseline JSON path forwards every update; the candidate consolidates first and
+then encodes the smaller batch. Five samples were used for each path.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Wire bytes/op | Relative |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Raw JSON forwarding | 3,578,215 | 1,287,959 | 28,676 | 344,901 | 1.00x |
+| Consolidate then JSON | 6,947,828 | 2,913,662 | 38,325 | 11,031 | 1.94x CPU, 2.26x heap, 1.34x allocations; 31.27x smaller wire |
+
+Raw samples:
+
+```text
+Raw JSON forwarding: 3578215, 3830969, 3903120, 3531997, 3564414 ns/op
+Consolidate then JSON: 6947828, 7501028, 7335190, 6825268, 6852424 ns/op
+```
+
+The path is opt-in. It trades local CPU, heap, and allocations for a much
+smaller downstream payload and is appropriate when transfer size dominates.
+Repeat with `make benchmark-m213-differential-consolidation`.
