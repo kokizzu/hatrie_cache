@@ -28323,3 +28323,21 @@ race-codec-bitmap:
 
 deliver-codec-bitmap:
 	bash scripts/deliver-codec-bitmap.sh
+
+benchmark-codec-float-xor:
+	bash scripts/benchmark-codec-float-xor.sh
+
+format-codec-float-xor:
+	bash scripts/format-codec-float-xor.sh
+
+test-codec-float-xor:
+	bash scripts/test-codec-float-xor.sh
+
+test-codec-float-xor-package:
+	bash scripts/test-codec-float-xor-package.sh
+
+race-codec-float-xor:
+	bash scripts/race-codec-float-xor.sh
+
+deliver-codec-float-xor:
+	bash scripts/deliver-codec-float-xor.sh
