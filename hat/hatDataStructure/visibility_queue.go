@@ -1,6 +1,9 @@
 package hatDataStructure
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 // DefaultVisibilityQueueTimeout is used by a zero-value queue and by
 // constructors that receive a non-positive timeout.
@@ -10,6 +13,26 @@ const DefaultVisibilityQueueTimeout = time.Minute
 // that receive a zero epoch. Restarting consumers should persist and advance
 // the epoch, then use NewVisibilityQueueWithEpoch.
 const DefaultVisibilityQueueEpoch uint64 = 1
+
+const MaxVisibilityQueueDeadLetters = 1 << 20
+
+var ErrVisibilityQueueRetryPolicyInvalid = errors.New("hatDataStructure: visibility queue retry policy is invalid")
+
+// VisibilityQueueRetryOptions bounds delivery attempts and retained terminal
+// failures. Both limits are opt-in; the legacy constructors leave retries
+// unlimited and retain no dead letters.
+type VisibilityQueueRetryOptions struct {
+	MaxAttempts    uint32
+	MaxDeadLetters int
+}
+
+// VisibilityQueueDeadLetter is an item that exhausted its configured retry
+// attempts. The value is detached from the queue's pending and lease state.
+type VisibilityQueueDeadLetter[T any] struct {
+	ID       uint64
+	Value    T
+	Attempts uint32
+}
 
 // VisibilityQueueLeaseToken identifies a lease across a process or storage
 // handoff. Both fields must match the queue that owns the lease.
@@ -104,6 +127,36 @@ func NewVisibilityQueueWithEpoch[T any](capacity int, visibilityTimeout time.Dur
 	}
 }
 
+// NewVisibilityQueueWithRetryPolicy creates a visibility queue with bounded
+// retries and a finite dead-letter buffer. A full dead-letter buffer preserves
+// the active lease so callers can drain capacity before retrying the route.
+func NewVisibilityQueueWithRetryPolicy[T any](capacity int, visibilityTimeout time.Duration, epoch uint64, options VisibilityQueueRetryOptions) (*VisibilityQueueWithRetry[T], error) {
+	if options.MaxAttempts == 0 {
+		if options.MaxDeadLetters != 0 {
+			return nil, ErrVisibilityQueueRetryPolicyInvalid
+		}
+	} else if options.MaxDeadLetters < 1 || options.MaxDeadLetters > MaxVisibilityQueueDeadLetters {
+		return nil, ErrVisibilityQueueRetryPolicyInvalid
+	}
+	queue := NewVisibilityQueueWithEpoch[T](capacity, visibilityTimeout, epoch)
+	return &VisibilityQueueWithRetry[T]{
+		VisibilityQueue: queue,
+		maxAttempts:     options.MaxAttempts,
+		maxDeadLetters:  options.MaxDeadLetters,
+	}, nil
+}
+
+// VisibilityQueueWithRetry adds bounded retry and dead-letter handling to a
+// VisibilityQueue. The legacy queue remains unchanged when this wrapper is
+// not used, including its allocation-free Nack path.
+type VisibilityQueueWithRetry[T any] struct {
+	*VisibilityQueue[T]
+	maxAttempts    uint32
+	maxDeadLetters int
+	deadLetters    []VisibilityQueueDeadLetter[T]
+	deadLetterHead int
+}
+
 func (queue *VisibilityQueue[T]) pendingQueue() *DelayQueue[visibilityQueueEntry[T]] {
 	if queue.pending == nil {
 		queue.pending = NewDelayQueue[visibilityQueueEntry[T]](queue.capacity)
@@ -161,6 +214,35 @@ func (queue *VisibilityQueue[T]) LeaseLen() int {
 	return len(queue.leases)
 }
 
+// DeadLetterLen returns the number of terminal failures waiting for the
+// caller's dead-letter consumer.
+func (queue *VisibilityQueueWithRetry[T]) DeadLetterLen() int {
+	if queue == nil {
+		return 0
+	}
+	return len(queue.deadLetters) - queue.deadLetterHead
+}
+
+// PopDeadLetter removes the oldest terminal failure. It returns false when
+// the dead-letter buffer is empty.
+func (queue *VisibilityQueueWithRetry[T]) PopDeadLetter() (VisibilityQueueDeadLetter[T], bool) {
+	if queue == nil || queue.deadLetterHead >= len(queue.deadLetters) {
+		return VisibilityQueueDeadLetter[T]{}, false
+	}
+	deadLetter := queue.deadLetters[queue.deadLetterHead]
+	queue.deadLetters[queue.deadLetterHead] = VisibilityQueueDeadLetter[T]{}
+	queue.deadLetterHead++
+	if queue.deadLetterHead == len(queue.deadLetters) {
+		queue.deadLetters = queue.deadLetters[:0]
+		queue.deadLetterHead = 0
+	} else if queue.deadLetterHead >= 64 && queue.deadLetterHead*2 >= len(queue.deadLetters) {
+		copy(queue.deadLetters, queue.deadLetters[queue.deadLetterHead:])
+		queue.deadLetters = queue.deadLetters[:len(queue.deadLetters)-queue.deadLetterHead]
+		queue.deadLetterHead = 0
+	}
+	return deadLetter, true
+}
+
 // Enqueue adds an immediately available item. It returns false if a positive
 // capacity has already been reached.
 func (queue *VisibilityQueue[T]) Enqueue(value T) bool {
@@ -183,6 +265,24 @@ func (queue *VisibilityQueue[T]) EnqueueAfter(now time.Time, delay time.Duration
 
 func (queue *VisibilityQueue[T]) hasCapacity() bool {
 	return queue.capacity <= 0 || queue.Len() < queue.capacity
+}
+
+func (queue *VisibilityQueueWithRetry[T]) shouldDeadLetter(attempts uint32) bool {
+	return queue.maxAttempts > 0 && attempts >= queue.maxAttempts
+}
+
+func (queue *VisibilityQueueWithRetry[T]) routeDeadLetter(lease visibilityQueueLease[T]) bool {
+	if queue.DeadLetterLen() >= queue.maxDeadLetters {
+		return false
+	}
+	queue.deadLetters = append(queue.deadLetters, VisibilityQueueDeadLetter[T]{
+		ID:       lease.entry.id,
+		Value:    lease.entry.value,
+		Attempts: lease.entry.attempts,
+	})
+	queue.expiryRemove(lease.expiryIndex)
+	delete(queue.leases, lease.entry.id)
+	return true
 }
 
 func (queue *VisibilityQueue[T]) nextLeaseID() (uint64, bool) {
@@ -227,6 +327,45 @@ func (queue *VisibilityQueue[T]) LeaseFor(now time.Time, timeout time.Duration) 
 		return item, false
 	}
 	queue.RequeueExpired(now)
+	entry, ok := queue.pendingQueue().PopReady(now)
+	if !ok {
+		return item, false
+	}
+	if entry.id == 0 {
+		entry.id, ok = queue.nextLeaseID()
+		if !ok {
+			queue.pendingQueue().Push(now, entry)
+			return item, false
+		}
+	}
+	if entry.attempts != ^uint32(0) {
+		entry.attempts++
+	}
+	if timeout <= 0 {
+		timeout = queue.timeout()
+	}
+	until := now.Add(timeout)
+	lease := visibilityQueueLease[T]{
+		entry:       entry,
+		until:       until,
+		expiryIndex: len(queue.expirations.items),
+	}
+	queue.leaseMap()[entry.id] = lease
+	queue.expiryPush(visibilityQueueExpiry{id: entry.id, until: until})
+	item = VisibilityQueueItem[T]{
+		ID:         entry.id,
+		Value:      entry.value,
+		Attempts:   entry.attempts,
+		LeaseUntil: until,
+	}
+	return item, true
+}
+
+func (queue *VisibilityQueue[T]) leaseForWithoutRecovery(now time.Time, timeout time.Duration) (VisibilityQueueItem[T], bool) {
+	var item VisibilityQueueItem[T]
+	if queue == nil {
+		return item, false
+	}
 	entry, ok := queue.pendingQueue().PopReady(now)
 	if !ok {
 		return item, false
@@ -358,6 +497,126 @@ func (queue *VisibilityQueue[T]) Clear() {
 	}
 	queue.expirations.items = nil
 	queue.leases = nil
+}
+
+// Lease returns the next ready item and applies the retry policy to expired
+// leases before taking another item.
+func (queue *VisibilityQueueWithRetry[T]) Lease(now time.Time) (VisibilityQueueItem[T], bool) {
+	if queue == nil || queue.VisibilityQueue == nil {
+		return VisibilityQueueItem[T]{}, false
+	}
+	return queue.LeaseFor(now, queue.timeout())
+}
+
+// LeaseWithToken returns a retry-policy-aware lease with an epoch-fenced token.
+func (queue *VisibilityQueueWithRetry[T]) LeaseWithToken(now time.Time) (VisibilityQueueLease[T], bool) {
+	item, ok := queue.Lease(now)
+	if !ok {
+		return VisibilityQueueLease[T]{}, false
+	}
+	return VisibilityQueueLease[T]{
+		Token:      VisibilityQueueLeaseToken{Epoch: queue.Epoch(), ID: item.ID},
+		Value:      item.Value,
+		Attempts:   item.Attempts,
+		LeaseUntil: item.LeaseUntil,
+	}, true
+}
+
+// LeaseFor returns the next ready item and applies the retry policy to expired
+// leases before taking another item.
+func (queue *VisibilityQueueWithRetry[T]) LeaseFor(now time.Time, timeout time.Duration) (VisibilityQueueItem[T], bool) {
+	if queue == nil || queue.VisibilityQueue == nil {
+		return VisibilityQueueItem[T]{}, false
+	}
+	queue.RequeueExpired(now)
+	return queue.VisibilityQueue.leaseForWithoutRecovery(now, timeout)
+}
+
+// Nack makes an active lease available again or routes it to the dead-letter
+// buffer when its attempt limit has been reached.
+func (queue *VisibilityQueueWithRetry[T]) Nack(id uint64, readyAt time.Time) bool {
+	if queue == nil || queue.VisibilityQueue == nil || id == 0 {
+		return false
+	}
+	lease, ok := queue.leases[id]
+	if !ok {
+		return false
+	}
+	if queue.shouldDeadLetter(lease.entry.attempts) {
+		return queue.routeDeadLetter(lease)
+	}
+	queue.expiryRemove(lease.expiryIndex)
+	delete(queue.leases, id)
+	queue.pendingQueue().Push(readyAt, lease.entry)
+	return true
+}
+
+// NackToken makes an active lease available again or routes it to the
+// dead-letter buffer when its attempt limit has been reached.
+func (queue *VisibilityQueueWithRetry[T]) NackToken(token VisibilityQueueLeaseToken, readyAt time.Time) bool {
+	if queue == nil || queue.VisibilityQueue == nil || token.ID == 0 || token.Epoch == 0 || token.Epoch != queue.Epoch() {
+		return false
+	}
+	lease, ok := queue.leases[token.ID]
+	if !ok {
+		return false
+	}
+	if queue.shouldDeadLetter(lease.entry.attempts) {
+		return queue.routeDeadLetter(lease)
+	}
+	queue.expiryRemove(lease.expiryIndex)
+	delete(queue.leases, token.ID)
+	queue.pendingQueue().Push(readyAt, lease.entry)
+	return true
+}
+
+// RequeueExpired makes expired leases available or routes terminal failures to
+// the dead-letter buffer. A full buffer preserves the expired lease.
+func (queue *VisibilityQueueWithRetry[T]) RequeueExpired(now time.Time) int {
+	if queue == nil || queue.VisibilityQueue == nil {
+		return 0
+	}
+	recovered := 0
+	for len(queue.expirations.items) > 0 {
+		expiry := queue.expirations.items[0]
+		if expiry.until.After(now) {
+			break
+		}
+		lease, ok := queue.leases[expiry.id]
+		if !ok || !lease.until.Equal(expiry.until) {
+			queue.expiryPop()
+			continue
+		}
+		if queue.shouldDeadLetter(lease.entry.attempts) {
+			if !queue.routeDeadLetter(lease) {
+				break
+			}
+			recovered++
+			continue
+		}
+		expiry = queue.expiryPop()
+		delete(queue.leases, expiry.id)
+		queue.pendingQueue().Push(now, lease.entry)
+		recovered++
+	}
+	return recovered
+}
+
+// Clear removes queue contents and pending dead letters without reusing lease
+// IDs.
+func (queue *VisibilityQueueWithRetry[T]) Clear() {
+	if queue == nil {
+		return
+	}
+	if queue.VisibilityQueue != nil {
+		queue.VisibilityQueue.Clear()
+	}
+	var zero VisibilityQueueDeadLetter[T]
+	for index := queue.deadLetterHead; index < len(queue.deadLetters); index++ {
+		queue.deadLetters[index] = zero
+	}
+	queue.deadLetters = nil
+	queue.deadLetterHead = 0
 }
 
 func visibilityQueueExpiryBefore(left, right visibilityQueueExpiry) bool {

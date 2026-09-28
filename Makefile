@@ -28532,3 +28532,30 @@ verify-m246:
 .PHONY: vet-m246
 vet-m246:
 	@bash scripts/vet-m246.sh
+.PHONY: format-t248
+format-t248:
+	@bash scripts/format-t248.sh
+
+.PHONY: test-t248
+test-t248:
+	@bash scripts/test-t248.sh
+
+.PHONY: race-t248
+race-t248:
+	@bash scripts/race-t248.sh
+
+.PHONY: benchmark-t248
+benchmark-t248:
+	@bash scripts/benchmark-t248.sh
+
+.PHONY: benchmark-t248-before-after
+benchmark-t248-before-after:
+	@bash scripts/benchmark-t248-before-after.sh
+
+.PHONY: vet-t248
+vet-t248:
+	@bash scripts/vet-t248.sh
+
+.PHONY: verify-t248
+verify-t248:
+	@bash scripts/verify-t248.sh

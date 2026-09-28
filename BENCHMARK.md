@@ -38666,3 +38666,24 @@ The isolated cooperative-check benchmark was run on `AMD Ryzen 9 5950X
 The disabled path does not read the configured clock and remains allocation
 free. The enabled path adds a small clock-read cost but remains allocation
 free; a positive CPU budget is deliberately opt-in.
+
+<a id="t248-bounded-visibility-queue-dead-letters"></a>
+## T248 Bounded Visibility Queue Dead Letters
+
+This benchmark compares the unchanged legacy visibility queue path with the
+opt-in retry wrapper. Run `make benchmark-t248-before-after`. The command uses
+seven 2-second samples with `GOMAXPROCS=1` on an AMD Ryzen 9 5950X. The
+terminal case primes the dead-letter buffer before timing one enqueue, lease,
+terminal `Nack`, and `PopDeadLetter` cycle, so the timed path measures steady
+state rather than its first backing-slice allocation.
+
+| Workload | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| `origin/master` legacy `Lease` + `Nack` | 104.8 | 0 | 0 |
+| T248 legacy `Lease` + `Nack` | 101.1 | 0 | 0 |
+| T248 primed terminal `Nack` + `PopDeadLetter` | 127.9 | 0 | 0 |
+
+The default path is effectively unchanged within run-to-run noise and retains
+zero allocations. The terminal row is a separate workload and includes the
+bounded retry/dead-letter bookkeeping; it should not be interpreted as a
+universal speedup over ordinary retry handling.

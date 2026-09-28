@@ -212,6 +212,7 @@ security guidance before exposing it on a network.
 - Product inspiration round two: [INSPIRATION_ROUND2.md](INSPIRATION_ROUND2.md)
 - CLI JSON and human-readable output modes: [CLI_OUTPUT.md](CLI_OUTPUT.md)
 - Generic bounded dead-letter queue with replay controls: [DEAD_LETTER_QUEUE.md](DEAD_LETTER_QUEUE.md)
+- Visibility-timeout leases with optional bounded retries and dead-letter routing: [T248_DEAD_LETTER_QUEUE.md](T248_DEAD_LETTER_QUEUE.md)
 - Typed functional secondary index: [FUNCTIONAL_INDEX.md](FUNCTIONAL_INDEX.md)
 - Materialized SQL functional indexes with online publication: [TR023_FUNCTIONAL_INDEX.md](TR023_FUNCTIONAL_INDEX.md)
 - Materialized SQL index distribution statistics and selective conjunct planning: [TR030_INDEX_STATS.md](TR030_INDEX_STATS.md)
