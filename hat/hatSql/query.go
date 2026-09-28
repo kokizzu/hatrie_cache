@@ -1161,10 +1161,14 @@ func executeSQLColumnarQueryRows(query *sqlQuery, resolver SQLSourceResolver, co
 	if query.limit == 0 {
 		return true, nil
 	}
-	fields, _, projectionFields, ok := sqlColumnarScanFields(query)
+	fields, predicateFields, projectionFields, ok := sqlColumnarScanFields(query)
 	if !ok {
 		return false, nil
 	}
+	if handled, err := executeSQLColumnarPrewhereQueryRows(query, resolver, columnar, control, visit, predicateFields, projectionFields); handled {
+		return true, err
+	}
+	conditionCache, conditionVersion, conditionCacheable, err := sqlColumnarConditionCacheVersion(query, resolver, control)
 	conditionCache, conditionVersion, conditionCacheable, err := sqlColumnarConditionCacheVersion(query, resolver, control)
 	if err != nil {
 		return true, err
@@ -8999,10 +9003,14 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 	if !sqlCanColumnarScan(q, outer) {
 		return SQLQueryResult{}, false, nil
 	}
-	fields, _, projectionFields, ok := sqlColumnarScanFields(q)
+	fields, predicateFields, projectionFields, ok := sqlColumnarScanFields(q)
 	if !ok {
 		return SQLQueryResult{}, false, nil
 	}
+	if result, handled, err := executeSQLColumnarPrewhereScan(q, resolver, columnar, control, metrics, predicateFields, projectionFields); handled {
+		return result, true, err
+	}
+	conditionCache, conditionVersion, conditionCacheable, err := sqlColumnarConditionCacheVersion(q, resolver, control)
 	conditionCache, conditionVersion, conditionCacheable, err := sqlColumnarConditionCacheVersion(q, resolver, control)
 	if err != nil {
 		return SQLQueryResult{}, true, err

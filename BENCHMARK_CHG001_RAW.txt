@@ -1,0 +1,16 @@
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatSql
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkCHG001LegacyColumnarWideSelective-32       	     123	   1968294 ns/op	  20800000 source-bytes/op	 1418997 B/op	    1630 allocs/op
+BenchmarkCHG001LegacyColumnarWideSelective-32       	     127	   1886940 ns/op	  20800000 source-bytes/op	 1415615 B/op	    1629 allocs/op
+BenchmarkCHG001LegacyColumnarWideSelective-32       	     122	   1946795 ns/op	  20800000 source-bytes/op	 1416587 B/op	    1629 allocs/op
+BenchmarkCHG001LegacyColumnarWideSelective-32       	     124	   1881693 ns/op	  20800000 source-bytes/op	 1418452 B/op	    1630 allocs/op
+BenchmarkCHG001LegacyColumnarWideSelective-32       	     124	   1888818 ns/op	  20800000 source-bytes/op	 1415702 B/op	    1629 allocs/op
+BenchmarkCHG001AutomaticPrewhereWideSelective-32    	     128	   1839637 ns/op	    366400 source-bytes/op	 1425697 B/op	    1643 allocs/op
+BenchmarkCHG001AutomaticPrewhereWideSelective-32    	     133	   1849554 ns/op	    366400 source-bytes/op	 1426429 B/op	    1643 allocs/op
+BenchmarkCHG001AutomaticPrewhereWideSelective-32    	     130	   1920562 ns/op	    366400 source-bytes/op	 1427952 B/op	    1644 allocs/op
+BenchmarkCHG001AutomaticPrewhereWideSelective-32    	     121	   1934724 ns/op	    366400 source-bytes/op	 1427208 B/op	    1644 allocs/op
+BenchmarkCHG001AutomaticPrewhereWideSelective-32    	     122	   1838418 ns/op	    366400 source-bytes/op	 1426478 B/op	    1643 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatSql	4.255s

@@ -29547,3 +29547,29 @@ push-m052ah-auto-native-count-distinct:
 .PHONY: deliver-m052ah-auto-native-count-distinct
 deliver-m052ah-auto-native-count-distinct:
 	bash scripts/deliver-m052ah-auto-native-count-distinct.sh deliver
+
+.PHONY: test-chg001-prewhere
+test-chg001-prewhere:
+	bash ./scripts/test-chg001-prewhere.sh
+
+.PHONY: benchmark-chg001-prewhere
+benchmark-chg001-prewhere:
+	bash ./scripts/benchmark-chg001-prewhere.sh
+
+.PHONY: format-chg001-prewhere
+format-chg001-prewhere:
+	bash ./scripts/format-chg001-prewhere.sh
+
+.PHONY: stage-chg001-prewhere commit-chg001-prewhere push-chg001-prewhere deliver-chg001-prewhere status-chg001-prewhere unstage-chg001-prewhere
+stage-chg001-prewhere:
+	bash ./scripts/deliver-chg001-prewhere.sh stage
+commit-chg001-prewhere:
+	bash ./scripts/deliver-chg001-prewhere.sh commit
+push-chg001-prewhere:
+	bash ./scripts/deliver-chg001-prewhere.sh push
+deliver-chg001-prewhere:
+	bash ./scripts/deliver-chg001-prewhere.sh deliver
+status-chg001-prewhere:
+	bash ./scripts/deliver-chg001-prewhere.sh status
+unstage-chg001-prewhere:
+	bash ./scripts/deliver-chg001-prewhere.sh unstage

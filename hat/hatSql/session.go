@@ -848,3 +848,29 @@ func sessionObjectName(name string) (string, error) {
 	}
 	return strings.ToLower(name), nil
 }
+
+// ResolveSQLColumnarPrewhere forwards the optional two-phase scan contract
+// after preserving session-local source precedence.
+func (session *SQLSession) ResolveSQLColumnarPrewhere(name, key string, fields []string) (ColumnarBatch, bool, error) {
+	if session == nil || session.hasLocalSQLSource(name, key) || session.source == nil {
+		return ColumnarBatch{}, false, nil
+	}
+	prewhere, ok := session.source.(ColumnarPrewhereSourceResolver)
+	if !ok {
+		return ColumnarBatch{}, false, nil
+	}
+	return prewhere.ResolveSQLColumnarPrewhere(name, key, fields)
+}
+
+// ResolveSQLColumnarProjection forwards the compact projection phase of the
+// optional two-phase scan contract.
+func (session *SQLSession) ResolveSQLColumnarProjection(name, key string, fields []string, rowIndexes []int) (ColumnarBatch, bool, error) {
+	if session == nil || session.hasLocalSQLSource(name, key) || session.source == nil {
+		return ColumnarBatch{}, false, nil
+	}
+	prewhere, ok := session.source.(ColumnarPrewhereSourceResolver)
+	if !ok {
+		return ColumnarBatch{}, false, nil
+	}
+	return prewhere.ResolveSQLColumnarProjection(name, key, fields, rowIndexes)
+}

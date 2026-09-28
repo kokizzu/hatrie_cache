@@ -1730,3 +1730,14 @@ type JSONIndexStats struct {
 	AverageRowsPerKey  float64
 	FrequencyHistogram []JSONIndexFrequencyBucket
 }
+
+// ColumnarPrewhereSourceResolver optionally separates a selective scan into
+// predicate and projection phases. The first phase returns only predicate
+// fields for every source row. The second phase receives the matching source
+// row indexes and may return compact, match-only projection columns. Returning
+// available=false from either phase keeps the established columnar resolver
+// path unchanged.
+type ColumnarPrewhereSourceResolver interface {
+	ResolveSQLColumnarPrewhere(name, key string, fields []string) (ColumnarBatch, bool, error)
+	ResolveSQLColumnarProjection(name, key string, fields []string, rowIndexes []int) (ColumnarBatch, bool, error)
+}

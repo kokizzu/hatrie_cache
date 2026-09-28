@@ -39137,3 +39137,25 @@ lower in allocation count. These are per-operation allocation measurements;
 the incremental operator intentionally retains its exact multiplicity state.
 Raw samples and supported SQL shape are in
 [M039_INCREMENTAL_SQL_GROUP_COUNT_DISTINCT.md](M039_INCREMENTAL_SQL_GROUP_COUNT_DISTINCT.md).
+
+<a id="chg001-columnar-prewhere"></a>
+## CHG-001 Automatic Columnar `PREWHERE`
+
+Command: `make benchmark-chg001-prewhere`.
+
+Fixture: 20,000 rows, a 1 KiB payload, `WHERE score = 0` (1% matching rows),
+and `SELECT id, payload`. Five `-benchmem` samples were run on Linux/amd64
+with an AMD Ryzen 9 5950X. `source-bytes/op` is the logical field payload
+requested from the resolver, not an estimate of a particular wire codec.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Source bytes/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Existing all-column scan | 1,888,818 | 1,416,587 | 1,629 | 20,800,000 | 1.00x |
+| Automatic two-phase `PREWHERE` | 1,849,554 | 1,426,478 | 1,643 | 366,400 | 1.02x faster |
+
+The two-phase resolver reduces logical source transfer by 56.8x (98.2%) and
+is 2.1% faster in this local fixture. Its cost is 0.7% more transient bytes
+and 0.86% more allocations because the projection batch is compacted to
+matching row indexes. Sources opt in through `ColumnarPrewhereSourceResolver`;
+all existing resolvers retain the legacy path unchanged. Raw samples are in
+[`BENCHMARK_CHG001_RAW.txt`](BENCHMARK_CHG001_RAW.txt).

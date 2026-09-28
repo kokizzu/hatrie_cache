@@ -437,3 +437,29 @@ func (resolver CatalogResolver) ResolveSQLSourcePartitionsForPredicate(name, key
 	}
 	return pruning.ResolveSQLSourcePartitionsForPredicate(name, key, predicate)
 }
+
+// ResolveSQLColumnarPrewhere forwards the optional two-phase scan contract
+// while keeping information-schema sources local.
+func (resolver CatalogResolver) ResolveSQLColumnarPrewhere(name, key string, fields []string) (ColumnarBatch, bool, error) {
+	if catalogOwnsVirtualSource(name, key) || resolver.Source == nil {
+		return ColumnarBatch{}, false, nil
+	}
+	prewhere, ok := resolver.Source.(ColumnarPrewhereSourceResolver)
+	if !ok {
+		return ColumnarBatch{}, false, nil
+	}
+	return prewhere.ResolveSQLColumnarPrewhere(name, key, fields)
+}
+
+// ResolveSQLColumnarProjection forwards the compact projection phase of the
+// optional two-phase scan contract.
+func (resolver CatalogResolver) ResolveSQLColumnarProjection(name, key string, fields []string, rowIndexes []int) (ColumnarBatch, bool, error) {
+	if catalogOwnsVirtualSource(name, key) || resolver.Source == nil {
+		return ColumnarBatch{}, false, nil
+	}
+	prewhere, ok := resolver.Source.(ColumnarPrewhereSourceResolver)
+	if !ok {
+		return ColumnarBatch{}, false, nil
+	}
+	return prewhere.ResolveSQLColumnarProjection(name, key, fields, rowIndexes)
+}
