@@ -45,6 +45,10 @@ var (
 	ErrBinaryStreamTruncated = errors.New("hatHttp: binary stream is truncated")
 	// ErrBinaryStreamOptions indicates an invalid stream bound.
 	ErrBinaryStreamOptions = errors.New("hatHttp: invalid binary stream options")
+	// ErrBinaryStreamBufferTooSmall indicates that a caller-provided reuse
+	// buffer cannot hold the next frame payload. The reader is terminated after
+	// this error because the frame header has already been consumed.
+	ErrBinaryStreamBufferTooSmall = errors.New("hatHttp: binary stream reuse buffer is too small")
 )
 
 // BinaryStreamFrameKind identifies the payload meaning of one frame.
@@ -316,6 +320,18 @@ func NewBinaryStreamReader(reader io.Reader, options BinaryStreamOptions) (*Bina
 // Next reads one frame. io.EOF after a valid terminal frame is the normal end
 // condition; truncation or protocol errors permanently stop the reader.
 func (reader *BinaryStreamReader) Next(ctx context.Context) (BinaryStreamFrame, error) {
+	return reader.next(ctx, nil, false)
+}
+
+// NextInto reads one frame into payload without allocating for the payload.
+// The returned frame's Payload aliases payload and remains valid until the
+// caller reuses or changes that buffer. The reader is terminated when payload
+// is too small for the next frame.
+func (reader *BinaryStreamReader) NextInto(ctx context.Context, payload []byte) (BinaryStreamFrame, error) {
+	return reader.next(ctx, payload, true)
+}
+
+func (reader *BinaryStreamReader) next(ctx context.Context, reuse []byte, reuseBuffer bool) (BinaryStreamFrame, error) {
 	if reader == nil || reader.reader == nil || reader.done {
 		return BinaryStreamFrame{}, io.EOF
 	}
@@ -367,7 +383,16 @@ func (reader *BinaryStreamReader) Next(ctx context.Context) (BinaryStreamFrame, 
 		reader.done = true
 		return BinaryStreamFrame{}, ErrBinaryStreamChunkTooLarge
 	}
-	payload := make([]byte, int(length))
+	var payload []byte
+	if reuseBuffer {
+		if uint64(length) > uint64(cap(reuse)) {
+			reader.done = true
+			return BinaryStreamFrame{}, fmt.Errorf("%w: need %d bytes, have %d", ErrBinaryStreamBufferTooSmall, length, cap(reuse))
+		}
+		payload = reuse[:int(length)]
+	} else {
+		payload = make([]byte, int(length))
+	}
 	if _, err := io.ReadFull(reader.reader, payload); err != nil {
 		reader.done = true
 		return BinaryStreamFrame{}, fmt.Errorf("%w: payload", ErrBinaryStreamTruncated)
