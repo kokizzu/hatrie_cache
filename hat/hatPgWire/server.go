@@ -189,6 +189,30 @@ func (connection *reusableMessageConnection) writeRowDescription(fields []Field)
 	return writeRaw(connection.Conn, packet)
 }
 
+func (connection *reusableMessageConnection) writeCStringMessage(messageType byte, value string) error {
+	packet, reusable := connection.beginMessage(messageType, len(value)+1)
+	if !reusable {
+		return writeMessage(connection.Conn, messageType, appendCString(nil, value))
+	}
+	copy(packet[5:], value)
+	packet[5+len(value)] = 0
+	return writeRaw(connection.Conn, packet)
+}
+
+func (connection *reusableMessageConnection) writeParameterStatus(key string, value string) error {
+	packet, reusable := connection.beginMessage('S', len(key)+len(value)+2)
+	if !reusable {
+		return writeParameterStatus(connection.Conn, key, value)
+	}
+	body := packet[5:]
+	offset := copy(body, key)
+	body[offset] = 0
+	offset++
+	offset += copy(body[offset:], value)
+	body[offset] = 0
+	return writeRaw(connection.Conn, packet)
+}
+
 // ServeConn serves one PostgreSQL v3 connection until the client terminates,
 // the context is cancelled, or the connection fails. It supports startup,
 // optional clear-text password authentication, simple queries, text-format
@@ -968,6 +992,9 @@ func writeAuthenticationCleartextPassword(connection net.Conn) error {
 }
 
 func writeParameterStatus(connection net.Conn, key string, value string) error {
+	if reusable, ok := connection.(*reusableMessageConnection); ok {
+		return reusable.writeParameterStatus(key, value)
+	}
 	return writeMessage(connection, 'S', appendCString(appendCString(nil, key), value))
 }
 
@@ -999,6 +1026,9 @@ func writeQueryResultRange(connection net.Conn, result QueryResult, startRow int
 	tag := result.CommandTag
 	if tag == "" {
 		tag = fmt.Sprintf("SELECT %d", len(result.Rows))
+	}
+	if reusable, ok := connection.(*reusableMessageConnection); ok {
+		return reusable.writeCStringMessage('C', tag)
 	}
 	return writeMessage(connection, 'C', appendCString(nil, tag))
 }

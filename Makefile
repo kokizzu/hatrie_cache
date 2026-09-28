@@ -22232,3 +22232,23 @@ commit-pgwire-row-description:
 	bash scripts/deliver-pgwire-row-description.sh commit
 push-pgwire-row-description:
 	bash scripts/deliver-pgwire-row-description.sh push
+
+.PHONY: format-pgwire-scalar-message test-pgwire-scalar-message benchmark-pgwire-scalar-message-baseline benchmark-pgwire-scalar-message race-pgwire-scalar-message
+format-pgwire-scalar-message:
+	bash scripts/format-pgwire-scalar-message.sh
+test-pgwire-scalar-message:
+	bash scripts/test-pgwire-scalar-message.sh
+benchmark-pgwire-scalar-message-baseline:
+	bash scripts/benchmark-pgwire-scalar-message-baseline.sh
+benchmark-pgwire-scalar-message:
+	bash scripts/benchmark-pgwire-scalar-message.sh
+race-pgwire-scalar-message:
+	bash scripts/race-pgwire-scalar-message.sh
+
+.PHONY: stage-pgwire-scalar-message commit-pgwire-scalar-message push-pgwire-scalar-message
+stage-pgwire-scalar-message:
+	bash scripts/deliver-pgwire-scalar-message.sh stage
+commit-pgwire-scalar-message:
+	bash scripts/deliver-pgwire-scalar-message.sh commit
+push-pgwire-scalar-message:
+	bash scripts/deliver-pgwire-scalar-message.sh push
