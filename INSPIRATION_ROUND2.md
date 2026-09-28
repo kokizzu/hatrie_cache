@@ -133,7 +133,7 @@ operator control remain the preferred deployment model.
 - [ ] M244 Compaction debt metrics measured against the current logical frontier.
 - [ ] M245 Timestamp throughput and input-to-output latency metrics.
 - [x] M246 Per-object history-retention policies with bounded storage accounting.
-- [ ] M247 Resume errors that identify when a requested frontier has expired.
+- [x] M247 Resume errors identify expired historical frontiers through the opt-in `QuerySubscriptionCheckpointValidator`; see [M247_RESUME_EXPIRED_FRONTIER.md](M247_RESUME_EXPIRED_FRONTIER.md).
 - [ ] M248 Reusable maintained-result cache for identical read expressions.
 - [x] M249 Consistency fencing between a point read and a subsequent subscription; see [M249_READ_FENCE.md](M249_READ_FENCE.md).
 - [ ] M250 Temporal join alignment that waits for both input frontiers.

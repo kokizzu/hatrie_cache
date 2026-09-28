@@ -17,6 +17,9 @@ var (
 	// ErrQuerySubscriptionCheckpointComplete identifies a bounded subscription
 	// whose historical replay already reached its terminal frontier.
 	ErrQuerySubscriptionCheckpointComplete = errors.New("query subscription checkpoint is complete")
+	// ErrQuerySubscriptionCheckpointExpired identifies a checkpoint whose
+	// requested frontier is no longer retained by the caller's source.
+	ErrQuerySubscriptionCheckpointExpired = errors.New("query subscription checkpoint frontier expired")
 )
 
 // QuerySubscriptionCheckpoint is the consumer-applied state needed to resume
@@ -27,6 +30,27 @@ type QuerySubscriptionCheckpoint struct {
 	Definition   QuerySubscriptionDefinition
 	Snapshot     QuerySubscriptionSnapshot
 	Differential bool
+}
+
+// QuerySubscriptionCheckpointValidator checks whether a checkpoint's
+// historical frontier is still available before a resumed subscription is
+// registered. Implementations own retention policy and may return
+// ErrQuerySubscriptionCheckpointExpired when a fresh snapshot is required.
+type QuerySubscriptionCheckpointValidator interface {
+	ValidateQuerySubscriptionCheckpoint(QuerySubscriptionCheckpoint) error
+}
+
+// QuerySubscriptionCheckpointValidatorFunc adapts a function to
+// QuerySubscriptionCheckpointValidator.
+type QuerySubscriptionCheckpointValidatorFunc func(QuerySubscriptionCheckpoint) error
+
+// ValidateQuerySubscriptionCheckpoint implements
+// QuerySubscriptionCheckpointValidator.
+func (validator QuerySubscriptionCheckpointValidatorFunc) ValidateQuerySubscriptionCheckpoint(checkpoint QuerySubscriptionCheckpoint) error {
+	if validator == nil {
+		return ErrQuerySubscriptionCheckpointInvalid
+	}
+	return validator(checkpoint)
 }
 
 type querySubscriptionCheckpointState struct {
@@ -150,7 +174,21 @@ func (registry *QuerySubscriptions) closeWithCheckpoint(subscription *QuerySubsc
 // evaluating its query at the checkpoint frontier. The next NotifyChangedAt
 // call either skips a replayed frontier or refreshes from the next frontier.
 func (registry *QuerySubscriptions) Resume(checkpoint QuerySubscriptionCheckpoint) (*QuerySubscription, error) {
-	subscription, err := registry.resume(checkpoint, false)
+	subscription, err := registry.resume(checkpoint, false, nil)
+	if err != nil {
+		return nil, err
+	}
+	return subscription, nil
+}
+
+// ResumeWithValidator restores an ordinary subscription after the caller's
+// retention validator confirms that the checkpoint frontier is still usable.
+// It does not evaluate the query or alter the legacy Resume path.
+func (registry *QuerySubscriptions) ResumeWithValidator(checkpoint QuerySubscriptionCheckpoint, validator QuerySubscriptionCheckpointValidator) (*QuerySubscription, error) {
+	if validator == nil {
+		return nil, ErrQuerySubscriptionCheckpointInvalid
+	}
+	subscription, err := registry.resume(checkpoint, false, validator)
 	if err != nil {
 		return nil, err
 	}
@@ -161,14 +199,27 @@ func (registry *QuerySubscriptions) Resume(checkpoint QuerySubscriptionCheckpoin
 // subscription. It emits no initial batch because the checkpoint represents
 // the consumer's already-applied state.
 func (registry *QuerySubscriptions) ResumeDifferential(checkpoint QuerySubscriptionCheckpoint) (*QueryDifferentialSubscription, error) {
-	subscription, err := registry.resume(checkpoint, true)
+	subscription, err := registry.resume(checkpoint, true, nil)
 	if err != nil {
 		return nil, err
 	}
 	return &QueryDifferentialSubscription{subscription: subscription}, nil
 }
 
-func (registry *QuerySubscriptions) resume(checkpoint QuerySubscriptionCheckpoint, differential bool) (*QuerySubscription, error) {
+// ResumeDifferentialWithValidator restores a differential subscription after
+// the caller's retention validator confirms the checkpoint frontier.
+func (registry *QuerySubscriptions) ResumeDifferentialWithValidator(checkpoint QuerySubscriptionCheckpoint, validator QuerySubscriptionCheckpointValidator) (*QueryDifferentialSubscription, error) {
+	if validator == nil {
+		return nil, ErrQuerySubscriptionCheckpointInvalid
+	}
+	subscription, err := registry.resume(checkpoint, true, validator)
+	if err != nil {
+		return nil, err
+	}
+	return &QueryDifferentialSubscription{subscription: subscription}, nil
+}
+
+func (registry *QuerySubscriptions) resume(checkpoint QuerySubscriptionCheckpoint, differential bool, validator QuerySubscriptionCheckpointValidator) (*QuerySubscription, error) {
 	if registry == nil {
 		return nil, ErrQuerySubscriptionCheckpointInvalid
 	}
@@ -191,6 +242,14 @@ func (registry *QuerySubscriptions) resume(checkpoint QuerySubscriptionCheckpoin
 	}
 	if snapshot.Revision == 0 && !definition.StartLive {
 		return nil, fmt.Errorf("%w: zero revision requires StartLive", ErrQuerySubscriptionCheckpointInvalid)
+	}
+	if validator != nil {
+		if err := validator.ValidateQuerySubscriptionCheckpoint(checkpoint); err != nil {
+			if errors.Is(err, ErrQuerySubscriptionCheckpointExpired) {
+				return nil, err
+			}
+			return nil, fmt.Errorf("%w: %w", ErrQuerySubscriptionCheckpointInvalid, err)
+		}
 	}
 
 	registry.mu.Lock()
