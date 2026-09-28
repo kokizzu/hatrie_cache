@@ -22252,3 +22252,23 @@ commit-pgwire-scalar-message:
 	bash scripts/deliver-pgwire-scalar-message.sh commit
 push-pgwire-scalar-message:
 	bash scripts/deliver-pgwire-scalar-message.sh push
+
+.PHONY: format-pgwire-fixed-message test-pgwire-fixed-message benchmark-pgwire-fixed-message-baseline benchmark-pgwire-fixed-message race-pgwire-fixed-message
+format-pgwire-fixed-message:
+	bash scripts/format-pgwire-fixed-message.sh
+test-pgwire-fixed-message:
+	bash scripts/test-pgwire-fixed-message.sh
+benchmark-pgwire-fixed-message-baseline:
+	bash scripts/benchmark-pgwire-fixed-message-baseline.sh
+benchmark-pgwire-fixed-message:
+	bash scripts/benchmark-pgwire-fixed-message.sh
+race-pgwire-fixed-message:
+	bash scripts/race-pgwire-fixed-message.sh
+
+.PHONY: stage-pgwire-fixed-message commit-pgwire-fixed-message push-pgwire-fixed-message
+stage-pgwire-fixed-message:
+	bash scripts/deliver-pgwire-fixed-message.sh stage
+commit-pgwire-fixed-message:
+	bash scripts/deliver-pgwire-fixed-message.sh commit
+push-pgwire-fixed-message:
+	bash scripts/deliver-pgwire-fixed-message.sh push

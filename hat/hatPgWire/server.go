@@ -213,6 +213,46 @@ func (connection *reusableMessageConnection) writeParameterStatus(key string, va
 	return writeRaw(connection.Conn, packet)
 }
 
+func (connection *reusableMessageConnection) writeAuthenticationOK() error {
+	packet, reusable := connection.beginMessage('R', 4)
+	if !reusable {
+		return writeAuthenticationOK(connection.Conn)
+	}
+	binary.BigEndian.PutUint32(packet[5:], 0)
+	return writeRaw(connection.Conn, packet)
+}
+
+func (connection *reusableMessageConnection) writeAuthenticationCleartextPassword() error {
+	packet, reusable := connection.beginMessage('R', 4)
+	if !reusable {
+		return writeAuthenticationCleartextPassword(connection.Conn)
+	}
+	binary.BigEndian.PutUint32(packet[5:], 3)
+	return writeRaw(connection.Conn, packet)
+}
+
+func (connection *reusableMessageConnection) writeReadyForQuery() error {
+	packet, reusable := connection.beginMessage('Z', 1)
+	if !reusable {
+		return writeReadyForQuery(connection.Conn)
+	}
+	packet[5] = 'I'
+	return writeRaw(connection.Conn, packet)
+}
+
+func (connection *reusableMessageConnection) writeBackendKeyData(processID uint32, secret uint32) error {
+	packet, reusable := connection.beginMessage('K', 8)
+	if !reusable {
+		keyData := make([]byte, 8)
+		binary.BigEndian.PutUint32(keyData[:4], processID)
+		binary.BigEndian.PutUint32(keyData[4:], secret)
+		return writeMessage(connection.Conn, 'K', keyData)
+	}
+	binary.BigEndian.PutUint32(packet[5:9], processID)
+	binary.BigEndian.PutUint32(packet[9:13], secret)
+	return writeRaw(connection.Conn, packet)
+}
+
 // ServeConn serves one PostgreSQL v3 connection until the client terminates,
 // the context is cancelled, or the connection fails. It supports startup,
 // optional clear-text password authentication, simple queries, text-format
@@ -971,6 +1011,12 @@ func writeStartupComplete(connection net.Conn, processID uint32, secret uint32) 
 			return err
 		}
 	}
+	if reusable, ok := connection.(*reusableMessageConnection); ok {
+		if err := reusable.writeBackendKeyData(processID, secret); err != nil {
+			return err
+		}
+		return reusable.writeReadyForQuery()
+	}
 	keyData := make([]byte, 8)
 	binary.BigEndian.PutUint32(keyData[:4], processID)
 	binary.BigEndian.PutUint32(keyData[4:], secret)
@@ -981,11 +1027,17 @@ func writeStartupComplete(connection net.Conn, processID uint32, secret uint32) 
 }
 
 func writeAuthenticationOK(connection net.Conn) error {
+	if reusable, ok := connection.(*reusableMessageConnection); ok {
+		return reusable.writeAuthenticationOK()
+	}
 	body := make([]byte, 4)
 	return writeMessage(connection, 'R', body)
 }
 
 func writeAuthenticationCleartextPassword(connection net.Conn) error {
+	if reusable, ok := connection.(*reusableMessageConnection); ok {
+		return reusable.writeAuthenticationCleartextPassword()
+	}
 	body := make([]byte, 4)
 	binary.BigEndian.PutUint32(body, 3)
 	return writeMessage(connection, 'R', body)
@@ -999,6 +1051,9 @@ func writeParameterStatus(connection net.Conn, key string, value string) error {
 }
 
 func writeReadyForQuery(connection net.Conn) error {
+	if reusable, ok := connection.(*reusableMessageConnection); ok {
+		return reusable.writeReadyForQuery()
+	}
 	return writeMessage(connection, 'Z', []byte{'I'})
 }
 
