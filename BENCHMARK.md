@@ -38561,3 +38561,30 @@ The current-image upsert envelope was compared with the existing before/after CD
 | JSON decode | 6,783 ns/op; 1,248 B/op; 29 allocs/op | 5,100 ns/op; 984 B/op; 22 allocs/op | Upsert 1.33x faster, 1.27x lower bytes, and 1.32x fewer allocations |
 
 The API is additive and opt-in. It does not replace CDC envelopes when consumers need the previous row image. Reproduce with `make benchmark-m206-upsert-envelope`; see [M206_UPSERT_ENVELOPES.md](M206_UPSERT_ENVELOPES.md).
+
+## M212 Logical Compaction
+
+Measured on Linux/amd64, AMD Ryzen 9 5950X, five samples in one controlled
+run. The baseline is the existing `DifferentialMultiset[int]` add path; the
+candidate is `LogicalCompaction[int].Add` over the same 4096-update workload.
+The maintenance workload compacts 4096 records across 128 values through
+timestamp 4095.
+
+| Workload | Median ns/op | Median B/op | Median allocs/op | Relative CPU | Relative bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Existing `DifferentialMultiset.Add` | 8,627 | 6,704 | 12 | 1.00x | 1.00x |
+| `LogicalCompaction.Add` | 8,745 | 6,712 | 12 | 1.014x (1.4% slower) | 1.001x (0.12% higher) |
+| `LogicalCompaction.CompactThrough` | 330,258 | 9,470 | 11 | maintenance-only | maintenance-only |
+
+Raw samples:
+
+```text
+Existing DifferentialMultiset.Add: 8527, 8325, 9937, 9071, 8627 ns/op
+LogicalCompaction.Add:             9090, 8582, 8607, 8745, 9736 ns/op
+LogicalCompaction.CompactThrough:  338924, 319258, 330258, 331670, 323821 ns/op
+```
+
+The add path is not presented as a speedup. The feature adds bounded-history
+maintenance; it remains opt-in and currently removes old records in place
+without promising immediate map-backing reclamation. Re-run with
+`make benchmark-m212-logical-compaction`.

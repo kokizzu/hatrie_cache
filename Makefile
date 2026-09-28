@@ -28440,3 +28440,23 @@ race-m206-upsert-envelope:
 
 benchmark-m206-upsert-envelope:
 	bash scripts/benchmark-m206-upsert-envelope.sh
+
+.PHONY: format-m212-logical-compaction
+format-m212-logical-compaction:
+	bash scripts/format-m212-logical-compaction.sh
+
+.PHONY: test-m212-logical-compaction
+test-m212-logical-compaction:
+	bash scripts/test-m212-logical-compaction.sh
+
+.PHONY: race-m212-logical-compaction
+race-m212-logical-compaction:
+	bash scripts/race-m212-logical-compaction.sh
+
+.PHONY: benchmark-m212-logical-compaction-baseline
+benchmark-m212-logical-compaction-baseline:
+	bash scripts/benchmark-m212-logical-compaction-baseline.sh
+
+.PHONY: benchmark-m212-logical-compaction
+benchmark-m212-logical-compaction:
+	bash scripts/benchmark-m212-logical-compaction.sh
