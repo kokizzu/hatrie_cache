@@ -22121,3 +22121,32 @@ commit-rate-limiter-allow-n:
 
 push-rate-limiter-allow-n:
 	bash scripts/deliver-rate-limiter-allow-n.sh push
+
+.PHONY: format-http-stream-reuse test-http-stream-reuse test-http-stream-package benchmark-http-stream-reuse-baseline benchmark-http-stream-reuse race-http-stream-reuse
+format-http-stream-reuse:
+	bash scripts/format-http-stream-reuse.sh
+
+test-http-stream-reuse:
+	bash scripts/test-http-stream-reuse.sh
+
+test-http-stream-package:
+	bash scripts/test-http-stream-package.sh
+
+benchmark-http-stream-reuse-baseline:
+	bash scripts/benchmark-http-stream-reuse-baseline.sh
+
+benchmark-http-stream-reuse:
+	bash scripts/benchmark-http-stream-reuse.sh
+
+race-http-stream-reuse:
+	bash scripts/race-http-stream-reuse.sh
+
+.PHONY: stage-http-stream-reuse commit-http-stream-reuse push-http-stream-reuse
+stage-http-stream-reuse:
+	bash scripts/deliver-http-stream-reuse.sh stage
+
+commit-http-stream-reuse:
+	bash scripts/deliver-http-stream-reuse.sh commit
+
+push-http-stream-reuse:
+	bash scripts/deliver-http-stream-reuse.sh push
