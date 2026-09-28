@@ -22,13 +22,16 @@ var (
 )
 
 type sqlIncrementalGroupAggregateConfig struct {
-	where       sqlExpr
-	alias       string
-	groupField  string
-	groupColumn string
-	countColumn string
-	sumField    string
-	sumColumn   string
+	where        sqlExpr
+	alias        string
+	groupField   string
+	groupColumn  string
+	countColumn  string
+	sumField     string
+	sumColumn    string
+	extremaField string
+	minColumn    string
+	maxColumn    string
 }
 
 // SQLIncrementalGroupAggregate maintains a restricted grouped SQL result from
@@ -45,9 +48,12 @@ type SQLIncrementalGroupAggregate struct {
 	groupColumn string
 	countColumn string
 	sumColumn   string
+	minColumn   string
+	maxColumn   string
 	groupValues map[string]interface{}
 	count       *IncrementalGroupCount
 	countSum    *IncrementalGroupCountSumInt64
+	minMax      *IncrementalGroupMinMaxInt64
 }
 
 // CompileIncrementalGroupAggregate lowers a compiled query to exact signed
@@ -69,9 +75,13 @@ func (query *CompiledSQLQuery) CompileIncrementalGroupAggregate() (*SQLIncrement
 		groupColumn: config.groupColumn,
 		countColumn: config.countColumn,
 		sumColumn:   config.sumColumn,
+		minColumn:   config.minColumn,
+		maxColumn:   config.maxColumn,
 		groupValues: make(map[string]interface{}),
 	}
-	if config.sumField != "" {
+	if config.extremaField != "" {
+		operator.minMax, err = NewIncrementalGroupMinMaxInt64(groupKey, sqlIncrementalInt64Value(config.extremaField))
+	} else if config.sumField != "" {
 		operator.countSum, err = NewIncrementalGroupCountSumInt64(groupKey, sqlIncrementalInt64Value(config.sumField))
 	} else {
 		operator.count, err = NewIncrementalGroupCount(groupKey)
@@ -152,6 +162,9 @@ func validateSQLIncrementalGroupAggregateQuery(query *CompiledSQLQuery) (sqlIncr
 		}
 		switch strings.ToUpper(item.expr.name) {
 		case "COUNT":
+			if config.extremaField != "" {
+				return unsupported("MIN/MAX cannot be combined with COUNT or SUM")
+			}
 			if config.countColumn != "" {
 				return unsupported("only one COUNT aggregate is supported")
 			}
@@ -160,6 +173,9 @@ func validateSQLIncrementalGroupAggregateQuery(query *CompiledSQLQuery) (sqlIncr
 			}
 			config.countColumn = column
 		case "SUM":
+			if config.extremaField != "" {
+				return unsupported("MIN/MAX cannot be combined with COUNT or SUM")
+			}
 			if config.sumColumn != "" {
 				return unsupported("only one SUM aggregate is supported")
 			}
@@ -168,6 +184,28 @@ func validateSQLIncrementalGroupAggregateQuery(query *CompiledSQLQuery) (sqlIncr
 			}
 			config.sumColumn = column
 			config.sumField = item.expr.args[0].name
+		case "MIN", "MAX":
+			if config.countColumn != "" || config.sumColumn != "" {
+				return unsupported("MIN/MAX cannot be combined with COUNT or SUM")
+			}
+			if len(item.expr.args) != 1 || item.expr.args[0].kind != "field" {
+				return unsupported(fmt.Sprintf("%s must use one direct field", strings.ToUpper(item.expr.name)))
+			}
+			if config.extremaField != "" && config.extremaField != item.expr.args[0].name {
+				return unsupported("MIN and MAX must use the same direct field")
+			}
+			config.extremaField = item.expr.args[0].name
+			if strings.EqualFold(item.expr.name, "MIN") {
+				if config.minColumn != "" {
+					return unsupported("only one MIN aggregate is supported")
+				}
+				config.minColumn = column
+			} else {
+				if config.maxColumn != "" {
+					return unsupported("only one MAX aggregate is supported")
+				}
+				config.maxColumn = column
+			}
 		default:
 			return unsupported(fmt.Sprintf("aggregate %q is not supported", item.expr.name))
 		}
@@ -175,8 +213,8 @@ func validateSQLIncrementalGroupAggregateQuery(query *CompiledSQLQuery) (sqlIncr
 	if !groupSeen {
 		return unsupported("the GROUP BY field must be projected")
 	}
-	if config.countColumn == "" && config.sumColumn == "" {
-		return unsupported("COUNT(*) or SUM(field) is required")
+	if config.countColumn == "" && config.sumColumn == "" && config.extremaField == "" {
+		return unsupported("COUNT(*), SUM(field), or MIN/MAX(field) is required")
 	}
 	return config, nil
 }
@@ -275,7 +313,9 @@ func (operator *SQLIncrementalGroupAggregate) Apply(updates []DifferentialRow) (
 		changes []DifferentialRow
 		err     error
 	)
-	if operator.countSum != nil {
+	if operator.minMax != nil {
+		changes, err = operator.minMax.Apply(accepted)
+	} else if operator.countSum != nil {
 		changes, err = operator.countSum.Apply(accepted)
 	} else {
 		changes, err = operator.count.Apply(accepted)
@@ -323,7 +363,9 @@ func (operator *SQLIncrementalGroupAggregate) Snapshot() []DifferentialRow {
 		return nil
 	}
 	var rows []DifferentialRow
-	if operator.countSum != nil {
+	if operator.minMax != nil {
+		rows = operator.minMax.Snapshot()
+	} else if operator.countSum != nil {
 		rows = operator.countSum.Snapshot()
 	} else {
 		rows = operator.count.Snapshot()
@@ -347,6 +389,14 @@ func (operator *SQLIncrementalGroupAggregate) sqlRow(aggregate SQLRow, groupValu
 	if operator.sumColumn != "" {
 		if value, ok := aggregate["sum"].(int64); ok {
 			row[operator.sumColumn] = float64(value)
+		}
+	}
+	if operator.minMax != nil {
+		if operator.minColumn != "" {
+			row[operator.minColumn] = aggregate["min"]
+		}
+		if operator.maxColumn != "" {
+			row[operator.maxColumn] = aggregate["max"]
 		}
 	}
 	return row

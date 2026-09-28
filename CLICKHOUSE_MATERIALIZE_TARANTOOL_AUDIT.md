@@ -240,6 +240,7 @@ records a separate implementation boundary.
   and one-atomic-update batch reservation; cross-process consensus remains
   caller-owned. See [M033_LOGICAL_TIMESTAMP_ORACLE.md](M033_LOGICAL_TIMESTAMP_ORACLE.md).
 - [ ] M037 Generic negative-diff support for every SQL operator.
+- [x] M037m Compiled SQL grouped `MIN`/`MAX` now has opt-in exact signed maintenance for restricted integer row-source queries, including duplicate-preserving endpoint retractions, WHERE filtering, and atomic validation; mixed or global shapes retain the normal executor path. See [M037_SQL_INCREMENTAL_GROUP_MIN_MAX.md](M037_SQL_INCREMENTAL_GROUP_MIN_MAX.md).
 - [ ] M037e Generic keyed differential reduction was benchmarked and rolled back because the arbitrary callback path was about 7.97x slower, 6.36x larger in transient bytes, and 5.67x more allocation-heavy than the existing specialized reducer; see [BENCHMARK.md](BENCHMARK.md#rejected-generic-keyed-differential-reduction).
 - [ ] M038 Generic multiset duplicate preservation across all operators.
 - [x] M038i Compiled SQL `SELECT DISTINCT` supports exact signed incremental

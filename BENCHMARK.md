@@ -39195,3 +39195,22 @@ state memory for projected rows and typed canonical keys. It is opt-in through
 remain on the normal executor path. Full semantics are documented in
 [M038_SQL_INCREMENTAL_DISTINCT.md](M038_SQL_INCREMENTAL_DISTINCT.md).
 
+
+## M037 SQL Incremental Group MIN/MAX
+
+Command: `make benchmark-m037-sql-incremental-group-minmax`
+
+One `-benchmem` sample on Linux/amd64, AMD Ryzen 9 5950X, using the existing
+10,000-row grouped MIN/MAX workload:
+
+| Path | ns/op | B/op | allocs/op | Relative |
+| --- | ---: | ---: | ---: | --- |
+| Rebuild grouped MIN/MAX from 10,000 rows | 549,264 | 939,695 | 5,386 | baseline |
+| Warm two-update incremental insert/retract | 2,413 | 2,052 | 20 | 227.6x faster, 457.9x lower bytes, 269.3x fewer allocs |
+
+The incremental path retains per-group value multiplicities for exact endpoint
+retractions. It is opt-in through `CompileIncrementalGroupAggregate`; normal
+executor behavior and unsupported query fallback remain unchanged. Full
+semantics are documented in
+[M037_SQL_INCREMENTAL_GROUP_MIN_MAX.md](M037_SQL_INCREMENTAL_GROUP_MIN_MAX.md).
+

@@ -29673,3 +29673,32 @@ push-m038-sql-incremental-distinct:
 
 status-m038-sql-incremental-distinct:
 	bash scripts/deliver-m038-sql-incremental-distinct.sh status
+
+.PHONY: format-m037-sql-incremental-group-minmax test-m037-sql-incremental-group-minmax benchmark-m037-sql-group-minmax-baseline benchmark-m037-sql-incremental-group-minmax race-m037-sql-incremental-group-minmax
+format-m037-sql-incremental-group-minmax:
+	bash scripts/format-m037-sql-incremental-group-minmax.sh
+
+test-m037-sql-incremental-group-minmax:
+	bash scripts/test-m037-sql-incremental-group-minmax.sh
+
+benchmark-m037-sql-group-minmax-baseline:
+	bash scripts/benchmark-m037-sql-group-minmax-baseline.sh
+
+benchmark-m037-sql-incremental-group-minmax:
+	bash scripts/benchmark-m037-sql-incremental-group-minmax.sh
+
+race-m037-sql-incremental-group-minmax:
+	bash scripts/race-m037-sql-incremental-group-minmax.sh
+
+.PHONY: stage-m037-sql-incremental-group-minmax commit-m037-sql-incremental-group-minmax push-m037-sql-incremental-group-minmax status-m037-sql-incremental-group-minmax
+stage-m037-sql-incremental-group-minmax:
+	bash scripts/deliver-m037-sql-incremental-group-minmax.sh stage
+
+commit-m037-sql-incremental-group-minmax:
+	bash scripts/deliver-m037-sql-incremental-group-minmax.sh commit
+
+push-m037-sql-incremental-group-minmax:
+	bash scripts/deliver-m037-sql-incremental-group-minmax.sh push
+
+status-m037-sql-incremental-group-minmax:
+	bash scripts/deliver-m037-sql-incremental-group-minmax.sh status
