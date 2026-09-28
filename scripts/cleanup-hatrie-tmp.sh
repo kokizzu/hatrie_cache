@@ -1,117 +1,149 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-tmp_root=${TMPDIR:-/tmp}
-min_age_hours=${HATRIE_TMP_MIN_AGE_HOURS:-24}
-repo_root=$(pwd -P)
-plan_file=${HATRIE_TMP_CLEANUP_PLAN:-"$repo_root/.hatrie-tmp-cleanup.plan"}
+mode="${1:-audit}"
+tmp_root="/tmp"
+plan_file="${HATRIE_TMP_CLEANUP_PLAN:-/tmp/.hatrie-tmp-cleanup.plan}"
+repo_root="$(pwd -P)"
 
-is_hatrie_directory() {
-  local path=$1
-  local name=${path##*/}
-  [[ "$name" == hatrie-cache-* || "$name" == hatrie_cache_* ]]
-}
+case "$mode" in
+  audit|plan|preview|apply)
+    ;;
+  *)
+  printf 'usage: %s [audit|plan|preview|apply]\n' "$0" >&2
+    exit 2
+    ;;
+esac
 
-is_active_path() {
-  local candidate=$1
-  local proc_dir cwd
-  for proc_dir in /proc/[0-9]*; do
-    [[ -d "$proc_dir" ]] || continue
-    cwd=$(readlink "$proc_dir/cwd" 2>/dev/null || true)
-    [[ -n "$cwd" ]] || continue
-    case "$cwd" in
-      "$candidate"|"$candidate"/*)
-        return 0
-        ;;
-    esac
+if [[ ! -d "$tmp_root" ]]; then
+  printf 'tmp root is missing: %s\n' "$tmp_root" >&2
+  exit 1
+fi
+
+worktree_file="$(mktemp /tmp/.hatrie-worktrees.XXXXXX)"
+trap 'rm -f -- "$worktree_file"' EXIT
+git -C "$repo_root" worktree list --porcelain > "$worktree_file"
+
+declare -a active_worktrees=()
+while IFS= read -r line; do
+  case "$line" in
+    worktree\ *)
+      active_worktrees+=("${line#worktree }")
+      ;;
+  esac
+done < "$worktree_file"
+
+is_active_worktree() {
+  local candidate="$1"
+  local active
+  for active in "${active_worktrees[@]}"; do
+    if [[ "$candidate" == "$active" || "$candidate" == "$active"/* ]]; then
+      return 0
+    fi
   done
   return 1
 }
 
-write_plan() {
-  local now=$1
-  local path mtime age_hours
-  local candidates=0
+is_worktree_like() {
+  local name="$1"
+  case "$name" in
+    hatrie-cache-inspiration-*|hatrie-cache-worktree-*|hatrie-worktree-*)
+      return 0
+      ;;
+  esac
+  return 1
+}
 
+is_generated_candidate() {
+  local path="$1"
+  local name="${path##*/}"
+  if is_active_worktree "$path" || is_worktree_like "$name"; then
+    return 1
+  fi
+  case "$name" in
+    hatrie-build-*|hatrie-test-*|hatrie-cache-test-*|hatrie_cache_test_*|hatrie-*-gocache.*|hatrie-gocache.*|hatrie-*-test.*|hatrie-*.tmp|hatrie-*.plan|hatrie-*.cover|hatrie-*.prof|hatrie-*.log|hatrie-*.out)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+describe_path() {
+  local path="$1"
+  local name="${path##*/}"
+  local kind="REVIEW"
+  if is_active_worktree "$path"; then
+    kind="KEEP active-worktree"
+  elif is_worktree_like "$name"; then
+    kind="KEEP worktree-like"
+  elif is_generated_candidate "$path"; then
+    kind="CANDIDATE generated"
+  fi
+  printf '%s\t%s\t' "$kind" "$path"
+  du -sh -- "$path" 2>/dev/null || printf '?\t'
+  stat -c '%y' -- "$path" 2>/dev/null || printf 'unknown\n'
+}
+
+collect_entries() {
+  local path
+  while IFS= read -r -d '' path; do
+    describe_path "$path"
+  done < <(find "$tmp_root" -mindepth 1 -maxdepth 1 -name 'hatrie*' -print0)
+}
+
+write_plan() {
+  local path
   : > "$plan_file"
   while IFS= read -r -d '' path; do
-    is_hatrie_directory "$path" || continue
-    [[ "$path" != "$repo_root" && "$path" != "$repo_root"/* ]] || continue
-    is_active_path "$path" && continue
-
-    mtime=$(stat -c '%Y' -- "$path")
-    age_hours=$(( (now - mtime) / 3600 ))
-    (( age_hours >= min_age_hours )) || continue
-    printf '%s\n' "$path" >> "$plan_file"
-    candidates=$((candidates + 1))
-  done < <(find "$tmp_root" -mindepth 1 -maxdepth 1 -type d -print0)
-
-  printf 'Hatrie test temporary cleanup plan (age >= %s hours):\n' "$min_age_hours"
-  if (( candidates == 0 )); then
-    printf 'Summary: 0 candidate(s); plan removed.\n'
-    rm -f -- "$plan_file"
-    return 0
-  fi
-
-  while IFS= read -r path; do
-    mtime=$(stat -c '%Y' -- "$path")
-    age_hours=$(( (now - mtime) / 3600 ))
-    printf '%s hours %s\n' "$age_hours" "$path"
-  done < "$plan_file"
-  printf 'Summary: %s candidate(s).\n' "$candidates"
-  printf 'Plan: %s\n' "$plan_file"
+    if is_generated_candidate "$path"; then
+      printf '%s\n' "$path" >> "$plan_file"
+    fi
+  done < <(find "$tmp_root" -mindepth 1 -maxdepth 1 -name 'hatrie*' -print0)
 }
 
-apply_plan() {
-  local path
-  local removed=0
-  local skipped=0
-
-  [[ -f "$plan_file" ]] || {
-    printf 'No cleanup plan found at %s; run preview first.\n' "$plan_file" >&2
-    return 1
-  }
-
-  while IFS= read -r path; do
-    [[ -n "$path" ]] || continue
-    [[ "$path" == "$tmp_root"/* ]] || {
-      printf 'Refusing plan path outside %s: %s\n' "$tmp_root" "$path" >&2
-      return 1
-    }
-    [[ "$path" != "$tmp_root"/*/* ]] || {
-      printf 'Refusing non-top-level plan path: %s\n' "$path" >&2
-      return 1
-    }
-    is_hatrie_directory "$path" || {
-      printf 'Refusing non-Hatrie plan path: %s\n' "$path" >&2
-      return 1
-    }
-    [[ -d "$path" ]] || {
-      skipped=$((skipped + 1))
-      continue
-    }
-    is_active_path "$path" && {
-      printf 'Refusing active path: %s\n' "$path" >&2
-      return 1
-    }
-    rm -rf -- "$path"
-    printf 'Removed %s\n' "$path"
-    removed=$((removed + 1))
-  done < "$plan_file"
-
-  rm -f -- "$plan_file"
-  printf 'Summary: %s removed, %s already absent.\n' "$removed" "$skipped"
-}
-
-case "${1:-}" in
-  preview|plan)
-    write_plan "$(date +%s)"
+case "$mode" in
+  audit)
+    printf 'Hatrie /tmp audit (no changes)\n'
+    printf 'Registered worktrees are protected, including nested contents.\n'
+    collect_entries
+    ;;
+  plan|preview)
+    write_plan
+    printf 'Hatrie /tmp cleanup preview\n'
+    printf 'Plan: %s\n' "$plan_file"
+    if [[ -s "$plan_file" ]]; then
+      while IFS= read -r path; do
+        describe_path "$path"
+      done < "$plan_file"
+    else
+      printf 'Plan: none\n'
+    fi
     ;;
   apply)
-    apply_plan
-    ;;
-  *)
-    printf 'usage: %s preview|apply\n' "$0" >&2
-    exit 2
+    if [[ ! -f "$plan_file" ]]; then
+      printf 'cleanup plan is missing; run cleanup-hatrie-tmp-preview first: %s\n' "$plan_file" >&2
+      exit 1
+    fi
+    removed=0
+    while IFS= read -r path; do
+      [[ -n "$path" ]] || continue
+      if [[ "$path" != "$tmp_root"/* ]]; then
+        printf 'refusing path outside /tmp: %s\n' "$path" >&2
+        exit 1
+      fi
+      if [[ ! -e "$path" && ! -L "$path" ]]; then
+        printf 'already absent: %s\n' "$path"
+        continue
+      fi
+      if ! is_generated_candidate "$path"; then
+        printf 'refusing changed or protected path: %s\n' "$path" >&2
+        exit 1
+      fi
+      rm -rf -- "$path"
+      printf 'removed: %s\n' "$path"
+      removed=$((removed + 1))
+    done < "$plan_file"
+    rm -f -- "$plan_file"
+    printf 'Removed: %d\n' "$removed"
     ;;
 esac
