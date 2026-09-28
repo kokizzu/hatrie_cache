@@ -253,6 +253,22 @@ func (connection *reusableMessageConnection) writeBackendKeyData(processID uint3
 	return writeRaw(connection.Conn, packet)
 }
 
+func (connection *reusableMessageConnection) writeParameterDescription(parameterTypes []uint32) error {
+	bodyLength := 2 + 4*len(parameterTypes)
+	packet, reusable := connection.beginMessage('t', bodyLength)
+	if !reusable {
+		return writeParameterDescription(connection.Conn, parameterTypes)
+	}
+	body := packet[5:]
+	binary.BigEndian.PutUint16(body, uint16(len(parameterTypes)))
+	offset := 2
+	for _, parameterType := range parameterTypes {
+		binary.BigEndian.PutUint32(body[offset:], parameterType)
+		offset += 4
+	}
+	return writeRaw(connection.Conn, packet)
+}
+
 // ServeConn serves one PostgreSQL v3 connection until the client terminates,
 // the context is cancelled, or the connection fails. It supports startup,
 // optional clear-text password authentication, simple queries, text-format
@@ -877,6 +893,9 @@ func decodeTextParameters(parameters []interface{}, parameterTypes []uint32) ([]
 }
 
 func writeParameterDescription(connection net.Conn, parameterTypes []uint32) error {
+	if reusable, ok := connection.(*reusableMessageConnection); ok {
+		return reusable.writeParameterDescription(parameterTypes)
+	}
 	body := make([]byte, 2+len(parameterTypes)*4)
 	binary.BigEndian.PutUint16(body[:2], uint16(len(parameterTypes)))
 	for index, parameterType := range parameterTypes {
