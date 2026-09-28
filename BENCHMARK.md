@@ -38746,3 +38746,37 @@ candidate queue header is 40 bytes versus 32 bytes for the clean baseline; the
 map backing is allocated only after the first claim. See
 [T245_QUEUE_VISIBILITY.md](T245_QUEUE_VISIBILITY.md) for semantics and the
 recovery tradeoff.
+
+<a id="t246-priority-queue-starvation-bounds"></a>
+## T246 Priority Queue Starvation Bounds
+
+The paired run compares the clean T246 baseline with the candidate after the
+default-path dispatch optimization. It uses seven 750ms samples of
+`go test ./hat/hatDataStructure -run '^$' -bench ... -benchmem` on an AMD
+Ryzen 9 5950X. The visibility queue row is a control for machine-frequency
+drift between the baseline and candidate processes.
+
+| Workload | Baseline median | Candidate median | Candidate / baseline |
+| --- | ---: | ---: | ---: |
+| Existing priority visibility `Lease` + `Ack` | 163.9 ns/op, 0 B/op, 0 allocs/op | 175.1 ns/op, 0 B/op, 0 allocs/op | 1.07x raw; 1.006x after visibility-control normalization |
+| Existing visibility `Lease` + `Ack` control | 123.4 ns/op, 0 B/op, 0 allocs/op | 131.1 ns/op, 0 B/op, 0 allocs/op | 1.06x |
+| T246 strict priority, 1,024 ready items | N/A | 273.4 ns/op, 0 B/op, 0 allocs/op | Baseline for opt-in mode |
+| T246 bounded fairness, bound 16, 1,024 ready items | N/A | 375.4 ns/op, 0 B/op, 0 allocs/op | 1.37x versus T246 strict |
+
+The default remains strict priority and adds no allocations. The independent
+visibility control moved by 1.06x in the same run, so the priority/control
+ratio moved from 1.328x to 1.336x, a roughly 0.6% normalized change. The
+opt-in fairness mode costs about 37.3% in this 1,024-ready-item workload
+because it scans ready entries when the bound is reached; it is intended for
+queues where starvation avoidance is more important than strict-priority
+throughput. Raw candidate samples were:
+
+```text
+priority strict path: 160.4 165.5 172.5 175.5 175.1 178.2 183.9 ns/op
+visibility control:   124.7 122.8 127.0 131.1 133.8 136.3 131.5 ns/op
+T246 strict/1024:     283.5 288.2 266.5 265.4 283.0 269.9 273.4 ns/op
+T246 bound16/1024:    357.9 382.5 367.1 382.7 380.2 344.9 375.4 ns/op
+```
+
+See [T246_PRIORITY_QUEUE_STARVATION.md](T246_PRIORITY_QUEUE_STARVATION.md) for
+the API and the fairness semantics.

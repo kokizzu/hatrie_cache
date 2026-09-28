@@ -221,7 +221,7 @@ func TestPriorityVisibilityQueueBinaryRejectsTruncatedAndOversizedRecords(t *tes
 	}
 
 	malformed := append([]byte(nil), payload...)
-	binary.LittleEndian.PutUint32(malformed[44:48], 2)
+	binary.LittleEndian.PutUint32(malformed[48:52], 2)
 	refreshPriorityVisibilityQueueChecksum(malformed)
 	if _, err := UnmarshalPriorityVisibilityQueue(malformed, codec); err == nil {
 		t.Fatal("UnmarshalPriorityVisibilityQueue accepted a truncated record count")

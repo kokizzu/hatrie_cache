@@ -14,6 +14,7 @@ security guidance before exposing it on a network.
 - Snapshot-plus-WAL node joining with bounded catch-up and completion fencing: [TT007_SNAPSHOT_WAL_JOIN.md](TT007_SNAPSHOT_WAL_JOIN.md), with measurements in [BENCHMARK.md](BENCHMARK.md#tt-007-snapshot-plus-wal-join).
 - Cooperative scheduler cancellation and explicit drain lifecycle: [TT034_TASK_CANCELLATION.md](TT034_TASK_CANCELLATION.md), with before/after measurements in [BENCHMARK.md](BENCHMARK.md#tt-034-cooperative-task-cancellation).
 - Opt-in priority-queue visibility leases for worker crash recovery: [T245_QUEUE_VISIBILITY.md](T245_QUEUE_VISIBILITY.md), with CPU, memory, and allocation measurements in [BENCHMARK.md](BENCHMARK.md#t245-priority-queue-visibility-leases).
+- Opt-in starvation bounds for priority visibility queues: [T246_PRIORITY_QUEUE_STARVATION.md](T246_PRIORITY_QUEUE_STARVATION.md), with the default strict-priority path and fairness cost measured in [BENCHMARK.md](BENCHMARK.md#t246-priority-queue-starvation-bounds).
 - New to the cache commands and value types: [DATA_STRUCTURE.md](DATA_STRUCTURE.md)
 - ClickHouse-style SQL RowBinary streaming export and bounded bulk import: [CH050_SQL_ROW_BINARY_STREAM.md](CH050_SQL_ROW_BINARY_STREAM.md)
 - Opt-in ClickHouse-style `*_OR_NULL` grouped aggregates on the native columnar path: [CH038_OR_NULL_COLUMNAR.md](CH038_OR_NULL_COLUMNAR.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-038-or-null-columnar-aggregates)

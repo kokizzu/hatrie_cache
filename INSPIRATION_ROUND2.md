@@ -189,7 +189,9 @@ operator control remain the preferred deployment model.
 - [x] T245 Queue visibility timeouts for worker crash recovery; see
   [T245_QUEUE_VISIBILITY.md](T245_QUEUE_VISIBILITY.md) and the measurements in
   [BENCHMARK.md](BENCHMARK.md#t245-priority-queue-visibility-leases).
-- [ ] T246 Priority queues with starvation bounds.
+- [x] T246 Priority queues with starvation bounds; see
+  [T246_PRIORITY_QUEUE_STARVATION.md](T246_PRIORITY_QUEUE_STARVATION.md) and the
+  measurements in [BENCHMARK.md](BENCHMARK.md#t246-priority-queue-starvation-bounds).
 - [x] T247 Queue task deduplication by client-supplied identity; see
   [DEDUPLICATING_QUEUE.md](DEDUPLICATING_QUEUE.md) and
   [BENCHMARK.md](BENCHMARK.md#t247-deduplicating-queue).
