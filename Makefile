@@ -28341,3 +28341,21 @@ race-codec-float-xor:
 
 deliver-codec-float-xor:
 	bash scripts/deliver-codec-float-xor.sh
+
+benchmark-codec-int64-delta:
+	bash scripts/benchmark-codec-int64-delta.sh
+
+format-codec-int64-delta:
+	bash scripts/format-codec-int64-delta.sh
+
+test-codec-int64-delta:
+	bash scripts/test-codec-int64-delta.sh
+
+test-codec-int64-delta-package:
+	bash scripts/test-codec-int64-delta-package.sh
+
+race-codec-int64-delta:
+	bash scripts/race-codec-int64-delta.sh
+
+deliver-codec-int64-delta:
+	bash scripts/deliver-codec-int64-delta.sh
