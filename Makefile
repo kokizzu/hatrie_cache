@@ -28287,3 +28287,21 @@ race-codec-timestamps:
 	bash scripts/race-codec-timestamps.sh
 deliver-codec-timestamps:
 	bash scripts/deliver-timestamps.sh
+
+benchmark-codec-rle:
+	bash scripts/benchmark-codec-rle.sh
+
+format-codec-rle:
+	bash scripts/format-codec-rle.sh
+
+test-codec-rle:
+	bash scripts/test-codec-rle.sh
+
+test-codec-rle-package:
+	bash scripts/test-codec-rle-package.sh
+
+race-codec-rle:
+	bash scripts/race-codec-rle.sh
+
+deliver-codec-rle:
+	bash scripts/deliver-codec-rle.sh
