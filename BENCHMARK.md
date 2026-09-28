@@ -38480,3 +38480,18 @@ BenchmarkCH004FinalPushdownFastPath-32  4584  262764 ns/op  447714 B/op  2069 al
 The fallback difference is within benchmark noise; the optimization is
 strictly opt-in and normal queries do not allocate its reconciled-source cache.
 Reproduce with `make benchmark-ch004-final`.
+
+## C222 Mergeable Approximate Top-K State
+
+Five isolated `-benchmem` samples processed 100,000 deterministic string
+values with 20,000 possible keys and `k=100` on an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative |
+| --- | ---: | ---: | ---: | --- |
+| Exact map plus full sort | 11,370,700 | 1,127,740 | 68 | baseline |
+| Bounded `hatDataStructure.TopK` | 26,976,785 | 21,872 | 12 | 2.37x CPU, 51.6x lower bytes |
+
+The bounded state is an opt-in distributed-partial primitive. It accepts the
+CPU cost to retain only `O(k)` counters and to merge partial summaries without
+replaying every row; the existing exact and SQL paths remain unchanged. See
+[APPROX_TOP_K_STATE.md](APPROX_TOP_K_STATE.md).

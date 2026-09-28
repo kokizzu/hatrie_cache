@@ -28359,3 +28359,15 @@ race-codec-int64-delta:
 
 deliver-codec-int64-delta:
 	bash scripts/deliver-codec-int64-delta.sh
+
+test-topk-c222:
+	bash scripts/test-topk-c222.sh
+
+benchmark-topk-c222:
+	bash scripts/benchmark-topk-c222.sh
+
+format-topk-c222:
+	bash scripts/format-topk-c222.sh
+
+race-topk-c222:
+	bash scripts/race-topk-c222.sh
