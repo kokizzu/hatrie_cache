@@ -22150,3 +22150,25 @@ commit-http-stream-reuse:
 
 push-http-stream-reuse:
 	bash scripts/deliver-http-stream-reuse.sh push
+
+.PHONY: format-pgwire-buffer-reuse test-pgwire-buffer-reuse test-pgwire-package benchmark-pgwire-buffer-baseline benchmark-pgwire-buffer-reuse race-pgwire-buffer-reuse
+format-pgwire-buffer-reuse:
+	bash scripts/format-pgwire-buffer-reuse.sh
+test-pgwire-buffer-reuse:
+	bash scripts/test-pgwire-buffer-reuse.sh
+test-pgwire-package:
+	bash scripts/test-pgwire-package.sh
+benchmark-pgwire-buffer-baseline:
+	bash scripts/benchmark-pgwire-buffer-baseline.sh
+benchmark-pgwire-buffer-reuse:
+	bash scripts/benchmark-pgwire-buffer-reuse.sh
+race-pgwire-buffer-reuse:
+	bash scripts/race-pgwire-buffer-reuse.sh
+
+.PHONY: stage-pgwire-buffer-reuse commit-pgwire-buffer-reuse push-pgwire-buffer-reuse
+stage-pgwire-buffer-reuse:
+	bash scripts/deliver-pgwire-buffer-reuse.sh stage
+commit-pgwire-buffer-reuse:
+	bash scripts/deliver-pgwire-buffer-reuse.sh commit
+push-pgwire-buffer-reuse:
+	bash scripts/deliver-pgwire-buffer-reuse.sh push
