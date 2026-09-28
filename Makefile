@@ -28407,3 +28407,7 @@ benchmark-t249-stats:
 
 race-t249-stats:
 	bash scripts/race-t249-stats.sh
+
+.PHONY: audit-hatrie-tmp-names
+audit-hatrie-tmp-names:
+	@bash scripts/audit-hatrie-tmp-names.sh
