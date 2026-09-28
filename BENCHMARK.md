@@ -38629,3 +38629,17 @@ The opt-in budget path costs about 2.35x latency, 2.00x allocated bytes, and
 waiter allocation improved it from 327.3/290.8/276.0/309.0/294.9 ns/op,
 168 B/op, and 4 allocations to the final measurements. Existing admission
 users and defaults are unchanged.
+# C233 CPU-Time Budget
+
+The isolated cooperative-check benchmark was run on `AMD Ryzen 9 5950X
+16-Core Processor`, `linux/amd64`, with `-benchmem -count=5`:
+
+| Variant | Samples (ns/op) | Bytes/op | Allocs/op |
+| --- | --- | ---: | ---: |
+| Origin, budget disabled | 4.969, 4.962, 5.237, 5.159, 4.988 | 0 | 0 |
+| C233, budget disabled | 4.875, 4.757, 4.879, 5.488, 5.589 | 0 | 0 |
+| C233, budget enabled | 7.121, 6.543, 6.609, 6.753, 7.254 | 0 | 0 |
+
+The disabled path does not read the configured clock and remains allocation
+free. The enabled path adds a small clock-read cost but remains allocation
+free; a positive CPU budget is deliberately opt-in.

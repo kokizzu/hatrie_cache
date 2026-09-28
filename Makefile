@@ -28492,3 +28492,16 @@ benchmark-c231-memory-admission-baseline:
 
 benchmark-c231-memory-admission:
 	bash scripts/benchmark-c231-memory-admission.sh
+.PHONY: format-c233 test-c233 race-c233 benchmark-c233
+
+format-c233:
+	@bash scripts/format-c233.sh
+
+test-c233:
+	@bash scripts/test-c233.sh
+
+race-c233:
+	@bash scripts/race-c233.sh
+
+benchmark-c233:
+	@bash scripts/benchmark-c233.sh

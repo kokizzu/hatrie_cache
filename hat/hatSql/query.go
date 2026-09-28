@@ -194,6 +194,27 @@ const MaxSQLQueryThreads = 256
 const MaxSQLOperatorYieldEvery = 1 << 20
 
 var ErrSQLExecutionStepsExceeded = fmt.Errorf("SQL execution step budget exceeded")
+var ErrSQLCPUTimeExceeded = fmt.Errorf("SQL CPU time budget exceeded")
+var ErrSQLCPUTimeSourceRequired = fmt.Errorf("SQL CPU time source is required")
+
+// SQLCPUTimeSource reads a monotonic CPU-time value for the current query's
+// accounting domain. Callers that execute a query across workers should
+// provide a source that accounts for all of those workers.
+type SQLCPUTimeSource struct {
+	read func() time.Duration
+}
+
+// NewSQLCPUTimeSource adapts a monotonic CPU-time reader for SQLQueryOptions.
+func NewSQLCPUTimeSource(read func() time.Duration) *SQLCPUTimeSource {
+	if read == nil {
+		return nil
+	}
+	return &SQLCPUTimeSource{read: read}
+}
+
+func (source *SQLCPUTimeSource) now() time.Duration {
+	return source.read()
+}
 
 // SQLQueryOptions bounds one query. Zero uses the safe default or disables an
 // optional byte/work budget; Timeout derives a deadline from ctx.
@@ -240,6 +261,13 @@ type SQLQueryOptions struct {
 	// one query. Zero keeps the existing unbounded behavior. This is an
 	// opt-in CPU/work proxy, not a wall-clock duration limit.
 	MaxExecutionSteps int
+	// MaxCPUTime bounds cooperative CPU time for one query. Zero preserves the
+	// existing behavior. A positive value requires CPUTimeSource and is checked
+	// only when the query reaches a cooperative execution check.
+	MaxCPUTime time.Duration
+	// CPUTimeSource supplies the monotonic CPU-time clock used by MaxCPUTime.
+	// It must be safe for concurrent calls when Workers is enabled.
+	CPUTimeSource *SQLCPUTimeSource
 	// Quota optionally applies a caller-owned rolling quota registry. Nil keeps
 	// the existing unmetered path.
 	Quota *SQLQuotaRegistry
@@ -8290,6 +8318,9 @@ type sqlExecutionControl struct {
 	yields            atomic.Uint64
 	maxExecutionSteps uint64
 	executionSteps    uint64
+	maxCPUTime        time.Duration
+	cpuTimeSource     *SQLCPUTimeSource
+	cpuStart          time.Duration
 }
 
 // sqlExecutionControlContext preserves the normal context contract while
@@ -8348,8 +8379,11 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if options.MaxRows < 0 || options.MaxIntermediateRows < 0 || options.MaxJoinWork < 0 || options.MaxJoinBytes < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxGroupMergeBytes < 0 || options.MaxGroupKeys < 0 || options.MaxSetBytes < 0 || options.MaxSpillBytes < 0 || options.MaxQuerySpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 || options.Workers < 0 || options.OperatorYieldEvery < 0 || options.MaxExecutionSteps < 0 {
+	if options.MaxRows < 0 || options.MaxIntermediateRows < 0 || options.MaxJoinWork < 0 || options.MaxJoinBytes < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxGroupMergeBytes < 0 || options.MaxGroupKeys < 0 || options.MaxSetBytes < 0 || options.MaxSpillBytes < 0 || options.MaxQuerySpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 || options.Workers < 0 || options.OperatorYieldEvery < 0 || options.MaxExecutionSteps < 0 || options.MaxCPUTime < 0 {
 		return nil, func() {}, fmt.Errorf("SQL query budgets cannot be negative")
+	}
+	if options.MaxCPUTime > 0 && options.CPUTimeSource == nil {
+		return nil, func() {}, fmt.Errorf("%w when MaxCPUTime is set", ErrSQLCPUTimeSourceRequired)
 	}
 	if options.OperatorYieldEvery > MaxSQLOperatorYieldEvery {
 		return nil, func() {}, fmt.Errorf("SQL operator yield quantum exceeds the maximum %d", MaxSQLOperatorYieldEvery)
@@ -8361,7 +8395,10 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 		return nil, func() {}, fmt.Errorf("unsupported SQL collation %q", options.Collation)
 	}
 	newControl := func(controlContext context.Context) *sqlExecutionControl {
-		control := &sqlExecutionControl{ctx: controlContext, maxRows: sqlQueryMaxRows(options), options: options, sources: map[string][]SQLRow{}, operatorMemory: options.OperatorMemoryTracker, maxExecutionSteps: uint64(options.MaxExecutionSteps)}
+		control := &sqlExecutionControl{ctx: controlContext, maxRows: sqlQueryMaxRows(options), options: options, sources: map[string][]SQLRow{}, operatorMemory: options.OperatorMemoryTracker, maxExecutionSteps: uint64(options.MaxExecutionSteps), maxCPUTime: options.MaxCPUTime, cpuTimeSource: options.CPUTimeSource}
+		if control.maxCPUTime > 0 {
+			control.cpuStart = control.cpuTimeSource.now()
+		}
 		if options.MaxQuerySpillBytes > 0 {
 			control.spillQuota = newSQLSpillQuota(options.MaxQuerySpillBytes)
 		}
@@ -8412,6 +8449,12 @@ func (control *sqlExecutionControl) check() error {
 		control.executionSteps++
 		if control.executionSteps > control.maxExecutionSteps {
 			return fmt.Errorf("%w: %d checks, maximum %d", ErrSQLExecutionStepsExceeded, control.executionSteps, control.maxExecutionSteps)
+		}
+	}
+	if control.maxCPUTime > 0 {
+		current := control.cpuTimeSource.now()
+		if current >= control.cpuStart && current-control.cpuStart >= control.maxCPUTime {
+			return fmt.Errorf("%w: %s elapsed, maximum %s", ErrSQLCPUTimeExceeded, current-control.cpuStart, control.maxCPUTime)
 		}
 	}
 	control.maybeYield()
