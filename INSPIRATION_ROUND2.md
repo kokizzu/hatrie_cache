@@ -69,7 +69,7 @@ operator control remain the preferred deployment model.
 - [x] C231 Workload groups with per-class concurrency and memory budgets; see [C231_MEMORY_ADMISSION.md](C231_MEMORY_ADMISSION.md) and [BENCHMARK.md](BENCHMARK.md#c231-workload-memory-admission).
 - [x] C232 Query-complexity limits for rows, joins, and intermediate results.
 - [x] C233 Per-query CPU-time budgets with cooperative cancellation; see [C233_CPU_TIME_BUDGET.md](C233_CPU_TIME_BUDGET.md) and [BENCHMARK.md](BENCHMARK.md#c233-cpu-time-budget).
-- [ ] C234 Query profiler records for stage time, bytes, and allocations.
+- [x] C234 Query profiler records for stage elapsed time, bytes, and optional query-boundary allocations; see [C234_QUERY_PROFILER.md](C234_QUERY_PROFILER.md) and [BENCHMARK.md](BENCHMARK.md#c234-automatic-query-profiler).
 - [x] C235 Read/write task profiler aggregation by table part and column. See [C235_TASK_PROFILER.md](C235_TASK_PROFILER.md).
 - [ ] C236 Explain output for data-skipping-index decisions and rejected marks.
 - [x] C237 Explain output for projection selection and estimated I/O cost; see [C237_PROJECTION_EXPLAIN.md](C237_PROJECTION_EXPLAIN.md) and [BENCHMARK.md](BENCHMARK.md#c237-projection-selection-explain).

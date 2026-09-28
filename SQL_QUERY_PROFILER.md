@@ -77,3 +77,9 @@ The cost is paid only by callers that enable profiling and call `Record`.
 Recording is allocation-free after a query's bounded ring is initialized;
 snapshot copying allocates by design to protect the profiler's internal state.
 See the raw samples in [BENCHMARK.md](BENCHMARK.md#ch-032-query-profiler-samples).
+
+For automatic executor stage samples and optional query-boundary allocation
+counters, use the `SQLQueryOptions.QueryProfiler` integration documented in
+[C234_QUERY_PROFILER.md](C234_QUERY_PROFILER.md). Automatic stage elapsed time
+is reported in `SQLQueryProfileSample.ElapsedTime`; it is distinct from the
+caller-supplied `CPUTime` and `BlockedTime` fields.

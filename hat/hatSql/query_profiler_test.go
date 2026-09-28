@@ -118,11 +118,13 @@ func TestSQLQueryProfilerRejectsInvalidAndClosedUse(t *testing.T) {
 		"operator": {CPUTime: 1},
 		"cpu":      {Operator: "scan", CPUTime: -1},
 		"blocked":  {Operator: "scan", BlockedTime: -1},
+		"elapsed":  {Operator: "scan", ElapsedTime: -1},
 	} {
 		if _, err := profiler.Record("q1", sample); !errors.Is(err, map[string]error{
 			"operator": ErrSQLQueryProfilerOperatorRequired,
 			"cpu":      ErrSQLQueryProfilerDurationInvalid,
 			"blocked":  ErrSQLQueryProfilerDurationInvalid,
+			"elapsed":  ErrSQLQueryProfilerDurationInvalid,
 		}[name]) {
 			t.Errorf("invalid %s error = %v", name, err)
 		}

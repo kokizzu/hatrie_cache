@@ -43,6 +43,10 @@ type SQLQueryProfilerOptions struct {
 	MaxSamplesPerQuery         int
 	MaxMemoryOperatorsPerQuery int
 	SampleEvery                uint64
+	// CaptureAllocations enables query-boundary runtime allocation counters.
+	// It is off by default because runtime memory snapshots are substantially
+	// more expensive than recording existing execution-stage metrics.
+	CaptureAllocations bool
 }
 
 // SQLQueryProfileSample is one privacy-safe operator observation. CPUTime and
@@ -52,6 +56,7 @@ type SQLQueryProfileSample struct {
 	Operator    string        `json:"operator"`
 	CPUTime     time.Duration `json:"cpu_time"`
 	BlockedTime time.Duration `json:"blocked_time"`
+	ElapsedTime time.Duration `json:"elapsed_time"`
 	Rows        uint64        `json:"rows"`
 	Bytes       uint64        `json:"bytes"`
 	Timestamp   time.Time     `json:"timestamp"`
@@ -92,10 +97,14 @@ type SQLQueryMemoryProfile struct {
 // counts captured samples before the per-query ring bound; SamplesDropped
 // counts samples overwritten after that bound was reached.
 type SQLQueryProfile struct {
-	QueryID        string                  `json:"query_id"`
-	Samples        []SQLQueryProfileSample `json:"samples"`
-	SamplesSeen    uint64                  `json:"samples_seen"`
-	SamplesDropped uint64                  `json:"samples_dropped"`
+	QueryID         string                  `json:"query_id"`
+	Samples         []SQLQueryProfileSample `json:"samples"`
+	SamplesSeen     uint64                  `json:"samples_seen"`
+	SamplesDropped  uint64                  `json:"samples_dropped"`
+	ResultBytes     uint64                  `json:"result_bytes"`
+	AllocatedBytes  uint64                  `json:"allocated_bytes"`
+	AllocationCount uint64                  `json:"allocation_count"`
+	HeapBytes       uint64                  `json:"heap_bytes"`
 }
 
 // SQLQueryProfilerStats describes bounded profiler state without exposing
@@ -133,7 +142,9 @@ type SQLQueryProfiler struct {
 	maxSamplesPerQuery            int
 	maxMemoryOperatorsPerQuery    int
 	sampleEvery                   uint64
+	captureAllocations            bool
 	sequence                      uint64
+	querySequence                 uint64
 	sampleCount                   uint64
 	unsampledCount                uint64
 	droppedSampleCount            uint64
@@ -186,6 +197,7 @@ func NewSQLQueryProfiler(options SQLQueryProfilerOptions) (*SQLQueryProfiler, er
 		maxSamplesPerQuery:         maxSamples,
 		maxMemoryOperatorsPerQuery: maxMemoryOperators,
 		sampleEvery:                sampleEvery,
+		captureAllocations:         options.CaptureAllocations,
 		queries:                    make(map[string]*sqlQueryProfileState, maxQueries),
 	}, nil
 }
@@ -207,7 +219,7 @@ func (profiler *SQLQueryProfiler) Record(queryID string, sample SQLQueryProfileS
 	if len(sample.Operator) > maxSQLQueryProfilerOperatorBytes {
 		return false, fmt.Errorf("%w: operator exceeds %d bytes", ErrSQLQueryProfilerOperatorRequired, maxSQLQueryProfilerOperatorBytes)
 	}
-	if sample.CPUTime < 0 || sample.BlockedTime < 0 {
+	if sample.CPUTime < 0 || sample.BlockedTime < 0 || sample.ElapsedTime < 0 {
 		return false, ErrSQLQueryProfilerDurationInvalid
 	}
 	if sample.Timestamp.IsZero() {
@@ -226,20 +238,9 @@ func (profiler *SQLQueryProfiler) Record(queryID string, sample SQLQueryProfileS
 		return false, nil
 	}
 
-	state := profiler.queries[queryID]
-	if state == nil {
-		if len(profiler.queries) >= profiler.maxQueries {
-			profiler.evictOldestLocked()
-		}
-		state = &sqlQueryProfileState{
-			profile: SQLQueryProfile{
-				QueryID: queryID,
-				Samples: make([]SQLQueryProfileSample, 0, profiler.maxSamplesPerQuery),
-			},
-		}
-		profiler.queries[queryID] = state
-	}
-	state.lastSeen = sequence
+	state := profiler.ensureQueryProfileLocked(queryID)
+	profiler.querySequence++
+	state.lastSeen = profiler.querySequence
 	state.profile.SamplesSeen++
 	profiler.sampleCount++
 	if len(state.profile.Samples) < profiler.maxSamplesPerQuery {
@@ -257,6 +258,59 @@ func (profiler *SQLQueryProfiler) Record(queryID string, sample SQLQueryProfileS
 	state.profile.SamplesDropped++
 	profiler.droppedSampleCount++
 	return true, nil
+}
+
+// recordQueryEvent converts privacy-safe executor stages into bounded samples
+// and stores query-boundary allocation counters. Allocation counters cover the
+// whole query; they are not attributed to an individual stage.
+func (profiler *SQLQueryProfiler) recordQueryEvent(event QueryEvent) {
+	if profiler == nil || event.QueryID == "" {
+		return
+	}
+	for _, operator := range event.Operators {
+		rows := uint64(0)
+		if operator.OutputRows > 0 {
+			rows = uint64(operator.OutputRows)
+		}
+		bytes := uint64(0)
+		if operator.OutputBytes != nil && *operator.OutputBytes > 0 {
+			bytes = uint64(*operator.OutputBytes)
+		} else if operator.InputBytes != nil && *operator.InputBytes > 0 {
+			bytes = uint64(*operator.InputBytes)
+		}
+		elapsedTime := time.Duration(0)
+		if operator.ElapsedNanos > 0 {
+			elapsedTime = time.Duration(operator.ElapsedNanos)
+		}
+		_, _ = profiler.Record(event.QueryID, SQLQueryProfileSample{
+			Operator:    operator.Node,
+			ElapsedTime: elapsedTime,
+			Rows:        rows,
+			Bytes:       bytes,
+			Timestamp:   time.Now(),
+		})
+	}
+
+	queryID, err := normalizeSQLQueryProfilerQueryID(event.QueryID)
+	if err != nil {
+		return
+	}
+	profiler.mu.Lock()
+	defer profiler.mu.Unlock()
+	if profiler.closed {
+		return
+	}
+	state := profiler.ensureQueryProfileLocked(queryID)
+	profiler.querySequence++
+	state.lastSeen = profiler.querySequence
+	if event.ResultBytes > 0 {
+		state.profile.ResultBytes = uint64(event.ResultBytes)
+	} else {
+		state.profile.ResultBytes = 0
+	}
+	state.profile.AllocatedBytes = event.AllocatedBytes
+	state.profile.AllocationCount = event.AllocationCount
+	state.profile.HeapBytes = event.HeapBytes
 }
 
 // RecordMemory records one bounded operator memory observation. It is
@@ -418,6 +472,24 @@ func (profiler *SQLQueryProfiler) Close() {
 	profiler.mu.Lock()
 	profiler.closed = true
 	profiler.mu.Unlock()
+}
+
+func (profiler *SQLQueryProfiler) ensureQueryProfileLocked(queryID string) *sqlQueryProfileState {
+	state := profiler.queries[queryID]
+	if state != nil {
+		return state
+	}
+	if len(profiler.queries) >= profiler.maxQueries {
+		profiler.evictOldestLocked()
+	}
+	state = &sqlQueryProfileState{
+		profile: SQLQueryProfile{
+			QueryID: queryID,
+			Samples: make([]SQLQueryProfileSample, 0, profiler.maxSamplesPerQuery),
+		},
+	}
+	profiler.queries[queryID] = state
+	return state
 }
 
 func (profiler *SQLQueryProfiler) evictOldestLocked() {

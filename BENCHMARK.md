@@ -1168,6 +1168,42 @@ This is an opt-in diagnostics API, so these costs are not added to ordinary
 SQL execution. Recording retains bounded state without per-sample allocation;
 inspection allocates a defensive copy so readers cannot mutate live state.
 
+## C234 Automatic Query Profiler
+
+This compares a clean `origin/master` baseline with the C234 candidate on an
+AMD Ryzen 9 5950X. Each run used `go test -benchmem -count=5 -benchtime=500ms`
+against the same two-row SQL query. The profiler benchmark reuses one bounded
+query ID so the result measures steady state rather than profile creation and
+eviction.
+
+### Raw Samples
+
+~~~text
+Clean baseline:
+BenchmarkC234QueryDefault-32   7748  7923  7354  7828  7512 ns/op, 4592 B/op, 19 allocs/op
+BenchmarkC234QueryObserver-32  9555  9362  9349  9429  9095 ns/op, 5316 B/op, 30 allocs/op
+
+Candidate:
+BenchmarkC234QueryDefault-32                8449  8187  8397  8433  8250 ns/op, 4592 B/op, 19 allocs/op
+BenchmarkC234QueryObserver-32              12693 11078 10547 10795 10406 ns/op, 5316-5317 B/op, 30 allocs/op
+BenchmarkC234QueryProfiler-32              10952 10812 10608 11553 10533 ns/op, 5316-5317 B/op, 30 allocs/op
+BenchmarkC234QueryProfilerAllocations-32   58260 59003 59326 58877 57218 ns/op, 5332 B/op, 30 allocs/op
+~~~
+
+### Median Comparison
+
+| Path | Median ns/op | B/op | Allocs/op | Relative to clean default |
+| --- | ---: | ---: | ---: | ---: |
+| Clean default | 7,748 | 4,592 | 19 | 1.00x |
+| Existing observer | 9,362 | 5,316 | 30 | 1.21x |
+| Automatic profiler, allocation capture off | 10,812 | 5,317 | 30 | 1.40x |
+| Automatic profiler, allocation capture on | 58,877 | 5,332 | 30 | 7.60x |
+
+The profiler's default mode records existing stage metrics without runtime
+memory snapshots. `CaptureAllocations=true` adds two `runtime.MemStats` reads
+per query and is therefore intentionally opt-in; its allocation counters are
+query-boundary totals, not per-stage attribution.
+
 ## CH-012: Bitmap-Backed Lightweight Logical Deletes
 
 CH-012 replaces the per-row `[]bool` tombstone mask used by opt-in typed-table

@@ -16,6 +16,7 @@ security guidance before exposing it on a network.
 - Opt-in priority-queue visibility leases for worker crash recovery: [T245_QUEUE_VISIBILITY.md](T245_QUEUE_VISIBILITY.md), with CPU, memory, and allocation measurements in [BENCHMARK.md](BENCHMARK.md#t245-priority-queue-visibility-leases).
 - Opt-in starvation bounds for priority visibility queues: [T246_PRIORITY_QUEUE_STARVATION.md](T246_PRIORITY_QUEUE_STARVATION.md), with the default strict-priority path and fairness cost measured in [BENCHMARK.md](BENCHMARK.md#t246-priority-queue-starvation-bounds).
 - Opt-in SQL memory-overcommit admission queues: [C230_MEMORY_OVERCOMMIT.md](C230_MEMORY_OVERCOMMIT.md), with default-path and reservation costs measured in [BENCHMARK.md](BENCHMARK.md#c230-memory-overcommit-admission).
+- Opt-in automatic SQL stage profiling with optional query-boundary allocation counters: [C234_QUERY_PROFILER.md](C234_QUERY_PROFILER.md), with stage and allocation capture tradeoffs measured in [BENCHMARK.md](BENCHMARK.md#c234-automatic-query-profiler).
 - New to the cache commands and value types: [DATA_STRUCTURE.md](DATA_STRUCTURE.md)
 - ClickHouse-style SQL RowBinary streaming export and bounded bulk import: [CH050_SQL_ROW_BINARY_STREAM.md](CH050_SQL_ROW_BINARY_STREAM.md)
 - Opt-in ClickHouse-style `*_OR_NULL` grouped aggregates on the native columnar path: [CH038_OR_NULL_COLUMNAR.md](CH038_OR_NULL_COLUMNAR.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-038-or-null-columnar-aggregates)
