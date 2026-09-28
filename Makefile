@@ -22057,3 +22057,32 @@ cleanup-hatrie-tmp-commit:
 cleanup-hatrie-tmp-push:
 
 	bash scripts/push-cleanup-hatrie-tmp.sh
+
+.PHONY: format-hash-key-fastpath test-hash-key-fastpath test-hash-key-fastpath-package benchmark-hash-key-baseline benchmark-hash-key-fastpath race-hash-key-fastpath
+format-hash-key-fastpath:
+	bash scripts/format-hash-key-fastpath.sh
+
+test-hash-key-fastpath:
+	bash scripts/test-hash-key-fastpath.sh
+
+test-hash-key-fastpath-package:
+	bash scripts/test-hash-package.sh
+
+benchmark-hash-key-baseline:
+	bash scripts/benchmark-hash-key-baseline.sh
+
+benchmark-hash-key-fastpath:
+	bash scripts/benchmark-hash-key-fastpath.sh
+
+race-hash-key-fastpath:
+	bash scripts/race-hash-key-fastpath.sh
+
+.PHONY: stage-hash-key-fastpath commit-hash-key-fastpath push-hash-key-fastpath
+stage-hash-key-fastpath:
+	bash scripts/deliver-hash-key-fastpath.sh stage
+
+commit-hash-key-fastpath:
+	bash scripts/deliver-hash-key-fastpath.sh commit
+
+push-hash-key-fastpath:
+	bash scripts/deliver-hash-key-fastpath.sh push

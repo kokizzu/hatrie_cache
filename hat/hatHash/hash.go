@@ -27,6 +27,34 @@ func FNV1_64(value []byte) uint64 {
 	return hash
 }
 
+// FNV1a64Uint64 hashes value in canonical big-endian byte order without
+// materializing an intermediate byte slice.
+func FNV1a64Uint64(value uint64) uint64 {
+	hash := FNVOffset64
+	hash ^= (value >> 56) & 0xff
+	hash *= FNVPrime64
+	hash ^= (value >> 48) & 0xff
+	hash *= FNVPrime64
+	hash ^= (value >> 40) & 0xff
+	hash *= FNVPrime64
+	hash ^= (value >> 32) & 0xff
+	hash *= FNVPrime64
+	hash ^= (value >> 24) & 0xff
+	hash *= FNVPrime64
+	hash ^= (value >> 16) & 0xff
+	hash *= FNVPrime64
+	hash ^= (value >> 8) & 0xff
+	hash *= FNVPrime64
+	hash ^= value & 0xff
+	return hash * FNVPrime64
+}
+
+// FNV1a64Int64 hashes value's two's-complement bits in canonical big-endian
+// byte order without materializing an intermediate byte slice.
+func FNV1a64Int64(value int64) uint64 {
+	return FNV1a64Uint64(uint64(value))
+}
+
 // FNV1a64JSONString hashes a JSON string payload without allocating it.
 func FNV1a64JSONString(value string) uint64 {
 	hash := FNVOffset64
