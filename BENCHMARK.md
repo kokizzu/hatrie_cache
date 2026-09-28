@@ -38495,3 +38495,18 @@ The bounded state is an opt-in distributed-partial primitive. It accepts the
 CPU cost to retain only `O(k)` counters and to merge partial summaries without
 replaying every row; the existing exact and SQL paths remain unchanged. See
 [APPROX_TOP_K_STATE.md](APPROX_TOP_K_STATE.md).
+
+## C223 Mergeable Approximate Sketch States
+
+Five isolated `-benchmem` samples on an AMD Ryzen 9 5950X compared two already
+partitioned inputs with replaying every raw value into one sketch.
+
+| State | Replay baseline median | Merge median | CPU result | Replay / merge heap | Replay / merge allocs |
+| --- | ---: | ---: | --- | ---: | ---: |
+| HyperLogLog, 8,192 values | 102,810 ns/op | 2,956 ns/op | 34.8x faster | 1,024 / 1,024 B/op | 1 / 1 |
+| QuantileSketch, 4,096 values | 144,895 ns/op | 1,071 ns/op | 135x faster | 1,512 / 2,624 B/op | 6 / 6 |
+
+The quantile merge allocates a combined summary copy, a bounded 1.74x heap
+increase in exchange for avoiding raw-row replay. Existing SQL approximate
+aggregate evaluation remains unchanged. See
+[MERGEABLE_APPROX_SKETCHES.md](MERGEABLE_APPROX_SKETCHES.md).

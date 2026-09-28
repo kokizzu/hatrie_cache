@@ -28371,3 +28371,15 @@ format-topk-c222:
 
 race-topk-c222:
 	bash scripts/race-topk-c222.sh
+
+test-c223-merge:
+	bash scripts/test-c223-merge.sh
+
+benchmark-c223-merge:
+	bash scripts/benchmark-c223-merge.sh
+
+format-c223-merge:
+	bash scripts/format-c223-merge.sh
+
+race-c223-merge:
+	bash scripts/race-c223-merge.sh
