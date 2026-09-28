@@ -314,6 +314,14 @@ type SQLQueryOptions struct {
 	// per SQL operator and can enforce its configured per-operator limit. Nil
 	// keeps the default path free of tracker allocations and accounting.
 	OperatorMemoryTracker *SQLOperatorMemoryTracker
+	// MemoryAdmission optionally queues this query until its declared memory
+	// reservation fits a shared hard budget. Nil preserves the existing query
+	// path and is the default.
+	MemoryAdmission *SQLMemoryAdmission
+	// MemoryReservationBytes is the caller's conservative peak working-memory
+	// reservation for this query. Zero disables admission; a positive value
+	// requires MemoryAdmission.
+	MemoryReservationBytes int64
 	// SpillFaults is an optional per-query external-sort I/O hook. It exists
 	// for deterministic fault-injection and chaos tests; production callers
 	// normally leave it nil.
@@ -873,6 +881,17 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		observation.attachPlanSnapshot(&result, operatorSteps)
 		observation.finish(result, err, operatorSteps, source, parameters)
 	}()
+	if options.MemoryReservationBytes < 0 || (options.MemoryReservationBytes > 0 && options.MemoryAdmission == nil) {
+		return result, ErrSQLMemoryAdmissionRequestInvalid
+	}
+	if options.MemoryReservationBytes > 0 {
+		var releaseMemory func()
+		releaseMemory, err = options.MemoryAdmission.Acquire(ctx, options.MemoryReservationBytes)
+		if err != nil {
+			return result, err
+		}
+		defer releaseMemory()
+	}
 	var snapshotResolver SQLSourceResolver
 	var snapshotRelease func()
 	var snapshotErr error

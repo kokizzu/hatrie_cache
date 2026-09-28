@@ -38780,3 +38780,38 @@ T246 bound16/1024:    357.9 382.5 367.1 382.7 380.2 344.9 375.4 ns/op
 
 See [T246_PRIORITY_QUEUE_STARVATION.md](T246_PRIORITY_QUEUE_STARVATION.md) for
 the API and the fairness semantics.
+
+<a id="c230-memory-overcommit-admission"></a>
+## C230 Memory-Overcommit Admission
+
+The paired run compares the clean `origin/master` worktree with the candidate
+after the fast-path allocation reduction. It uses seven 500ms samples of
+`go test ./hat/hatSql -run '^$' -bench ... -benchmem` on an AMD Ryzen 9 5950X.
+The candidate was run after the baseline in the same invocation, so the rows
+are controls for process and CPU-frequency variation rather than a claim that
+the feature makes ordinary queries faster.
+
+| Workload | Clean baseline median | Candidate median | Candidate / baseline |
+| --- | ---: | ---: | ---: |
+| `BenchmarkCH030QueryDefault` | 12,417 ns/op, 6,080 B/op, 32 allocs/op | 10,987 ns/op, 6,080 B/op, 32 allocs/op | 0.88x |
+| `BenchmarkCH031SQLQueryManagerDefaultExecute` | 12,168 ns/op, 5,393 B/op, 30 allocs/op | 11,079 ns/op, 5,393 B/op, 30 allocs/op | 0.91x |
+| Opt-in reservation `Acquire` + release | N/A | 111.5 ns/op, 48 B/op, 2 allocs/op | New path |
+
+The default query rows retain identical allocation counts and show no measured
+regression in this run. The reservation row is the cost of the explicit
+controller fast path after capacity is immediately available; queued requests
+also allocate a bounded waiter/channel only when they actually block.
+
+Raw samples (ns/op):
+
+```text
+CH030 baseline: 12627 11828 10919 12417 12801 12260 12830
+CH030 candidate: 10002 10301 10614 11602 11606 12428 10987
+CH031 baseline: 12296 12252 10621 12262 12168 11103 10496
+CH031 candidate: 11558 11326 11357 10795 11020 10752 11079
+reservation: 126.8 123.6 120.0 105.5 103.9 111.5 102.3
+```
+
+See [C230_MEMORY_OVERCOMMIT.md](C230_MEMORY_OVERCOMMIT.md) for the API and
+the distinction between declared admission reservations and per-operator
+memory enforcement.

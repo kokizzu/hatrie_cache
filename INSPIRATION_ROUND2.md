@@ -63,7 +63,9 @@ operator control remain the preferred deployment model.
 - [x] C227 External aggregation spilling with merge-time memory limits; `SQLQueryOptions.MaxGroupMergeBytes` bounds the decoded spill-reader frontier, stays off by default, and cleans temporary files on rejection. See [C227_GROUP_MERGE_BUDGET.md](C227_GROUP_MERGE_BUDGET.md) and [BENCHMARK.md#c227-external-group-merge-memory-budget](BENCHMARK.md#c227-external-group-merge-memory-budget).
 - [ ] C228 External sort spilling with stable run ordering.
 - [x] C229 Explicit join overflow policy for auto, reject, and bounded spill; truncation remains intentionally unsupported to preserve SQL correctness. See [C229_JOIN_OVERFLOW_POLICY.md](C229_JOIN_OVERFLOW_POLICY.md) and [BENCHMARK.md#c229-join-overflow-policy](BENCHMARK.md#c229-join-overflow-policy).
-- [ ] C230 Memory-overcommit wait queues before query cancellation.
+- [x] C230 Memory-overcommit wait queues before query cancellation; see
+  [C230_MEMORY_OVERCOMMIT.md](C230_MEMORY_OVERCOMMIT.md) and the measurements in
+  [BENCHMARK.md](BENCHMARK.md#c230-memory-overcommit-admission).
 - [x] C231 Workload groups with per-class concurrency and memory budgets; see [C231_MEMORY_ADMISSION.md](C231_MEMORY_ADMISSION.md) and [BENCHMARK.md](BENCHMARK.md#c231-workload-memory-admission).
 - [x] C232 Query-complexity limits for rows, joins, and intermediate results.
 - [x] C233 Per-query CPU-time budgets with cooperative cancellation; see [C233_CPU_TIME_BUDGET.md](C233_CPU_TIME_BUDGET.md) and [BENCHMARK.md](BENCHMARK.md#c233-cpu-time-budget).
