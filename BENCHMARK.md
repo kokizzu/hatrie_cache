@@ -1195,7 +1195,8 @@ BenchmarkC234QueryProfilerAllocations-32   58260 59003 59326 58877 57218 ns/op, 
 | Path | Median ns/op | B/op | Allocs/op | Relative to clean default |
 | --- | ---: | ---: | ---: | ---: |
 | Clean default | 7,748 | 4,592 | 19 | 1.00x |
-| Existing observer | 9,362 | 5,316 | 30 | 1.21x |
+| Candidate default | 8,397 | 4,592 | 19 | 1.08x |
+| Candidate existing observer | 10,795 | 5,316 | 30 | 1.39x |
 | Automatic profiler, allocation capture off | 10,812 | 5,317 | 30 | 1.40x |
 | Automatic profiler, allocation capture on | 58,877 | 5,332 | 30 | 7.60x |
 
