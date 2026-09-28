@@ -190,7 +190,7 @@ operator control remain the preferred deployment model.
   [DEDUPLICATING_QUEUE.md](DEDUPLICATING_QUEUE.md) and
   [BENCHMARK.md](BENCHMARK.md#t247-deduplicating-queue).
 - [ ] T248 Retry counters and dead-letter routing for failed tasks.
-- [ ] T249 Queue capacity, age, retry, and consumer-lag metrics.
+- [x] T249 Queue capacity, age, retry, and consumer-lag metrics. See [`QUEUE_STATS.md`](QUEUE_STATS.md).
 - [ ] T250 Gap-safe sequence allocation with durable current value.
 ## C204 Status
 

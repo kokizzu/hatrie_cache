@@ -38524,3 +38524,16 @@ client identities on an AMD Ryzen 9 5950X.
 The queue is opt-in policy state: the map lookup costs CPU, but duplicate-heavy
 workloads avoid repeated task execution and retain only active unique keys. See
 [DEDUPLICATING_QUEUE.md](DEDUPLICATING_QUEUE.md).
+
+## T249 queue metrics snapshot
+
+Workload: 4,096 pending items and 128 retained dead letters; five benchmark
+runs, median shown.
+
+| Operation | ns/op | B/op | allocs/op | Relative time |
+| --- | ---: | ---: | ---: | ---: |
+| Manual `DeadLetters()` copy and scan | 2,053 | 12,288 | 1 | 1.00x |
+| `DeadLetterQueue.Stats(now)` | 615.4 | 0 | 0 | 3.34x faster |
+
+`Stats(now)` keeps pending inspection O(1) by reporting whether the earliest
+item is ready instead of counting all ready heap entries.

@@ -28395,3 +28395,15 @@ format-t247-dedup:
 
 race-t247-dedup:
 	bash scripts/race-t247-dedup.sh
+
+test-t249-stats:
+	bash scripts/test-t249-stats.sh
+
+format-t249-stats:
+	bash scripts/format-t249-stats.sh
+
+benchmark-t249-stats:
+	bash scripts/benchmark-t249-stats.sh
+
+race-t249-stats:
+	bash scripts/race-t249-stats.sh
