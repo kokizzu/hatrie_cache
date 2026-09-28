@@ -28274,3 +28274,16 @@ race-codec-low-cardinality:
 	bash scripts/race-codec-low-cardinality.sh
 deliver-codec-low-cardinality:
 	bash scripts/deliver-low-cardinality.sh
+# compact-timestamp-feature
+benchmark-codec-timestamps:
+	bash scripts/benchmark-codec-timestamps.sh
+format-codec-timestamps:
+	bash scripts/format-codec-timestamps.sh
+test-codec-timestamps:
+	bash scripts/test-codec-timestamps.sh
+test-codec-timestamps-package:
+	bash scripts/test-codec-timestamps-package.sh
+race-codec-timestamps:
+	bash scripts/race-codec-timestamps.sh
+deliver-codec-timestamps:
+	bash scripts/deliver-timestamps.sh
