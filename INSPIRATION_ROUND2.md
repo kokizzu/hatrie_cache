@@ -191,7 +191,7 @@ operator control remain the preferred deployment model.
   [BENCHMARK.md](BENCHMARK.md#t247-deduplicating-queue).
 - [ ] T248 Retry counters and dead-letter routing for failed tasks.
 - [x] T249 Queue capacity, age, retry, and consumer-lag metrics. See [`QUEUE_STATS.md`](QUEUE_STATS.md).
-- [ ] T250 Gap-safe sequence allocation with durable current value.
+- [x] T250 Gap-safe sequence allocation with durable current value. `hatDataStructure.DurableSequence` persists the candidate before advancing its in-memory current value, retries the same value after persistence failure, and rejects overflow; see [T250_GAP_SAFE_SEQUENCE.md](T250_GAP_SAFE_SEQUENCE.md).
 ## C204 Status
 
 C204 is adopted. Idempotency keys now propagate from async journal entries

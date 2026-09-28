@@ -28411,3 +28411,19 @@ race-t249-stats:
 .PHONY: audit-hatrie-tmp-names
 audit-hatrie-tmp-names:
 	@bash scripts/audit-hatrie-tmp-names.sh
+
+.PHONY: test-t250-durable-sequence format-t250-durable-sequence benchmark-t250-durable-sequence-baseline benchmark-t250-durable-sequence race-t250-durable-sequence
+test-t250-durable-sequence:
+	@bash scripts/test-t250-durable-sequence.sh
+
+format-t250-durable-sequence:
+	@bash scripts/format-t250-durable-sequence.sh
+
+benchmark-t250-durable-sequence-baseline:
+	@bash scripts/benchmark-t250-durable-sequence-baseline.sh
+
+benchmark-t250-durable-sequence:
+	@bash scripts/benchmark-t250-durable-sequence.sh
+
+race-t250-durable-sequence:
+	@bash scripts/race-t250-durable-sequence.sh

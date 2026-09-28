@@ -38537,3 +38537,15 @@ runs, median shown.
 
 `Stats(now)` keeps pending inspection O(1) by reporting whether the earliest
 item is ready instead of counting all ready heap entries.
+
+## T250 Gap-Safe Durable Sequence Allocation
+
+The T250 durable sequence benchmark compares the existing atomic increment control with the opt-in persistence-serialized sequence. Five samples ran on AMD Ryzen 9 5950X, amd64.
+
+| Operation | Median | Heap | Allocs | Tradeoff |
+| --- | ---: | ---: | ---: | --- |
+| Atomic increment baseline | 1.964 ns/op | 0 B/op | 0 | Existing in-memory control |
+| DurableSequence.Next | 8.304 ns/op | 0 B/op | 0 | 4.23x slower for serialized durability |
+| DurableSequence.Current | 4.840 ns/op | 0 B/op | 0 | Mutex-protected read |
+
+The feature is opt-in and does not replace an existing default allocator. A real persistence callback adds its storage latency. Raw commands: `make benchmark-t250-durable-sequence-baseline` and `make benchmark-t250-durable-sequence`.
