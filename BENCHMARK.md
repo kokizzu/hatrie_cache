@@ -37606,37 +37606,92 @@ BenchmarkTT024TextIndexRestore-32    100 9478444 ns/op 41.41 MB/s 392482 wire-by
 ## MZ-045 Versioned Arrangement Plan Cache
 
 This compares repeated EXPLAIN planning for the same normalized query and
-source metadata. The baseline resolves and clones arrangement metadata on
-every plan. The cache case warms one bounded versioned entry, then reuses the
-marked recommendation. Linux amd64, AMD Ryzen 9 5950X, five samples per case,
-`-benchtime=100x`.
+source metadata. The bounded cache stores raw source/version metadata and
+reapplies the workload-specific recommendation on each defensive copy, which
+also enables the M214 cross-plan case below. Linux amd64, AMD Ryzen 9 5950X,
+five samples per case, `-benchtime=500ms`.
 
 | Case | Median ns/op | Median B/op | Median allocs/op | Relative result |
 | --- | ---: | ---: | ---: | --- |
-| Metadata resolution baseline | 2,468 | 3,026 | 23 | baseline |
-| Warm versioned plan cache | 1,955 | 2,768 | 17 | 1.26x faster; 8.5% lower B/op; 26.1% fewer allocs |
+| Clean baseline, metadata resolution | 4,697 | 2,983 | 23 | baseline |
+| Clean baseline, warm versioned cache | 4,261 | 2,774 | 17 | 1.10x faster; 7.0% lower B/op; 26.1% fewer allocs |
+| M214 candidate, metadata resolution | 4,260 | 2,983 | 23 | baseline |
+| M214 candidate, warm versioned cache | 4,112 | 2,838 | 21 | 1.04x faster; 4.9% lower B/op; 8.7% fewer allocs |
 
 The cache is opt-in, bounded to 64 entries and 1 MiB by default, and bypassed
 when either the cache pointer or explicit version is absent. The key combines
-the compiled query token fingerprint, source kind/key, and caller-supplied
-metadata version. Callers must advance the version or call `Invalidate` when
-physical arrangement metadata changes. Cached output is cloned before return,
-so callers cannot mutate retained entries.
+the source kind/key and caller-supplied metadata version; query-specific
+recommendation flags are applied after the raw metadata is cloned. Callers
+must advance the version or call `Invalidate` when physical arrangement
+metadata changes. Cached output is cloned before return, so callers cannot
+mutate retained entries.
 
-Raw output:
+Raw output from the clean baseline:
 
 ```text
-BenchmarkMZ045ArrangementMetadataBaseline-32    100 2750 ns/op 3026 B/op 23 allocs/op
-BenchmarkMZ045ArrangementMetadataBaseline-32    100 2186 ns/op 3026 B/op 23 allocs/op
-BenchmarkMZ045ArrangementMetadataBaseline-32    100 2920 ns/op 3027 B/op 23 allocs/op
-BenchmarkMZ045ArrangementMetadataBaseline-32    100 2043 ns/op 3024 B/op 23 allocs/op
-BenchmarkMZ045ArrangementMetadataBaseline-32    100 2468 ns/op 3026 B/op 23 allocs/op
-BenchmarkMZ045ArrangementMetadataCache-32       100 1596 ns/op 2768 B/op 17 allocs/op
-BenchmarkMZ045ArrangementMetadataCache-32       100 1731 ns/op 2768 B/op 17 allocs/op
-BenchmarkMZ045ArrangementMetadataCache-32       100 2399 ns/op 2768 B/op 17 allocs/op
-BenchmarkMZ045ArrangementMetadataCache-32       100 1955 ns/op 2768 B/op 17 allocs/op
-BenchmarkMZ045ArrangementMetadataCache-32       100 2094 ns/op 2768 B/op 17 allocs/op
+BenchmarkMZ045ArrangementMetadataBaseline-32  4697 ns/op 2983 B/op 23 allocs/op
+BenchmarkMZ045ArrangementMetadataBaseline-32  4479 ns/op 2983 B/op 23 allocs/op
+BenchmarkMZ045ArrangementMetadataBaseline-32  4671 ns/op 2983 B/op 23 allocs/op
+BenchmarkMZ045ArrangementMetadataBaseline-32  5023 ns/op 2983 B/op 23 allocs/op
+BenchmarkMZ045ArrangementMetadataBaseline-32  5073 ns/op 2983 B/op 23 allocs/op
+BenchmarkMZ045ArrangementMetadataCache-32     4064 ns/op 2774 B/op 17 allocs/op
+BenchmarkMZ045ArrangementMetadataCache-32     4261 ns/op 2774 B/op 17 allocs/op
+BenchmarkMZ045ArrangementMetadataCache-32     4153 ns/op 2774 B/op 17 allocs/op
+BenchmarkMZ045ArrangementMetadataCache-32     4560 ns/op 2774 B/op 17 allocs/op
+BenchmarkMZ045ArrangementMetadataCache-32     4574 ns/op 2774 B/op 17 allocs/op
 ```
+
+Raw output from the M214 candidate:
+
+```text
+BenchmarkMZ045ArrangementMetadataBaseline-32  4392 ns/op 2983 B/op 23 allocs/op
+BenchmarkMZ045ArrangementMetadataBaseline-32  4260 ns/op 2983 B/op 23 allocs/op
+BenchmarkMZ045ArrangementMetadataBaseline-32  4064 ns/op 2983 B/op 23 allocs/op
+BenchmarkMZ045ArrangementMetadataBaseline-32  4263 ns/op 2983 B/op 23 allocs/op
+BenchmarkMZ045ArrangementMetadataBaseline-32  4168 ns/op 2983 B/op 23 allocs/op
+BenchmarkMZ045ArrangementMetadataCache-32     4112 ns/op 2838 B/op 21 allocs/op
+BenchmarkMZ045ArrangementMetadataCache-32     3973 ns/op 2838 B/op 21 allocs/op
+BenchmarkMZ045ArrangementMetadataCache-32     4208 ns/op 2838 B/op 21 allocs/op
+BenchmarkMZ045ArrangementMetadataCache-32     4151 ns/op 2838 B/op 21 allocs/op
+BenchmarkMZ045ArrangementMetadataCache-32     3880 ns/op 2838 B/op 21 allocs/op
+```
+
+<a id="m214-cross-plan-arrangement-metadata-reuse"></a>
+## M214 Cross-Plan Arrangement Metadata Reuse
+
+This paired workload creates two different compatible plans over the same
+source and metadata version. The before path uses the existing query-keyed
+cache, so both plans resolve the same source metadata. The after path shares
+the raw source/version entry and applies each plan's recommendation flags to a
+defensive copy. Five samples used `-benchtime=500ms`.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative |
+| --- | ---: | ---: | ---: | ---: |
+| Before: query-keyed cache | 15,046 | 7,434 | 63 | 1.00x |
+| After: source/version reuse | 9,732 | 6,800 | 54 | 1.55x faster; 8.5% lower B/op; 14.3% fewer allocs |
+
+Raw samples:
+
+```text
+Before:
+BenchmarkM214CompatibleArrangementPlanCache-32  39531  13461 ns/op  7434 B/op  63 allocs/op
+BenchmarkM214CompatibleArrangementPlanCache-32  40530  15046 ns/op  7434 B/op  63 allocs/op
+BenchmarkM214CompatibleArrangementPlanCache-32  32767  16512 ns/op  7434 B/op  63 allocs/op
+BenchmarkM214CompatibleArrangementPlanCache-32  33394  15506 ns/op  7435 B/op  63 allocs/op
+BenchmarkM214CompatibleArrangementPlanCache-32  40945  15046 ns/op  7434 B/op  63 allocs/op
+
+After:
+BenchmarkM214CompatibleArrangementPlanCache-32  46575  12738 ns/op  6801 B/op  54 allocs/op
+BenchmarkM214CompatibleArrangementPlanCache-32  59586  11112 ns/op  6800 B/op  54 allocs/op
+BenchmarkM214CompatibleArrangementPlanCache-32  61386   9407 ns/op  6800 B/op  54 allocs/op
+BenchmarkM214CompatibleArrangementPlanCache-32  57675   9602 ns/op  6800 B/op  54 allocs/op
+BenchmarkM214CompatibleArrangementPlanCache-32  67104   9732 ns/op  6800 B/op  54 allocs/op
+```
+
+M214 remains opt-in and metadata-only; it does not automatically create or
+hydrate live arrangements. The exact-hit control above shows the small cost
+of per-query recommendation reapplication; the two-compatible-plan workload
+is the intended cross-plan optimization.
 ## CH-025: Compaction-Pool Priority Policy
 
 Command: `make benchmark-ch025-priority` on AMD Ryzen 9 5950X, linux/amd64.

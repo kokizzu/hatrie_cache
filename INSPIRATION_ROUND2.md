@@ -102,7 +102,7 @@ operator control remain the preferred deployment model.
 - [x] M211 Explicit rejection of reads before `since` or at/after `upper` frontiers; see [SQL_AS_OF.md](SQL_AS_OF.md).
 - [x] M212 logical compaction with a monotone frontier; see `M212_LOGICAL_COMPACTION.md`.
 - [x] M213 Consolidation of equal updates before forwarding to downstream consumers; see [M213_DIFFERENTIAL_CONSOLIDATION.md](M213_DIFFERENTIAL_CONSOLIDATION.md).
-- [ ] M214 Arrangement reuse across indexes and compatible query plans.
+- [x] M214 Arrangement metadata reuse across compatible query plans; see [M214_ARRANGEMENT_REUSE.md](M214_ARRANGEMENT_REUSE.md) and [BENCHMARK.md#m214-cross-plan-arrangement-metadata-reuse](BENCHMARK.md#m214-cross-plan-arrangement-metadata-reuse).
 - [ ] M215 Delta-join maintenance for high-churn join inputs.
 - [ ] M216 Incremental top-K arrangements with bounded replacement state.
 - [ ] M217 Indexes that store complete maintained view results for point lookups.

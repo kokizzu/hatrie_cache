@@ -43,7 +43,6 @@ type SQLArrangementPlanCacheStats struct {
 }
 
 type sqlArrangementPlanCacheKey struct {
-	queryKey   string
 	sourceKind string
 	sourceKey  string
 	version    string
@@ -56,8 +55,9 @@ type sqlArrangementPlanCacheEntry struct {
 }
 
 // SQLArrangementPlanCache reuses bounded EXPLAIN arrangement metadata for an
-// exact normalized query/source/version identity. It is safe for concurrent
-// readers and is opt-in through SQLQueryOptions.
+// exact source/version identity. Recommendation flags are applied per query
+// after the source metadata is reused, so compatible plans share one lookup.
+// It is safe for concurrent readers and is opt-in through SQLQueryOptions.
 type SQLArrangementPlanCache struct {
 	mu         sync.Mutex
 	maxEntries int
@@ -162,9 +162,8 @@ func (cache *SQLArrangementPlanCache) initLocked() {
 	}
 }
 
-func (cache *SQLArrangementPlanCache) resolve(query *sqlQuery, resolver SQLSourceResolver, source sqlSource, workload SQLArrangementWorkload, version string) []SQLArrangementMetadata {
+func (cache *SQLArrangementPlanCache) resolve(resolver SQLSourceResolver, source sqlSource, workload SQLArrangementWorkload, version string) []SQLArrangementMetadata {
 	key := sqlArrangementPlanCacheKey{
-		queryKey:   query.cacheKey,
 		sourceKind: source.kind,
 		sourceKey:  source.key,
 		version:    version,
@@ -176,13 +175,13 @@ func (cache *SQLArrangementPlanCache) resolve(query *sqlQuery, resolver SQLSourc
 		cache.hits++
 		arrangements := cloneSQLArrangementMetadata(element.Value.(*sqlArrangementPlanCacheEntry).arrangements)
 		cache.mu.Unlock()
+		sqlMarkArrangementRecommendation(arrangements, workload)
 		return arrangements
 	}
 	cache.misses++
 	cache.mu.Unlock()
 
 	arrangements := resolveSQLArrangementMetadata(resolver, source)
-	sqlMarkArrangementRecommendation(arrangements, workload)
 	if len(arrangements) == 0 {
 		return arrangements
 	}
@@ -197,6 +196,7 @@ func (cache *SQLArrangementPlanCache) resolve(query *sqlQuery, resolver SQLSourc
 		cache.order.MoveToFront(element)
 		arrangements = cloneSQLArrangementMetadata(element.Value.(*sqlArrangementPlanCacheEntry).arrangements)
 		cache.mu.Unlock()
+		sqlMarkArrangementRecommendation(arrangements, workload)
 		return arrangements
 	}
 	if entry.weight <= cache.maxBytes {
@@ -213,6 +213,7 @@ func (cache *SQLArrangementPlanCache) resolve(query *sqlQuery, resolver SQLSourc
 		cache.bytes += entry.weight
 	}
 	cache.mu.Unlock()
+	sqlMarkArrangementRecommendation(arrangements, workload)
 	return arrangements
 }
 
@@ -228,7 +229,7 @@ func (cache *SQLArrangementPlanCache) removeElementLocked(element *list.Element)
 
 func sqlResolveArrangementPlan(query *sqlQuery, resolver SQLSourceResolver, source sqlSource, workload SQLArrangementWorkload, cache *SQLArrangementPlanCache, version string) []SQLArrangementMetadata {
 	if cache != nil && query != nil && query.cacheKey != "" && version != "" {
-		return cache.resolve(query, resolver, source, workload, version)
+		return cache.resolve(resolver, source, workload, version)
 	}
 	arrangements := resolveSQLArrangementMetadata(resolver, source)
 	sqlMarkArrangementRecommendation(arrangements, workload)
@@ -236,7 +237,7 @@ func sqlResolveArrangementPlan(query *sqlQuery, resolver SQLSourceResolver, sour
 }
 
 func sqlArrangementPlanCacheEntryWeight(key sqlArrangementPlanCacheKey, arrangements []SQLArrangementMetadata) int64 {
-	weight := int64(64 + len(key.queryKey) + len(key.sourceKind) + len(key.sourceKey) + len(key.version))
+	weight := int64(64 + len(key.sourceKind) + len(key.sourceKey) + len(key.version))
 	for _, arrangement := range arrangements {
 		weight += int64(64 + len(arrangement.Key) + len(arrangement.Kind) + len(arrangement.Locality))
 		for _, field := range arrangement.Fields {

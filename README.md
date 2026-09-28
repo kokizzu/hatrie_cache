@@ -295,6 +295,7 @@ security guidance before exposing it on a network.
 - Opt-in immutable packed RTREE spatial queries: [TT021_PACKED_RTREE.md](TT021_PACKED_RTREE.md)
 - Opt-in `MaterializedSource` SQL spatial R-tree queries: [TT021_MATERIALIZED_SPATIAL_INDEX.md](TT021_MATERIALIZED_SPATIAL_INDEX.md)
 - Canonical compiled-plan and per-EXPLAIN workload reuse: [MZ045_COMPILED_PLAN_EQUIVALENCE.md](MZ045_COMPILED_PLAN_EQUIVALENCE.md)
+- Cross-plan source/version arrangement metadata reuse for compatible EXPLAIN plans: [M214_ARRANGEMENT_REUSE.md](M214_ARRANGEMENT_REUSE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m214-cross-plan-arrangement-metadata-reuse)
 - Compact secondary-index posting lists: [TR053_COMPACT_POSTING_LIST.md](TR053_COMPACT_POSTING_LIST.md)
 - Single-task compaction scheduler fast path: [TR054_COMPACTION_SCHEDULER_SINGLE_TASK.md](TR054_COMPACTION_SCHEDULER_SINGLE_TASK.md)
 - Opt-in bounded grouped value collection: [SQL bounded `GROUP_ARRAY`](SQL_BOUNDED_GROUP_ARRAY.md)
