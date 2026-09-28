@@ -28305,3 +28305,21 @@ race-codec-rle:
 
 deliver-codec-rle:
 	bash scripts/deliver-codec-rle.sh
+
+benchmark-codec-bitmap:
+	bash scripts/benchmark-codec-bitmap.sh
+
+format-codec-bitmap:
+	bash scripts/format-codec-bitmap.sh
+
+test-codec-bitmap:
+	bash scripts/test-codec-bitmap.sh
+
+test-codec-bitmap-package:
+	bash scripts/test-codec-bitmap-package.sh
+
+race-codec-bitmap:
+	bash scripts/race-codec-bitmap.sh
+
+deliver-codec-bitmap:
+	bash scripts/deliver-codec-bitmap.sh
