@@ -28427,3 +28427,16 @@ benchmark-t250-durable-sequence:
 
 race-t250-durable-sequence:
 	@bash scripts/race-t250-durable-sequence.sh
+
+.PHONY: format-m206-upsert-envelope test-m206-upsert-envelope race-m206-upsert-envelope benchmark-m206-upsert-envelope
+format-m206-upsert-envelope:
+	bash scripts/format-m206-upsert-envelope.sh
+
+test-m206-upsert-envelope:
+	bash scripts/test-m206-upsert-envelope.sh
+
+race-m206-upsert-envelope:
+	bash scripts/race-m206-upsert-envelope.sh
+
+benchmark-m206-upsert-envelope:
+	bash scripts/benchmark-m206-upsert-envelope.sh

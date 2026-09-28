@@ -38549,3 +38549,15 @@ The T250 durable sequence benchmark compares the existing atomic increment contr
 | DurableSequence.Current | 4.840 ns/op | 0 B/op | 0 | Mutex-protected read |
 
 The feature is opt-in and does not replace an existing default allocator. A real persistence callback adds its storage latency. Raw commands: `make benchmark-t250-durable-sequence-baseline` and `make benchmark-t250-durable-sequence`.
+
+<a id="m206-upsert-envelopes"></a>
+### M206 Upsert Envelopes
+
+The current-image upsert envelope was compared with the existing before/after CDC envelope in five clean-worktree samples. The measured medians were:
+
+| Workload | Existing CDC | Upsert | Result |
+|---|---:|---:|---|
+| In-memory normalize | 163.6 ns/op; 64 B/op; 1 alloc/op | 91.18 ns/op; 48 B/op; 1 alloc/op | Upsert 1.79x faster and 1.33x lower bytes |
+| JSON decode | 6,783 ns/op; 1,248 B/op; 29 allocs/op | 5,100 ns/op; 984 B/op; 22 allocs/op | Upsert 1.33x faster, 1.27x lower bytes, and 1.32x fewer allocations |
+
+The API is additive and opt-in. It does not replace CDC envelopes when consumers need the previous row image. Reproduce with `make benchmark-m206-upsert-envelope`; see [M206_UPSERT_ENVELOPES.md](M206_UPSERT_ENVELOPES.md).
