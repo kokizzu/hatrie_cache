@@ -22,6 +22,7 @@ const (
 	sslRequestCode          = 80877103
 	defaultMaxMessage       = 16 << 20
 	frontendMessageReuseMax = 64 << 10
+	backendMessageReuseMax  = 64 << 10
 
 	OIDBool   = 16
 	OIDInt2   = 21
@@ -90,6 +91,32 @@ func (handler QueryHandlerFunc) Query(ctx context.Context, query string) (QueryR
 	return handler(ctx, query)
 }
 
+type reusableMessageConnection struct {
+	net.Conn
+	buffer []byte
+}
+
+func (connection *reusableMessageConnection) writeMessage(messageType byte, body []byte) error {
+	packetLength := 5 + len(body)
+	if packetLength > backendMessageReuseMax {
+		packet := make([]byte, packetLength)
+		packet[0] = messageType
+		binary.BigEndian.PutUint32(packet[1:5], uint32(4+len(body)))
+		copy(packet[5:], body)
+		return writeRaw(connection.Conn, packet)
+	}
+	if cap(connection.buffer) < packetLength {
+		connection.buffer = make([]byte, packetLength)
+	} else {
+		connection.buffer = connection.buffer[:packetLength]
+	}
+	packet := connection.buffer
+	packet[0] = messageType
+	binary.BigEndian.PutUint32(packet[1:5], uint32(4+len(body)))
+	copy(packet[5:], body)
+	return writeRaw(connection.Conn, packet)
+}
+
 // ServeConn serves one PostgreSQL v3 connection until the client terminates,
 // the context is cancelled, or the connection fails. It supports startup,
 // optional clear-text password authentication, simple queries, text-format
@@ -145,6 +172,7 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 	}
 	metrics.recordConnection(tlsEnabled)
 	defer metrics.recordConnectionClosed()
+	connection = &reusableMessageConnection{Conn: connection}
 	var frontendMessageBuffer []byte
 	if options.Authenticator != nil {
 		if err := writeAuthenticationCleartextPassword(connection); err != nil {
@@ -983,6 +1011,9 @@ func writeError(connection net.Conn, messageType byte, code string, message stri
 }
 
 func writeMessage(connection net.Conn, messageType byte, body []byte) error {
+	if reusable, ok := connection.(*reusableMessageConnection); ok {
+		return reusable.writeMessage(messageType, body)
+	}
 	packet := make([]byte, 5+len(body))
 	packet[0] = messageType
 	binary.BigEndian.PutUint32(packet[1:5], uint32(4+len(body)))

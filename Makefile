@@ -22172,3 +22172,23 @@ commit-pgwire-buffer-reuse:
 	bash scripts/deliver-pgwire-buffer-reuse.sh commit
 push-pgwire-buffer-reuse:
 	bash scripts/deliver-pgwire-buffer-reuse.sh push
+
+.PHONY: format-pgwire-response-buffer test-pgwire-response-buffer benchmark-pgwire-response-buffer-baseline benchmark-pgwire-response-buffer race-pgwire-response-buffer
+format-pgwire-response-buffer:
+	bash scripts/format-pgwire-response-buffer.sh
+test-pgwire-response-buffer:
+	bash scripts/test-pgwire-response-buffer.sh
+benchmark-pgwire-response-buffer-baseline:
+	bash scripts/benchmark-pgwire-response-buffer-baseline.sh
+benchmark-pgwire-response-buffer:
+	bash scripts/benchmark-pgwire-response-buffer.sh
+race-pgwire-response-buffer:
+	bash scripts/race-pgwire-response-buffer.sh
+
+.PHONY: stage-pgwire-response-buffer commit-pgwire-response-buffer push-pgwire-response-buffer
+stage-pgwire-response-buffer:
+	bash scripts/deliver-pgwire-response-buffer.sh stage
+commit-pgwire-response-buffer:
+	bash scripts/deliver-pgwire-response-buffer.sh commit
+push-pgwire-response-buffer:
+	bash scripts/deliver-pgwire-response-buffer.sh push
