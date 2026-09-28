@@ -67,3 +67,17 @@ func TestC233DisabledCPUTimeBudgetDoesNotReadClock(t *testing.T) {
 		t.Fatalf("disabled CPU budget read clock %d times", calls)
 	}
 }
+
+func TestC233CPUTimeBudgetRejectsZeroValueSource(t *testing.T) {
+	_, cancel, err := newSQLExecutionControl(context.Background(), SQLQueryOptions{
+		MaxCPUTime:    time.Second,
+		CPUTimeSource: &SQLCPUTimeSource{},
+	})
+	if err == nil {
+		cancel()
+		t.Fatal("zero-value CPUTimeSource was accepted")
+	}
+	if !errors.Is(err, ErrSQLCPUTimeSourceRequired) {
+		t.Fatalf("zero-value source returned %v, want ErrSQLCPUTimeSourceRequired", err)
+	}
+}

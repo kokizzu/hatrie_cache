@@ -213,6 +213,9 @@ func NewSQLCPUTimeSource(read func() time.Duration) *SQLCPUTimeSource {
 }
 
 func (source *SQLCPUTimeSource) now() time.Duration {
+	if source == nil || source.read == nil {
+		return 0
+	}
 	return source.read()
 }
 
@@ -8382,7 +8385,7 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 	if options.MaxRows < 0 || options.MaxIntermediateRows < 0 || options.MaxJoinWork < 0 || options.MaxJoinBytes < 0 || options.MaxResultBytes < 0 || options.MaxSortBytes < 0 || options.MaxGroupBytes < 0 || options.MaxGroupMergeBytes < 0 || options.MaxGroupKeys < 0 || options.MaxSetBytes < 0 || options.MaxSpillBytes < 0 || options.MaxQuerySpillBytes < 0 || options.MaxRecursionDepth < 0 || options.Timeout < 0 || options.SlowQueryThreshold < 0 || options.Workers < 0 || options.OperatorYieldEvery < 0 || options.MaxExecutionSteps < 0 || options.MaxCPUTime < 0 {
 		return nil, func() {}, fmt.Errorf("SQL query budgets cannot be negative")
 	}
-	if options.MaxCPUTime > 0 && options.CPUTimeSource == nil {
+	if options.MaxCPUTime > 0 && (options.CPUTimeSource == nil || options.CPUTimeSource.read == nil) {
 		return nil, func() {}, fmt.Errorf("%w when MaxCPUTime is set", ErrSQLCPUTimeSourceRequired)
 	}
 	if options.OperatorYieldEvery > MaxSQLOperatorYieldEvery {
