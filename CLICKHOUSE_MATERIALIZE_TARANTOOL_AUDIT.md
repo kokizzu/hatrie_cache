@@ -247,6 +247,11 @@ records a separate implementation boundary.
   `INTERSECT`, and `EXCEPT` branches through the existing native dataflow
   runtime while preserving conservative fallback boundaries. See
   [M052_NATIVE_UNION.md](M052_NATIVE_UNION.md) and
+- [x] M052 Shared dataflow executor binding reuses the compiled query's
+  immutable memoized fragment plan without copying fragment metadata on every
+  executor construction; `CompileDataflow` remains the independent-copy API.
+  See [M052_REUSABLE_DATAFLOW_EXECUTOR.md](M052_REUSABLE_DATAFLOW_EXECUTOR.md)
+  and [BENCHMARK.md](BENCHMARK.md#m052-shared-dataflow-executor).
   [BENCHMARK.md](BENCHMARK.md#m052z-native-scalar-set-operation-fragments).
 - [ ] M064 Recursive dataflow maintenance.
 - [-] M064e Generic recursive fixpoint scheduler evaluated and rolled back: the post-change median was 1.05x slower, used 1.27x more transient bytes, and 1.12x more allocations than the existing traversal baseline. See [BENCHMARK.md](BENCHMARK.md#m064-recursive-fixpoint-evaluation-rejected).
@@ -297,6 +302,11 @@ spill handling, and conservative fallback behavior remain unchanged. The
   measured path is 1.50x faster with 65.1% lower bytes/op and 33.3% fewer
 allocations than the final general-executor control. See
 [M052_NATIVE_UNION.md](M052_NATIVE_UNION.md) and
+- [x] M052 Shared dataflow executor binding reuses the compiled query's
+  immutable memoized fragment plan without copying fragment metadata on every
+  executor construction; `CompileDataflow` remains the independent-copy API.
+  See [M052_REUSABLE_DATAFLOW_EXECUTOR.md](M052_REUSABLE_DATAFLOW_EXECUTOR.md)
+  and [BENCHMARK.md](BENCHMARK.md#m052-shared-dataflow-executor).
 [BENCHMARK.md](BENCHMARK.md#m052z-native-scalar-set-operation-fragments).
 
 ### M049: Concurrent compiled-plan miss coalescing

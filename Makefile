@@ -29573,3 +29573,35 @@ status-chg001-prewhere:
 	bash ./scripts/deliver-chg001-prewhere.sh status
 unstage-chg001-prewhere:
 	bash ./scripts/deliver-chg001-prewhere.sh unstage
+
+.PHONY: benchmark-m052-shared-dataflow-executor
+benchmark-m052-shared-dataflow-executor:
+	bash ./scripts/benchmark-m052-shared-dataflow-executor.sh
+
+.PHONY: test-m052-shared-dataflow-executor
+test-m052-shared-dataflow-executor:
+	bash ./scripts/test-m052-shared-dataflow-executor.sh
+
+.PHONY: format-m052-shared-dataflow-executor
+format-m052-shared-dataflow-executor:
+	bash ./scripts/format-m052-shared-dataflow-executor.sh
+
+.PHONY: race-m052-shared-dataflow-executor
+race-m052-shared-dataflow-executor:
+	bash ./scripts/race-m052-shared-dataflow-executor.sh
+
+.PHONY: stage-m052-shared-dataflow-executor
+stage-m052-shared-dataflow-executor:
+	bash ./scripts/deliver-m052-shared-dataflow-executor.sh stage
+
+.PHONY: commit-m052-shared-dataflow-executor
+commit-m052-shared-dataflow-executor:
+	bash ./scripts/deliver-m052-shared-dataflow-executor.sh commit
+
+.PHONY: push-m052-shared-dataflow-executor
+push-m052-shared-dataflow-executor:
+	bash ./scripts/deliver-m052-shared-dataflow-executor.sh push
+
+.PHONY: status-m052-shared-dataflow-executor
+status-m052-shared-dataflow-executor:
+	bash ./scripts/deliver-m052-shared-dataflow-executor.sh status

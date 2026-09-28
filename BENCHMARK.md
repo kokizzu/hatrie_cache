@@ -118,6 +118,23 @@ required.
 
 ## M064 Recursive Fixpoint Evaluation (Rejected)
 
+## M052 Shared Dataflow Executor
+
+Command: `make benchmark-m052-shared-dataflow-executor`
+
+This benchmark warms the compiled query's memoized plan before repeatedly
+binding a runner. The clone path is the existing `CompileDataflow` API; the
+shared path is the opt-in `CompileReusableDataflow` API.
+
+| Path | Samples (ns/op) | Median | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `CompileDataflow` clone | 284.3, 274.9, 278.3, 286.6, 268.5 | 278.3 | 352 | 5 | baseline |
+| `CompileReusableDataflow` shared | 63.39, 66.11, 65.15, 66.70, 72.33 | 66.11 | 80 | 1 | 4.21x faster, 4.40x lower bytes, 5x fewer allocations |
+
+The shared method only reuses immutable fragment metadata. Runners must treat
+the fragment and input metadata as read-only; callers needing an independent
+mutable plan continue to use `CompileDataflow`.
+
 This opt-in Materialize-style recursive fixpoint scheduler was test-first
 implemented and then rolled back. It used stable breadth-first discovery,
 duplicate suppression, context cancellation, and bounded rows/iterations. The
