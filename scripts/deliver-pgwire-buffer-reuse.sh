@@ -52,7 +52,9 @@ stage_makefile() {
   local index_file=$1 makefile_snapshot makefile_blob
   makefile_snapshot=$(mktemp /tmp/hatrie-pgwire-buffer-makefile.XXXXXX)
   git show HEAD:Makefile > "$makefile_snapshot"
-  makefile_block >> "$makefile_snapshot"
+  if ! grep -q '^stage-pgwire-buffer-reuse:' "$makefile_snapshot"; then
+    makefile_block >> "$makefile_snapshot"
+  fi
   makefile_blob=$(git hash-object -w "$makefile_snapshot")
   GIT_INDEX_FILE="$index_file" git update-index --add --cacheinfo "100644,$makefile_blob,Makefile"
   rm -f "$makefile_snapshot"
@@ -62,7 +64,7 @@ stage_feature() {
   local index_file
   index_file=$(mktemp /tmp/hatrie-pgwire-buffer-index.XXXXXX)
   rm -f "$index_file"
-  trap 'rm -f "$index_file"' RETURN
+  trap "rm -f -- '$index_file'" EXIT
 
   GIT_INDEX_FILE="$index_file" git read-tree HEAD
   for path in "${feature_paths[@]}"; do
@@ -97,7 +99,7 @@ commit_feature() {
   local index_file
   index_file=$(mktemp /tmp/hatrie-pgwire-buffer-index.XXXXXX)
   rm -f "$index_file"
-  trap 'rm -f "$index_file"' RETURN
+  trap "rm -f -- '$index_file'" EXIT
 
   GIT_INDEX_FILE="$index_file" git read-tree HEAD
   for path in "${feature_paths[@]}"; do
@@ -123,10 +125,11 @@ push_feature() {
 
   tmp_worktree=$(mktemp -d /tmp/hatrie-pgwire-buffer-push.XXXXXX)
   cleanup_worktree() {
-    git worktree remove --force "$tmp_worktree" >/dev/null 2>&1 || true
+    local worktree_path=$1
+    git worktree remove --force "$worktree_path" >/dev/null 2>&1 || true
     git worktree prune >/dev/null 2>&1 || true
   }
-  trap cleanup_worktree RETURN
+  trap "cleanup_worktree '$tmp_worktree'" EXIT
 
   git worktree add --detach "$tmp_worktree" "$remote_commit"
   if ! git -C "$tmp_worktree" cherry-pick "$local_commit"; then
