@@ -28248,3 +28248,16 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+# default-value-suppression-feature
+benchmark-codec-default-value-suppression:
+	bash scripts/benchmark-codec-default-value-suppression.sh
+test-codec-default-value-suppression:
+	bash scripts/test-codec-default-value-suppression.sh
+format-codec-default-value-suppression:
+	bash scripts/format-codec-default-value-suppression.sh
+test-codec-default-value-suppression-package:
+	bash scripts/test-codec-default-value-suppression-package.sh
+race-codec-default-value-suppression:
+	bash scripts/race-codec-default-value-suppression.sh
+deliver-codec-default-value-suppression:
+	bash scripts/deliver-default-value-suppression.sh
