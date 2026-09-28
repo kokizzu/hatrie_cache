@@ -22272,3 +22272,23 @@ commit-pgwire-fixed-message:
 	bash scripts/deliver-pgwire-fixed-message.sh commit
 push-pgwire-fixed-message:
 	bash scripts/deliver-pgwire-fixed-message.sh push
+
+.PHONY: format-pgwire-parameter-description test-pgwire-parameter-description benchmark-pgwire-parameter-description-baseline benchmark-pgwire-parameter-description race-pgwire-parameter-description
+format-pgwire-parameter-description:
+	bash scripts/format-pgwire-parameter-description.sh
+test-pgwire-parameter-description:
+	bash scripts/test-pgwire-parameter-description.sh
+benchmark-pgwire-parameter-description-baseline:
+	bash scripts/benchmark-pgwire-parameter-description-baseline.sh
+benchmark-pgwire-parameter-description:
+	bash scripts/benchmark-pgwire-parameter-description.sh
+race-pgwire-parameter-description:
+	bash scripts/race-pgwire-parameter-description.sh
+
+.PHONY: stage-pgwire-parameter-description commit-pgwire-parameter-description push-pgwire-parameter-description
+stage-pgwire-parameter-description:
+	bash scripts/deliver-pgwire-parameter-description.sh stage
+commit-pgwire-parameter-description:
+	bash scripts/deliver-pgwire-parameter-description.sh commit
+push-pgwire-parameter-description:
+	bash scripts/deliver-pgwire-parameter-description.sh push
