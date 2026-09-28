@@ -28476,3 +28476,19 @@ benchmark-m213-differential-consolidation-baseline:
 
 benchmark-m213-differential-consolidation:
 	bash scripts/benchmark-m213-differential-consolidation.sh
+
+.PHONY: format-c231-memory-admission test-c231-memory-admission race-c231-memory-admission benchmark-c231-memory-admission-baseline benchmark-c231-memory-admission
+format-c231-memory-admission:
+	bash scripts/format-c231-memory-admission.sh
+
+test-c231-memory-admission:
+	bash scripts/test-c231-memory-admission.sh
+
+race-c231-memory-admission:
+	bash scripts/race-c231-memory-admission.sh
+
+benchmark-c231-memory-admission-baseline:
+	bash scripts/benchmark-c231-memory-admission-baseline.sh
+
+benchmark-c231-memory-admission:
+	bash scripts/benchmark-c231-memory-admission.sh

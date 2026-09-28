@@ -64,7 +64,7 @@ operator control remain the preferred deployment model.
 - [ ] C228 External sort spilling with stable run ordering.
 - [x] C229 Explicit join overflow policy for auto, reject, and bounded spill; truncation remains intentionally unsupported to preserve SQL correctness. See [C229_JOIN_OVERFLOW_POLICY.md](C229_JOIN_OVERFLOW_POLICY.md) and [BENCHMARK.md#c229-join-overflow-policy](BENCHMARK.md#c229-join-overflow-policy).
 - [ ] C230 Memory-overcommit wait queues before query cancellation.
-- [ ] C231 Workload groups with per-class concurrency and memory budgets.
+- [x] C231 Workload groups with per-class concurrency and memory budgets; see [C231_MEMORY_ADMISSION.md](C231_MEMORY_ADMISSION.md) and [BENCHMARK.md](BENCHMARK.md#c231-workload-memory-admission).
 - [x] C232 Query-complexity limits for rows, joins, and intermediate results.
 - [ ] C233 Per-query CPU-time budgets with cooperative cancellation.
 - [ ] C234 Query profiler records for stage time, bytes, and allocations.

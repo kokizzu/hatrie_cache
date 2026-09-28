@@ -38611,3 +38611,21 @@ Consolidate then JSON: 6947828, 7501028, 7335190, 6825268, 6852424 ns/op
 The path is opt-in. It trades local CPU, heap, and allocations for a much
 smaller downstream payload and is appropriate when transfer size dominates.
 Repeat with `make benchmark-m213-differential-consolidation`.
+
+## C231 Workload memory admission
+
+The opt-in `hatWorkload.MemoryAdmissionController` was compared with the
+existing `AdmissionController` for one class, one concurrency slot, and a
+64-byte acquire/release workload on an AMD Ryzen 9 5950X host. Each result is
+`go test -run '^$' -bench ... -benchmem -count=5`.
+
+| Path | Samples (ns/op) | B/op | allocs/op | Relative latency |
+| --- | --- | ---: | ---: | ---: |
+| Existing admission | 63.11, 68.39, 77.12, 70.62, 62.69 | 4 | 1 | 1.00x |
+| Memory admission | 156.2, 166.5, 156.2, 156.2, 169.5 | 8 | 2 | 2.35x |
+
+The opt-in budget path costs about 2.35x latency, 2.00x allocated bytes, and
+2.00x allocations in this uncontended case. Removing its immediate-grant
+waiter allocation improved it from 327.3/290.8/276.0/309.0/294.9 ns/op,
+168 B/op, and 4 allocations to the final measurements. Existing admission
+users and defaults are unchanged.
