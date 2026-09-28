@@ -99,7 +99,7 @@ Output: `{"ok":true,"message":"ok","value":"12"}`.
 | Map | `PUTMAP`, `PEEKMAP`, `TAKEMAP` | Put `subkey` + `value`, or multiple fields in `pairs`; reads use `subkey`. | Peek returns without removal; take returns then removes. Objects/arrays are JSON text. |
 | Slice/deque | `PUSHSLICE`, `POPSLICE`, `SHIFTSLICE`, `HEADSLICE`, `TAILSLICE` | Push one `value` or `values`; reads use `key`. | Pop/shift remove one end; head/tail read one end. |
 | Set | `ADDSET`, `REMSET`, `HASSET`, `GETSET` | Add/remove one `value` or `values`; membership uses `value`. | Membership is `"1"`/`"0"`; get is a JSON array. |
-| Priority queue | `PUSHPQ`, `PEEKPQ`, `POPPQ`, `GETPQ` | Push `value` with integer `priority`; reads use `key`. | Peek/pop return a JSON `{priority,value}` item; pop removes it; get is ordered JSON. |
+| Priority queue | `PUSHPQ`, `PEEKPQ`, `POPPQ`, `GETPQ`, `CLAIMPQ`, `ACKPQ` | Push `value` with integer `priority`; reads use `key`; claim uses positive `ttl_seconds`; acknowledge uses the returned lease token in `value`. | Peek/pop return a JSON `{priority,value}` item; pop removes it; get is ordered JSON; claim returns a JSON lease and hides the item until acknowledgement or expiry. |
 
 Input:
 
@@ -111,10 +111,13 @@ Input:
 {"command":"ADDSET","key":"tags","values":["go","cache"]}
 {"command":"HASSET","key":"tags","value":"go"}
 {"command":"PUSHPQ","key":"queue","priority":10,"value":"urgent"}
+{"command":"CLAIMPQ","key":"queue","ttl_seconds":30}
+{"command":"ACKPQ","key":"queue","value":"1"}
 {"command":"POPPQ","key":"queue"}
 ```
 
-Output values are respectively `"admin"`, `"verify"`, `"1"`, and JSON
+Output values include `"admin"`, `"verify"`, `"1"`, a JSON lease from
+`CLAIMPQ`, the acknowledgement value `"1"`, and JSON
 `{"priority":10,"value":"urgent"}`.
 
 ## Filters and probabilistic structures
@@ -232,6 +235,8 @@ overflow. A positive `ttl_seconds` is required for `*X` and `EXPIRE`.
 | `PEEKPQ` | one `urgent` item | `{"key":"queue"}` | JSON `{"priority":10,"value":"urgent"}` | unchanged |
 | `POPPQ` | one `urgent` item | `{"key":"queue"}` | JSON `{"priority":10,"value":"urgent"}` | `queue=[]` |
 | `GETPQ` | one `urgent` item | `{"key":"queue"}` | JSON array of priority/value items | unchanged |
+| `CLAIMPQ` | one `urgent` item | `{"key":"queue","ttl_seconds":30}` | JSON lease with `token`, `item`, and `expires_at` | item hidden until acknowledgement or expiry |
+| `ACKPQ` | one item leased with token `1` | `{"key":"queue","value":"1"}` | `acknowledged`, `value:"1"` | lease removed; item stays removed |
 
 `PUSHSLICE` appends; `POPSLICE` removes from the tail; `SHIFTSLICE` removes
 from the head. Sets ignore duplicate additions. Priority-queue reads include
@@ -352,6 +357,8 @@ canonical command in the state tables.
 | `PEEKPQ` | `PEEKPRIORITY` |
 | `POPPQ` | `POPPRIORITY` |
 | `GETPQ` | `GETPRIORITY` |
+| `CLAIMPQ` | `CLAIMPRIORITY` |
+| `ACKPQ` | `ACKPRIORITY` |
 | `CREATEBF` | `RESERVEBF`, `BFRESERVE` |
 | `ADDBF` | `BFADD` |
 | `HASBF` | `BFHAS`, `BFEXISTS` |

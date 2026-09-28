@@ -15243,11 +15243,11 @@ payload shape before assuming it beats HTTP JSON.
 
 ## HAT-trie Command Families
 
-HAT-trie cache currently has 94 canonical command groups in `ExecuteCommand`,
+HAT-trie cache currently has 96 canonical command groups in `ExecuteCommand`,
 plus Redis-style aliases for several probabilistic and compact structures. The
 command set is strongest where Redis is also strong as a data-structure server:
 strings, counters, TTLs, lists/queues, sets, priority queues/sorted-set-like
-workloads, HyperLogLog, Bloom filters, Cuckoo filters, Count-Min Sketch, Top-K,
+workloads (including `CLAIMPQ` and `ACKPQ` visibility leases), HyperLogLog, Bloom filters, Cuckoo filters, Count-Min Sketch, Top-K,
 and quantile estimation. It also includes HAT-trie-specific exact and compact
 structures that Redis/Tarantool do not expose as a core command family, such as
 XOR filters, roaring bitmaps, sparse uint64 bitsets, radix-tree prefix indexes,
@@ -38720,3 +38720,29 @@ The opt-in early check makes stale operations approximately 231x faster and
 removes their measured operation allocations. Successful operations pay an
 approximately 10% CPU cost in this run; the default remains off. See
 [T234_EARLY_TRANSACTION_CONFLICT.md](T234_EARLY_TRANSACTION_CONFLICT.md).
+## T245 Priority Queue Visibility Leases
+
+The benchmark uses `go test ./hat/hatCache -run '^$' -bench ... -benchmem` on
+an AMD Ryzen 9 5950X. Each row below is the median of ten one-second samples;
+the paired run used the clean `84ca0f01` baseline and the T245 candidate.
+
+| Workload | Baseline median | Candidate median | Candidate / baseline |
+| --- | ---: | ---: | ---: |
+| Existing push/pop | 552.2 ns/op, 64 B/op, 2 allocs/op | 519.7 ns/op, 64 B/op, 2 allocs/op | 0.94x time |
+| Claim + acknowledge | N/A | 912.1 ns/op, 20 B/op, 2 allocs/op | New opt-in path |
+
+Raw baseline push/pop samples (ns/op): `513.5, 552.5, 526.2, 626.0,
+663.2, 648.6, 551.8, 567.8, 521.2, 523.2`.
+
+Raw candidate push/pop samples (ns/op): `508.8, 518.9, 495.0, 532.4,
+510.6, 503.5, 538.4, 582.2, 545.0, 520.5`.
+
+Raw candidate claim/ack samples (ns/op): `825.9, 825.8, 900.5, 888.1,
+880.5, 974.3, 960.6, 1052, 1095, 923.7`.
+
+Both existing and candidate push/pop runs report `64 B/op` and `2 allocs/op`.
+Claim/ack reports `20 B/op` and `2 allocs/op` after lease-map reuse. The
+candidate queue header is 40 bytes versus 32 bytes for the clean baseline; the
+map backing is allocated only after the first claim. See
+[T245_QUEUE_VISIBILITY.md](T245_QUEUE_VISIBILITY.md) for semantics and the
+recovery tradeoff.

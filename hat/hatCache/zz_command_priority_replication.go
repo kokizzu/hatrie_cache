@@ -15,8 +15,9 @@ func (ht *HatTrie) appendCommandDumpPriorityQueueEntryBinaryLocked(destination [
 		return destination, true, errors.New("hatriecache: priority queue backing index is missing")
 	}
 	queue := &ht.priorityQueues.array[index]
-	for itemIndex := range queue.items {
-		if _, ok, err := commandDumpPriorityQueueItemValueSize(queue.items[itemIndex]); err != nil {
+	items := queue.SnapshotItems()
+	for itemIndex := range items {
+		if _, ok, err := commandDumpPriorityQueueItemValueSize(items[itemIndex]); err != nil {
 			return destination, true, err
 		} else if !ok {
 			return destination, false, nil
@@ -27,7 +28,7 @@ func (ht *HatTrie) appendCommandDumpPriorityQueueEntryBinaryLocked(destination [
 		expiration := ht.expirationTimeLocked(entry.Key)
 		expiresAt = &expiration
 	}
-	data, err := appendCommandDumpPriorityQueueBinary(destination, expiresAt, queue.items)
+	data, err := appendCommandDumpPriorityQueueBinary(destination, expiresAt, items)
 	return data, true, err
 }
 

@@ -454,6 +454,35 @@ func (ht *HatTrie) executeCommand(request CacheCommandRequest) CacheCommandRespo
 			return commandError(err.Error())
 		}
 		return CacheCommandResponse{OK: true, Message: "pushed priority queue values", Value: strconv.Itoa(added)}
+	case "CLAIMPQ", "CLAIMPRIORITY":
+		visibility, ok := commandPriorityQueueVisibility(request)
+		if !ok {
+			return commandError("positive ttl_seconds is required")
+		}
+		lease, ok, err := ht.ClaimPriorityQueueChecked(key, visibility)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if !ok {
+			return CacheCommandResponse{OK: true, Message: "value not found"}
+		}
+		payload, err := json.Marshal(lease)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		return CacheCommandResponse{OK: true, Message: "claimed priority queue item", Value: string(payload)}
+	case "ACKPQ", "ACKPRIORITY":
+		if request.Value == "" {
+			return commandError("lease token is required")
+		}
+		acked, err := ht.AckPriorityQueueChecked(key, request.Value)
+		if err != nil {
+			return commandError(err.Error())
+		}
+		if !acked {
+			return CacheCommandResponse{OK: true, Message: "lease not found", Value: "0"}
+		}
+		return CacheCommandResponse{OK: true, Message: "acknowledged", Value: "1"}
 	case "PEEKPQ", "PEEKPRIORITY":
 		value, ok, err := ht.PeekPriorityQueueChecked(key)
 		if err != nil {

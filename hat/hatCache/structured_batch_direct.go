@@ -457,8 +457,17 @@ func (ht *HatTrie) structuredPeekPriorityLocked(key string, telemetry *batchTele
 		ht.recordReadBatchLocked(telemetry, false, key)
 		return structuredValueNotFound()
 	}
-	item, ok := ht.priorityQueues.array[hval.Index].Peek()
-	ht.recordReadBatchLocked(telemetry, ok, key)
+	queue := &ht.priorityQueues.array[hval.Index]
+	requeued := 0
+	if len(queue.leases) > 0 {
+		requeued = queue.requeueExpiredPriorityQueueLeases(ht.currentTime())
+	}
+	item, ok := queue.Peek()
+	if requeued > 0 {
+		ht.recordWriteBatchLocked(telemetry, key)
+	} else {
+		ht.recordReadBatchLocked(telemetry, ok, key)
+	}
 	if !ok {
 		return structuredValueNotFound()
 	}
@@ -475,8 +484,17 @@ func (ht *HatTrie) structuredPopPriorityLocked(key string, telemetry *batchTelem
 		ht.recordReadBatchLocked(telemetry, false, key)
 		return structuredValueNotFound()
 	}
-	item, ok := ht.priorityQueues.array[hval.Index].popItemRetain()
-	ht.recordReadBatchLocked(telemetry, ok, key)
+	queue := &ht.priorityQueues.array[hval.Index]
+	requeued := 0
+	if len(queue.leases) > 0 {
+		requeued = queue.requeueExpiredPriorityQueueLeases(ht.currentTime())
+	}
+	item, ok := queue.popItemRetain()
+	if requeued == 0 {
+		ht.recordReadBatchLocked(telemetry, ok, key)
+	} else {
+		ht.recordWriteBatchLocked(telemetry, key)
+	}
 	if !ok {
 		ht.cacheValueLocked(key, hval)
 		return structuredValueNotFound()
@@ -501,8 +519,17 @@ func (ht *HatTrie) structuredGetPriorityLocked(key string, telemetry *batchTelem
 		ht.recordReadBatchLocked(telemetry, false, key)
 		return structuredValueNotFound()
 	}
-	ht.recordReadBatchLocked(telemetry, true, key)
-	return commandValueResponse("ok", ht.priorityQueues.array[hval.Index].Items())
+	queue := &ht.priorityQueues.array[hval.Index]
+	requeued := 0
+	if len(queue.leases) > 0 {
+		requeued = queue.requeueExpiredPriorityQueueLeases(ht.currentTime())
+	}
+	if requeued > 0 {
+		ht.recordWriteBatchLocked(telemetry, key)
+	} else {
+		ht.recordReadBatchLocked(telemetry, true, key)
+	}
+	return commandValueResponse("ok", queue.Items())
 }
 
 func structuredValueNotFound() CacheCommandResponse {

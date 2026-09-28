@@ -26,6 +26,7 @@ var priorityQueueEmptyStringValue interface{} = ""
 type priorityQueueData struct {
 	items        []priorityQueueItem
 	nextSequence uint64
+	leases       map[string]priorityQueueLease
 }
 
 var errPriorityQueueSequenceExhausted = errors.New("hatriecache: priority queue sequence is exhausted")
@@ -201,6 +202,10 @@ func (pq *priorityQueueData) reserveCapacity(needed int) {
 func (pq *priorityQueueData) pushValue(priority int64, value interface{}) {
 	item := newPriorityQueueItem(priority, pq.nextSequence, value)
 	pq.nextSequence++
+	pq.pushItem(item)
+}
+
+func (pq *priorityQueueData) pushItem(item priorityQueueItem) {
 	pq.items = append(pq.items, item)
 	pq.siftUp(len(pq.items) - 1)
 }
@@ -283,15 +288,19 @@ func (pq *priorityQueueData) SnapshotItems() []priorityQueueItem {
 	if pq == nil {
 		return nil
 	}
-	if len(pq.items) == 0 {
+	total := len(pq.items) + len(pq.leases)
+	if total == 0 {
 		return []priorityQueueItem{}
 	}
 
 	copyData := priorityQueueData{
-		items:        make([]priorityQueueItem, len(pq.items)),
+		items:        make([]priorityQueueItem, 0, total),
 		nextSequence: pq.nextSequence,
 	}
-	copy(copyData.items, pq.items)
+	copyData.items = append(copyData.items, pq.items...)
+	for _, lease := range pq.leases {
+		copyData.items = append(copyData.items, lease.item)
+	}
 	out := make([]priorityQueueItem, 0, len(copyData.items))
 	for len(copyData.items) > 0 {
 		item, _ := copyData.popItem()
@@ -602,8 +611,17 @@ func (ht *HatTrie) PeekPriorityQueueChecked(key string) (PriorityItem, bool, err
 		ht.recordReadLocked(false, key)
 		return PriorityItem{}, false, nil
 	}
-	item, ok := ht.priorityQueues.array[hval.Index].Peek()
-	ht.recordReadLocked(ok, key)
+	queue := &ht.priorityQueues.array[hval.Index]
+	requeued := 0
+	if len(queue.leases) > 0 {
+		requeued = queue.requeueExpiredPriorityQueueLeases(ht.currentTime())
+	}
+	item, ok := queue.Peek()
+	if requeued > 0 {
+		ht.recordWriteLocked(key)
+	} else {
+		ht.recordReadLocked(ok, key)
+	}
 	return item, ok, nil
 }
 
@@ -631,9 +649,16 @@ func (ht *HatTrie) PopPriorityQueueChecked(key string) (PriorityItem, bool, erro
 		ht.recordReadLocked(false, key)
 		return PriorityItem{}, false, nil
 	}
-	item, ok := ht.priorityQueues.array[hval.Index].Pop()
+	queue := &ht.priorityQueues.array[hval.Index]
+	requeued := 0
+	if len(queue.leases) > 0 {
+		requeued = queue.requeueExpiredPriorityQueueLeases(ht.currentTime())
+	}
+	item, ok := queue.Pop()
 	if !ok {
-		ht.recordReadLocked(false, key)
+		if requeued == 0 {
+			ht.recordReadLocked(false, key)
+		}
 		return PriorityItem{}, false, nil
 	}
 	ht.recordReadLocked(true, key)
@@ -665,6 +690,15 @@ func (ht *HatTrie) GetPriorityQueueChecked(key string) (PriorityQueue, bool, err
 		ht.recordReadLocked(false, key)
 		return nil, false, nil
 	}
-	ht.recordReadLocked(true, key)
-	return ht.priorityQueues.array[hval.Index].Items(), true, nil
+	queue := &ht.priorityQueues.array[hval.Index]
+	requeued := 0
+	if len(queue.leases) > 0 {
+		requeued = queue.requeueExpiredPriorityQueueLeases(ht.currentTime())
+	}
+	if requeued > 0 {
+		ht.recordWriteLocked(key)
+	} else {
+		ht.recordReadLocked(true, key)
+	}
+	return queue.Items(), true, nil
 }
