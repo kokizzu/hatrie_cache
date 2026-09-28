@@ -17,10 +17,11 @@ import (
 )
 
 const (
-	protocolVersion3  = 196608
-	cancelRequestCode = 80877102
-	sslRequestCode    = 80877103
-	defaultMaxMessage = 16 << 20
+	protocolVersion3        = 196608
+	cancelRequestCode       = 80877102
+	sslRequestCode          = 80877103
+	defaultMaxMessage       = 16 << 20
+	frontendMessageReuseMax = 64 << 10
 
 	OIDBool   = 16
 	OIDInt2   = 21
@@ -144,11 +145,13 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 	}
 	metrics.recordConnection(tlsEnabled)
 	defer metrics.recordConnectionClosed()
+	var frontendMessageBuffer []byte
 	if options.Authenticator != nil {
 		if err := writeAuthenticationCleartextPassword(connection); err != nil {
 			return err
 		}
-		messageType, body, err := readFrontendMessage(connection, maxMessage)
+		messageType, body, nextMessageBuffer, err := readFrontendMessageInto(connection, maxMessage, frontendMessageBuffer)
+		frontendMessageBuffer = nextMessageBuffer
 		if err != nil {
 			return err
 		}
@@ -197,7 +200,8 @@ func ServeConn(ctx context.Context, connection net.Conn, handler QueryHandler, o
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		messageType, body, err := readFrontendMessage(connection, maxMessage)
+		messageType, body, nextMessageBuffer, err := readFrontendMessageInto(connection, maxMessage, frontendMessageBuffer)
+		frontendMessageBuffer = nextMessageBuffer
 		if err != nil {
 			return err
 		}
@@ -784,19 +788,37 @@ func parseStartupParameters(data []byte) (map[string]string, error) {
 }
 
 func readFrontendMessage(connection net.Conn, maxMessage int) (byte, []byte, error) {
+	messageType, body, _, err := readFrontendMessageInto(connection, maxMessage, nil)
+	return messageType, body, err
+}
+
+func readFrontendMessageInto(connection net.Conn, maxMessage int, buffer []byte) (byte, []byte, []byte, error) {
 	header := [5]byte{}
 	if _, err := io.ReadFull(connection, header[:]); err != nil {
-		return 0, nil, err
+		return 0, nil, buffer, err
 	}
 	length := int(binary.BigEndian.Uint32(header[1:]))
 	if length < 4 || length > maxMessage {
-		return 0, nil, fmt.Errorf("invalid PostgreSQL message length %d", length)
+		return 0, nil, buffer, fmt.Errorf("invalid PostgreSQL message length %d", length)
 	}
-	body := make([]byte, length-4)
+	bodyLength := length - 4
+	if bodyLength > frontendMessageReuseMax {
+		body := make([]byte, bodyLength)
+		if _, err := io.ReadFull(connection, body); err != nil {
+			return 0, nil, buffer, err
+		}
+		return header[0], body, buffer, nil
+	}
+	if cap(buffer) < bodyLength {
+		buffer = make([]byte, bodyLength)
+	} else {
+		buffer = buffer[:bodyLength]
+	}
+	body := buffer
 	if _, err := io.ReadFull(connection, body); err != nil {
-		return 0, nil, err
+		return 0, nil, buffer, err
 	}
-	return header[0], body, nil
+	return header[0], body, buffer, nil
 }
 
 func readLength(connection net.Conn) (int, error) {
