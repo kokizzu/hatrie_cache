@@ -28559,3 +28559,24 @@ vet-t248:
 .PHONY: verify-t248
 verify-t248:
 	@bash scripts/verify-t248.sh
+.PHONY: format-t234
+format-t234:
+	@bash scripts/format-t234.sh
+
+.PHONY: test-t234
+test-t234:
+	@bash scripts/test-t234.sh
+
+.PHONY: race-t234
+race-t234:
+	@bash scripts/race-t234.sh
+
+.PHONY: benchmark-t234
+benchmark-t234:
+	@bash scripts/benchmark-t234.sh
+
+.PHONY: vet-t234
+vet-t234:
+	@bash scripts/vet-t234.sh
+status-t234:
+	@bash ./scripts/status-t234.sh

@@ -173,7 +173,9 @@ operator control remain the preferred deployment model.
 - [ ] T231 After-replace audit hooks with transaction identity.
 - [ ] T232 Atomic transaction scopes with nested rollback boundaries.
 - [ ] T233 MVCC transactions that permit cooperative yields.
-- [ ] T234 Early conflict detection for competing transactional writes.
+- [x] T234 Early conflict detection for competing transactional writes; see
+  [T234_EARLY_TRANSACTION_CONFLICT.md](T234_EARLY_TRANSACTION_CONFLICT.md) and
+  [BENCHMARK.md](BENCHMARK.md#t234-early-transaction-conflict-detection).
 - [ ] T235 Cooperative fiber workers for nonblocking application tasks.
 - [ ] T236 Low-overhead mailbox channels between independent workers.
 - [ ] T237 Connection pools with health checks and reconnect backoff.

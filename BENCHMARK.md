@@ -38687,3 +38687,36 @@ The default path is effectively unchanged within run-to-run noise and retains
 zero allocations. The terminal row is a separate workload and includes the
 bounded retry/dead-letter bookkeeping; it should not be interpreted as a
 universal speedup over ordinary retry handling.
+
+<a id="t234-early-transaction-conflict-detection"></a>
+## T234 Early Transaction Conflict Detection
+
+Workload: SQL transaction `Execute`, AMD Ryzen 9 5950X, Linux amd64,
+`GOMAXPROCS=1`, seven samples, `-benchtime=300ms`, `-benchmem`. The origin
+benchmark and the T234 benchmark use the same insert statement and truncate
+staged rows after each iteration.
+
+| Workload | Mode | Median ns/op | B/op | allocs/op | Relative time |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Existing execute benchmark | `origin/master` | 3,345 | 2,952 | 13 | 1.00x |
+| Existing execute benchmark | T234 default | 3,130 | 2,952 | 13 | 0.94x |
+| Non-stale execute | default | 2,869 | 2,952 | 13 | 1.00x |
+| Non-stale execute | `EarlyConflictCheck` | 3,161 | 2,952 | 13 | 1.10x |
+| Stale execute | default | 3,223 | 2,952 | 13 | 1.00x |
+| Stale execute | `EarlyConflictCheck` | 13.96 | 0 | 0 | 0.0043x |
+
+Raw samples:
+
+```text
+origin/master: 3345 3518 3430 3642 2842 3173 3111
+T234 default: 3364 2764 2745 3130 3408 3034 3177
+T234 non-stale default: 2773 2770 2753 2899 2869 3461 3457
+T234 non-stale early: 2906 3652 3170 3161 3240 3075 3084
+T234 stale default: 3125 3223 3272 3241 3110 3271 3091
+T234 stale early: 14.29 14.19 13.93 13.94 13.96 13.94 15.46
+```
+
+The opt-in early check makes stale operations approximately 231x faster and
+removes their measured operation allocations. Successful operations pay an
+approximately 10% CPU cost in this run; the default remains off. See
+[T234_EARLY_TRANSACTION_CONFLICT.md](T234_EARLY_TRANSACTION_CONFLICT.md).

@@ -21,6 +21,7 @@ type SQLTransaction struct {
 	epoch                uint64
 	isolation            SQLTransactionIsolation
 	readOnly             bool
+	earlyConflictCheck   bool
 	deadline             time.Time
 	timedOut             bool
 	serializableLockHeld bool
@@ -102,6 +103,7 @@ func BeginSQLTransactionWithOptions(trie *HatTrie, options SQLTransactionOptions
 		epoch:                epoch,
 		isolation:            options.Isolation,
 		readOnly:             options.ReadOnly,
+		earlyConflictCheck:   options.EarlyConflictCheck,
 		deadline:             deadline,
 		serializableLockHeld: serializableLockHeld,
 	}, nil
@@ -132,6 +134,11 @@ func (transaction *SQLTransaction) Execute(source string) (SQLMutationResult, er
 	}
 	if err := transaction.checkTimeoutLocked(); err != nil {
 		return SQLMutationResult{}, err
+	}
+	if transaction.earlyConflictCheck {
+		if err := transaction.checkConflictLocked(); err != nil {
+			return SQLMutationResult{}, err
+		}
 	}
 	if transaction.readOnly {
 		return SQLMutationResult{}, ErrSQLTransactionReadOnly
@@ -177,6 +184,11 @@ func (transaction *SQLTransaction) Query(ctx context.Context, source string, par
 	if err := transaction.checkTimeoutLocked(); err != nil {
 		return SQLQueryResult{}, err
 	}
+	if transaction.earlyConflictCheck {
+		if err := transaction.checkConflictLocked(); err != nil {
+			return SQLQueryResult{}, err
+		}
+	}
 	queryContext := ctx
 	cancel := func() {}
 	if !transaction.deadline.IsZero() {
@@ -204,6 +216,9 @@ func (transaction *SQLTransaction) Commit() error {
 	response := transaction.live.executeSQLTransactionBatch(transaction.epoch, transaction.staged)
 	transaction.closeLocked()
 	if !response.OK {
+		if strings.HasPrefix(response.Message, "SQL transaction conflict:") {
+			return fmt.Errorf("%w: %s", ErrSQLTransactionConflict, response.Message)
+		}
 		return fmt.Errorf("%s", response.Message)
 	}
 	return nil
@@ -384,6 +399,16 @@ func (transaction *SQLTransaction) checkTimeoutLocked() error {
 	transaction.timedOut = true
 	transaction.closeLocked()
 	return ErrSQLTransactionTimeout
+}
+
+func (transaction *SQLTransaction) checkConflictLocked() error {
+	if transaction.live == nil {
+		return nil
+	}
+	if atomic.LoadUint64(&transaction.live.mutationEpoch) != transaction.epoch {
+		return ErrSQLTransactionConflict
+	}
+	return nil
 }
 
 func (transaction *SQLTransaction) closedError() error {

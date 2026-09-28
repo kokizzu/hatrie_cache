@@ -706,6 +706,7 @@ var ErrSQLSnapshotTokenInvalid = core.ErrSQLSnapshotTokenInvalid
 var ErrSQLSnapshotTokenMaxAgeInvalid = core.ErrSQLSnapshotTokenMaxAgeInvalid
 var ErrSQLSnapshotTokenSecretInvalid = core.ErrSQLSnapshotTokenSecretInvalid
 var ErrSQLTransactionReadOnly = core.ErrSQLTransactionReadOnly
+var ErrSQLTransactionConflict = core.ErrSQLTransactionConflict
 var ErrSQLTransactionTimeout = core.ErrSQLTransactionTimeout
 var ErrSnapshotManifestMismatch = core.ErrSnapshotManifestMismatch
 var ErrTopKCapacityMismatch = core.ErrTopKCapacityMismatch

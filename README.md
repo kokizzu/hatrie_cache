@@ -4994,3 +4994,15 @@ aggregate execution remains unchanged, and automatic planner wiring is not
 enabled. The snapshot memory and callback cost are measured in
 [MU031_RETRACTABLE_AGGREGATES.md](MU031_RETRACTABLE_AGGREGATES.md) and
 [BENCHMARK.md](BENCHMARK.md#mu-031-transactional-aggregate-rollback).
+
+## Early SQL Transaction Conflict Detection
+
+`SQLTransactionOptions.EarlyConflictCheck` is an opt-in guard for long-lived
+transactions. It rejects stale `Execute` and `Query` calls before SQL compile
+and staging work, while `Commit` remains the final atomic conflict guard. The
+default is off. See
+[T234_EARLY_TRANSACTION_CONFLICT.md](T234_EARLY_TRANSACTION_CONFLICT.md) for
+the API, tradeoff, and benchmark.
+
+Run `make test-t234`, `make race-t234`, `make vet-t234`, and
+`make benchmark-t234` for the focused checks and measurements.

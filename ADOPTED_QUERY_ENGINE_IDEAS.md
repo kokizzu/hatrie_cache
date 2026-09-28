@@ -1168,3 +1168,5 @@ query paths remain unchanged. The measured 16-caller cold-miss burst is 1.95x
 faster, with 3.43x lower transient bytes and 2.78x fewer allocations. See
 [M049_COMPILED_PLAN_SINGLEFLIGHT.md](M049_COMPILED_PLAN_SINGLEFLIGHT.md) and
 [BENCHMARK.md](BENCHMARK.md#m049-concurrent-compiled-plan-miss-coalescing).
+
+| Tarantool / Materialize | Early transactional conflict detection | Implemented as an opt-in SQL transaction guard | `SQLTransactionOptions.EarlyConflictCheck` rejects stale `Execute` and `Query` calls before SQL work, while `Commit` remains the atomic final guard. The default is off; a stale benchmark reduced median work from 3,223 ns/op, 2,952 B/op, and 13 allocs/op to 13.96 ns/op, 0 B/op, and 0 allocs/op. See [T234_EARLY_TRANSACTION_CONFLICT.md](T234_EARLY_TRANSACTION_CONFLICT.md). |
