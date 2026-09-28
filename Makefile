@@ -29605,3 +29605,16 @@ push-m052-shared-dataflow-executor:
 .PHONY: status-m052-shared-dataflow-executor
 status-m052-shared-dataflow-executor:
 	bash ./scripts/deliver-m052-shared-dataflow-executor.sh status
+
+.PHONY: cleanup-hatrie-tmp-full-plan cleanup-hatrie-tmp-full-apply cleanup-hatrie-tmp-full-audit cleanup-hatrie-tmp-full-self-test
+cleanup-hatrie-tmp-full-plan:
+	bash scripts/cleanup-hatrie-tmp-full.sh plan
+
+cleanup-hatrie-tmp-full-apply:
+	bash scripts/cleanup-hatrie-tmp-full.sh apply
+
+cleanup-hatrie-tmp-full-audit:
+	bash scripts/cleanup-hatrie-tmp-full.sh audit
+
+cleanup-hatrie-tmp-full-self-test:
+	bash scripts/cleanup-hatrie-tmp-full.sh self-test
