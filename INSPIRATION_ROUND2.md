@@ -186,7 +186,9 @@ operator control remain the preferred deployment model.
 - [ ] T244 Queue task delay and deadline scheduling.
 - [ ] T245 Queue visibility timeouts for worker crash recovery.
 - [ ] T246 Priority queues with starvation bounds.
-- [ ] T247 Queue task deduplication by client-supplied identity.
+- [x] T247 Queue task deduplication by client-supplied identity; see
+  [DEDUPLICATING_QUEUE.md](DEDUPLICATING_QUEUE.md) and
+  [BENCHMARK.md](BENCHMARK.md#t247-deduplicating-queue).
 - [ ] T248 Retry counters and dead-letter routing for failed tasks.
 - [ ] T249 Queue capacity, age, retry, and consumer-lag metrics.
 - [ ] T250 Gap-safe sequence allocation with durable current value.

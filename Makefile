@@ -28383,3 +28383,15 @@ format-c223-merge:
 
 race-c223-merge:
 	bash scripts/race-c223-merge.sh
+
+test-t247-dedup:
+	bash scripts/test-t247-dedup.sh
+
+benchmark-t247-dedup:
+	bash scripts/benchmark-t247-dedup.sh
+
+format-t247-dedup:
+	bash scripts/format-t247-dedup.sh
+
+race-t247-dedup:
+	bash scripts/race-t247-dedup.sh

@@ -38510,3 +38510,17 @@ The quantile merge allocates a combined summary copy, a bounded 1.74x heap
 increase in exchange for avoiding raw-row replay. Existing SQL approximate
 aggregate evaluation remains unchanged. See
 [MERGEABLE_APPROX_SKETCHES.md](MERGEABLE_APPROX_SKETCHES.md).
+
+## T247 Deduplicating Queue
+
+Five isolated `-benchmem` samples submitted 100,000 tasks with 100 repeating
+client identities on an AMD Ryzen 9 5950X.
+
+| Workload | Plain FIFO | Deduplicating queue | Relative result | Heap / allocs |
+| --- | ---: | ---: | --- | --- |
+| Admission and dequeue only | 156,440 ns/op | 1,077,623 ns/op | 6.9x CPU cost | 802,820 / 6,232 B/op; 1 / 5 allocs |
+| Admission plus 64-step task work | 5,959,487 ns/op | 1,069,376 ns/op | 5.6x faster | 802,816 / 6,232 B/op; 1 / 5 allocs |
+
+The queue is opt-in policy state: the map lookup costs CPU, but duplicate-heavy
+workloads avoid repeated task execution and retain only active unique keys. See
+[DEDUPLICATING_QUEUE.md](DEDUPLICATING_QUEUE.md).
