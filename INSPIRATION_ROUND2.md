@@ -187,7 +187,7 @@ operator control remain the preferred deployment model.
 - [ ] T241 Role-based authentication and per-space authorization.
 - [ ] T242 Append-only audit logging for administrative and data operations.
 - [x] T243 Mutual TLS authentication with certificate rotation; see [T243_MTLS_CERTIFICATE_ROTATION.md](T243_MTLS_CERTIFICATE_ROTATION.md).
-- [ ] T244 Queue task delay and deadline scheduling.
+- [x] T244 Queue task delay and deadline scheduling. Already adopted by the zero-allocation `hatDataStructure.DelayQueue`, `VisibilityQueue.EnqueueAfter`, and `PriorityVisibilityQueue.EnqueueAt/EnqueueAfter`; see [DELAY_QUEUE.md](DELAY_QUEUE.md) and [PRIORITY_VISIBILITY_QUEUE.md](PRIORITY_VISIBILITY_QUEUE.md).
 - [x] T245 Queue visibility timeouts for worker crash recovery; see
   [T245_QUEUE_VISIBILITY.md](T245_QUEUE_VISIBILITY.md) and the measurements in
   [BENCHMARK.md](BENCHMARK.md#t245-priority-queue-visibility-leases).
