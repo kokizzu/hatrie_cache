@@ -37772,6 +37772,47 @@ BenchmarkM217MaintainedPointLookupBuild-32     16 13572911 ns/op 10000 retained_
 BenchmarkM217MaintainedPointLookupBuild-32     18 13324466 ns/op 10000 retained_entries 7436705 B/op 35385 allocs/op
 ```
 
+<a id="m218-point-lookup-planner-selection"></a>
+## M218 Point-Lookup Planner Selection
+
+Command: `make benchmark-m218`, Linux amd64, AMD Ryzen 9 5950X, five samples
+per benchmark, `-benchtime=200ms`. The fixture has 10,000 complete rows and
+156 matching rows for `team-42`.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative |
+| --- | ---: | ---: | ---: | --- |
+| Always scan | 272,724 | 53,703 | 313 | 1.00x |
+| Cost-based plan plus point lookup | 94,425 | 61,944 | 316 | 2.89x faster; 15.3% more B/op; +3 allocs |
+| Planner only, 32 candidates | 7,431 | 9,832 | 4 | Planning overhead, not row execution |
+
+The selected path includes the planner decision and maintained M217 lookup in
+the timed loop, so the speedup includes planner overhead. M218 remains
+caller-driven and does not automatically create, hydrate, or drop indexes.
+Fallback reasons include unavailable arrangements, memory budget, no read
+savings, insufficient expected reads, and insufficient net benefit. Full raw
+samples and API semantics are in
+[M218_POINT_LOOKUP_PLANNER.md](M218_POINT_LOOKUP_PLANNER.md).
+
+Raw samples:
+
+```text
+BenchmarkM218BaselineAlwaysScanLookup-32       766 294908 ns/op 156.0 result_rows 53697 B/op 313 allocs/op
+BenchmarkM218BaselineAlwaysScanLookup-32      1010 270181 ns/op 156.0 result_rows 53708 B/op 313 allocs/op
+BenchmarkM218BaselineAlwaysScanLookup-32       901 265147 ns/op 156.0 result_rows 53703 B/op 313 allocs/op
+BenchmarkM218BaselineAlwaysScanLookup-32       835 294703 ns/op 156.0 result_rows 53697 B/op 313 allocs/op
+BenchmarkM218BaselineAlwaysScanLookup-32       830 272724 ns/op 156.0 result_rows 53704 B/op 313 allocs/op
+BenchmarkM218CostBasedPointLookup-32          2643  91211 ns/op 156.0 result_rows 61948 B/op 316 allocs/op
+BenchmarkM218CostBasedPointLookup-32          2391  96708 ns/op 156.0 result_rows 61944 B/op 316 allocs/op
+BenchmarkM218CostBasedPointLookup-32          2343  98335 ns/op 156.0 result_rows 61944 B/op 316 allocs/op
+BenchmarkM218CostBasedPointLookup-32          2331  92478 ns/op 156.0 result_rows 61946 B/op 316 allocs/op
+BenchmarkM218CostBasedPointLookup-32          2552  94425 ns/op 156.0 result_rows 61944 B/op 316 allocs/op
+BenchmarkM218PlannerDecision32Candidates-32  34004   6601 ns/op                     9832 B/op 4 allocs/op
+BenchmarkM218PlannerDecision32Candidates-32  34242   7514 ns/op                     9832 B/op 4 allocs/op
+BenchmarkM218PlannerDecision32Candidates-32  31214   7431 ns/op                     9832 B/op 4 allocs/op
+BenchmarkM218PlannerDecision32Candidates-32  30348   7581 ns/op                     9832 B/op 4 allocs/op
+BenchmarkM218PlannerDecision32Candidates-32  33954   6967 ns/op                     9832 B/op 4 allocs/op
+```
+
 ## CH-025: Compaction-Pool Priority Policy
 
 Command: `make benchmark-ch025-priority` on AMD Ryzen 9 5950X, linux/amd64.

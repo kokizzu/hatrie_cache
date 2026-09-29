@@ -106,7 +106,7 @@ operator control remain the preferred deployment model.
 - [x] M215 Delta-join maintenance for high-churn join inputs; see [M215_DELTA_JOIN.md](M215_DELTA_JOIN.md) and [BENCHMARK.md#m215-high-churn-delta-join-maintenance](BENCHMARK.md#m215-high-churn-delta-join-maintenance).
 - [ ] M216 Incremental top-K arrangements with bounded replacement state.
 - [x] M217 Indexes that store complete maintained view results for point lookups; see [M217_POINT_LOOKUP_INDEX.md](M217_POINT_LOOKUP_INDEX.md) and [BENCHMARK.md#m217-complete-row-point-lookup](BENCHMARK.md#m217-complete-row-point-lookup).
-- [ ] M218 Planner selection of point lookup versus arrangement scan.
+- [x] M218 Planner selection of point lookup versus arrangement scan; see [M218_POINT_LOOKUP_PLANNER.md](M218_POINT_LOOKUP_PLANNER.md) and [BENCHMARK.md#m218-point-lookup-planner-selection](BENCHMARK.md#m218-point-lookup-planner-selection).
 - [ ] M219 Background index creation with observable build frontier.
 - [ ] M220 Safe index removal after dependent readers drain.
 - [ ] M221 Isolated compute clusters with independent resource budgets.
