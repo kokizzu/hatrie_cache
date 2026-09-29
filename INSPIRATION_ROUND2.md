@@ -126,7 +126,7 @@ operator control remain the preferred deployment model.
 - [ ] M235 Dependency graph invalidation for affected indexes and views only.
 - [ ] M236 On-demand refresh of only invalidated maintained objects.
 - [ ] M237 Lazy hydration triggered by the first reader with cancellation support.
-- [ ] M238 Explain output for filter pushdown and arrangement reuse.
+- [x] M238 Explain output for filter pushdown and arrangement reuse; structured pruning telemetry and bounded arrangement metadata are already available through `ExplainStep.Pruning` and `ExplainStep.Arrangements`. See [CH022_EXPLAIN_PRUNING.md](CH022_EXPLAIN_PRUNING.md), [MU012_ARRANGEMENT_EXPLAIN.md](MU012_ARRANGEMENT_EXPLAIN.md), and [BENCHMARK.md#mu-012-arrangement-explain](BENCHMARK.md#mu-012-arrangement-explain).
 - [ ] M239 Explain output for logical timestamp and frontier requirements.
 - [ ] M240 Raw dataflow explain output for operator and exchange topology.
 - [ ] M241 Optimizer trace showing rule applications and rejected alternatives.
