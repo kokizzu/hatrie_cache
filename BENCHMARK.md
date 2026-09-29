@@ -39290,3 +39290,40 @@ BenchmarkM241OptimizerTrace/optimizer_trace-32         35082  8704 ns/op  9386 B
 BenchmarkM241OptimizerTrace/optimizer_trace-32         35024  8693 ns/op  9386 B/op  44 allocs/op
 BenchmarkM241OptimizerTrace/optimizer_trace-32         33450  8658 ns/op  9386 B/op  44 allocs/op
 ```
+## T205 Replication Lag And Apply Throughput
+
+Linux `amd64`, AMD Ryzen 9 5950X, `go test -benchmem -count=5 -benchtime=200ms`.
+The observation benchmark updates one already-registered space; the snapshot
+benchmark exports and sorts 256 spaces.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative |
+| --- | ---: | ---: | ---: | --- |
+| `ReplicaLSNMetrics.Observe`, existing space | 54.18 | 0 | 0 | 1.00x |
+| `ReplicaLSNMetrics.Snapshot`, 256 spaces | 40,384 | 21,912 | 4 | export path |
+
+This feature is new and default-off, so there is no previous production path
+with equivalent semantics. The pre/post measurement below is the implementation
+optimization performed during this feature: moving the space-name clone from
+every observation to first registration reduced steady-state observation from a
+72.25 ns/op median, 8 B/op, and 1 allocation to 54.18 ns/op, 0 B/op, and 0
+allocations, a 1.33x speedup and complete allocation removal. Snapshot cost was
+within benchmark noise.
+
+Raw five-sample output:
+
+```text
+BenchmarkReplicaLSNMetricsObserve-32     3245695  73.94 ns/op   8 B/op 1 allocs/op
+BenchmarkReplicaLSNMetricsObserve-32     3160773  72.25 ns/op   8 B/op 1 allocs/op
+BenchmarkReplicaLSNMetricsObserve-32     3221763  72.42 ns/op   8 B/op 1 allocs/op
+BenchmarkReplicaLSNMetricsObserve-32     3363579  70.68 ns/op   8 B/op 1 allocs/op
+BenchmarkReplicaLSNMetricsObserve-32     3337854  71.81 ns/op   8 B/op 1 allocs/op
+BenchmarkReplicaLSNMetricsObserve-32     4440739  53.79 ns/op   0 B/op 0 allocs/op
+BenchmarkReplicaLSNMetricsObserve-32     4433130  54.39 ns/op   0 B/op 0 allocs/op
+BenchmarkReplicaLSNMetricsObserve-32     4442304  54.18 ns/op   0 B/op 0 allocs/op
+BenchmarkReplicaLSNMetricsObserve-32     4447018  55.07 ns/op   0 B/op 0 allocs/op
+BenchmarkReplicaLSNMetricsObserve-32     4405700  53.99 ns/op   0 B/op 0 allocs/op
+BenchmarkReplicaLSNMetricsSnapshot-32       5230  40384 ns/op 21912 B/op 4 allocs/op
+```
+
+See [T205_REPLICATION_LAG_METRICS.md](T205_REPLICATION_LAG_METRICS.md) for
+API semantics, bounds, and the operational tradeoffs.

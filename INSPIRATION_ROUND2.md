@@ -146,7 +146,7 @@ operator control remain the preferred deployment model.
 - [x] T202 Automatic leader election for a replica set. Already adopted through `hatTopology.ElectionStore`, `hatTopology.ElectShardLeader`, and the opt-in `hatReplication.AutomaticFailoverCoordinator`; see [LEADER_ELECTION.md](LEADER_ELECTION.md), [TU12_AUTOMATIC_FAILOVER.md](TU12_AUTOMATIC_FAILOVER.md), and [BENCHMARK.md](BENCHMARK.md#tu12-automatic-failover).
 - [ ] T203 Strict leader fencing against stale writers after failover.
 - [ ] T204 Supervised failover with explicit operator override and recovery state.
-- [ ] T205 LSN-based replication lag and apply-throughput metrics.
+- [x] T205 LSN-based replication lag and apply-throughput metrics. Opt-in bounded `hatReplication.ReplicaLSNMetrics` tracks per-space source/applied LSNs, saturated lag, and timestamp-derived source/apply throughput without inspecting or changing the replication transport; see [T205_REPLICATION_LAG_METRICS.md](T205_REPLICATION_LAG_METRICS.md) and [BENCHMARK.md#t205-replication-lag-and-apply-throughput](BENCHMARK.md#t205-replication-lag-and-apply-throughput).
 - [ ] T206 Deterministic replica bootstrap and join workflow.
 - [ ] T207 Replica eviction, rejoin, and stale-state recovery protocol.
 - [ ] T208 Anonymous replicas that do not participate in quorum decisions.
