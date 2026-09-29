@@ -28606,3 +28606,5 @@ benchmark-m245:
 	@bash scripts/benchmark-m245.sh
 verify-m245:
 	@bash scripts/verify-m245.sh
+benchmark-t204:
+	@bash ./scripts/benchmark-t204.sh

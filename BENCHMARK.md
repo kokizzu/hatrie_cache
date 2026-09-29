@@ -39365,6 +39365,26 @@ allocations. Existing `Validate` callers and lease defaults are unchanged. Keep 
 serialized authority for failover and writes. See [T203_LEADER_WRITE_FENCING.md](T203_LEADER_WRITE_FENCING.md)
 for the security boundary and reproducible `make benchmark-t203` command.
 
+## T204 Supervised Failover
+
+The baseline is the existing automatic proposal/commit lifecycle. The
+supervised path adds token-gated operator approval, the recovery transition,
+and exact recovery-result validation. Five 200 ms samples were measured with
+`-benchmem` on an AMD Ryzen 9 5950X, linux/amd64.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative |
+| --- | --- | ---: | ---: | ---: | --- |
+| Existing automatic proposal + commit | 206.5, 210.4, 206.6, 210.5, 207.8 | 207.8 | 176 | 1 | baseline |
+| T204 supervised approval + recovery | 478.3, 475.6, 478.7, 489.1, 487.3 | 478.7 | 480 | 3 | 2.30x CPU, 2.73x bytes, 3.00x allocations |
+
+The unchanged automatic evaluator measured `74.34, 74.60, 75.12, 75.18,
+75.22 ns/op`, `0 B/op`, and `0 allocs/op`; its median is `75.12 ns/op`, within
+the pre-change `74.87 ns/op` median. T204 is therefore not a fast-path
+optimization. Its cost is isolated to the explicitly enabled supervised
+lifecycle, where the operator approval and recovery audit boundary are the
+purpose of the feature. The default automatic coordinator remains unchanged.
+Run `make benchmark-t204` to reproduce the measurements.
+
 ## T207 Replica Eviction And Rejoin
 
 The focused lifecycle benchmark performs join, join, remove, add for each
