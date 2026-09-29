@@ -39385,6 +39385,29 @@ lifecycle, where the operator approval and recovery audit boundary are the
 purpose of the feature. The default automatic coordinator remains unchanged.
 Run `make benchmark-t204` to reproduce the measurements.
 
+## T206 Deterministic Replica Bootstrap Checkpoints
+
+The baseline is the existing TU09 in-memory coordinator before checkpoint
+serialization. Five 200 ms samples used `-benchmem` on an AMD Ryzen 9 5950X,
+linux/amd64. The T206 checkpoint fixture is a catching-up join with a
+48-byte encoded state frame.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative |
+| --- | --- | ---: | ---: | ---: | --- |
+| Existing `AdvanceWAL` baseline | 26.07, 25.79, 26.09, 25.97, 26.02 | 26.02 | 0 | 0 | baseline |
+| T206 `AdvanceWAL` after | 26.11, 25.90, 25.96, 26.05, 25.93 | 25.96 | 0 | 0 | 1.00x, -0.06 ns |
+| Existing `Snapshot` baseline | 13.12, 13.03, 13.04, 13.04, 13.07 | 13.04 | 0 | 0 | baseline |
+| T206 `Snapshot` after | 13.11, 12.92, 12.98, 12.98, 12.93 | 12.98 | 0 | 0 | 1.00x, -0.06 ns |
+| T206 `MarshalSnapshot` | 167.2, 199.6, 178.0, 161.4, 166.7 | 167.2 | 304 | 2 | 48 wire bytes |
+| T206 `RestoreSnapshot` | 211.7, 215.4, 220.1, 221.8, 210.5 | 215.4 | 192 | 4 | explicit restart work |
+| T206 durable `Save` | 7,264,186, 1,467,748, 1,788,099, 1,437,642, 1,428,283 | 1,467,748 | 1,504 | 17 | file and directory sync |
+
+The existing in-memory transition and status paths retain zero allocations and
+remain within benchmark noise. Marshal/restore allocate only when a caller
+explicitly checkpoints or restarts; `Save` includes durable filesystem sync,
+so it must be scheduled as a recovery checkpoint rather than placed in the
+per-record WAL loop. Run `make benchmark-t206` to reproduce the measurements.
+
 ## T207 Replica Eviction And Rejoin
 
 The focused lifecycle benchmark performs join, join, remove, add for each
