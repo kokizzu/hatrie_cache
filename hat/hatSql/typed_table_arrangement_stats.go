@@ -15,7 +15,11 @@ type TypedTableAggregateArrangementStats struct {
 	Groups           int    `json:"groups"`
 	DistinctValues   int    `json:"distinct_values"`
 	CompactionCount  uint64 `json:"compaction_count"`
+	KeyBytes         uint64 `json:"key_bytes"`
+	ValueBytes       uint64 `json:"value_bytes"`
+	TraceBytes       uint64 `json:"trace_bytes"`
 	EstimatedBytes   uint64 `json:"estimated_bytes"`
+	RetainedBytes    uint64 `json:"retained_bytes"`
 }
 
 // TypedTableAggregateArrangementsStats is a consistent point-in-time report
@@ -84,6 +88,12 @@ func typedTableAggregateArrangementStats(key string, references int, aggregate *
 			distinctValues += len(collision.distinctValues)
 		}
 	}
+	keyBytes, valueBytes := estimateTypedTableAggregateStateBytes(aggregate)
+	estimatedBytes := keyBytes
+	addEstimatedBytes(&estimatedBytes, valueBytes)
+	traceBytes := estimateTypedTableAggregateTraceBytes(aggregate)
+	retainedBytes := estimatedBytes
+	addEstimatedBytes(&retainedBytes, traceBytes)
 	return TypedTableAggregateArrangementStats{
 		DefinitionKey:    key,
 		References:       references,
@@ -93,7 +103,11 @@ func typedTableAggregateArrangementStats(key string, references int, aggregate *
 		Groups:           aggregate.groupCount,
 		DistinctValues:   distinctValues,
 		CompactionCount:  aggregate.compactionCount,
-		EstimatedBytes:   estimateTypedTableAggregateBytes(aggregate),
+		KeyBytes:         keyBytes,
+		ValueBytes:       valueBytes,
+		TraceBytes:       traceBytes,
+		EstimatedBytes:   estimatedBytes,
+		RetainedBytes:    retainedBytes,
 	}
 }
 
@@ -161,30 +175,63 @@ func typedTableAggregateTableState(table *TypedTable) (sourceSequence, compacted
 	return table.sequence, table.compactedThrough
 }
 
-func estimateTypedTableAggregateBytes(aggregate *TypedTableAggregate) uint64 {
+func estimateTypedTableAggregateStateBytes(aggregate *TypedTableAggregate) (keyBytes, valueBytes uint64) {
 	if aggregate == nil {
-		return 0
+		return 0, 0
 	}
-	var total uint64
-	addEstimatedBytes(&total, uint64(len(aggregate.groups))*80)
-	addEstimatedBytes(&total, uint64(len(aggregate.compactGroupOrder))*16)
-	addEstimatedBytes(&total, uint64(len(aggregate.groupDictionaries))*64)
+	addEstimatedCount(&keyBytes, len(aggregate.groups), 80)
+	addEstimatedCount(&keyBytes, len(aggregate.compactGroupOrder), 16)
+	addEstimatedCount(&keyBytes, len(aggregate.groupDictionaries), 64)
 	for _, bucket := range aggregate.groups {
-		addEstimatedBytes(&total, estimateTypedTableAggregateGroupBytes(bucket.group))
+		groupKeyBytes, groupValueBytes := estimateTypedTableAggregateGroupBytes(bucket.group)
+		addEstimatedBytes(&keyBytes, groupKeyBytes)
+		addEstimatedBytes(&valueBytes, groupValueBytes)
 		for _, collision := range bucket.collisions {
-			addEstimatedBytes(&total, estimateTypedTableAggregateGroupBytes(collision))
+			groupKeyBytes, groupValueBytes := estimateTypedTableAggregateGroupBytes(collision)
+			addEstimatedBytes(&keyBytes, groupKeyBytes)
+			addEstimatedBytes(&valueBytes, groupValueBytes)
 		}
 	}
+	return keyBytes, valueBytes
+}
+
+func estimateTypedTableAggregateGroupBytes(group typedTableAggregateGroup) (keyBytes, valueBytes uint64) {
+	keyBytes = 64
+	addEstimatedBytes(&keyBytes, uint64(len(group.key)))
+	addEstimatedCount(&keyBytes, len(group.values), 32)
+	addEstimatedCount(&keyBytes, len(group.codes), 4)
+	addEstimatedCount(&keyBytes, len(group.kinds), 1)
+	valueBytes = 32
+	addEstimatedCount(&valueBytes, len(group.minValues)+len(group.maxValues)+len(group.distinctValues), 64)
+	return keyBytes, valueBytes
+}
+
+// estimateTypedTableAggregateTraceBytes reports the retained source
+// changefeed footprint shared by this arrangement's table. It intentionally
+// uses a fixed per-entry base so stats remain O(1) in retained history length;
+// this is a bounded accounting estimate, not a runtime allocator reading.
+func estimateTypedTableAggregateTraceBytes(aggregate *TypedTableAggregate) uint64 {
+	if aggregate == nil || aggregate.table == nil {
+		return 0
+	}
+	table := aggregate.table
+	table.mu.RLock()
+	defer table.mu.RUnlock()
+	var total uint64
+	addEstimatedCount(&total, len(table.changes), 64)
 	return total
 }
 
-func estimateTypedTableAggregateGroupBytes(group typedTableAggregateGroup) uint64 {
-	bytes := uint64(96 + len(group.key))
-	bytes += uint64(len(group.values)) * 32
-	bytes += uint64(len(group.codes)) * 4
-	bytes += uint64(len(group.kinds))
-	bytes += uint64(len(group.minValues)+len(group.maxValues)+len(group.distinctValues)) * 64
-	return bytes
+func addEstimatedCount(total *uint64, count int, bytesPerItem uint64) {
+	if count <= 0 || bytesPerItem == 0 || *total == ^uint64(0) {
+		return
+	}
+	countUint := uint64(count)
+	if countUint > ^uint64(0)/bytesPerItem {
+		*total = ^uint64(0)
+		return
+	}
+	addEstimatedBytes(total, countUint*bytesPerItem)
 }
 
 func addEstimatedBytes(total *uint64, value uint64) {

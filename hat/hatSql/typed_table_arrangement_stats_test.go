@@ -61,6 +61,15 @@ func TestTypedTableAggregateArrangementsExposeMemoryAndFreshnessStats(t *testing
 	if arrangementStats.References != 2 || arrangementStats.Checkpoint != 2 || arrangementStats.SourceSequence != 2 || arrangementStats.CompactedThrough != 0 || arrangementStats.Groups != 1 || arrangementStats.DistinctValues != 2 || arrangementStats.CompactionCount != 1 || arrangementStats.EstimatedBytes == 0 {
 		t.Fatalf("arrangement detail stats = %#v", arrangementStats)
 	}
+	if arrangementStats.KeyBytes == 0 || arrangementStats.ValueBytes == 0 || arrangementStats.TraceBytes == 0 {
+		t.Fatalf("arrangement memory breakdown = %#v", arrangementStats)
+	}
+	if arrangementStats.EstimatedBytes != arrangementStats.KeyBytes+arrangementStats.ValueBytes || arrangementStats.RetainedBytes != arrangementStats.EstimatedBytes+arrangementStats.TraceBytes {
+		t.Fatalf("arrangement memory total = %#v", arrangementStats)
+	}
+	keyBytes := arrangementStats.KeyBytes
+	valueBytes := arrangementStats.ValueBytes
+	traceBytes := arrangementStats.TraceBytes
 	compaction := arrangements.CompactionStats()
 	if compaction.LogicalFrontier != 2 || compaction.CompactedThrough != 0 || compaction.CompactionDebt != 2 {
 		t.Fatalf("compaction stats = %#v", compaction)
@@ -77,6 +86,9 @@ func TestTypedTableAggregateArrangementsExposeMemoryAndFreshnessStats(t *testing
 	}
 	if got, err := first.Stats(); err != nil || got.CompactedThrough != 1 {
 		t.Fatalf("stats after changelog compaction = %#v, err = %v", got, err)
+	}
+	if got, err := first.Stats(); err != nil || got.KeyBytes != keyBytes || got.ValueBytes != valueBytes || got.TraceBytes >= traceBytes || got.EstimatedBytes != got.KeyBytes+got.ValueBytes || got.RetainedBytes != got.EstimatedBytes+got.TraceBytes {
+		t.Fatalf("memory breakdown after changelog compaction = %#v, err = %v", got, err)
 	}
 	if got, err := first.CompactionStats(); err != nil || got.CompactedThrough != 1 || got.CompactionDebt != 1 {
 		t.Fatalf("compaction stats after changelog compaction = %#v, err = %v", got, err)

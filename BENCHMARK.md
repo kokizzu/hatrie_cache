@@ -20,6 +20,26 @@ fixed metric-slot updates instead of repeating those operations three times.
 An enabled operator retains three bounded points and one exact snapshot; the
 default catalog and SQL execution paths are unchanged.
 
+## M243 Arrangement Memory Metrics
+
+Command: `make benchmark-m243`
+
+The baseline is the clean M242 parent commit. Both paths use the same 128-row,
+eight-group typed-table aggregate fixture and seven `-benchmem` samples with
+`-cpu=1` on one
+AMD Ryzen 9 5950X host:
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | --- | ---: | ---: | ---: | --- |
+| Parent arrangement `Stats()` | 609.0, 520.1, 523.4, 527.2, 557.9, 562.8, 585.0 | 557.9 | 56 | 3 | baseline |
+| M243 arrangement `Stats()` | 536.5, 600.8, 561.0, 535.1, 554.5, 521.6, 552.6 | 552.6 | 56 | 3 | 0.99x CPU (within run-to-run noise) |
+
+The final implementation keeps allocation behavior unchanged and makes trace
+accounting constant-cost in retained history length. A payload-scanning
+prototype measured about 1,664 ns/op, or 3.17x the baseline, and was discarded.
+The feature is read-only: it does not alter compaction or query execution, and
+`TraceBytes` falls when retained changelog entries are compacted.
+
 ## M244 Compaction Debt Metrics
 
 Command: `make benchmark-m244`
