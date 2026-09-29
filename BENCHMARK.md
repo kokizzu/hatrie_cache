@@ -39327,3 +39327,19 @@ BenchmarkReplicaLSNMetricsSnapshot-32       5230  40384 ns/op 21912 B/op 4 alloc
 
 See [T205_REPLICATION_LAG_METRICS.md](T205_REPLICATION_LAG_METRICS.md) for
 API semantics, bounds, and the operational tradeoffs.
+## T207 Replica Eviction And Rejoin
+
+The focused lifecycle benchmark performs join, join, remove, add for each
+path and runs five 200 ms samples on an AMD Ryzen 9 5950X, linux/amd64.
+
+| Path | Raw ns/op samples | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Evict + rejoin | 3736, 3748, 3639, 3613, 3628 | 3639 | 9008 | 30 | 1.01x faster |
+| Leave + join control | 3692, 3624, 3875, 3775, 3642 | 3692 | 9008 | 30 | 1.00x |
+
+The explicit recovery lifecycle has the same memory and allocation profile as
+the existing control path and was slightly faster in this run; the small CPU
+difference is within normal benchmark noise. Existing join/leave behavior is
+preserved. See [T207_REPLICA_EVICTION_REJOIN.md](T207_REPLICA_EVICTION_REJOIN.md)
+for the recovery sequence, API contract, security boundaries, and verification
+commands.

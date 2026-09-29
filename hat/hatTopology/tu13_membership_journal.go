@@ -15,9 +15,12 @@ import (
 	json "github.com/goccy/go-json"
 )
 
+// Membership operation names accepted by MembershipJournal.Apply.
 const (
-	MembershipOperationJoin  = "join"
-	MembershipOperationLeave = "leave"
+	MembershipOperationJoin   = "join"
+	MembershipOperationLeave  = "leave"
+	MembershipOperationEvict  = "evict"
+	MembershipOperationRejoin = "rejoin"
 
 	MembershipJournalVersion        uint64 = 1
 	DefaultMembershipJournalHistory        = 256
@@ -205,8 +208,15 @@ func (journal *MembershipJournal) Apply(change MembershipChange) (MembershipReco
 			return MembershipRecord{}, ErrMembershipJournalLastNode
 		}
 		nodes = append(nodes[:index], nodes[index+1:]...)
+	case MembershipOperationRejoin:
+		nodes, err = addMembershipNode(nodes, normalized.Node)
+	case MembershipOperationEvict:
+		nodes, err = removeMembershipNode(nodes, normalized.Node.ID)
 	default:
 		return MembershipRecord{}, ErrMembershipJournalInvalidChange
+	}
+	if err != nil {
+		return MembershipRecord{}, err
 	}
 	sort.Slice(nodes, func(left, right int) bool { return nodes[left].ID < nodes[right].ID })
 	if journal.lastSequence == ^uint64(0) || journal.generation == ^uint64(0) {
@@ -368,14 +378,14 @@ func (journal *MembershipJournal) snapshotLocked() MembershipJournalSnapshot {
 func normalizeMembershipChange(change MembershipChange) (MembershipChange, error) {
 	change.Operation = strings.ToLower(strings.TrimSpace(change.Operation))
 	change.OperationID = strings.TrimSpace(change.OperationID)
-	if (change.Operation != MembershipOperationJoin && change.Operation != MembershipOperationLeave) || change.OperationID == "" || len(change.OperationID) > MaxMembershipOperationIDBytes {
+	if (change.Operation != MembershipOperationJoin && change.Operation != MembershipOperationLeave && change.Operation != MembershipOperationEvict && change.Operation != MembershipOperationRejoin) || change.OperationID == "" || len(change.OperationID) > MaxMembershipOperationIDBytes {
 		return MembershipChange{}, ErrMembershipJournalInvalidChange
 	}
 	node, err := normalizeMembershipNode(change.Node)
 	if err != nil {
 		return MembershipChange{}, err
 	}
-	if change.Operation == MembershipOperationLeave {
+	if change.Operation == MembershipOperationLeave || change.Operation == MembershipOperationEvict {
 		node = TopologyNode{ID: node.ID}
 	}
 	change.Node = node
@@ -449,7 +459,7 @@ func validateMembershipJournalSnapshot(snapshot MembershipJournalSnapshot, maxHi
 			return ErrMembershipJournalFormat
 		}
 		operationIDs[record.OperationID] = struct{}{}
-		if record.Operation != MembershipOperationJoin && record.Operation != MembershipOperationLeave {
+		if record.Operation != MembershipOperationJoin && record.Operation != MembershipOperationLeave && record.Operation != MembershipOperationEvict && record.Operation != MembershipOperationRejoin {
 			return ErrMembershipJournalFormat
 		}
 		node, err := normalizeMembershipNode(record.Node)
@@ -579,6 +589,24 @@ func membershipNodeIndex(nodes []TopologyNode, id string) int {
 		}
 	}
 	return -1
+}
+
+func addMembershipNode(nodes []TopologyNode, node TopologyNode) ([]TopologyNode, error) {
+	if membershipNodeIndex(nodes, node.ID) >= 0 {
+		return nil, fmt.Errorf("%w: node=%q", ErrMembershipJournalNodeExists, node.ID)
+	}
+	return append(nodes, node), nil
+}
+
+func removeMembershipNode(nodes []TopologyNode, id string) ([]TopologyNode, error) {
+	index := membershipNodeIndex(nodes, id)
+	if index < 0 {
+		return nil, fmt.Errorf("%w: node=%q", ErrMembershipJournalNodeMissing, id)
+	}
+	if len(nodes) == 1 {
+		return nil, ErrMembershipJournalLastNode
+	}
+	return append(nodes[:index], nodes[index+1:]...), nil
 }
 
 func cloneMembershipNodes(nodes []TopologyNode) []TopologyNode {

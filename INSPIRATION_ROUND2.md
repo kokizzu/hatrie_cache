@@ -148,7 +148,7 @@ operator control remain the preferred deployment model.
 - [ ] T204 Supervised failover with explicit operator override and recovery state.
 - [x] T205 LSN-based replication lag and apply-throughput metrics. Opt-in bounded `hatReplication.ReplicaLSNMetrics` tracks per-space source/applied LSNs, saturated lag, and timestamp-derived source/apply throughput without inspecting or changing the replication transport; see [T205_REPLICATION_LAG_METRICS.md](T205_REPLICATION_LAG_METRICS.md) and [BENCHMARK.md#t205-replication-lag-and-apply-throughput](BENCHMARK.md#t205-replication-lag-and-apply-throughput).
 - [ ] T206 Deterministic replica bootstrap and join workflow.
-- [ ] T207 Replica eviction, rejoin, and stale-state recovery protocol.
+- [x] T207 Replica eviction, rejoin, and stale-state recovery protocol. `hatTopology.MembershipJournal` now records explicit fenced `evict` and `rejoin` operations with atomic persistence, idempotent operation IDs, and replay visibility; snapshot/WAL recovery and traffic activation remain caller-owned. See [T207_REPLICA_EVICTION_REJOIN.md](T207_REPLICA_EVICTION_REJOIN.md) and [BENCHMARK.md#t207-replica-eviction-and-rejoin](BENCHMARK.md#t207-replica-eviction-and-rejoin).
 - [ ] T208 Anonymous replicas that do not participate in quorum decisions.
 - [ ] T209 Relay/applier backpressure when a replica falls behind.
 - [ ] T210 Master-master conflict hooks with source and sequence context.

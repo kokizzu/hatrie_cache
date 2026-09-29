@@ -87,6 +87,7 @@ security guidance before exposing it on a network.
 - SDK-neutral OpenTelemetry-compatible SQL query and operator spans: [QUERY_TRACING.md](QUERY_TRACING.md)
 - Replication queue and wire-byte metrics: [REPLICATION_METRICS.md](REPLICATION_METRICS.md)
 - Opt-in per-space replication LSN lag and source/applier throughput metrics: [T205_REPLICATION_LAG_METRICS.md](T205_REPLICATION_LAG_METRICS.md), with measurements in [BENCHMARK.md#t205-replication-lag-and-apply-throughput](BENCHMARK.md#t205-replication-lag-and-apply-throughput)
+- Opt-in fenced replica eviction and rejoin lifecycle operations: [T207_REPLICA_EVICTION_REJOIN.md](T207_REPLICA_EVICTION_REJOIN.md), with measurements in [BENCHMARK.md#t207-replica-eviction-and-rejoin](BENCHMARK.md#t207-replica-eviction-and-rejoin)
 - Replication pause and resume operations: [REPLICATION_OPERATIONS.md](REPLICATION_OPERATIONS.md)
 - Opt-in journal-wide synchronous write quorum bound to exact journal sequences and fence tokens: [TU10_JOURNAL_WRITE_QUORUM.md](TU10_JOURNAL_WRITE_QUORUM.md), with measured validation and execution costs in [BENCHMARK.md](BENCHMARK.md#t-u10-journal-wide-synchronous-write-quorum)
 - Opt-in two-phase cluster write commit with prepare barriers and explicit indeterminate-outcome handling: [T047_CLUSTER_WRITE_COMMIT.md](T047_CLUSTER_WRITE_COMMIT.md), with measured control-plane tradeoffs in [BENCHMARK.md](BENCHMARK.md#t047-cluster-write-commit)
