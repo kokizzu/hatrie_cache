@@ -224,6 +224,7 @@ explicitly opt-in operational control.
 
 | ClickHouse | Direct columnar append ingestion | Partially adopted as `hatSql.TypedTable.AppendColumnar`; complete scalar batches are validated before mutation and appended column-wise with plain and packed layouts supported. SQL `INSERT` routing remains caller-owned. | [CHU22_DIRECT_COLUMNAR_APPEND.md](CHU22_DIRECT_COLUMNAR_APPEND.md), [BENCHMARK.md#ch-u22-direct-columnar-append](BENCHMARK.md#ch-u22-direct-columnar-append) |
 | ClickHouse | Async-insert queue status and explicit flush | Adopted as the bounded importable `AsyncInsertQueueRegistry` with payload-free status snapshots and authenticated targeted/all-queue flush endpoints. It is disabled unless explicitly configured. | [CHU23_ASYNC_INSERT_QUEUE.md](CHU23_ASYNC_INSERT_QUEUE.md), [BENCHMARK.md#ch-u23-async-insert-queue-status-and-flush](BENCHMARK.md#ch-u23-async-insert-queue-status-and-flush) |
+| ClickHouse | Prepared-plan cache admission and eviction metrics | Adopted as additive bounded cache counters | `SQLPreparedQueryCacheStats.Admissions` counts newly retained parsed templates and `Evictions` counts LRU capacity removals. Hits, normalized aliases, explicit invalidation, disabled caches, query text, parameters, and result rows retain their existing behavior. See [CHG14_PREPARED_CACHE_METRICS.md](CHG14_PREPARED_CACHE_METRICS.md) and [BENCHMARK.md#chg14-prepared-plan-cache-metrics](BENCHMARK.md#chg14-prepared-plan-cache-metrics). |
 
 ## Measured Results
 

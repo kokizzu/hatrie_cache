@@ -39442,3 +39442,22 @@ an additional row. The ordinary path kept its allocation count flat; the 16 B
 median difference is within short-run benchmark noise. See
 [CHG05_WITH_TOTALS.md](CHG05_WITH_TOTALS.md) for syntax, limitations, and
 verification commands.
+
+## CHG14 Prepared-plan Cache Metrics
+
+This additive change exposes LRU admission and eviction counters for the
+bounded parsed-template cache. It does not retain query text or parameter
+values and leaves the successful hit path allocation-free. Samples ran on an
+AMD Ryzen 9 5950X, linux/amd64, with `-benchmem` and five repetitions.
+
+| Workload | Before median | After median | Before -> after | B/op | Allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Exact cache hit | 26.45 ns | 25.76 ns | 1.03x faster | 0 | 0 |
+| Normalized alias hit | 13.31 ns | 13.39 ns | 1.01x slower | 0 | 0 |
+| Versioned cache hit | 24.13 ns | 24.49 ns | 1.02x slower | 0 | 0 |
+
+The small CPU differences are benchmark noise rather than a regression signal;
+the new fields add only the two existing-counter values per cache instance,
+while the operational benefit is bounded admission/eviction visibility. See
+[CHG14_PREPARED_CACHE_METRICS.md](CHG14_PREPARED_CACHE_METRICS.md) for raw
+samples, semantics, and verification commands.

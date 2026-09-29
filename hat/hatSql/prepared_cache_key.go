@@ -3,7 +3,7 @@ package hatSql
 import "encoding/binary"
 
 type sqlPreparedQueryCacheLookupKey struct {
-	source       string
+	source        string
 	schemaVersion string
 }
 
@@ -64,10 +64,12 @@ func (cache *SQLPreparedQueryCache) templateWithSchemaVersion(source, schemaVers
 		cache.order.Remove(oldest)
 		delete(cache.entries, evicted)
 		sqlPreparedQueryCacheDeleteExactEntry(cache, entry.lookupKey)
+		cache.evictions++
 	}
 	entry = sqlPreparedQueryCacheEntry{query: query, order: cache.order.PushBack(key), lookupKey: lookupKey}
 	cache.entries[key] = entry
 	sqlPreparedQueryCacheSetExactEntry(cache, lookupKey, entry)
+	cache.admissions++
 	return query, nil
 }
 
