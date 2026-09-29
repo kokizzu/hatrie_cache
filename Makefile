@@ -28590,6 +28590,12 @@ benchmark-m243:
 	@bash scripts/benchmark-m243.sh
 verify-m243:
 	@bash scripts/verify-m243.sh
+benchmark-m250:
+	bash ./scripts/benchmark-m250.sh
+
+verify-m250:
+	bash ./scripts/verify-m250.sh
+
 benchmark-m245:
 	@bash scripts/benchmark-m245.sh
 verify-m245:

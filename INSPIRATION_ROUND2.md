@@ -138,7 +138,7 @@ operator control remain the preferred deployment model.
 - [x] M247 Resume errors identify expired historical frontiers through the opt-in `QuerySubscriptionCheckpointValidator`; see [M247_RESUME_EXPIRED_FRONTIER.md](M247_RESUME_EXPIRED_FRONTIER.md).
 - [ ] M248 Reusable maintained-result cache for identical read expressions.
 - [x] M249 Consistency fencing between a point read and a subsequent subscription; see [M249_READ_FENCE.md](M249_READ_FENCE.md).
-- [ ] M250 Temporal join alignment that waits for both input frontiers.
+- [x] M250 Temporal join alignment that waits for both input frontiers. Implemented as opt-in `DifferentialTemporalJoinAligned`; see [M250_TEMPORAL_JOIN_ALIGNMENT.md](M250_TEMPORAL_JOIN_ALIGNMENT.md) and [BENCHMARK.md](BENCHMARK.md#m250-temporal-join-frontier-alignment).
 
 ## Tarantool: 50 Additional Ideas
 

@@ -1,5 +1,29 @@
 # Benchmark
 
+## M250 Temporal Join Frontier Alignment
+
+Command: `make benchmark-m250` (`go test ./hat/hatSql -run '^$' -bench '^BenchmarkM250(Direct|Aligned)TemporalJoin$' -benchmem -cpu=1 -count=5`)
+
+Raw candidate samples:
+
+| Case | ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Direct | 2,214 | 1,856 | 17 |
+| Direct | 2,035 | 1,856 | 17 |
+| Direct | 2,044 | 1,856 | 17 |
+| Direct | 2,029 | 1,856 | 17 |
+| Direct | 2,048 | 1,856 | 17 |
+| Aligned | 2,394 | 2,192 | 24 |
+| Aligned | 2,556 | 2,192 | 24 |
+| Aligned | 2,588 | 2,192 | 24 |
+| Aligned | 2,384 | 2,192 | 24 |
+| Aligned | 2,426 | 2,192 | 24 |
+
+Medians are `2,044 ns/op` direct and `2,426 ns/op` aligned: aligned is `1.19x`
+the CPU time, `1.18x` the bytes, and `1.41x` the allocations for this
+one-row workload. The wrapper is opt-in; the existing direct join remains the
+default path.
+
 ## M242 Per-Operator Metrics
 
 Command: `make benchmark-m242`

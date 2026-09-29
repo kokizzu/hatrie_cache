@@ -176,6 +176,7 @@ security guidance before exposing it on a network.
 - ClickHouse-inspired bounded WebAssembly UDF memory with opt-in execution deadlines: [C214_BOUNDED_WASM_UDF.md](C214_BOUNDED_WASM_UDF.md)
 - Materialize-inspired snapshot-free command-journal subscriptions: [M203_SNAPSHOT_FREE_SUBSCRIPTIONS.md](M203_SNAPSHOT_FREE_SUBSCRIPTIONS.md)
 - Materialize-inspired point-read and subscription consistency fences: [M249_READ_FENCE.md](M249_READ_FENCE.md)
+- Materialize-inspired temporal join frontier alignment: [M250_TEMPORAL_JOIN_ALIGNMENT.md](M250_TEMPORAL_JOIN_ALIGNMENT.md), with measured buffering overhead in [BENCHMARK.md](BENCHMARK.md#m250-temporal-join-frontier-alignment)
 - Materialize-inspired bounded journal subscriptions: [M204_BOUNDED_SUBSCRIPTIONS.md](M204_BOUNDED_SUBSCRIPTIONS.md)
 - ClickHouse-inspired result-cache hit, miss, bypass, and eviction metrics: [C208_RESULT_CACHE_METRICS.md](C208_RESULT_CACHE_METRICS.md)
 - ClickHouse-inspired typed-table column statistics: [C209_TYPED_TABLE_STATS.md](C209_TYPED_TABLE_STATS.md)

@@ -147,6 +147,23 @@ func (join *DifferentialTemporalJoin) ApplyRight(changes []DifferentialRow) ([]D
 	return emitted, nil
 }
 
+// applyOwnedChanges applies rows whose Row maps are already privately owned
+// by the caller. It is used by the frontier-aligned wrapper after it has
+// cloned rows into its bounded pending buffers.
+func (join *DifferentialTemporalJoin) applyOwnedChanges(changes []DifferentialRow, leftSide bool) ([]DifferentialRow, error) {
+	if join == nil {
+		return nil, ErrDifferentialTemporalJoinNil
+	}
+	join.mu.Lock()
+	defer join.mu.Unlock()
+	if err := join.validateChanges(changes, leftSide); err != nil {
+		return nil, err
+	}
+	emitted := join.applyChangesOwned(changes, leftSide)
+	join.recordDifferentialTemporalJoinUpdates(changes)
+	return emitted, nil
+}
+
 // Compact evicts rows that cannot match any future counterpart and are sealed
 // by their own input frontier. Both frontiers are monotonic; a regression is
 // rejected without changing state. Retractions for evicted keys return
@@ -251,6 +268,14 @@ func (join *DifferentialTemporalJoin) validateChanges(changes []DifferentialRow,
 }
 
 func (join *DifferentialTemporalJoin) applyChanges(changes []DifferentialRow, leftSide bool) []DifferentialRow {
+	return join.applyChangesWithOwnership(changes, leftSide, false)
+}
+
+func (join *DifferentialTemporalJoin) applyChangesOwned(changes []DifferentialRow, leftSide bool) []DifferentialRow {
+	return join.applyChangesWithOwnership(changes, leftSide, true)
+}
+
+func (join *DifferentialTemporalJoin) applyChangesWithOwnership(changes []DifferentialRow, leftSide, rowsOwned bool) []DifferentialRow {
 	side := join.left
 	other := join.right
 	sideGroups := join.leftGroups
@@ -272,11 +297,15 @@ func (join *DifferentialTemporalJoin) applyChanges(changes []DifferentialRow, le
 		}
 		entry, exists := side[change.Key]
 		if !exists || entry.count == 0 {
+			row := change.Row
+			if !rowsOwned {
+				row = cloneDifferentialRow(change.Row)
+			}
 			entry = differentialTemporalJoinEntry{
 				key:      change.Key,
 				groupKey: keyFunc(change.Row),
 				time:     change.Time,
-				row:      cloneDifferentialRow(change.Row),
+				row:      row,
 			}
 		}
 		for _, counterpartKey := range counterpartGroups[entry.groupKey] {
