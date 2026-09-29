@@ -175,6 +175,7 @@ func sqlResultCacheOptionsEligible(options SQLQueryOptions) bool {
 		options.IndexUseRecorder == nil &&
 		options.IndexHint.Mode == "" &&
 		options.Optimizer == nil &&
+		options.OptimizerTrace == nil &&
 		options.SlowQueryRecorder == nil
 }
 

@@ -426,6 +426,10 @@ type SQLQueryOptions struct {
 	// planner controls after parsing. Nil preserves the default path and keeps
 	// SQLQueryOptions comparable for callers that use it as a value.
 	Optimizer *SQLQueryOptimizer
+	// OptimizerTrace enables a bounded rule and planner-decision trace on the
+	// materialized result. Nil preserves the default allocation-free path.
+	OptimizerTrace *SQLOptimizerTraceOptions
+	optimizerTrace *SQLOptimizerTrace
 	// SlowQueryRecorder retains privacy-safe samples only for queries that
 	// meet SlowQueryThreshold. Nil disables sample retention.
 	SlowQueryRecorder *SQLSlowQueryRecorder
@@ -893,6 +897,7 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 	if err = options.normalizeSQLSnapshotToken(); err != nil {
 		return result, err
 	}
+	options.optimizerTrace = newSQLOptimizerTrace(options.OptimizerTrace)
 	observation := newSQLQueryObservation(options)
 	var operatorSteps []SQLExplainStep
 	var quotaReservation SQLQuotaReservation
@@ -908,6 +913,7 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		}
 		err = sqlClassifyError(sqlRuntimeDiagnostic(err))
 		observation.attachPlanSnapshot(&result, operatorSteps)
+		attachSQLOptimizerTrace(&result, options.optimizerTrace, operatorSteps)
 		observation.finish(result, err, operatorSteps, source, parameters)
 	}()
 	if options.MemoryReservationBytes < 0 || (options.MemoryReservationBytes > 0 && options.MemoryAdmission == nil) {
@@ -5559,11 +5565,13 @@ func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceR
 	if err = options.normalizeSQLSnapshotToken(); err != nil {
 		return result, err
 	}
+	options.optimizerTrace = newSQLOptimizerTrace(options.OptimizerTrace)
 	observation := newSQLQueryObservation(options)
 	var operatorSteps []SQLExplainStep
 	result.QueryID = observation.id
 	defer func() {
 		observation.attachPlanSnapshot(&result, operatorSteps)
+		attachSQLOptimizerTrace(&result, options.optimizerTrace, operatorSteps)
 		observation.finish(result, err, operatorSteps, source, parameters)
 	}()
 	if options.AsOfFrontier != nil {

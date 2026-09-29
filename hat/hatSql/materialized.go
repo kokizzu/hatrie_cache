@@ -593,6 +593,7 @@ func cloneQueryResult(result QueryResult) QueryResult {
 	result.Rows = CloneRows(result.Rows)
 	result.Plan = cloneMaterializedExplainSteps(result.Plan)
 	result.PlanSnapshot = cloneSQLPlanSnapshot(result.PlanSnapshot)
+	result.OptimizerTrace = cloneSQLOptimizerTrace(result.OptimizerTrace)
 	if result.Stats != nil {
 		stats := *result.Stats
 		result.Stats = &stats

@@ -40,6 +40,9 @@ type QueryOptimizerRule = SQLQueryOptimizerRule
 
 func applySQLQueryOptimizerRules(source string, query *sqlQuery, options SQLQueryOptions) (SQLIndexHint, error) {
 	if options.Optimizer == nil || len(options.Optimizer.rules) == 0 {
+		if options.optimizerTrace != nil {
+			options.optimizerTrace.setFinalHint(options.IndexHint)
+		}
 		return options.IndexHint, nil
 	}
 	context := &SQLQueryOptimizationContext{
@@ -48,18 +51,35 @@ func applySQLQueryOptimizerRules(source string, query *sqlQuery, options SQLQuer
 		IndexHint: options.IndexHint,
 	}
 	for index, rule := range options.Optimizer.rules {
+		before := context.IndexHint
 		if rule == nil {
+			appendSQLOptimizerTraceRule(options.optimizerTrace, index+1, "skipped", before, before)
 			continue
 		}
 		if err := rule(context); err != nil {
+			appendSQLOptimizerTraceRule(options.optimizerTrace, index+1, "error", before, context.IndexHint)
+			if options.optimizerTrace != nil && index+1 < len(options.Optimizer.rules) && len(options.optimizerTrace.Entries) >= options.optimizerTrace.maxEntries {
+				options.optimizerTrace.Truncated = true
+			}
 			return SQLIndexHint{}, fmt.Errorf("SQL optimizer rule %d: %w", index+1, err)
 		}
+		status := "no_change"
+		if context.IndexHint != before {
+			status = "applied"
+		}
+		appendSQLOptimizerTraceRule(options.optimizerTrace, index+1, status, before, context.IndexHint)
 	}
 	if err := context.IndexHint.validate(); err != nil {
 		return SQLIndexHint{}, fmt.Errorf("SQL optimizer rule output: %w", err)
 	}
 	if options.IndexHint.Mode != "" {
+		if options.optimizerTrace != nil {
+			options.optimizerTrace.setFinalHint(options.IndexHint)
+		}
 		return options.IndexHint, nil
+	}
+	if options.optimizerTrace != nil {
+		options.optimizerTrace.setFinalHint(context.IndexHint)
 	}
 	return context.IndexHint, nil
 }

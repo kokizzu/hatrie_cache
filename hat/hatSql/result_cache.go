@@ -488,6 +488,7 @@ func cloneResultCacheResult(result QueryResult) QueryResult {
 		clone.Plan[index] = cloneResultCachePlanStep(step)
 	}
 	clone.PlanSnapshot = cloneSQLPlanSnapshot(result.PlanSnapshot)
+	clone.OptimizerTrace = cloneSQLOptimizerTrace(result.OptimizerTrace)
 	if result.Stats != nil {
 		stats := *result.Stats
 		clone.Stats = &stats

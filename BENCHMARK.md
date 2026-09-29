@@ -39249,3 +39249,44 @@ BenchmarkT238CompactBatchEncoding/one_batch-32                   248820   879.6 
 BenchmarkT238CompactBatchEncoding/one_batch-32                   240381   908.6 ns/op  1396 wire_bytes  1408 B/op  1 allocs/op
 BenchmarkT238CompactBatchEncoding/one_batch-32                   247612   891.1 ns/op  1396 wire_bytes  1408 B/op  1 allocs/op
 ```
+
+<a id="m241-optimizer-trace"></a>
+## M241 Optimizer Trace
+
+This opt-in diagnostic records ordered optimizer-rule transitions and
+non-selected explain alternatives. The benchmark uses the same one-row CACHE
+query for every row and compares the default path, an optimizer with tracing
+disabled, and the same optimizer with a 64-entry trace. It uses five 250ms
+samples on Linux/amd64, AMD Ryzen 9 5950X. This is a query-execution
+comparison, not a JSON serialization benchmark.
+
+| Workload | ns/op | B/op | Allocs/op | Relative to optimizer without trace |
+| --- | ---: | ---: | ---: | ---: |
+| Default, no optimizer | 4,621 | 4,568 | 19 | 0.56x CPU, 0.54x bytes, 0.45x allocs |
+| Optimizer, trace disabled | 8,304 | 8,506 | 42 | 1.00x |
+| Optimizer, trace enabled | 8,704 | 9,386 | 44 | 1.05x CPU, 1.10x bytes, 1.05x allocs |
+
+The default path has no trace allocation. Enabling the trace costs about 5%
+CPU, 10% allocated bytes, and two allocations in this small two-rule fixture;
+the bounded trace avoids preallocating the full configured limit. Run with
+`make benchmark-next25-m241` to reproduce the focused measurement.
+
+Raw output from five 250ms samples:
+
+```text
+BenchmarkM241OptimizerTrace/default-32                 61306  4621 ns/op  4568 B/op  19 allocs/op
+BenchmarkM241OptimizerTrace/default-32                 63106  4856 ns/op  4568 B/op  19 allocs/op
+BenchmarkM241OptimizerTrace/default-32                 63223  4686 ns/op  4568 B/op  19 allocs/op
+BenchmarkM241OptimizerTrace/default-32                 61383  4595 ns/op  4568 B/op  19 allocs/op
+BenchmarkM241OptimizerTrace/default-32                 62462  4598 ns/op  4568 B/op  19 allocs/op
+BenchmarkM241OptimizerTrace/optimizer_no_trace-32      36042  8285 ns/op  8506 B/op  42 allocs/op
+BenchmarkM241OptimizerTrace/optimizer_no_trace-32      34874  8500 ns/op  8506 B/op  42 allocs/op
+BenchmarkM241OptimizerTrace/optimizer_no_trace-32      36398  8304 ns/op  8506 B/op  42 allocs/op
+BenchmarkM241OptimizerTrace/optimizer_no_trace-32      35235  8479 ns/op  8506 B/op  42 allocs/op
+BenchmarkM241OptimizerTrace/optimizer_no_trace-32      35716  8149 ns/op  8506 B/op  42 allocs/op
+BenchmarkM241OptimizerTrace/optimizer_trace-32         35583  9046 ns/op  9386 B/op  44 allocs/op
+BenchmarkM241OptimizerTrace/optimizer_trace-32         33843  8742 ns/op  9386 B/op  44 allocs/op
+BenchmarkM241OptimizerTrace/optimizer_trace-32         35082  8704 ns/op  9386 B/op  44 allocs/op
+BenchmarkM241OptimizerTrace/optimizer_trace-32         35024  8693 ns/op  9386 B/op  44 allocs/op
+BenchmarkM241OptimizerTrace/optimizer_trace-32         33450  8658 ns/op  9386 B/op  44 allocs/op
+```
