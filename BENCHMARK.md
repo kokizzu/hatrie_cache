@@ -21,6 +21,27 @@ frontier observability without initiating compaction, retaining history, or
 adding fields to the hot stats return value. `CompactionDebt` is a sequence
 distance, not a memory-byte estimate.
 
+## M245 Dataflow Progress Metrics
+
+Command: `make benchmark-m245`
+
+The baseline is the clean M245 parent commit, using the same six metric names
+and values. The old path publishes a complete progress sample through six
+generic `UpdateMetric` calls; the M245 path publishes the same six values and
+derived progress state through one typed update. Five samples were measured
+with `-benchmem` on one AMD Ryzen 9 5950X host:
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | --- | ---: | ---: | ---: | --- |
+| Parent: six generic `UpdateMetric` calls | 628.2, 587.7, 601.3, 602.4, 655.1 | 602.4 | 0 | 0 | baseline |
+| M245: one `ObserveProgress` call | 228.6, 231.7, 230.6, 226.3, 227.1 | 228.6 | 0 | 0 | 2.63x lower update time |
+
+This is a control-plane publishing comparison, not a claim that arbitrary SQL
+queries become 2.60x faster. The gain comes from one lock, one object lookup,
+and fixed metric-slot updates instead of repeating those operations six times.
+The enabled object retains six bounded points and one last-progress snapshot;
+the default catalog path and existing SQL execution path are unchanged.
+
 ## M246 Per-Frontier History Retention Policy
 
 Command: `make benchmark-m246-before-after`

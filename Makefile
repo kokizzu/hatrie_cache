@@ -28582,3 +28582,7 @@ status-t234:
 	@bash ./scripts/status-t234.sh
 benchmark-m244:
 	@bash scripts/benchmark-m244.sh
+benchmark-m245:
+	@bash scripts/benchmark-m245.sh
+verify-m245:
+	@bash scripts/verify-m245.sh

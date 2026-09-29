@@ -133,7 +133,7 @@ operator control remain the preferred deployment model.
 - [ ] M242 Per-operator update, batch, and frontier metrics.
 - [ ] M243 Arrangement memory metrics split by key, value, and trace history.
 - [x] M244 Compaction debt metrics measured against the current logical frontier. `TypedTableAggregateArrangements.CompactionStats` and its arrangement-lease equivalent expose a saturated sequence-distance debt without changing compaction or the existing stats allocation shape. See [M244_COMPACTION_DEBT_METRICS.md](M244_COMPACTION_DEBT_METRICS.md) and [BENCHMARK.md#m244-compaction-debt-metrics](BENCHMARK.md#m244-compaction-debt-metrics).
-- [ ] M245 Timestamp throughput and input-to-output latency metrics.
+- [x] M245 Timestamp throughput and input-to-output latency metrics. `SQLDataflowMetricsCatalog.ObserveProgress` exposes bounded input/output frontiers, timestamp throughput, saturated lag, and wall-clock input-to-output latency. See [M245_DATAFLOW_PROGRESS_METRICS.md](M245_DATAFLOW_PROGRESS_METRICS.md) and [BENCHMARK.md#m245-dataflow-progress-metrics](BENCHMARK.md#m245-dataflow-progress-metrics).
 - [x] M246 Per-object history-retention policies with bounded storage accounting.
 - [x] M247 Resume errors identify expired historical frontiers through the opt-in `QuerySubscriptionCheckpointValidator`; see [M247_RESUME_EXPIRED_FRONTIER.md](M247_RESUME_EXPIRED_FRONTIER.md).
 - [ ] M248 Reusable maintained-result cache for identical read expressions.
