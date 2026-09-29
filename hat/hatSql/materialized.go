@@ -591,6 +591,7 @@ func normalizeMaterializedViewIdempotencyKeys(keys []string) []string {
 func cloneQueryResult(result QueryResult) QueryResult {
 	result.Columns = append([]string(nil), result.Columns...)
 	result.Rows = CloneRows(result.Rows)
+	result.Totals = CloneRows(result.Totals)
 	result.Plan = cloneMaterializedExplainSteps(result.Plan)
 	result.PlanSnapshot = cloneSQLPlanSnapshot(result.PlanSnapshot)
 	result.OptimizerTrace = cloneSQLOptimizerTrace(result.OptimizerTrace)

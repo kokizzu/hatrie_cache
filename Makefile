@@ -28611,3 +28611,18 @@ benchmark-t204:
 
 benchmark-t206:
 	@bash ./scripts/benchmark-t206.sh
+.PHONY: test-chg05
+test-chg05:
+	bash ./scripts/test-chg05.sh
+
+.PHONY: race-chg05
+race-chg05:
+	bash ./scripts/race-chg05.sh
+
+.PHONY: vet-chg05
+vet-chg05:
+	bash ./scripts/vet-chg05.sh
+
+.PHONY: benchmark-chg05
+benchmark-chg05:
+	bash ./scripts/benchmark-chg05.sh

@@ -12,6 +12,9 @@ import (
 // or ordered contracts retain their specialized paths, and callers can force
 // the general executor with the DisableNativeDataflow option.
 func executeSQLAutoNativeDataflow(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, options SQLQueryOptions, control *sqlExecutionControl, recordPlan bool) (SQLQueryResult, bool, error) {
+	if query == nil || query.withTotals {
+		return SQLQueryResult{}, false, nil
+	}
 	detail, eligible := sqlAutoNativeDataflowPlanDetail(query, resolver, options)
 	if !eligible {
 		return SQLQueryResult{}, false, nil

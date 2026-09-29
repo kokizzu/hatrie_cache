@@ -787,7 +787,11 @@ func newSQLQueryObservation(options SQLQueryOptions) sqlQueryObservation {
 }
 
 func (observation sqlQueryObservation) finish(result SQLQueryResult, err error, steps []SQLExplainStep, source string, parameters []interface{}) {
-	observation.finishSummary(len(result.Rows), len(result.Columns), observation.resultBytes(result.Rows), err, steps, source, parameters)
+	resultBytes := observation.resultBytes(result.Rows)
+	if resultBytes >= 0 {
+		resultBytes += sqlRowsBytes(result.Totals)
+	}
+	observation.finishSummary(len(result.Rows), len(result.Columns), resultBytes, err, steps, source, parameters)
 }
 
 func (observation sqlQueryObservation) attachPlanSnapshot(result *SQLQueryResult, steps []SQLExplainStep) {
@@ -1032,21 +1036,23 @@ func executeSQLQueryUncached(ctx context.Context, source string, query *sqlQuery
 		result.QueryID = observation.id
 		return result, err
 	}
-	if projection, ok := options.ProjectionCatalog.lookupExact(source, resolver, options); ok {
-		if (control.options.MaxRows > 0 || control.options.MaxIntermediateRows > 0) && len(projection.Rows) > control.maxRows {
-			return result, fmt.Errorf("SQL result exceeds the %d row limit", control.maxRows)
+	if !query.withTotals {
+		if projection, ok := options.ProjectionCatalog.lookupExact(source, resolver, options); ok {
+			if (control.options.MaxRows > 0 || control.options.MaxIntermediateRows > 0) && len(projection.Rows) > control.maxRows {
+				return result, fmt.Errorf("SQL result exceeds the %d row limit", control.maxRows)
+			}
+			if control.options.MaxResultBytes > 0 && sqlRowsBytes(projection.Rows) > control.options.MaxResultBytes {
+				return result, fmt.Errorf("SQL result exceeds the %d byte limit", control.options.MaxResultBytes)
+			}
+			if err := control.check(); err != nil {
+				return result, err
+			}
+			projection.QueryID = observation.id
+			if operatorSteps != nil {
+				*operatorSteps = projection.Plan
+			}
+			return projection, nil
 		}
-		if control.options.MaxResultBytes > 0 && sqlRowsBytes(projection.Rows) > control.options.MaxResultBytes {
-			return result, fmt.Errorf("SQL result exceeds the %d byte limit", control.options.MaxResultBytes)
-		}
-		if err := control.check(); err != nil {
-			return result, err
-		}
-		projection.QueryID = observation.id
-		if operatorSteps != nil {
-			*operatorSteps = projection.Plan
-		}
-		return projection, nil
 	}
 	if options.IndexHint.Mode == SQLIndexHintForbid && strings.TrimSpace(options.IndexHint.Kind) != "" {
 		return result, fmt.Errorf("%w: kind-specific FORBID requires ExplainSQLIndexStrategy", ErrSQLIndexStrategyHintUnsupported)
@@ -1061,26 +1067,28 @@ func executeSQLQueryUncached(ctx context.Context, source string, query *sqlQuery
 		metrics = &sqlExecutionMetrics{adaptive: options.AdaptivePlanner, indexHint: options.IndexHint}
 	}
 	recordNativePlan := observation.observer != nil || observation.recorder != nil || observation.profiler != nil
-	if nativeResult, handled, nativeErr := executeSQLAutoNativeDataflow(ctx, query, resolver, options, control, recordNativePlan); handled {
-		nativeResult.QueryID = observation.id
-		if operatorSteps != nil {
-			*operatorSteps = nativeResult.Plan
+	if !query.withTotals {
+		if nativeResult, handled, nativeErr := executeSQLAutoNativeDataflow(ctx, query, resolver, options, control, recordNativePlan); handled {
+			nativeResult.QueryID = observation.id
+			if operatorSteps != nil {
+				*operatorSteps = nativeResult.Plan
+			}
+			return nativeResult, nativeErr
 		}
-		return nativeResult, nativeErr
 	}
-	if metrics == nil && !sqlQueryHasWithFill(query) && query.limitBy == nil && !query.limitWithTies && sqlIndexedMaterializedOrderStreamable(query, resolver, options) {
+	if metrics == nil && !query.withTotals && !sqlQueryHasWithFill(query) && query.limitBy == nil && !query.limitWithTies && sqlIndexedMaterializedOrderStreamable(query, resolver, options) {
 		streamed, streamErr := executeSQLIndexedOrderMaterializedStream(ctx, query, resolver, control)
 		if !errors.Is(streamErr, errSQLOrderedSourceUnavailable) {
 			streamed.QueryID = observation.id
 			return streamed, streamErr
 		}
 	}
-	if metrics == nil && !sqlQueryHasWithFill(query) && query.limitBy == nil && !query.limitWithTies && sqlTopNMaterializedStreamable(query, resolver) {
+	if metrics == nil && !query.withTotals && !sqlQueryHasWithFill(query) && query.limitBy == nil && !query.limitWithTies && sqlTopNMaterializedStreamable(query, resolver) {
 		streamed, streamErr := executeSQLTopNMaterializedStream(ctx, query, resolver, control)
 		streamed.QueryID = observation.id
 		return streamed, streamErr
 	}
-	if metrics == nil && control.options.MaxResultBytes <= 0 {
+	if metrics == nil && !query.withTotals && control.options.MaxResultBytes <= 0 {
 		if aggregates, ok := sqlArgExtremeMaterializedPlan(query); ok {
 			result, aggregateErr := executeSQLArgExtremeMaterialized(ctx, query, resolver, control, aggregates)
 			result.QueryID = observation.id
@@ -1506,6 +1514,9 @@ func sqlColumnarQueryRowsMatcher(query *sqlQuery, batch ColumnarBatch, functions
 func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func(columns []string, row SQLRow) error) error {
 	if query != nil && query.prewhere.kind != "" && !sqlPrewhereStreamable(query, resolver) {
 		query = sqlQueryWithCombinedPrewhere(query)
+	}
+	if query != nil && query.withTotals {
+		return fmt.Errorf("SQL WITH TOTALS is only available for materialized query results")
 	}
 	if sqlQueryHasFinalSource(query) {
 		result, err := executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
@@ -6151,6 +6162,7 @@ type sqlQuery struct {
 	groupingSets         [][]sqlExpr
 	groupingDimensions   []sqlExpr
 	groupingSetsTemplate *sqlQuery
+	withTotals           bool
 	having               sqlExpr
 	qualify              sqlExpr
 	orderBy              []sqlOrder
@@ -6521,6 +6533,16 @@ func (p *sqlQueryParser) parseQueryInternal(stopRight bool) (*sqlQuery, error) {
 			q.groupBy = values
 			q.groupingSets = sets
 			q.groupingDimensions = dimensions
+			if p.keyword("WITH") {
+				p.next()
+				if err := p.expectKeyword("TOTALS"); err != nil {
+					return nil, err
+				}
+				if len(values) == 0 || len(sets) != 0 {
+					return nil, p.diagnostic(p.previous(), "WITH TOTALS requires a regular GROUP BY clause")
+				}
+				q.withTotals = true
+			}
 		case p.keyword("HAVING"):
 			if q.having.kind != "" {
 				return nil, p.diagnostic(p.current(), "HAVING appears more than once")
@@ -8969,6 +8991,9 @@ func executeSQLApproximateAggregateResultStream(q *sqlQuery, resolver SQLSourceR
 // columns. It only accepts a single-source field projection with a simple
 // field/literal predicate, so every other query keeps the general executor.
 func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, metrics *sqlExecutionMetrics, outer *sqlExecRow) (SQLQueryResult, bool, error) {
+	if q == nil || q.withTotals {
+		return SQLQueryResult{}, false, nil
+	}
 	if sqlQueryHasFinalSource(q) {
 		return SQLQueryResult{}, false, nil
 	}
@@ -11845,6 +11870,9 @@ func sqlColumnarNumericMatches(number float64, operator string, value float64) b
 }
 
 func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]SQLRow, metrics *sqlExecutionMetrics, control *sqlExecutionControl, outer *sqlExecRow) (SQLQueryResult, error) {
+	if q != nil && q.withTotals && len(q.unions) != 0 {
+		return SQLQueryResult{}, fmt.Errorf("SQL WITH TOTALS cannot be combined with set operations")
+	}
 	if control != nil && control.operatorMemory != nil {
 		defer func() {
 			control.releaseOperatorMemory("GROUP BY")
@@ -11913,12 +11941,12 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			}
 		}
 	}
-	if outer == nil && !finalSource {
+	if outer == nil && !finalSource && !q.withTotals {
 		if result, handled, streamErr := executeSQLApproximateAggregateResultStream(q, resolver, control); handled {
 			return result, streamErr
 		}
 	}
-	if !finalSource && !sqlQueryHasWithFill(q) && q.limitBy == nil {
+	if !finalSource && !q.withTotals && !sqlQueryHasWithFill(q) && q.limitBy == nil {
 		if result, handled, runtimeErr := executeSQLRuntimeJoinFilter(q, resolver, control, metrics); handled {
 			return result, runtimeErr
 		}
@@ -11929,7 +11957,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			return result, streamErr
 		}
 	}
-	if !finalSource && !sqlQueryHasWithFill(q) {
+	if !finalSource && !q.withTotals && !sqlQueryHasWithFill(q) {
 		if result, handled, streamErr := executeSQLHashGroupAggregateStream(q, resolver, control, metrics, nil); handled {
 			return result, streamErr
 		}
@@ -11960,12 +11988,12 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 				base, indexed, err = resolveSQLIndexedSource(*q.from, q.where, resolver, metrics, sqlCoveringProjectionFields(q))
 			}
 		}
-		if !finalSource && !indexed && q.sample == nil && !sqlQueryHasWithFill(q) {
+		if !finalSource && !indexed && !q.withTotals && q.sample == nil && !sqlQueryHasWithFill(q) {
 			if result, handled, err := executeSQLColumnarScan(q, resolver, control, metrics, outer); handled {
 				return result, err
 			}
 		}
-		if !finalSource && !indexed && q.limitBy == nil {
+		if !finalSource && !indexed && !q.withTotals && q.limitBy == nil {
 			if result, handled, err := executeSQLPrewhereScan(q, resolver, ctes, metrics, control, outer); handled {
 				return result, err
 			}
@@ -12658,6 +12686,10 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 	}
 	started = time.Now()
 	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: make([]SQLRow, 0, len(groups))}
+	result.Totals, err = sqlWithTotalsResult(q, rows, result.Columns)
+	if err != nil {
+		return SQLQueryResult{}, err
+	}
 	projectGroup := func(group []sqlExecRow) (sqlQueryOutput, bool, error) {
 		representative := sqlExecRow{}
 		if len(group) > 0 {
@@ -13149,7 +13181,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		started = time.Now()
 		metrics.record("LIMIT", fmt.Sprintf("limit=%d offset=%d", q.limit, q.offset), sortInputRows, len(result.Rows), started)
 	}
-	if control != nil && control.options.MaxResultBytes > 0 && sqlRowsBytes(result.Rows) > control.options.MaxResultBytes {
+	if control != nil && control.options.MaxResultBytes > 0 && sqlRowsBytes(result.Rows)+sqlRowsBytes(result.Totals) > control.options.MaxResultBytes {
 		return SQLQueryResult{}, fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
 	}
 	return executeSQLUnionResult(q, result, resolver, ctes, metrics, control)
@@ -17162,6 +17194,9 @@ func (aggregate *sqlOrderedAggregate) value() interface{} {
 // proved that equal group keys are adjacent and that the final ORDER BY uses
 // the same field, so no grouping hash map or final sort is needed.
 func executeSQLOrderedGroupAggregate(q *sqlQuery, rows []sqlExecRow, control *sqlExecutionControl, metrics *sqlExecutionMetrics) (SQLQueryResult, bool, error) {
+	if q == nil || q.withTotals {
+		return SQLQueryResult{}, false, nil
+	}
 	projections, ok := sqlOrderedGroupProjections(q)
 	if !ok {
 		return SQLQueryResult{}, false, nil
@@ -17383,6 +17418,9 @@ func executeSQLStreamedSpilledGroupAggregate(q *sqlQuery, resolver SQLSourceReso
 }
 
 func executeSQLSpilledGroupAggregate(q *sqlQuery, rows []sqlExecRow, control *sqlExecutionControl, metrics *sqlExecutionMetrics) (SQLQueryResult, bool, error) {
+	if q == nil || q.withTotals {
+		return SQLQueryResult{}, false, nil
+	}
 	return executeSQLSpilledGroupAggregateRows(q, func(visit func(sqlExecRow) error) error {
 		for _, row := range rows {
 			if err := visit(row); err != nil {

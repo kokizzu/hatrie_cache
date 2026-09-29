@@ -156,6 +156,9 @@ func sqlGroupingSetsOnePassContains(groupingSet []sqlExpr, dimensions []sqlExpr,
 }
 
 func executeSQLGroupingSetsOnePass(q *sqlQuery, rows []sqlExecRow, control *sqlExecutionControl, metrics *sqlExecutionMetrics) (SQLQueryResult, bool, error) {
+	if q == nil || q.withTotals {
+		return SQLQueryResult{}, false, nil
+	}
 	projections, ok := sqlGroupingSetsOnePassProjections(q)
 	if !sqlGroupingSetsOnePassEligible(q) || !ok {
 		return SQLQueryResult{}, false, nil

@@ -39424,3 +39424,21 @@ difference is within normal benchmark noise. Existing join/leave behavior is
 preserved. See [T207_REPLICA_EVICTION_REJOIN.md](T207_REPLICA_EVICTION_REJOIN.md)
 for the recovery sequence, API contract, security boundaries, and verification
 commands.
+## CHG05 Grouped `WITH TOTALS`
+
+`GROUP BY ... WITH TOTALS` adds one separate grand-total row to the materialized
+result. The feature is opt-in; ordinary grouped queries retain the existing
+allocation count. Five `-benchmem` samples were run on an AMD Ryzen 9 5950X,
+linux/amd64, with `make benchmark-chg05`.
+
+| Path | Raw ns/op samples | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Before: ordinary grouped query | 12600, 12259, 11468, 11691, 11271 | 11691 | 12304 | 81 | baseline |
+| After: ordinary grouped query | 12088, 11814, 11875, 11732, 13217 | 11875 | 12320 | 81 | 1.02x |
+| After: grouped query with totals | 12218, 12191, 12051, 11985, 12128 | 12128 | 12848 | 88 | 1.04x vs before |
+
+The totals path costs 528 B and 7 allocations in this fixture because it emits
+an additional row. The ordinary path kept its allocation count flat; the 16 B
+median difference is within short-run benchmark noise. See
+[CHG05_WITH_TOTALS.md](CHG05_WITH_TOTALS.md) for syntax, limitations, and
+verification commands.

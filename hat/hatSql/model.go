@@ -23,6 +23,7 @@ type QueryResult struct {
 	QueryID        string             `json:"query_id,omitempty"`
 	Columns        []string           `json:"columns"`
 	Rows           []Row              `json:"rows"`
+	Totals         []Row              `json:"totals,omitempty"`
 	Plan           []ExplainStep      `json:"plan,omitempty"`
 	PlanSnapshot   *SQLPlanSnapshot   `json:"plan_snapshot,omitempty"`
 	OptimizerTrace *SQLOptimizerTrace `json:"optimizer_trace,omitempty"`
