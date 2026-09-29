@@ -117,6 +117,7 @@ type SQLDataflowMetricsCatalog struct {
 	objects      map[sqlDataflowMetricsKey]SQLDataflowMetricsObject
 	metricPoints int
 	progress     map[sqlDataflowMetricsKey]sqlDataflowProgressState
+	operators    map[sqlDataflowMetricsKey]sqlDataflowOperatorState
 }
 
 // NewSQLDataflowMetricsCatalog creates an empty bounded metrics catalog.
@@ -156,6 +157,9 @@ func (c *SQLDataflowMetricsCatalog) Upsert(object SQLDataflowMetricsObject) erro
 	c.metricPoints = points
 	if c.progress != nil {
 		delete(c.progress, key)
+	}
+	if c.operators != nil {
+		delete(c.operators, key)
 	}
 	return nil
 }
@@ -219,6 +223,9 @@ func (c *SQLDataflowMetricsCatalog) Remove(kind SQLDataflowObjectKind, name stri
 	c.metricPoints -= len(object.Metrics)
 	if c.progress != nil {
 		delete(c.progress, key)
+	}
+	if c.operators != nil {
+		delete(c.operators, key)
 	}
 	return nil
 }

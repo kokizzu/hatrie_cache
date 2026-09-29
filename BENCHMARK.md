@@ -1,5 +1,25 @@
 # Benchmark
 
+## M242 Per-Operator Metrics
+
+Command: `make benchmark-m242`
+
+The baseline is the clean M242 parent commit. It publishes the same three
+operator values with three generic `UpdateMetric` calls; the M242 path publishes
+the update count, batch count, and frontier with one typed call. Five samples
+were measured with `-benchmem` on one AMD Ryzen 9 5950X host:
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | --- | ---: | ---: | ---: | --- |
+| Parent: three generic `UpdateMetric` calls | 290.6, 254.1, 273.5, 255.2, 250.5 | 255.2 | 0 | 0 | baseline |
+| M242: one `ObserveOperator` call | 137.0, 152.4, 127.8, 139.6, 134.7 | 137.0 | 0 | 0 | 1.86x lower update time |
+
+This is a metric-publication comparison, not a claim that arbitrary SQL
+queries become 1.77x faster. The gain comes from one lock, one lookup, and
+fixed metric-slot updates instead of repeating those operations three times.
+An enabled operator retains three bounded points and one exact snapshot; the
+default catalog and SQL execution paths are unchanged.
+
 ## M244 Compaction Debt Metrics
 
 Command: `make benchmark-m244`
