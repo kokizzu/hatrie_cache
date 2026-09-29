@@ -143,7 +143,7 @@ operator control remain the preferred deployment model.
 ## Tarantool: 50 Additional Ideas
 
 - [ ] T201 Per-space synchronous replication quorum for critical records only.
-- [ ] T202 Automatic leader election for a replica set.
+- [x] T202 Automatic leader election for a replica set. Already adopted through `hatTopology.ElectionStore`, `hatTopology.ElectShardLeader`, and the opt-in `hatReplication.AutomaticFailoverCoordinator`; see [LEADER_ELECTION.md](LEADER_ELECTION.md), [TU12_AUTOMATIC_FAILOVER.md](TU12_AUTOMATIC_FAILOVER.md), and [BENCHMARK.md](BENCHMARK.md#tu12-automatic-failover).
 - [ ] T203 Strict leader fencing against stale writers after failover.
 - [ ] T204 Supervised failover with explicit operator override and recovery state.
 - [ ] T205 LSN-based replication lag and apply-throughput metrics.
