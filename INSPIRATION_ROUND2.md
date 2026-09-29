@@ -108,7 +108,7 @@ operator control remain the preferred deployment model.
 - [x] M217 Indexes that store complete maintained view results for point lookups; see [M217_POINT_LOOKUP_INDEX.md](M217_POINT_LOOKUP_INDEX.md) and [BENCHMARK.md#m217-complete-row-point-lookup](BENCHMARK.md#m217-complete-row-point-lookup).
 - [x] M218 Planner selection of point lookup versus arrangement scan; see [M218_POINT_LOOKUP_PLANNER.md](M218_POINT_LOOKUP_PLANNER.md) and [BENCHMARK.md#m218-point-lookup-planner-selection](BENCHMARK.md#m218-point-lookup-planner-selection).
 - [x] M219 Background index creation with observable build frontier; see [M219_BACKGROUND_INDEX_BUILD.md](M219_BACKGROUND_INDEX_BUILD.md) and [BENCHMARK.md#m219-background-index-creation](BENCHMARK.md#m219-background-index-creation).
-- [ ] M220 Safe index removal after dependent readers drain.
+- [x] M220 Safe index removal after dependent readers drain; see [M220_SAFE_INDEX_RETIREMENT.md](M220_SAFE_INDEX_RETIREMENT.md) and [BENCHMARK.md#m220-safe-index-retirement](BENCHMARK.md#m220-safe-index-retirement).
 - [ ] M221 Isolated compute clusters with independent resource budgets.
 - [ ] M222 Replicated compute workers for highly available maintained indexes.
 - [ ] M223 Hydration state machines that distinguish cold, hydrating, and ready views.

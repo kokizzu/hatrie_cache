@@ -300,6 +300,7 @@ security guidance before exposing it on a network.
 - Opt-in complete-row point-lookup arrangements: [M217_POINT_LOOKUP_INDEX.md](M217_POINT_LOOKUP_INDEX.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m217-complete-row-point-lookup)
 - Cost-based selection between point lookup and arrangement scan: [M218_POINT_LOOKUP_PLANNER.md](M218_POINT_LOOKUP_PLANNER.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m218-point-lookup-planner-selection)
 - Opt-in background index creation with observable build frontiers: [M219_BACKGROUND_INDEX_BUILD.md](M219_BACKGROUND_INDEX_BUILD.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m219-background-index-creation)
+- Opt-in safe index retirement after dependent readers drain: [M220_SAFE_INDEX_RETIREMENT.md](M220_SAFE_INDEX_RETIREMENT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m220-safe-index-retirement)
 - Compact secondary-index posting lists: [TR053_COMPACT_POSTING_LIST.md](TR053_COMPACT_POSTING_LIST.md)
 - Single-task compaction scheduler fast path: [TR054_COMPACTION_SCHEDULER_SINGLE_TASK.md](TR054_COMPACTION_SCHEDULER_SINGLE_TASK.md)
 - Opt-in bounded grouped value collection: [SQL bounded `GROUP_ARRAY`](SQL_BOUNDED_GROUP_ARRAY.md)

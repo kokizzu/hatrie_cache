@@ -37836,6 +37836,62 @@ large memory and allocation cost. Full API semantics, raw benchmark output,
 and lifecycle tradeoffs are in
 [M219_BACKGROUND_INDEX_BUILD.md](M219_BACKGROUND_INDEX_BUILD.md).
 
+<a id="m220-safe-index-retirement"></a>
+## M220 Safe Index Retirement
+
+Command: `make benchmark-m220`, Linux amd64, AMD Ryzen 9 5950X, five samples
+per benchmark, `-benchtime=200ms`, `-benchmem`. This is a lifecycle-cost
+benchmark, not a SQL query benchmark: the direct pointer row is the lower
+bound, the acquire/release row models one dependent operation, and the held
+lease row models multiple reads under one operation.
+
+| Operation | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Direct pointer access | 0.439 | 0 | 0 | 1.00x |
+| Acquire, access, release | 53.02 | 32 | 1 | 120.78x |
+| One held lease access | 4.933 | 0 | 0 | 11.24x |
+| Register then idle retire | 237.3 | 336 | 4 | lifecycle-only |
+
+The opt-in registry therefore adds one allocation only when a reader is
+admitted. A caller should acquire once and hold the lease across the complete
+dependent operation, rather than acquire per row. Existing SQL execution is
+unchanged because no default executor path uses this registry.
+
+Raw samples from `make benchmark-m220`:
+
+```text
+# direct_pointer ns/op B/op allocs/op
+0.4246 0 0
+0.4341 0 0
+0.4390 0 0
+0.4566 0 0
+0.4705 0 0
+
+# acquire_release ns/op B/op allocs/op
+54.31 32 1
+53.02 32 1
+50.85 32 1
+52.41 32 1
+54.91 32 1
+
+# held_lease ns/op B/op allocs/op
+4.933 0 0
+4.802 0 0
+5.030 0 0
+4.864 0 0
+5.325 0 0
+
+# retire_idle ns/op B/op allocs/op
+232.9 336 4
+243.2 336 4
+226.7 336 4
+260.3 336 4
+237.3 336 4
+```
+
+See [M220_SAFE_INDEX_RETIREMENT.md](M220_SAFE_INDEX_RETIREMENT.md) for API
+semantics and ownership rules.
+
 ## CH-025: Compaction-Pool Priority Policy
 
 Command: `make benchmark-ch025-priority` on AMD Ryzen 9 5950X, linux/amd64.
