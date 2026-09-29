@@ -142,7 +142,7 @@ operator control remain the preferred deployment model.
 
 ## Tarantool: 50 Additional Ideas
 
-- [ ] T201 Per-space synchronous replication quorum for critical records only.
+- [x] T201 Per-space synchronous replication quorum for critical records only. `hatReplication.SpaceWriteQuorum` selects copied, bounded `JournalWriteQuorum` policies by logical space; it is default-off, and `ForSpace` enables zero-allocation hot-path reuse. See [T201_SPACE_WRITE_QUORUM.md](T201_SPACE_WRITE_QUORUM.md) and [BENCHMARK.md#t201-per-space-synchronous-write-quorum](BENCHMARK.md#t201-per-space-synchronous-write-quorum).
 - [x] T202 Automatic leader election for a replica set. Already adopted through `hatTopology.ElectionStore`, `hatTopology.ElectShardLeader`, and the opt-in `hatReplication.AutomaticFailoverCoordinator`; see [LEADER_ELECTION.md](LEADER_ELECTION.md), [TU12_AUTOMATIC_FAILOVER.md](TU12_AUTOMATIC_FAILOVER.md), and [BENCHMARK.md](BENCHMARK.md#tu12-automatic-failover).
 - [ ] T203 Strict leader fencing against stale writers after failover.
 - [ ] T204 Supervised failover with explicit operator override and recovery state.

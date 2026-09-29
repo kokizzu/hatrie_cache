@@ -28461,6 +28461,9 @@ benchmark-m212-logical-compaction-baseline:
 benchmark-m212-logical-compaction:
 	bash scripts/benchmark-m212-logical-compaction.sh
 
+benchmark-t201:
+	bash ./scripts/benchmark-t201.sh
+
 .PHONY: format-m213-differential-consolidation test-m213-differential-consolidation race-m213-differential-consolidation benchmark-m213-differential-consolidation-baseline benchmark-m213-differential-consolidation
 format-m213-differential-consolidation:
 	bash scripts/format-m213-differential-consolidation.sh

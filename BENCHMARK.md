@@ -39327,6 +39327,27 @@ BenchmarkReplicaLSNMetricsSnapshot-32       5230  40384 ns/op 21912 B/op 4 alloc
 
 See [T205_REPLICATION_LAG_METRICS.md](T205_REPLICATION_LAG_METRICS.md) for
 API semantics, bounds, and the operational tradeoffs.
+## T201 Per-Space Synchronous Write Quorum
+
+The parent control was measured before implementation with the existing
+`BenchmarkTU10JournalWriteQuorumEvaluate`: five 200 ms samples had a median of
+`38.52 ns/op`, `0 B/op`, and `0 allocs/op` (its timer includes setup). The
+final same-fixture comparison resets the timer after setup and uses five
+samples on an AMD Ryzen 9 5950X, linux/amd64.
+
+| Path | Raw ns/op samples | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Cached `ForSpace` policy | 23.69, 23.25, 23.23, 23.43, 23.51 | 23.43 | 0 | 0 | 1.00x control |
+| Journal quorum control | 22.70, 22.56, 23.35, 26.08, 26.51 | 23.35 | 0 | 0 | baseline |
+| Per-call selector convenience | 41.75, 41.37, 41.87, 39.55, 37.89 | 41.37 | 0 | 0 | 1.77x control |
+| Default-off check | 0.5295, 0.4910, 0.5071, 0.5225, 0.4853 | 0.5071 | 0 | 0 | no allocation |
+
+The cached policy adds no memory or allocation cost and only a small CPU
+difference within normal benchmark noise. The existing journal quorum path is
+unchanged. Resolve with `ForSpace` during space setup; do not use the
+per-call selector in a hot record loop. See [T201_SPACE_WRITE_QUORUM.md](T201_SPACE_WRITE_QUORUM.md)
+for configuration, safety, and the reproducible `make benchmark-t201` command.
+
 ## T207 Replica Eviction And Rejoin
 
 The focused lifecycle benchmark performs join, join, remove, add for each
