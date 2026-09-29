@@ -127,7 +127,7 @@ operator control remain the preferred deployment model.
 - [ ] M236 On-demand refresh of only invalidated maintained objects.
 - [ ] M237 Lazy hydration triggered by the first reader with cancellation support.
 - [x] M238 Explain output for filter pushdown and arrangement reuse; structured pruning telemetry and bounded arrangement metadata are already available through `ExplainStep.Pruning` and `ExplainStep.Arrangements`. See [CH022_EXPLAIN_PRUNING.md](CH022_EXPLAIN_PRUNING.md), [MU012_ARRANGEMENT_EXPLAIN.md](MU012_ARRANGEMENT_EXPLAIN.md), and [BENCHMARK.md#mu-012-arrangement-explain](BENCHMARK.md#mu-012-arrangement-explain).
-- [ ] M239 Explain output for logical timestamp and frontier requirements.
+- [x] M239 Explain output for logical timestamp and frontier requirements; opt-in `SQLPlanSnapshot` records query-start time, required source frontier, exact `AS OF` frontier, and detached explain steps. See [MZ050_PLAN_SNAPSHOTS.md](MZ050_PLAN_SNAPSHOTS.md) and [BENCHMARK.md#mz-050-sql-plan-snapshots](BENCHMARK.md#mz-050-sql-plan-snapshots).
 - [ ] M240 Raw dataflow explain output for operator and exchange topology.
 - [ ] M241 Optimizer trace showing rule applications and rejected alternatives.
 - [x] M242 Per-operator update, batch, and frontier metrics. `SQLDataflowMetricsCatalog.ObserveOperator` exposes bounded cumulative update/batch counters and an exact logical frontier snapshot with zero-allocation steady-state updates. See [M242_OPERATOR_METRICS.md](M242_OPERATOR_METRICS.md) and [BENCHMARK.md#m242-per-operator-metrics](BENCHMARK.md#m242-per-operator-metrics).
