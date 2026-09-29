@@ -39,7 +39,7 @@ func BenchmarkSQLPreparedQueryCacheExactLookupBaseline(b *testing.B) {
 		if cache.order == nil {
 			cache.order = list.New()
 		}
-		cache.entries[sources[index]] = sqlPreparedQueryCacheEntry{query: query, order: cache.order.PushBack(sources[index])}
+		cache.entries[sources[index]] = sqlPreparedQueryCacheEntry{query: query, order: cache.order.PushBack(sqlPreparedQueryCacheOrderEntry{key: sources[index]})}
 	}
 	b.ReportAllocs()
 	b.ResetTimer()

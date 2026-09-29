@@ -31,9 +31,26 @@ func (cache *SQLPreparedQueryCache) templateWithSchemaVersion(source, schemaVers
 		cache.mu.Unlock()
 		return entry.query, nil
 	}
+	if entry, ok := cache.negativeEntries[lookupKey]; ok {
+		cache.negativeHits++
+		cache.order.MoveToBack(entry.order)
+		err := entry.err
+		cache.mu.Unlock()
+		return nil, err
+	}
 	cache.mu.Unlock()
 	key, err := sqlPreparedQueryCacheKey(source, schemaVersion)
 	if err != nil {
+		cache.mu.Lock()
+		if entry, ok := cache.negativeEntries[lookupKey]; ok {
+			cache.negativeHits++
+			error := entry.err
+			cache.order.MoveToBack(entry.order)
+			cache.mu.Unlock()
+			return nil, error
+		}
+		sqlPreparedQueryCacheRememberNegative(cache, lookupKey, err)
+		cache.mu.Unlock()
 		return nil, err
 	}
 	cache.mu.Lock()
@@ -54,19 +71,13 @@ func (cache *SQLPreparedQueryCache) templateWithSchemaVersion(source, schemaVers
 	}
 	query, err := parseSQLQueryTemplate(source)
 	if err != nil {
+		sqlPreparedQueryCacheRememberNegative(cache, lookupKey, err)
 		return nil, err
 	}
 	cache.misses++
-	if len(cache.entries) >= cache.capacity {
-		oldest := cache.order.Front()
-		evicted := oldest.Value.(string)
-		entry := cache.entries[evicted]
-		cache.order.Remove(oldest)
-		delete(cache.entries, evicted)
-		sqlPreparedQueryCacheDeleteExactEntry(cache, entry.lookupKey)
-		cache.evictions++
-	}
-	entry = sqlPreparedQueryCacheEntry{query: query, order: cache.order.PushBack(key), lookupKey: lookupKey}
+	sqlPreparedQueryCacheMakeRoom(cache)
+	entry = sqlPreparedQueryCacheEntry{query: query, lookupKey: lookupKey}
+	entry.order = cache.order.PushBack(sqlPreparedQueryCacheOrderEntry{key: key, lookupKey: lookupKey})
 	cache.entries[key] = entry
 	sqlPreparedQueryCacheSetExactEntry(cache, lookupKey, entry)
 	cache.admissions++
@@ -98,9 +109,42 @@ func sqlPreparedQueryCacheDeleteExactEntry(cache *SQLPreparedQueryCache, lookupK
 	delete(cache.versionedExactEntries, lookupKey)
 }
 
-// Invalidate removes every parsed template and remembered source alias while
-// retaining the cache capacity and hit/miss counters. It is useful after a
-// broad index or projection rebuild.
+func sqlPreparedQueryCacheMakeRoom(cache *SQLPreparedQueryCache) {
+	for len(cache.entries)+len(cache.negativeEntries) >= cache.capacity {
+		oldest := cache.order.Front()
+		if oldest == nil {
+			return
+		}
+		orderEntry := oldest.Value.(sqlPreparedQueryCacheOrderEntry)
+		if orderEntry.negative {
+			delete(cache.negativeEntries, orderEntry.lookupKey)
+		} else if entry, ok := cache.entries[orderEntry.key]; ok {
+			delete(cache.entries, orderEntry.key)
+			sqlPreparedQueryCacheDeleteExactEntry(cache, entry.lookupKey)
+		}
+		cache.order.Remove(oldest)
+		cache.evictions++
+	}
+}
+
+func sqlPreparedQueryCacheRememberNegative(cache *SQLPreparedQueryCache, lookupKey sqlPreparedQueryCacheLookupKey, err error) {
+	if cache.negativeEntries == nil {
+		cache.negativeEntries = map[sqlPreparedQueryCacheLookupKey]sqlPreparedQueryCacheNegativeEntry{}
+	}
+	if entry, ok := cache.negativeEntries[lookupKey]; ok {
+		cache.order.MoveToBack(entry.order)
+		return
+	}
+	sqlPreparedQueryCacheMakeRoom(cache)
+	entry := sqlPreparedQueryCacheNegativeEntry{err: err}
+	entry.order = cache.order.PushBack(sqlPreparedQueryCacheOrderEntry{lookupKey: lookupKey, negative: true})
+	cache.negativeEntries[lookupKey] = entry
+	cache.negativeAdmissions++
+}
+
+// Invalidate removes every parsed template, remembered source alias, and
+// negative parse result while retaining the cache capacity and counters. It is
+// useful after a broad index or projection rebuild.
 func (cache *SQLPreparedQueryCache) Invalidate() int {
 	return cache.invalidatePreparedPlans(false, "")
 }
@@ -127,6 +171,13 @@ func (cache *SQLPreparedQueryCache) invalidatePreparedPlans(scoped bool, schemaV
 		delete(cache.entries, key)
 		sqlPreparedQueryCacheDeleteExactEntry(cache, entry.lookupKey)
 		removed++
+	}
+	for key, entry := range cache.negativeEntries {
+		if scoped && key.schemaVersion != schemaVersion {
+			continue
+		}
+		cache.order.Remove(entry.order)
+		delete(cache.negativeEntries, key)
 	}
 	return removed
 }

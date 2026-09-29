@@ -102,11 +102,14 @@ func (cache *SQLPreparedQueryCache) Save(path string, options SQLPreparedQueryCa
 	cache.mu.Lock()
 	records := make([]sqlPreparedQueryCachePersistenceRecord, 0, len(cache.entries))
 	for element := cache.order.Front(); element != nil; element = element.Next() {
-		key, ok := element.Value.(string)
+		orderEntry, ok := element.Value.(sqlPreparedQueryCacheOrderEntry)
 		if !ok {
 			continue
 		}
-		entry, ok := cache.entries[key]
+		if orderEntry.negative {
+			continue
+		}
+		entry, ok := cache.entries[orderEntry.key]
 		if !ok || entry.query == nil {
 			continue
 		}
@@ -206,22 +209,13 @@ func (cache *SQLPreparedQueryCache) insertPreparedQueryCacheEntryLocked(key, sou
 		cache.order.Remove(existing.order)
 		sqlPreparedQueryCacheDeleteExactEntry(cache, existing.lookupKey)
 	}
-	if len(cache.entries) >= cache.capacity {
-		oldest := cache.order.Front()
-		if oldest != nil {
-			evictedKey := oldest.Value.(string)
-			evicted := cache.entries[evictedKey]
-			cache.order.Remove(oldest)
-			delete(cache.entries, evictedKey)
-			sqlPreparedQueryCacheDeleteExactEntry(cache, evicted.lookupKey)
-		}
-	}
+	sqlPreparedQueryCacheMakeRoom(cache)
 	lookupKey := sqlPreparedQueryCacheLookupKey{source: source, schemaVersion: schemaVersion}
 	entry := sqlPreparedQueryCacheEntry{
 		query:     query,
-		order:     cache.order.PushBack(key),
 		lookupKey: lookupKey,
 	}
+	entry.order = cache.order.PushBack(sqlPreparedQueryCacheOrderEntry{key: key, lookupKey: lookupKey})
 	cache.entries[key] = entry
 	sqlPreparedQueryCacheSetExactEntry(cache, lookupKey, entry)
 }

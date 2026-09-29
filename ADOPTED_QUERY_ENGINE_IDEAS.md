@@ -1194,3 +1194,12 @@ existing payload-first path. The 32-command encoding benchmark measured 1.86x
 lower CPU time, 1.15x lower wire bytes, 1.45x lower allocated bytes, and 32x
 fewer allocations than 32 individual frames. See [T238_COMPACT_BATCH.md](T238_COMPACT_BATCH.md)
 and [BENCHMARK.md](BENCHMARK.md#t238-ordered-compact-binary-request-batches).
+
+
+### Negative Parse-Result Cache
+
+Adopted a bounded negative result cache for deterministic SQL lexer/parser
+failures. It shares the prepared-query LRU capacity, is invalidation-aware, and
+does not change the successful exact-hit path. Repeated invalid requests were
+24.2x faster with 49.9x less memory and 18.0x fewer allocations; valid hits were
+byte/allocation neutral. See NEGATIVE_PARSE_CACHE.md and BENCHMARK.md.

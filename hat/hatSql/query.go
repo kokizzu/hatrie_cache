@@ -471,39 +471,57 @@ type SQLQueryOptions struct {
 // SQLQueryOptions, retained for compatibility with the root package.
 type QueryOptions = SQLQueryOptions
 
-// SQLPreparedQueryCacheStats reports immutable parsed-template reuse. Values
-// bound to `$n` are never stored in this cache.
+// SQLPreparedQueryCacheStats reports immutable parsed-template reuse and
+// bounded negative parse-result reuse. Values bound to `$n` are never stored
+// in this cache.
 type SQLPreparedQueryCacheStats struct {
-	Entries    int
-	Hits       uint64
-	Misses     uint64
-	Admissions uint64
-	Evictions  uint64
+	Entries            int
+	Hits               uint64
+	Misses             uint64
+	Admissions         uint64
+	Evictions          uint64
+	NegativeEntries    int
+	NegativeHits       uint64
+	NegativeAdmissions uint64
 }
 
 // PreparedQueryCacheStats reports parsed-template cache reuse.
 type PreparedQueryCacheStats = SQLPreparedQueryCacheStats
 
-// SQLPreparedQueryCache caches parsed, unbound SQL templates by exact source
-// text with least-recently-used eviction. It is safe for concurrent query
-// execution.
+// SQLPreparedQueryCache caches parsed, unbound SQL templates and deterministic
+// parse failures by source namespace with least-recently-used eviction. It is
+// safe for concurrent query execution.
 type SQLPreparedQueryCache struct {
 	mu                    sync.Mutex
 	capacity              int
 	entries               map[string]sqlPreparedQueryCacheEntry
 	exactEntries          map[string]sqlPreparedQueryCacheEntry
 	versionedExactEntries map[sqlPreparedQueryCacheLookupKey]sqlPreparedQueryCacheEntry
+	negativeEntries       map[sqlPreparedQueryCacheLookupKey]sqlPreparedQueryCacheNegativeEntry
 	order                 *list.List
 	hits                  uint64
 	misses                uint64
 	admissions            uint64
 	evictions             uint64
+	negativeHits          uint64
+	negativeAdmissions    uint64
 }
 
 type sqlPreparedQueryCacheEntry struct {
 	query     *sqlQuery
 	order     *list.Element
 	lookupKey sqlPreparedQueryCacheLookupKey
+}
+
+type sqlPreparedQueryCacheNegativeEntry struct {
+	err   error
+	order *list.Element
+}
+
+type sqlPreparedQueryCacheOrderEntry struct {
+	key       string
+	lookupKey sqlPreparedQueryCacheLookupKey
+	negative  bool
 }
 
 // PreparedQueryCache caches immutable parsed, unbound SQL templates.
@@ -534,11 +552,14 @@ func (cache *SQLPreparedQueryCache) Stats() SQLPreparedQueryCacheStats {
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
 	return SQLPreparedQueryCacheStats{
-		Entries:    len(cache.entries),
-		Hits:       cache.hits,
-		Misses:     cache.misses,
-		Admissions: cache.admissions,
-		Evictions:  cache.evictions,
+		Entries:            len(cache.entries),
+		Hits:               cache.hits,
+		Misses:             cache.misses,
+		Admissions:         cache.admissions,
+		Evictions:          cache.evictions,
+		NegativeEntries:    len(cache.negativeEntries),
+		NegativeHits:       cache.negativeHits,
+		NegativeAdmissions: cache.negativeAdmissions,
 	}
 }
 

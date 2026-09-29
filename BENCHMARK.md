@@ -39461,3 +39461,34 @@ the new fields add only the two existing-counter values per cache instance,
 while the operational benefit is bounded admission/eviction visibility. See
 [CHG14_PREPARED_CACHE_METRICS.md](CHG14_PREPARED_CACHE_METRICS.md) for raw
 samples, semantics, and verification commands.
+
+
+## Negative Parse Cache
+
+This ClickHouse/Materialize-style bounded query-analysis memoization caches
+deterministic SQL lexer/parser failures. It shares the successful prepared-query
+LRU capacity, is cleared by cache invalidation, and does not affect the valid
+exact-hit path.
+
+CPU: AMD Ryzen 9 5950X 16-Core Processor, Linux amd64. Each row is the median of
+five benchmark samples from go test -benchmem.
+
+| Workload | Baseline | After | Improvement |
+| --- | ---: | ---: | ---: |
+| Repeated invalid source, ns/op | 3,558 | 147.2 | 24.2x faster |
+| Repeated invalid source, B/op | 5,592 | 112 | 49.9x lower |
+| Repeated invalid source, allocs/op | 18 | 1 | 18.0x lower |
+| Repeated valid cache hit, ns/op | 1,409 | 1,414 | 1.00x neutral |
+| Repeated valid cache hit, B/op | 2,488 | 2,488 | 1.00x neutral |
+| Repeated valid cache hit, allocs/op | 7 | 7 | 1.00x neutral |
+
+Raw invalid-source samples:
+- Baseline: 3571, 3558, 3560, 3502, 3517 ns/op; 5592 B/op; 18 allocs/op.
+- After: 148.0, 147.2, 148.2, 144.8, 141.9 ns/op; 112 B/op; 1 alloc/op.
+
+Raw valid-source samples:
+- Baseline: 1473, 1413, 1391, 1409, 1359 ns/op; 2488 B/op; 7 allocs/op.
+- After: 1414, 1465, 1402, 1404, 1416 ns/op; 2488 B/op; 7 allocs/op.
+
+See NEGATIVE_PARSE_CACHE.md for behavior, bounds, persistence handling, and
+verification commands.
