@@ -2,6 +2,7 @@ package hatDataStructure
 
 import (
 	"errors"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -133,5 +134,58 @@ func TestFunctionalIndexConcurrentMixedOperations(t *testing.T) {
 	}
 	if got := index.DistinctKeys(); got != 8 {
 		t.Fatalf("DistinctKeys() = %d, want 8", got)
+	}
+}
+
+func TestFunctionalIndexPostingLifecycleKeepsEntriesInSync(t *testing.T) {
+	index, err := NewFunctionalIndex[int, int](func(value int) int { return value % 4 }, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id := 1; id <= 64; id++ {
+		if err := index.Upsert(uint64(id), id*10); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for id := 2; id <= 64; id += 3 {
+		if !index.Delete(uint64(id)) {
+			t.Fatalf("Delete(%d) = false", id)
+		}
+	}
+	if err := index.Upsert(5, 405); err != nil {
+		t.Fatal(err)
+	}
+	if err := index.Upsert(6, 406); err != nil {
+		t.Fatal(err)
+	}
+
+	for key := 0; key < 4; key++ {
+		want := make([]int, 0, 16)
+		for id := 1; id <= 64; id++ {
+			if id%3 == 2 && id != 5 {
+				continue
+			}
+			value := id * 10
+			if id == 5 {
+				value = 405
+			}
+			if id == 6 {
+				value = 406
+			}
+			if value%4 == key {
+				want = append(want, value)
+			}
+		}
+		got := append([]int(nil), index.Lookup(key)...)
+		sort.Ints(got)
+		sort.Ints(want)
+		if len(got) != len(want) {
+			t.Fatalf("Lookup(%d) length = %d, want %d; got=%v want=%v", key, len(got), len(want), got, want)
+		}
+		for position := range want {
+			if got[position] != want[position] {
+				t.Fatalf("Lookup(%d) = %v, want %v", key, got, want)
+			}
+		}
 	}
 }

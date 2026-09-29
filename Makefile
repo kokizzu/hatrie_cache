@@ -28650,3 +28650,23 @@ vet-compiled-negative-cache:
 .PHONY: benchmark-compiled-negative-cache
 benchmark-compiled-negative-cache:
 	bash scripts/compiled-negative-cache.sh benchmark
+
+.PHONY: test-functional-index
+test-functional-index:
+	bash scripts/run-functional-index-fastpath.sh test
+
+.PHONY: benchmark-functional-index
+benchmark-functional-index:
+	bash scripts/run-functional-index-fastpath.sh benchmark
+
+.PHONY: full-test-functional-index
+full-test-functional-index:
+	bash scripts/run-functional-index-fastpath.sh full
+
+.PHONY: race-functional-index
+race-functional-index:
+	bash scripts/run-functional-index-fastpath.sh race
+
+.PHONY: format-functional-index
+format-functional-index:
+	bash scripts/run-functional-index-fastpath.sh format

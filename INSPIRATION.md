@@ -1145,3 +1145,5 @@ SQL shape. See [CH035_REMOTE_SHARD_PRUNING.md](CH035_REMOTE_SHARD_PRUNING.md).
   the correct fallback. See
   [M052AD_AUTO_NATIVE_CONDITIONAL_AGGREGATES.md](M052AD_AUTO_NATIVE_CONDITIONAL_AGGREGATES.md)
   and [BENCHMARK.md](BENCHMARK.md#m052ad-automatic-native-conditional-aggregates).
+
+- [x] C168 Direct functional-index posting traversal. Inspired by ClickHouse-style tight arrangement loops and Tarantool-style typed secondary-index access, `FunctionalIndex.LookupInto` now relies on its private posting/entry invariant and removes one defensive map-existence branch per hit; the change is allocation-neutral and measured 1.1%/12.4%/1.5% faster for 1/8/128-hit postings. See [FUNCTIONAL_INDEX_LOOKUP_FASTPATH.md](FUNCTIONAL_INDEX_LOOKUP_FASTPATH.md).

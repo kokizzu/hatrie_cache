@@ -1214,3 +1214,5 @@ schema-version invalidation. Repeated invalid compiled sources improved from
 allocations; the valid compiled-plan hit remained allocation-free within
 benchmark noise. See [COMPILED_NEGATIVE_CACHE.md](COMPILED_NEGATIVE_CACHE.md)
 and [BENCHMARK.md](BENCHMARK.md#compiled-query-negative-result-cache).
+
+| ClickHouse / Tarantool | Direct typed posting-list traversal | Implemented | `FunctionalIndex.LookupInto` reads the value directly from each private posting ID after the invariant is established by locked mutations, removing a redundant existence branch without changing API, ordering, storage, or allocation behavior. See [FUNCTIONAL_INDEX_LOOKUP_FASTPATH.md](FUNCTIONAL_INDEX_LOOKUP_FASTPATH.md). |

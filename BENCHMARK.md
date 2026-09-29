@@ -39519,3 +39519,18 @@ Raw valid-source samples:
 
 See [COMPILED_NEGATIVE_CACHE.md](COMPILED_NEGATIVE_CACHE.md) for bounds,
 invalidation semantics, and verification commands.
+
+## Functional Index Lookup Fast Path
+
+`make benchmark-functional-index` measured repeated `LookupInto` with a
+preallocated destination on an AMD Ryzen 9 5950X. Five samples per posting
+size, with `-benchmem`:
+
+| Posting hits | Before median | After median | Result | B/op | allocs/op |
+| ---: | ---: | ---: | --- | ---: | ---: |
+| 1 | 11.05 ns/op | 10.93 ns/op | 1.1x faster | 0 | 0 |
+| 8 | 46.49 ns/op | 40.71 ns/op | 1.14x faster | 0 | 0 |
+| 128 | 943.6 ns/op | 929.1 ns/op | 1.02x faster | 0 | 0 |
+
+Raw samples, invariant, and verification commands are in
+[FUNCTIONAL_INDEX_LOOKUP_FASTPATH.md](FUNCTIONAL_INDEX_LOOKUP_FASTPATH.md).
