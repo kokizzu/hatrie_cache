@@ -37813,6 +37813,29 @@ BenchmarkM218PlannerDecision32Candidates-32  30348   7581 ns/op                 
 BenchmarkM218PlannerDecision32Candidates-32  33954   6967 ns/op                     9832 B/op 4 allocs/op
 ```
 
+<a id="m219-background-index-creation"></a>
+## M219 Background Index Creation
+
+Command: `make benchmark-m219`, Linux amd64, AMD Ryzen 9 5950X, five samples
+per benchmark, `-benchtime=200ms`. The fixture contains 4,096 differential
+rows in 32 batches. The synchronous control applies those batches directly to
+a fresh point lookup; the background path includes builder construction, one
+worker, progress updates, and `Wait`.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative to synchronous |
+| --- | ---: | ---: | ---: | --- |
+| Synchronous apply | 5,426,655 | 3,208,669 | 12,859 | 1.00x |
+| Background builder, default immutable inputs | 5,341,309 | 3,382,212 | 12,896 | 0.98x CPU; 1.05x bytes; +37 allocs |
+| Background builder, `CloneInputs: true` | 7,990,831 | 4,930,557 | 21,121 | 1.47x CPU; 1.54x bytes; +8,262 allocs |
+| Status snapshot | 13.55 | 0 | 0 | 0 allocs; 0 B/op |
+
+The default builder keeps throughput close to synchronous construction while
+letting `Start` return before the build completes and exposing a monotone
+frontier. `CloneInputs` is intentionally opt-in because cloning row maps has a
+large memory and allocation cost. Full API semantics, raw benchmark output,
+and lifecycle tradeoffs are in
+[M219_BACKGROUND_INDEX_BUILD.md](M219_BACKGROUND_INDEX_BUILD.md).
+
 ## CH-025: Compaction-Pool Priority Policy
 
 Command: `make benchmark-ch025-priority` on AMD Ryzen 9 5950X, linux/amd64.
