@@ -18,14 +18,15 @@ const (
 )
 
 var (
-	ErrLeaderLeaseName     = errors.New("hatriecache: leader lease name is required")
-	ErrLeaderLeaseHolder   = errors.New("hatriecache: leader lease holder is required")
-	ErrLeaderLeaseTTL      = errors.New("hatriecache: leader lease TTL is invalid")
-	ErrLeaderLeaseHeld     = errors.New("hatriecache: leader lease is held by another node")
-	ErrLeaderLeaseExpired  = errors.New("hatriecache: leader lease has expired")
-	ErrLeaderLeaseFenced   = errors.New("hatriecache: leader lease token or holder is fenced")
-	ErrLeaderLeaseNotFound = errors.New("hatriecache: leader lease was not found")
-	ErrLeaderLeaseToken    = errors.New("hatriecache: leader lease token overflow")
+	ErrLeaderLeaseName          = errors.New("hatriecache: leader lease name is required")
+	ErrLeaderLeaseHolder        = errors.New("hatriecache: leader lease holder is required")
+	ErrLeaderLeaseTTL           = errors.New("hatriecache: leader lease TTL is invalid")
+	ErrLeaderLeaseHeld          = errors.New("hatriecache: leader lease is held by another node")
+	ErrLeaderLeaseExpired       = errors.New("hatriecache: leader lease has expired")
+	ErrLeaderLeaseFenced        = errors.New("hatriecache: leader lease token or holder is fenced")
+	ErrLeaderLeaseNotFound      = errors.New("hatriecache: leader lease was not found")
+	ErrLeaderLeaseToken         = errors.New("hatriecache: leader lease token overflow")
+	ErrLeaderLeaseWriteCallback = errors.New("hatriecache: leader lease write callback is required")
 )
 
 // LeaderLeaseOptions configures an in-memory lease authority. The authority
@@ -183,6 +184,38 @@ func (store *LeaderLeaseStore) Validate(name, holder string, token uint64) error
 		return ErrLeaderLeaseFenced
 	}
 	return nil
+}
+
+// WithFence validates the current holder and runs write while the lease store
+// mutex is held. This makes lease validation and the protected write one
+// atomic admission boundary for callers using the same lease authority.
+// Keep write short and do not call lease-store methods from the callback.
+func (store *LeaderLeaseStore) WithFence(name, holder string, token uint64, write func(LeaderLease) error) error {
+	if store == nil {
+		return ErrLeaderLeaseNotFound
+	}
+	if write == nil {
+		return ErrLeaderLeaseWriteCallback
+	}
+	name, holder, err := normalizeLeaderLeaseIdentity(name, holder)
+	if err != nil {
+		return err
+	}
+	now := store.now()
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	lease, ok := store.leases[name]
+	if !ok {
+		return ErrLeaderLeaseNotFound
+	}
+	if !now.Before(lease.ExpiresAt) {
+		delete(store.leases, name)
+		return ErrLeaderLeaseExpired
+	}
+	if lease.Holder != holder || lease.Token != token {
+		return ErrLeaderLeaseFenced
+	}
+	return write(lease)
 }
 
 // Current returns an independent copy of the current lease when present. An

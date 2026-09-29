@@ -39348,6 +39348,23 @@ unchanged. Resolve with `ForSpace` during space setup; do not use the
 per-call selector in a hot record loop. See [T201_SPACE_WRITE_QUORUM.md](T201_SPACE_WRITE_QUORUM.md)
 for configuration, safety, and the reproducible `make benchmark-t201` command.
 
+## T203 Strict Leader Write Fencing
+
+The parent `BenchmarkTR01LeaderLeaseValidation` was measured before the change
+with five 200 ms samples on an AMD Ryzen 9 5950X, linux/amd64.
+
+| Path | Raw ns/op samples | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Existing `Validate` baseline | 23.63, 21.23, 20.99, 21.59, 23.10 | 21.59 | 0 | 0 | baseline |
+| `WithFence` atomic callback | 25.23, 25.58, 27.80, 28.05, 24.77 | 25.58 | 0 | 0 | 1.20x |
+| `Validate` plus write callback control | 21.36, 21.38, 21.23, 21.36, 21.15 | 21.36 | 0 | 0 | 1.00x |
+
+`WithFence` closes the validation-to-write race with about `4.22 ns/op` extra
+CPU versus the racy validation-plus-write control and no additional memory or
+allocations. Existing `Validate` callers and lease defaults are unchanged. Keep the callback short and use the same
+serialized authority for failover and writes. See [T203_LEADER_WRITE_FENCING.md](T203_LEADER_WRITE_FENCING.md)
+for the security boundary and reproducible `make benchmark-t203` command.
+
 ## T207 Replica Eviction And Rejoin
 
 The focused lifecycle benchmark performs join, join, remove, add for each

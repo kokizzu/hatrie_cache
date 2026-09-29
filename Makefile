@@ -28461,6 +28461,9 @@ benchmark-m212-logical-compaction-baseline:
 benchmark-m212-logical-compaction:
 	bash scripts/benchmark-m212-logical-compaction.sh
 
+benchmark-t203:
+	bash ./scripts/benchmark-t203.sh
+
 benchmark-t201:
 	bash ./scripts/benchmark-t201.sh
 

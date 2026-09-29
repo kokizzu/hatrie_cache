@@ -335,6 +335,7 @@ security guidance before exposing it on a network.
 - Opt-in deterministic parallel mapping for independent CPU-bound work: [PARALLEL_MAP.md](PARALLEL_MAP.md)
 - Opt-in incremental foreign-key enforcement: [FOREIGN_KEY_INDEX.md](FOREIGN_KEY_INDEX.md)
 - Independent topology leader election: [LEADER_ELECTION.md](LEADER_ELECTION.md)
+- Strict leader write fencing with atomic validation-to-write admission: [T203_LEADER_WRITE_FENCING.md](T203_LEADER_WRITE_FENCING.md), with measurements in [BENCHMARK.md#t203-strict-leader-write-fencing](BENCHMARK.md#t203-strict-leader-write-fencing)
 - Opt-in leader-lease and monotonic fencing primitive; full consensus integration remains caller-owned: [TR01_LEADER_LEASE.md](TR01_LEADER_LEASE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#tr-01-leader-lease-and-fencing)
 - Default-off automatic failover policy with quorum, deterministic caught-up candidate selection, and generation/fencing-checked proposals: [TU12_AUTOMATIC_FAILOVER.md](TU12_AUTOMATIC_FAILOVER.md), with measurements in [BENCHMARK.md](BENCHMARK.md#t-u12-automatic-failover-coordinator)
 - Snapshot-plus-WAL join bootstrap coordinator with bounded replay, generation fencing, and activation states: [TU09_SNAPSHOT_WAL_BOOTSTRAP.md](TU09_SNAPSHOT_WAL_BOOTSTRAP.md), with measurements in [BENCHMARK.md](BENCHMARK.md#t-u09-snapshot-plus-wal-bootstrap-coordinator)
