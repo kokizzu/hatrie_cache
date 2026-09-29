@@ -105,7 +105,7 @@ operator control remain the preferred deployment model.
 - [x] M214 Arrangement metadata reuse across compatible query plans; see [M214_ARRANGEMENT_REUSE.md](M214_ARRANGEMENT_REUSE.md) and [BENCHMARK.md#m214-cross-plan-arrangement-metadata-reuse](BENCHMARK.md#m214-cross-plan-arrangement-metadata-reuse).
 - [x] M215 Delta-join maintenance for high-churn join inputs; see [M215_DELTA_JOIN.md](M215_DELTA_JOIN.md) and [BENCHMARK.md#m215-high-churn-delta-join-maintenance](BENCHMARK.md#m215-high-churn-delta-join-maintenance).
 - [ ] M216 Incremental top-K arrangements with bounded replacement state.
-- [ ] M217 Indexes that store complete maintained view results for point lookups.
+- [x] M217 Indexes that store complete maintained view results for point lookups; see [M217_POINT_LOOKUP_INDEX.md](M217_POINT_LOOKUP_INDEX.md) and [BENCHMARK.md#m217-complete-row-point-lookup](BENCHMARK.md#m217-complete-row-point-lookup).
 - [ ] M218 Planner selection of point lookup versus arrangement scan.
 - [ ] M219 Background index creation with observable build frontier.
 - [ ] M220 Safe index removal after dependent readers drain.

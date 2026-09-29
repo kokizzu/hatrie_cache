@@ -297,6 +297,7 @@ security guidance before exposing it on a network.
 - Canonical compiled-plan and per-EXPLAIN workload reuse: [MZ045_COMPILED_PLAN_EQUIVALENCE.md](MZ045_COMPILED_PLAN_EQUIVALENCE.md)
 - Cross-plan source/version arrangement metadata reuse for compatible EXPLAIN plans: [M214_ARRANGEMENT_REUSE.md](M214_ARRANGEMENT_REUSE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m214-cross-plan-arrangement-metadata-reuse)
 - Opt-in consolidated delta maintenance for high-churn incremental joins: [M215_DELTA_JOIN.md](M215_DELTA_JOIN.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m215-high-churn-delta-join-maintenance)
+- Opt-in complete-row point-lookup arrangements: [M217_POINT_LOOKUP_INDEX.md](M217_POINT_LOOKUP_INDEX.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m217-complete-row-point-lookup)
 - Compact secondary-index posting lists: [TR053_COMPACT_POSTING_LIST.md](TR053_COMPACT_POSTING_LIST.md)
 - Single-task compaction scheduler fast path: [TR054_COMPACTION_SCHEDULER_SINGLE_TASK.md](TR054_COMPACTION_SCHEDULER_SINGLE_TASK.md)
 - Opt-in bounded grouped value collection: [SQL bounded `GROUP_ARRAY`](SQL_BOUNDED_GROUP_ARRAY.md)

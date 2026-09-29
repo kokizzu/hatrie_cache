@@ -37733,6 +37733,45 @@ BenchmarkM215DeltaJoinHighChurnConsolidated-32  30248 7299 ns/op 0 output_rows 4
 BenchmarkM215DeltaJoinHighChurnConsolidated-32  29050 7332 ns/op 0 output_rows 4720 B/op 29 allocs/op
 BenchmarkM215DeltaJoinHighChurnConsolidated-32  29533 7750 ns/op 0 output_rows 4720 B/op 29 allocs/op
 ```
+<a id="m217-complete-row-point-lookup"></a>
+## M217 Complete-Row Point-Lookup Arrangement
+
+Command: `make benchmark-m217`, Linux amd64, AMD Ryzen 9 5950X, five samples
+per benchmark, `-benchtime=200ms`. The fixture has 10,000 complete rows, 64
+point-lookup keys, and 156 matching rows for `team-42`.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative |
+| --- | ---: | ---: | ---: | --- |
+| Full scan point lookup | 283,819 | 53,697 | 313 | 1.00x |
+| Maintained complete-row lookup | 100,450 | 61,632 | 314 | 2.83x faster; 14.8% more B/op; +1 alloc |
+| Maintained index construction | 13,572,911 | 7,467,850 | 35,938 | Setup cost for 10,000 retained entries |
+
+The maintained path serves the same 156 complete rows without checking all
+10,000 source rows. It is explicitly opt-in because it retains one cloned row
+per active key and posting maps; the ordinary scan and SQL defaults are
+unchanged. Full raw samples and update semantics are in
+[M217_POINT_LOOKUP_INDEX.md](M217_POINT_LOOKUP_INDEX.md).
+
+Raw samples:
+
+```text
+BenchmarkM217FullScanPointLookup-32           978 288308 ns/op 156.0 result_rows 10000 source_rows 53703 B/op 313 allocs/op
+BenchmarkM217FullScanPointLookup-32           825 270726 ns/op 156.0 result_rows 10000 source_rows 53697 B/op 313 allocs/op
+BenchmarkM217FullScanPointLookup-32           907 278453 ns/op 156.0 result_rows 10000 source_rows 53704 B/op 313 allocs/op
+BenchmarkM217FullScanPointLookup-32           801 285237 ns/op 156.0 result_rows 10000 source_rows 53697 B/op 313 allocs/op
+BenchmarkM217FullScanPointLookup-32           765 283819 ns/op 156.0 result_rows 10000 source_rows 53697 B/op 313 allocs/op
+BenchmarkM217MaintainedPointLookup-32        2523 100548 ns/op 156.0 result_rows 10000 retained_entries 61634 B/op 314 allocs/op
+BenchmarkM217MaintainedPointLookup-32        2120  98937 ns/op 156.0 result_rows 10000 retained_entries 61632 B/op 314 allocs/op
+BenchmarkM217MaintainedPointLookup-32        2462  96745 ns/op 156.0 result_rows 10000 retained_entries 61632 B/op 314 allocs/op
+BenchmarkM217MaintainedPointLookup-32        2311 100450 ns/op 156.0 result_rows 10000 retained_entries 61632 B/op 314 allocs/op
+BenchmarkM217MaintainedPointLookup-32        1996 100634 ns/op 156.0 result_rows 10000 retained_entries 61635 B/op 314 allocs/op
+BenchmarkM217MaintainedPointLookupBuild-32     15 14208331 ns/op 10000 retained_entries 7486491 B/op 36270 allocs/op
+BenchmarkM217MaintainedPointLookupBuild-32     16 12504068 ns/op 10000 retained_entries 7467850 B/op 35938 allocs/op
+BenchmarkM217MaintainedPointLookupBuild-32     15 14181010 ns/op 10000 retained_entries 7486508 B/op 36270 allocs/op
+BenchmarkM217MaintainedPointLookupBuild-32     16 13572911 ns/op 10000 retained_entries 7467847 B/op 35938 allocs/op
+BenchmarkM217MaintainedPointLookupBuild-32     18 13324466 ns/op 10000 retained_entries 7436705 B/op 35385 allocs/op
+```
+
 ## CH-025: Compaction-Pool Priority Policy
 
 Command: `make benchmark-ch025-priority` on AMD Ryzen 9 5950X, linux/amd64.
