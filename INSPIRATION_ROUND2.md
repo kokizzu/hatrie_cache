@@ -132,7 +132,7 @@ operator control remain the preferred deployment model.
 - [ ] M241 Optimizer trace showing rule applications and rejected alternatives.
 - [ ] M242 Per-operator update, batch, and frontier metrics.
 - [ ] M243 Arrangement memory metrics split by key, value, and trace history.
-- [ ] M244 Compaction debt metrics measured against the current logical frontier.
+- [x] M244 Compaction debt metrics measured against the current logical frontier. `TypedTableAggregateArrangements.CompactionStats` and its arrangement-lease equivalent expose a saturated sequence-distance debt without changing compaction or the existing stats allocation shape. See [M244_COMPACTION_DEBT_METRICS.md](M244_COMPACTION_DEBT_METRICS.md) and [BENCHMARK.md#m244-compaction-debt-metrics](BENCHMARK.md#m244-compaction-debt-metrics).
 - [ ] M245 Timestamp throughput and input-to-output latency metrics.
 - [x] M246 Per-object history-retention policies with bounded storage accounting.
 - [x] M247 Resume errors identify expired historical frontiers through the opt-in `QuerySubscriptionCheckpointValidator`; see [M247_RESUME_EXPIRED_FRONTIER.md](M247_RESUME_EXPIRED_FRONTIER.md).

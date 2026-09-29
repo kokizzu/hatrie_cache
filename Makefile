@@ -28580,3 +28580,5 @@ vet-t234:
 	@bash scripts/vet-t234.sh
 status-t234:
 	@bash ./scripts/status-t234.sh
+benchmark-m244:
+	@bash scripts/benchmark-m244.sh

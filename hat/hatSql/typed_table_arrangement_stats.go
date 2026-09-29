@@ -97,6 +97,61 @@ func typedTableAggregateArrangementStats(key string, references int, aggregate *
 	}
 }
 
+// TypedTableCompactionStats reports changefeed retention against the current
+// logical frontier without adding fields or allocations to the hot arrangement
+// stats path.
+type TypedTableCompactionStats struct {
+	LogicalFrontier  uint64 `json:"logical_frontier"`
+	CompactedThrough uint64 `json:"compacted_through"`
+	CompactionDebt   uint64 `json:"compaction_debt"`
+}
+
+// CompactionStats reports the table-level retained sequence distance for all
+// aggregate arrangements in this catalog.
+func (arrangements *TypedTableAggregateArrangements) CompactionStats() TypedTableCompactionStats {
+	if arrangements == nil {
+		return TypedTableCompactionStats{}
+	}
+	logicalFrontier, compactedThrough := typedTableAggregateTableState(arrangements.table)
+	return newTypedTableCompactionStats(logicalFrontier, compactedThrough)
+}
+
+// CompactionStats reports the table-level retained sequence distance for this
+// aggregate arrangement lease.
+func (arrangement *TypedTableAggregateArrangement) CompactionStats() (TypedTableCompactionStats, error) {
+	entry, err := arrangement.activeEntry()
+	if err != nil {
+		return TypedTableCompactionStats{}, err
+	}
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	var table *TypedTable
+	if entry.aggregate != nil {
+		table = entry.aggregate.table
+	}
+	logicalFrontier, compactedThrough := typedTableAggregateTableState(table)
+	return newTypedTableCompactionStats(logicalFrontier, compactedThrough), nil
+}
+
+func newTypedTableCompactionStats(logicalFrontier, compactedThrough uint64) TypedTableCompactionStats {
+	return TypedTableCompactionStats{
+		LogicalFrontier:  logicalFrontier,
+		CompactedThrough: compactedThrough,
+		CompactionDebt:   typedTableCompactionDebt(logicalFrontier, compactedThrough),
+	}
+}
+
+// typedTableCompactionDebt reports retained changefeed sequence distance from
+// the current logical frontier to the table's compaction frontier. It is a
+// sequence count, not a byte estimate, and saturates at zero if frontiers are
+// already equal or a restored snapshot reports them out of order.
+func typedTableCompactionDebt(sourceSequence, compactedThrough uint64) uint64 {
+	if sourceSequence <= compactedThrough {
+		return 0
+	}
+	return sourceSequence - compactedThrough
+}
+
 func typedTableAggregateTableState(table *TypedTable) (sourceSequence, compactedThrough uint64) {
 	if table == nil {
 		return 0, 0

@@ -61,6 +61,10 @@ func TestTypedTableAggregateArrangementsExposeMemoryAndFreshnessStats(t *testing
 	if arrangementStats.References != 2 || arrangementStats.Checkpoint != 2 || arrangementStats.SourceSequence != 2 || arrangementStats.CompactedThrough != 0 || arrangementStats.Groups != 1 || arrangementStats.DistinctValues != 2 || arrangementStats.CompactionCount != 1 || arrangementStats.EstimatedBytes == 0 {
 		t.Fatalf("arrangement detail stats = %#v", arrangementStats)
 	}
+	compaction := arrangements.CompactionStats()
+	if compaction.LogicalFrontier != 2 || compaction.CompactedThrough != 0 || compaction.CompactionDebt != 2 {
+		t.Fatalf("compaction stats = %#v", compaction)
+	}
 	individual, err := first.Stats()
 	if err != nil {
 		t.Fatal(err)
@@ -73,6 +77,9 @@ func TestTypedTableAggregateArrangementsExposeMemoryAndFreshnessStats(t *testing
 	}
 	if got, err := first.Stats(); err != nil || got.CompactedThrough != 1 {
 		t.Fatalf("stats after changelog compaction = %#v, err = %v", got, err)
+	}
+	if got, err := first.CompactionStats(); err != nil || got.CompactedThrough != 1 || got.CompactionDebt != 1 {
+		t.Fatalf("compaction stats after changelog compaction = %#v, err = %v", got, err)
 	}
 	stats.Arrangements[0].DefinitionKey = "mutated"
 	if arrangements.Stats().Arrangements[0].DefinitionKey == "mutated" {

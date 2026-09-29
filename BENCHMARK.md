@@ -1,5 +1,26 @@
 # Benchmark
 
+## M244 Compaction Debt Metrics
+
+Command: `make benchmark-m244`
+
+The baseline is the feature's parent commit, measured in a clean worktree with
+the same benchmark fixture. The existing arrangement-stats path was measured
+with one CPU, seven samples, and `-benchmem`; the dedicated metric path was
+measured with five samples. The latest run's medians were:
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Parent `Stats()` | 1,596 | 192 | 7 | baseline |
+| M244 `Stats()` | 1,552 | 192 | 7 | 1.03x in this run; latency is workload/CPU sensitive |
+| M244 `CompactionStats()` | 4.97 | 0 | 0 | new read-only metric path |
+
+The important compatibility result is unchanged allocation behavior on the
+existing stats path. M244 does not claim a query-speed improvement; it adds
+frontier observability without initiating compaction, retaining history, or
+adding fields to the hot stats return value. `CompactionDebt` is a sequence
+distance, not a memory-byte estimate.
+
 ## M246 Per-Frontier History Retention Policy
 
 Command: `make benchmark-m246-before-after`
