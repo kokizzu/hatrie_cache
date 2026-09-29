@@ -230,6 +230,7 @@ security guidance before exposing it on a network.
 - ClickHouse-style explicit partition-affine asynchronous batching: [C202_PARTITIONED_ASYNC_BATCHER.md](C202_PARTITIONED_ASYNC_BATCHER.md)
 - Tarantool-style bounded reusable peer connections: [PEER_CONNECTION_POOL.md](PEER_CONNECTION_POOL.md)
 - Tarantool-style compact multiplexed peer frames: [COMPACT_PEER_PROTOCOL.md](COMPACT_PEER_PROTOCOL.md)
+- Tarantool-style ordered compact binary request batches: [T238_COMPACT_BATCH.md](T238_COMPACT_BATCH.md), with measurements in [BENCHMARK.md](BENCHMARK.md#t238-ordered-compact-binary-request-batches)
 - Materialize-style connector lifecycle registry: [CONNECTOR_LIFECYCLE.md](CONNECTOR_LIFECYCLE.md)
 - Materialize-style durable connector lifecycle checkpoints: [MU01_DURABLE_CONNECTOR_STATE.md](MU01_DURABLE_CONNECTOR_STATE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m-u01-durable-connector-lifecycle-state)
 - Materialize-style named lower/upper frontier registry: [FRONTIER_REGISTRY.md](FRONTIER_REGISTRY.md)

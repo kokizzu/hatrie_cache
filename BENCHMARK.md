@@ -39107,3 +39107,39 @@ reservation: 126.8 123.6 120.0 105.5 103.9 111.5 102.3
 See [C230_MEMORY_OVERCOMMIT.md](C230_MEMORY_OVERCOMMIT.md) for the API and
 the distinction between declared admission reservations and per-operator
 memory enforcement.
+
+<a id="t238-ordered-compact-binary-request-batches"></a>
+## T238 Ordered Compact Binary Request Batches
+
+Measured on Linux/amd64, AMD Ryzen 9 5950X, five samples from
+`make benchmark-t238`. The fixture encodes 32 representative `SETSTR` commands
+with compact binary frames. The baseline sends 32 individual frames; the
+candidate sends one ordered `BATCH` frame through the direct uncompressed
+encoder. This is an encoding comparison, not a network or handler benchmark.
+
+| Workload | Median ns/op | Median wire bytes | Median B/op | Median allocs/op | Candidate / baseline |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 32 individual frames | 1,689 | 1,600 | 2,048 | 32 | 1.00x |
+| One ordered batch frame | 906.9 | 1,396 | 1,408 | 1 | 0.537x CPU, 0.873x wire, 0.688x bytes, 0.031x allocs |
+
+The batch path is therefore about **1.86x faster**, **1.15x lower wire size**,
+**1.45x lower allocated bytes**, and **32x fewer allocations** for this fixture.
+The benefit comes from removing 31 frame headers and encoding directly into the
+session write buffer. Compression-enabled sessions intentionally retain the
+existing payload-first path and are not represented by this direct-encoder
+comparison.
+
+Raw output:
+
+```text
+BenchmarkT238CompactBatchEncoding/individual_frames_baseline-32  131058  1671 ns/op  1600 wire_bytes  2048 B/op  32 allocs/op
+BenchmarkT238CompactBatchEncoding/individual_frames_baseline-32  146289  1765 ns/op  1600 wire_bytes  2048 B/op  32 allocs/op
+BenchmarkT238CompactBatchEncoding/individual_frames_baseline-32  130897  1689 ns/op  1600 wire_bytes  2048 B/op  32 allocs/op
+BenchmarkT238CompactBatchEncoding/individual_frames_baseline-32  129253  1705 ns/op  1600 wire_bytes  2048 B/op  32 allocs/op
+BenchmarkT238CompactBatchEncoding/individual_frames_baseline-32  130411  1679 ns/op  1600 wire_bytes  2048 B/op  32 allocs/op
+BenchmarkT238CompactBatchEncoding/one_batch-32                   251344   906.9 ns/op  1396 wire_bytes  1408 B/op  1 allocs/op
+BenchmarkT238CompactBatchEncoding/one_batch-32                   239871   911.7 ns/op  1396 wire_bytes  1408 B/op  1 allocs/op
+BenchmarkT238CompactBatchEncoding/one_batch-32                   248820   879.6 ns/op  1396 wire_bytes  1408 B/op  1 allocs/op
+BenchmarkT238CompactBatchEncoding/one_batch-32                   240381   908.6 ns/op  1396 wire_bytes  1408 B/op  1 allocs/op
+BenchmarkT238CompactBatchEncoding/one_batch-32                   247612   891.1 ns/op  1396 wire_bytes  1408 B/op  1 allocs/op
+```

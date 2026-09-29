@@ -1176,3 +1176,15 @@ faster, with 3.43x lower transient bytes and 2.78x fewer allocations. See
 [BENCHMARK.md](BENCHMARK.md#m049-concurrent-compiled-plan-miss-coalescing).
 
 | Tarantool / Materialize | Early transactional conflict detection | Implemented as an opt-in SQL transaction guard | `SQLTransactionOptions.EarlyConflictCheck` rejects stale `Execute` and `Query` calls before SQL work, while `Commit` remains the atomic final guard. The default is off; a stale benchmark reduced median work from 3,223 ns/op, 2,952 B/op, and 13 allocs/op to 13.96 ns/op, 0 B/op, and 0 allocs/op. See [T234_EARLY_TRANSACTION_CONFLICT.md](T234_EARLY_TRANSACTION_CONFLICT.md). |
+
+## T238: Ordered compact binary request batches
+
+Adopted as an opt-in `hatPeer.CompactPeerSession.CallBatch` API. A bounded batch
+uses one compact binary frame, executes commands sequentially, preserves response
+order, and represents an individual handler failure as `CompactError` so later
+items still run. Plain sessions write the complete frame directly into the
+existing reusable session buffer; configured payload compression keeps the
+existing payload-first path. The 32-command encoding benchmark measured 1.86x
+lower CPU time, 1.15x lower wire bytes, 1.45x lower allocated bytes, and 32x
+fewer allocations than 32 individual frames. See [T238_COMPACT_BATCH.md](T238_COMPACT_BATCH.md)
+and [BENCHMARK.md](BENCHMARK.md#t238-ordered-compact-binary-request-batches).
