@@ -1203,3 +1203,14 @@ failures. It shares the prepared-query LRU capacity, is invalidation-aware, and
 does not change the successful exact-hit path. Repeated invalid requests were
 24.2x faster with 49.9x less memory and 18.0x fewer allocations; valid hits were
 byte/allocation neutral. See NEGATIVE_PARSE_CACHE.md and BENCHMARK.md.
+
+### Compiled Query Negative-Result Cache
+
+Adopted a second bounded negative-result layer for deterministic failures after
+SQL compilation begins. It shares the immutable compiled-plan cache's LRU entry
+and byte limits, skips oversized failures, and is removed by ordinary or
+schema-version invalidation. Repeated invalid compiled sources improved from
+3,467 ns/op, 5,736 B/op, and 20 allocations to 25.80 ns/op, 0 B/op, and zero
+allocations; the valid compiled-plan hit remained allocation-free within
+benchmark noise. See [COMPILED_NEGATIVE_CACHE.md](COMPILED_NEGATIVE_CACHE.md)
+and [BENCHMARK.md](BENCHMARK.md#compiled-query-negative-result-cache).

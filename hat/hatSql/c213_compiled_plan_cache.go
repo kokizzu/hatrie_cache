@@ -30,7 +30,8 @@ func DefaultSQLCompiledQueryCacheOptions() SQLCompiledQueryCacheOptions {
 	}
 }
 
-// SQLCompiledQueryCacheStats reports bounded compiled-plan cache use.
+// SQLCompiledQueryCacheStats reports bounded compiled-plan and deterministic
+// compile-failure cache use. Bytes includes both entry kinds.
 type SQLCompiledQueryCacheStats struct {
 	Entries    int
 	Bytes      int64
@@ -39,33 +40,40 @@ type SQLCompiledQueryCacheStats struct {
 	Hits       uint64
 	Misses     uint64
 	// Coalesced counts callers that shared an in-flight exact-key compilation.
-	Coalesced  uint64
-	Evictions  uint64
-	Oversized  uint64
+	Coalesced          uint64
+	Evictions          uint64
+	Oversized          uint64
+	NegativeEntries    int
+	NegativeHits       uint64
+	NegativeAdmissions uint64
 }
 
 // CompiledQueryCacheStats is the package-native short name for
 // SQLCompiledQueryCacheStats.
 type CompiledQueryCacheStats = SQLCompiledQueryCacheStats
 
-// SQLCompiledQueryCache stores immutable compiled SQL handles in a bounded
-// least-recently-used cache. Handles are safe for concurrent execution and do
-// not retain bound parameter values.
+// SQLCompiledQueryCache stores immutable compiled SQL handles and deterministic
+// compile failures in a bounded least-recently-used cache. Handles are safe
+// for concurrent execution and do not retain bound parameter values.
 type SQLCompiledQueryCache struct {
-	mu         sync.Mutex
-	maxEntries int
-	maxBytes   int64
-	bytes      int64
-	entries    map[sqlCompiledQueryCacheKey]sqlCompiledQueryCacheEntry
-	canonical  map[sqlCompiledQueryCanonicalCacheKey]sqlCompiledQueryCacheEntry
-	flights    map[sqlCompiledQueryCacheKey]*sqlCompiledQueryCacheFlight
-	compile    func(string) (*CompiledSQLQuery, error)
-	order      *list.List
-	hits       uint64
-	misses     uint64
-	coalesced  uint64
-	evictions  uint64
-	oversized  uint64
+	mu                 sync.Mutex
+	maxEntries         int
+	maxBytes           int64
+	bytes              int64
+	entries            map[sqlCompiledQueryCacheKey]sqlCompiledQueryCacheEntry
+	canonical          map[sqlCompiledQueryCanonicalCacheKey]sqlCompiledQueryCacheEntry
+	negative           map[sqlCompiledQueryCacheKey]sqlCompiledQueryCacheNegativeEntry
+	flights            map[sqlCompiledQueryCacheKey]*sqlCompiledQueryCacheFlight
+	compile            func(string) (*CompiledSQLQuery, error)
+	order              *list.List
+	hits               uint64
+	misses             uint64
+	coalesced          uint64
+	evictions          uint64
+	oversized          uint64
+	negativeHits       uint64
+	negativeAdmissions uint64
+	negativeBytes      int64
 }
 
 type sqlCompiledQueryCacheKey struct {
@@ -83,6 +91,17 @@ type sqlCompiledQueryCacheEntry struct {
 	weight       int64
 	order        *list.Element
 	canonicalKey sqlCompiledQueryCanonicalCacheKey
+}
+
+type sqlCompiledQueryCacheNegativeEntry struct {
+	err    error
+	weight int64
+	order  *list.Element
+}
+
+type sqlCompiledQueryCacheOrderEntry struct {
+	key      sqlCompiledQueryCacheKey
+	negative bool
 }
 
 type sqlCompiledQueryCacheFlight struct {
@@ -138,6 +157,13 @@ func (cache *SQLCompiledQueryCache) CompileWithSchemaVersion(source, schemaVersi
 		cache.mu.Unlock()
 		return entry.query, nil
 	}
+	if entry, ok := cache.negative[key]; ok {
+		cache.negativeHits++
+		cache.order.MoveToBack(entry.order)
+		err := entry.err
+		cache.mu.Unlock()
+		return nil, err
+	}
 	if flight, ok := cache.flights[key]; ok {
 		cache.coalesced++
 		cache.mu.Unlock()
@@ -191,21 +217,9 @@ func (cache *SQLCompiledQueryCache) CompileWithSchemaVersion(source, schemaVersi
 		cache.oversized++
 		return cache.finishCompiledQueryFlightLocked(key, flight, query, nil)
 	}
-	for len(cache.entries) >= cache.maxEntries || cache.bytes+weight > cache.maxBytes {
-		oldest := cache.order.Front()
-		if oldest == nil {
-			break
-		}
-		oldKey := oldest.Value.(sqlCompiledQueryCacheKey)
-		oldEntry := cache.entries[oldKey]
-		cache.order.Remove(oldest)
-		delete(cache.entries, oldKey)
-		delete(cache.canonical, oldEntry.canonicalKey)
-		cache.bytes -= oldEntry.weight
-		cache.evictions++
-	}
+	sqlCompiledQueryCacheMakeRoomLocked(cache, weight)
 	entry := sqlCompiledQueryCacheEntry{query: query, weight: weight, canonicalKey: canonicalKey}
-	entry.order = cache.order.PushBack(key)
+	entry.order = cache.order.PushBack(sqlCompiledQueryCacheOrderEntry{key: key})
 	cache.entries[key] = entry
 	cache.canonical[canonicalKey] = entry
 	cache.bytes += weight
@@ -215,6 +229,9 @@ func (cache *SQLCompiledQueryCache) CompileWithSchemaVersion(source, schemaVersi
 func (cache *SQLCompiledQueryCache) finishCompiledQueryFlight(key sqlCompiledQueryCacheKey, flight *sqlCompiledQueryCacheFlight, query *CompiledSQLQuery, err error) (*CompiledSQLQuery, error) {
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
+	if err != nil {
+		sqlCompiledQueryCacheRememberNegativeLocked(cache, key, err)
+	}
 	return cache.finishCompiledQueryFlightLocked(key, flight, query, err)
 }
 
@@ -224,6 +241,50 @@ func (cache *SQLCompiledQueryCache) finishCompiledQueryFlightLocked(key sqlCompi
 	flight.err = err
 	close(flight.done)
 	return query, err
+}
+
+func sqlCompiledQueryCacheMakeRoomLocked(cache *SQLCompiledQueryCache, weight int64) {
+	for len(cache.entries)+len(cache.negative) >= cache.maxEntries || cache.bytes+cache.negativeBytes+weight > cache.maxBytes {
+		oldest := cache.order.Front()
+		if oldest == nil {
+			return
+		}
+		orderEntry := oldest.Value.(sqlCompiledQueryCacheOrderEntry)
+		if orderEntry.negative {
+			entry := cache.negative[orderEntry.key]
+			delete(cache.negative, orderEntry.key)
+			cache.negativeBytes -= entry.weight
+		} else if entry, ok := cache.entries[orderEntry.key]; ok {
+			delete(cache.entries, orderEntry.key)
+			delete(cache.canonical, entry.canonicalKey)
+			cache.bytes -= entry.weight
+		}
+		cache.order.Remove(oldest)
+		cache.evictions++
+	}
+}
+
+func sqlCompiledQueryCacheRememberNegativeLocked(cache *SQLCompiledQueryCache, key sqlCompiledQueryCacheKey, err error) {
+	weight := sqlCompiledQueryCacheWeight(key.source)
+	if weight > cache.maxBytes {
+		return
+	}
+	if entry, ok := cache.negative[key]; ok {
+		cache.order.MoveToBack(entry.order)
+		return
+	}
+	sqlCompiledQueryCacheMakeRoomLocked(cache, weight)
+	if len(cache.entries)+len(cache.negative) >= cache.maxEntries || cache.bytes+cache.negativeBytes+weight > cache.maxBytes {
+		return
+	}
+	if cache.negative == nil {
+		cache.negative = map[sqlCompiledQueryCacheKey]sqlCompiledQueryCacheNegativeEntry{}
+	}
+	entry := sqlCompiledQueryCacheNegativeEntry{err: err, weight: weight}
+	entry.order = cache.order.PushBack(sqlCompiledQueryCacheOrderEntry{key: key, negative: true})
+	cache.negative[key] = entry
+	cache.negativeBytes += weight
+	cache.negativeAdmissions++
 }
 
 // CompileSQLQueryWithCache compiles source through cache when non-nil.
@@ -242,19 +303,23 @@ func (cache *SQLCompiledQueryCache) Stats() SQLCompiledQueryCacheStats {
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
 	return SQLCompiledQueryCacheStats{
-		Entries:    len(cache.entries),
-		Bytes:      cache.bytes,
-		MaxEntries: cache.maxEntries,
-		MaxBytes:   cache.maxBytes,
-		Hits:       cache.hits,
-		Misses:     cache.misses,
-		Coalesced:  cache.coalesced,
-		Evictions:  cache.evictions,
-		Oversized:  cache.oversized,
+		Entries:            len(cache.entries),
+		Bytes:              cache.bytes + cache.negativeBytes,
+		MaxEntries:         cache.maxEntries,
+		MaxBytes:           cache.maxBytes,
+		Hits:               cache.hits,
+		Misses:             cache.misses,
+		Coalesced:          cache.coalesced,
+		Evictions:          cache.evictions,
+		Oversized:          cache.oversized,
+		NegativeEntries:    len(cache.negative),
+		NegativeHits:       cache.negativeHits,
+		NegativeAdmissions: cache.negativeAdmissions,
 	}
 }
 
-// Invalidate removes every compiled plan while retaining counters and limits.
+// Invalidate removes every compiled plan and negative compile result while
+// retaining counters and limits.
 func (cache *SQLCompiledQueryCache) Invalidate() int {
 	return cache.invalidateSchemaVersion(false, "")
 }
@@ -280,6 +345,14 @@ func (cache *SQLCompiledQueryCache) invalidateSchemaVersion(scoped bool, schemaV
 		delete(cache.canonical, entry.canonicalKey)
 		cache.bytes -= entry.weight
 		removed++
+	}
+	for key, entry := range cache.negative {
+		if scoped && key.schemaVersion != schemaVersion {
+			continue
+		}
+		cache.order.Remove(entry.order)
+		delete(cache.negative, key)
+		cache.negativeBytes -= entry.weight
 	}
 	return removed
 }

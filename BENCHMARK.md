@@ -39492,3 +39492,30 @@ Raw valid-source samples:
 
 See NEGATIVE_PARSE_CACHE.md for behavior, bounds, persistence handling, and
 verification commands.
+
+## Compiled Query Negative-Result Cache
+
+This ClickHouse/Materialize-style cache memoizes deterministic failures from
+the compiled SQL-plan layer. It shares the successful-plan LRU's entry and
+byte limits, so failed requests cannot grow memory without bound. Five
+`-benchmem` samples were run on an AMD Ryzen 9 5950X, linux/amd64.
+
+| Workload | Baseline median | After median | Improvement | B/op | Allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Repeated invalid source, ns/op | 3,467 | 25.80 | 134.4x faster | 0 | 0 |
+| Repeated invalid source, B/op | 5,736 | 0 | eliminated | 0 | 0 |
+| Repeated invalid source, allocs/op | 20 | 0 | eliminated | 0 | 0 |
+| Repeated valid cache hit, ns/op | 22.68 | 22.88 | 0.99x, neutral | 0 | 0 |
+| Repeated valid cache hit, B/op | 0 | 0 | 1.00x, neutral | 0 | 0 |
+| Repeated valid cache hit, allocs/op | 0 | 0 | 1.00x, neutral | 0 | 0 |
+
+Raw invalid-source samples:
+- Baseline: 3413, 3394, 3467, 3482, 3562 ns/op; 5736 B/op; 20 allocs/op.
+- After: 26.12, 25.80, 25.75, 26.09, 25.77 ns/op; 0 B/op; 0 allocs/op.
+
+Raw valid-source samples:
+- Baseline: 22.89, 21.65, 22.11, 22.92, 22.68 ns/op; 0 B/op; 0 allocs/op.
+- After: 22.85, 22.89, 23.05, 22.88, 21.97 ns/op; 0 B/op; 0 allocs/op.
+
+See [COMPILED_NEGATIVE_CACHE.md](COMPILED_NEGATIVE_CACHE.md) for bounds,
+invalidation semantics, and verification commands.
