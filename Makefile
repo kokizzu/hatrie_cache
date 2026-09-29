@@ -28626,3 +28626,27 @@ vet-chg05:
 .PHONY: benchmark-chg05
 benchmark-chg05:
 	bash ./scripts/benchmark-chg05.sh
+
+.PHONY: format-compiled-negative-cache
+format-compiled-negative-cache:
+	bash scripts/compiled-negative-cache.sh format
+
+.PHONY: test-compiled-negative-cache
+test-compiled-negative-cache:
+	bash scripts/compiled-negative-cache.sh test
+
+.PHONY: full-test-compiled-negative-cache
+full-test-compiled-negative-cache:
+	bash scripts/compiled-negative-cache.sh full
+
+.PHONY: race-compiled-negative-cache
+race-compiled-negative-cache:
+	bash scripts/compiled-negative-cache.sh race
+
+.PHONY: vet-compiled-negative-cache
+vet-compiled-negative-cache:
+	bash scripts/compiled-negative-cache.sh vet
+
+.PHONY: benchmark-compiled-negative-cache
+benchmark-compiled-negative-cache:
+	bash scripts/compiled-negative-cache.sh benchmark
