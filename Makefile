@@ -28916,6 +28916,22 @@ test-m236:
 test-m237:
 	bash scripts/test-m237.sh
 
+.PHONY: test-chg01
+test-chg01:
+	bash scripts/test-chg01.sh
+
+.PHONY: benchmark-chg01
+benchmark-chg01:
+	bash scripts/benchmark-chg01.sh
+
+.PHONY: race-chg01
+race-chg01:
+	bash scripts/race-chg01.sh
+
+.PHONY: vet-chg01
+vet-chg01:
+	bash scripts/vet-chg01.sh
+
 .PHONY: format-m237
 format-m237:
 	bash scripts/format-m237.sh

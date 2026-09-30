@@ -29910,6 +29910,11 @@ The normal unbounded path remains unchanged when the cap is disabled.
 The implementation and configuration scope are documented in
 [CHG01_EXTERNAL_GROUP_SPILL.md](CHG01_EXTERNAL_GROUP_SPILL.md).
 
+The current-worktree verification raw output is retained in
+[`CHG01_BENCHMARK_RAW.txt`](CHG01_BENCHMARK_RAW.txt); it confirms the same
+bounded-spill tradeoff with 3.77-4.05 ms unbounded samples and 13.80-14.63 ms
+bounded samples.
+
 ## CHG02: Small-Cardinality `GROUP BY` Index
 
 The benchmark uses the same 2,048-row `VALUES` query with 1, 4, 16, 64, or

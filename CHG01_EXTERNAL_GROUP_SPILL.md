@@ -96,3 +96,8 @@ make print-chg01-benchmark
 
 The complete raw samples are retained in the [CH-G01 section of
 `BENCHMARK.md`](BENCHMARK.md#ch-g01-bounded-external-group-by-aggregation-spill).
+
+A fresh post-adoption run on the current worktree is retained in
+[CHG01_BENCHMARK_RAW.txt](CHG01_BENCHMARK_RAW.txt). It measured 3.77-4.05 ms
+for the unbounded path and 13.80-14.63 ms for the bounded spill path across
+five 200 ms samples, confirming the documented opt-in CPU and allocation cost.
