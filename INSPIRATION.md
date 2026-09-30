@@ -1228,3 +1228,13 @@ The paired 128-row benchmark measured 1.32x lower median latency and reduced
 warm-call allocation from 16,504 B/19 allocations to 0 B/0 allocations. The
 feature is opt-in because it retains high-water memory and is not concurrent.
 See [ROW_BINARY_ADAPTIVE_ENCODER.md](ROW_BINARY_ADAPTIVE_ENCODER.md).
+## C183: Reusable adaptive RowBinary decode buffers
+
+Tarantool-style tuple readers and ClickHouse transfer consumers benefit from
+reusing destination storage on repeated batches. `hatSql.DecodeSQLRowBinaryAdaptiveInto`
+and `SQLRowBinaryAdaptiveDecoder.DecodeInto` reuse caller-owned row maps and
+retain delta scratch without changing the existing allocating decoder or HSA1
+wire format. The paired 128-row benchmark measured 2.23x lower median latency,
+50,304 -> 5,120 B/op, and 641 -> 256 allocations. The APIs are opt-in because
+the caller owns the reusable destination and decoder concurrency contract.
+See [ROW_BINARY_ADAPTIVE_DECODER.md](ROW_BINARY_ADAPTIVE_DECODER.md).

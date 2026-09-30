@@ -39699,3 +39699,26 @@ The zero-allocation result is for warm calls and excludes the encoder's
 retained high-water candidate buffers and per-column scratch. The feature is
 opt-in and single-owner; `Reset` releases retained capacity. See
 [ROW_BINARY_ADAPTIVE_ENCODER.md](ROW_BINARY_ADAPTIVE_ENCODER.md).
+## C183 Reusable adaptive RowBinary decode buffers
+
+Workload: 128 rows with `INT64`, `DateTime`, and string columns, ten samples on
+an AMD Ryzen 9 5950X.
+
+| Operation | Median ns/op | B/op | Allocs/op | Relative latency |
+| --- | ---: | ---: | ---: | ---: |
+| Existing `DecodeSQLRowBinaryAdaptive` | 39,395 | 50,304 | 641 | 1.00x |
+| Warm `DecodeSQLRowBinaryAdaptiveInto` | 17,689 | 5,171 | 259 | 2.23x faster |
+| Warm `SQLRowBinaryAdaptiveDecoder.DecodeInto` | 17,685 | 5,120 | 256 | 2.23x faster |
+
+Raw `ns/op` samples, in benchmark order:
+
+```text
+allocating_decode: 39366 39505 39368 39616 38821 38678 38611 39422 39961 40361
+reusable_rows: 17611 17625 17648 17720 17520 17657 18031 18406 17909 17758
+reusable_decoder: 17631 17489 17749 17570 17716 17382 17815 17829 18057 17654
+```
+
+The reusable destination retains row maps and values; the stateful decoder
+retains only delta scratch in addition to that caller-owned destination. The
+existing decoder and defaults remain unchanged. See
+[ROW_BINARY_ADAPTIVE_DECODER.md](ROW_BINARY_ADAPTIVE_DECODER.md).
