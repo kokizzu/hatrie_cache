@@ -22350,3 +22350,31 @@ review-chu60-numeric-in:
 .PHONY: ship-chu60-numeric-in
 ship-chu60-numeric-in:
 	bash ./scripts/ship-chu60-numeric-in.sh
+
+.PHONY: inspect-round20
+inspect-round20:
+	bash ./scripts/inspect-round20.sh
+.PHONY: format-chu61-nullable-predicate test-chu61-nullable-predicate benchmark-chu61-nullable-predicate race-chu61-nullable-predicate vet-chu61-nullable-predicate test-chu61-sql-package review-chu61-nullable-predicate ship-chu61-nullable-predicate
+format-chu61-nullable-predicate:
+	bash scripts/format-chu61-nullable-predicate.sh
+
+test-chu61-nullable-predicate:
+	bash scripts/test-chu61-nullable-predicate.sh
+
+benchmark-chu61-nullable-predicate:
+	bash scripts/benchmark-chu61-nullable-predicate.sh
+
+race-chu61-nullable-predicate:
+	bash scripts/race-chu61-nullable-predicate.sh
+
+vet-chu61-nullable-predicate:
+	bash scripts/vet-chu61-nullable-predicate.sh
+
+test-chu61-sql-package:
+	bash scripts/test-chu61-sql-package.sh
+
+review-chu61-nullable-predicate:
+	bash scripts/review-chu61-nullable-predicate.sh
+
+ship-chu61-nullable-predicate:
+	bash scripts/ship-chu61-nullable-predicate.sh

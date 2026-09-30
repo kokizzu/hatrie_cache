@@ -754,3 +754,13 @@ lists, dynamic expressions, and mixed-type lists retain the general evaluator.
 The measured fixture is 75.46x faster, with 1,131.43x less allocated heap and
 1,093.88x fewer allocations. See [CHU60_NUMERIC_IN.md](CHU60_NUMERIC_IN.md)
 and [BENCHMARK.md](BENCHMARK.md#chu60-numeric-in).
+
+## CHU61: Nullable Predicate Bitmap Filtering
+
+Adopted as a direct columnar fast path for `IS NULL` and `IS NOT NULL` over
+validated packed numeric, boolean, and dense nullable validity bitmaps. The
+zero-value/default behavior is unchanged: legacy plain columns and unsupported
+layouts retain the general evaluator. On the measured fixture, `IS NULL` was
+4.61x faster with 6.84x less allocated heap; `IS NOT NULL` was 1.53x faster
+with 1.82x less allocated heap. See [CHU61_NULLABLE_PREDICATE.md](CHU61_NULLABLE_PREDICATE.md)
+and [BENCHMARK.md](BENCHMARK.md#chu61-nullable-predicate-bitmaps).

@@ -32642,3 +32642,34 @@ Each tuple is `ns/op / B/op / allocs/op`. The fast path admits only direct
 finite numeric literal lists. `NOT IN`, NULL-containing or mixed lists, and
 dynamic expressions keep the general SQL evaluator. See
 [CHU60_NUMERIC_IN.md](CHU60_NUMERIC_IN.md).
+
+## CHU61 Nullable Predicate Bitmaps
+
+Command:
+
+```sh
+make benchmark-chu61-nullable-predicate
+```
+
+Five samples on Linux/amd64, AMD Ryzen 9 5950X. The fixture has 16,384
+numeric rows with every eighth row NULL. The before run disables only the
+CHU61 dispatch branch; the after run reads the packed validity bitmap directly.
+
+| Workload | Before median ns/op | After median ns/op | CPU improvement | Before B/op | After B/op | Memory improvement | Before allocs/op | After allocs/op | Allocation improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `IS NULL` | 1,892,233 | 410,149 | 4.61x faster | 5,066,473 | 740,538 | 6.84x less | 4,187 | 4,126 | 1.01x fewer |
+| `IS NOT NULL` | 4,119,345 | 2,695,862 | 1.53x faster | 9,572,536 | 5,246,613 | 1.82x less | 28,825 | 28,763 | 1.00x fewer |
+
+Raw samples (`ns/op / B/op / allocs/op`):
+
+```text
+before IS NULL:     2025332/5066473/4187, 1892233/5066470/4187, 1883323/5066473/4187, 1889708/5066473/4187, 1906109/5066471/4187
+after IS NULL:       408777/740542/4126,   407039/740540/4126,   410149/740538/4126,   425750/740538/4126,   414925/740538/4126
+before IS NOT NULL: 4062053/9572573/28825, 4119345/9572523/28824, 4667681/9572559/28825, 4179787/9572525/28824, 4064148/9572536/28825
+after IS NOT NULL:  2741576/5246626/28763, 2695862/5246613/28763, 2657061/5246613/28763, 2705178/5246613/28763, 2689598/5246613/28763
+```
+
+The fast path is limited to direct field predicates with validated packed
+numeric, boolean, or dense nullable validity metadata. Legacy plain columns,
+malformed layouts, and wider expressions retain the general evaluator. See
+[CHU61_NULLABLE_PREDICATE.md](CHU61_NULLABLE_PREDICATE.md).
