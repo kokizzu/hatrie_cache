@@ -1367,3 +1367,17 @@ supports positional parameters on the stream API, and leaves JSON/NDJSON APIs
 unchanged as the fallback. The 128-row benchmark measured 4.97x lower median
 decode latency, 2.54x less wire data, 28.2% lower allocated bytes, and 58.4%
 fewer allocations. See [SQL_ROWBINARY_CLIENT.md](SQL_ROWBINARY_CLIENT.md).
+
+## C193: `LIMIT 0` source short-circuit
+
+ClickHouse avoids reading data for zero-row probes. Direct `CACHE` and `KEYS`
+queries with an explicit projection now return their schema with a non-nil
+empty result without invoking the source; streaming uses the same behavior.
+Joins, unions, CTEs, subqueries, `SELECT *`, final sources, totals, sampled
+queries, and `WITH TIES` remain on the established executor so their metadata
+and validation semantics are unchanged. The five-sample benchmark measured
+about 938x lower latency, 1,632x lower transient bytes, and 6,987x fewer
+allocations for a 16,384-row source, with no new cost on the `LIMIT 1`
+control. See [C193_LIMIT_ZERO.md](C193_LIMIT_ZERO.md).
+
+- [x] C193 `LIMIT 0` source short-circuit.

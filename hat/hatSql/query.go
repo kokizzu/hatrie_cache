@@ -1093,6 +1093,13 @@ func executeSQLQueryUncached(ctx context.Context, source string, query *sqlQuery
 			return result, err
 		}
 	}
+	if shortCircuit, ok := sqlC193LimitZeroResult(query); ok {
+		if err := control.check(); err != nil {
+			return result, err
+		}
+		shortCircuit.QueryID = observation.id
+		return shortCircuit, nil
+	}
 	var metrics *sqlExecutionMetrics
 	if observation.observer != nil || observation.recorder != nil || observation.profiler != nil || options.AdaptivePlanner != nil || options.IndexHint.Mode != "" || options.IndexAdvisor != nil || options.IndexUseRecorder != nil || strings.TrimSpace(options.ComputeCluster) != "" {
 		metrics = &sqlExecutionMetrics{adaptive: options.AdaptivePlanner, indexHint: options.IndexHint}
@@ -1543,6 +1550,9 @@ func sqlColumnarQueryRowsMatcher(query *sqlQuery, batch ColumnarBatch, functions
 }
 
 func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func(columns []string, row SQLRow) error) error {
+	if _, ok := sqlC193LimitZeroResult(query); ok {
+		return control.check()
+	}
 	if query != nil && query.prewhere.kind != "" && !sqlPrewhereStreamable(query, resolver) {
 		query = sqlQueryWithCombinedPrewhere(query)
 	}

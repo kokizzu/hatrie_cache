@@ -29202,3 +29202,42 @@ commit-c192-rowbinary-client:
 
 push-c192-rowbinary-client:
 	bash scripts/c192-rowbinary-client.sh push
+.PHONY: format-c193-limit-zero
+format-c193-limit-zero:
+	bash scripts/run-c193-limit-zero.sh format
+
+.PHONY: test-c193-limit-zero
+test-c193-limit-zero:
+	bash scripts/run-c193-limit-zero.sh test
+
+.PHONY: benchmark-c193-limit-zero
+benchmark-c193-limit-zero:
+	bash scripts/run-c193-limit-zero.sh benchmark
+
+.PHONY: race-c193-limit-zero
+race-c193-limit-zero:
+	bash scripts/run-c193-limit-zero.sh race
+
+.PHONY: vet-c193-limit-zero
+vet-c193-limit-zero:
+	bash scripts/run-c193-limit-zero.sh vet
+
+.PHONY: package-c193-limit-zero
+package-c193-limit-zero:
+	bash scripts/run-c193-limit-zero.sh package
+
+.PHONY: status-c193-limit-zero
+status-c193-limit-zero:
+	bash scripts/run-c193-limit-zero.sh status
+
+.PHONY: stage-c193-limit-zero
+stage-c193-limit-zero:
+	bash scripts/run-c193-limit-zero.sh stage
+
+.PHONY: commit-c193-limit-zero
+commit-c193-limit-zero:
+	bash scripts/run-c193-limit-zero.sh commit
+
+.PHONY: push-c193-limit-zero
+push-c193-limit-zero:
+	bash scripts/run-c193-limit-zero.sh push

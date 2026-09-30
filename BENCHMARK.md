@@ -40449,3 +40449,52 @@ BenchmarkSQLClientRowBinaryRows-32    27486   44557 ns/op  55.23 MB/s  2461 wire
 The RowBinary path is opt-in and the existing JSON/NDJSON APIs remain
 available. Full API and fallback guidance is in
 [`SQL_ROWBINARY_CLIENT.md`](SQL_ROWBINARY_CLIENT.md).
+
+<a id="c193-limit-zero-source-short-circuit"></a>
+## C193 `LIMIT 0` Source Short-Circuit
+
+Five benchmark samples on Linux/amd64 with an AMD Ryzen 9 5950X. Each resolver
+call constructs 16,384 row maps. The optimized path applies only to direct
+`CACHE`/`KEYS` queries with explicit projections and `LIMIT 0`; `LIMIT 1` is
+the control path.
+
+Raw baseline samples, before the shortcut:
+
+```text
+BenchmarkC193LimitZero/LimitZero-32 2582435 ns/op 5769123 B/op 48910 allocs/op
+BenchmarkC193LimitZero/LimitZero-32 2458235 ns/op 5769108 B/op 48910 allocs/op
+BenchmarkC193LimitZero/LimitZero-32 2828257 ns/op 5769099 B/op 48910 allocs/op
+BenchmarkC193LimitZero/LimitZero-32 2792809 ns/op 5769098 B/op 48910 allocs/op
+BenchmarkC193LimitZero/LimitZero-32 2730621 ns/op 5769099 B/op 48910 allocs/op
+BenchmarkC193LimitZero/LimitOne-32  2666331 ns/op 5769440 B/op 48913 allocs/op
+BenchmarkC193LimitZero/LimitOne-32  2572566 ns/op 5769440 B/op 48913 allocs/op
+BenchmarkC193LimitZero/LimitOne-32  2918869 ns/op 5769444 B/op 48913 allocs/op
+BenchmarkC193LimitZero/LimitOne-32  2958382 ns/op 5769442 B/op 48913 allocs/op
+BenchmarkC193LimitZero/LimitOne-32  2890280 ns/op 5769440 B/op 48913 allocs/op
+```
+
+Raw optimized samples:
+
+```text
+BenchmarkC193LimitZero/LimitZero-32 2914 ns/op    3536 B/op     7 allocs/op
+BenchmarkC193LimitZero/LimitZero-32 2847 ns/op    3536 B/op     7 allocs/op
+BenchmarkC193LimitZero/LimitZero-32 3021 ns/op    3536 B/op     7 allocs/op
+BenchmarkC193LimitZero/LimitZero-32 2860 ns/op    3536 B/op     7 allocs/op
+BenchmarkC193LimitZero/LimitZero-32 2937 ns/op    3536 B/op     7 allocs/op
+BenchmarkC193LimitZero/LimitOne-32  2153071 ns/op 5769450 B/op 48913 allocs/op
+BenchmarkC193LimitZero/LimitOne-32  2203178 ns/op 5769437 B/op 48913 allocs/op
+BenchmarkC193LimitZero/LimitOne-32  2562824 ns/op 5769440 B/op 48913 allocs/op
+BenchmarkC193LimitZero/LimitOne-32  2940805 ns/op 5769442 B/op 48913 allocs/op
+BenchmarkC193LimitZero/LimitOne-32  2847061 ns/op 5769444 B/op 48913 allocs/op
+```
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Improvement vs baseline |
+| --- | ---: | ---: | ---: | --- |
+| `LIMIT 0`, baseline | 2,730,621 | 5,769,099 | 48,910 | baseline |
+| `LIMIT 0`, short-circuit | 2,914 | 3,536 | 7 | 937.8x faster, 1,632x lower bytes, 6,987x fewer allocations |
+| `LIMIT 1`, baseline | 2,890,280 | 5,769,440 | 48,913 | control |
+| `LIMIT 1`, short-circuit disabled | 2,562,824 | 5,769,440 | 48,913 | no new memory or allocation cost; timing within fixture variance |
+
+The optimization is selected by query shape, not by a new configuration flag.
+The empty result retains a non-nil `Rows` slice for compatibility. Correctness
+and scope details are in [`C193_LIMIT_ZERO.md`](C193_LIMIT_ZERO.md).
