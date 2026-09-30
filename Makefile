@@ -29058,3 +29058,38 @@ commit-m037l-stateful-group-sum:
 
 push-m037l-stateful-group-sum:
 	bash scripts/m037l-stateful-group-sum.sh push
+
+.PHONY: baseline-m037ah-stateful-group-count-sum format-m037ah-stateful-group-count-sum test-m037ah-stateful-group-count-sum benchmark-m037ah-stateful-group-count-sum race-m037ah-stateful-group-count-sum vet-m037ah-stateful-group-count-sum package-test-m037ah-stateful-group-count-sum check-m037ah-stateful-group-count-sum status-m037ah-stateful-group-count-sum commit-m037ah-stateful-group-count-sum push-m037ah-stateful-group-count-sum
+
+baseline-m037ah-stateful-group-count-sum:
+	bash scripts/m037ah-stateful-group-count-sum.sh baseline
+
+format-m037ah-stateful-group-count-sum:
+	bash scripts/m037ah-stateful-group-count-sum.sh format
+
+test-m037ah-stateful-group-count-sum:
+	bash scripts/m037ah-stateful-group-count-sum.sh test
+
+benchmark-m037ah-stateful-group-count-sum:
+	bash scripts/m037ah-stateful-group-count-sum.sh benchmark
+
+race-m037ah-stateful-group-count-sum:
+	bash scripts/m037ah-stateful-group-count-sum.sh race
+
+vet-m037ah-stateful-group-count-sum:
+	bash scripts/m037ah-stateful-group-count-sum.sh vet
+
+package-test-m037ah-stateful-group-count-sum:
+	bash scripts/m037ah-stateful-group-count-sum.sh package-test
+
+check-m037ah-stateful-group-count-sum:
+	bash scripts/m037ah-stateful-group-count-sum.sh check
+
+status-m037ah-stateful-group-count-sum:
+	bash scripts/m037ah-stateful-group-count-sum.sh status
+
+commit-m037ah-stateful-group-count-sum:
+	bash scripts/m037ah-stateful-group-count-sum.sh commit
+
+push-m037ah-stateful-group-count-sum:
+	bash scripts/m037ah-stateful-group-count-sum.sh push

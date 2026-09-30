@@ -40306,3 +40306,27 @@ allocations. Both stateful paths retain only active aggregate state instead of
 historical input rows. Raw samples are in
 [`M037L_BENCHMARK_RAW.txt`](M037L_BENCHMARK_RAW.txt); API and correctness
 details are in [`M037L_STATEFUL_GROUP_SUM.md`](M037L_STATEFUL_GROUP_SUM.md).
+
+<a id="m037ah-stateful-group-count-sum"></a>
+## M037AH Stateful Differential Group COUNT + SUM
+
+Five benchmark samples on Linux/amd64 with an AMD Ryzen 9 5950X. The workload
+uses 256 signed differential updates across 32 groups. The rebuild control
+recomputes the complete input history after every update. Stateful streaming
+uses one-row `Apply` calls; stateful batch uses one 256-row `Apply` call.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Improvement vs rebuild |
+| --- | ---: | ---: | ---: | --- |
+| Full-history rebuild after every update | 13,112,752 | 24,307,275 | 117,195 | baseline |
+| Stateful one-row streaming `Apply` | 116,088 | 186,665 | 1,223 | 112.9x faster, 130.2x lower bytes, 95.8x fewer allocations |
+| Stateful 256-row batch `Apply` | 118,306 | 209,745 | 971 | 110.8x faster, 115.9x lower bytes, 120.7x fewer allocations |
+
+The combined arrangement stores count and sum together, so callers that need
+both values or a derived average do not maintain two keyed states. The batch
+path uses 12.4% more transient bytes than streaming because it retains pending
+per-group state for atomic validation, but it uses 20.6% fewer allocations.
+Both stateful paths retain only active aggregate state instead of historical
+input rows. Raw samples are in
+[`M037AH_BENCHMARK_RAW.txt`](M037AH_BENCHMARK_RAW.txt); API and correctness
+details are in
+[`M037AH_STATEFUL_GROUP_COUNT_SUM.md`](M037AH_STATEFUL_GROUP_COUNT_SUM.md).

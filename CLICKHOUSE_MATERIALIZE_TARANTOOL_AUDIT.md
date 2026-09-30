@@ -248,6 +248,11 @@ records a separate implementation boundary.
   atomic cross-batch signed updates and deterministic snapshots; generic
   aggregate arrangement lowering remains open. See
   [M037L_STATEFUL_GROUP_SUM.md](M037L_STATEFUL_GROUP_SUM.md).
+- [x] M037ah Combined stateful differential grouped `COUNT` + `int64` `SUM`
+  arrangement shares one keyed state entry for consumers needing both
+  aggregates or a derived average; generic aggregate arrangement lowering
+  remains open. See
+  [M037AH_STATEFUL_GROUP_COUNT_SUM.md](M037AH_STATEFUL_GROUP_COUNT_SUM.md).
 - [ ] M038 Generic multiset duplicate preservation across all operators.
 - [x] M038h Stateful duplicate-preserving grouped `COUNT` arrangement; the
   specialized operator is importable and opt-in, while all-operator generic
@@ -257,6 +262,10 @@ records a separate implementation boundary.
   the specialized operator is importable and opt-in, while all-operator
   generic multiset maintenance remains open. See
   [M037L_STATEFUL_GROUP_SUM.md](M037L_STATEFUL_GROUP_SUM.md).
+- [x] M038ah Stateful duplicate-preserving grouped `COUNT` + `int64` `SUM`
+  arrangement; the specialized operator is importable and opt-in, while
+  all-operator generic multiset maintenance remains open. See
+  [M037AH_STATEFUL_GROUP_COUNT_SUM.md](M037AH_STATEFUL_GROUP_COUNT_SUM.md).
 - [ ] M052 Lowering SQL plans into reusable dataflow fragments.
 - [x] M052ac Native scalar set-operation fragments compose eligible `UNION`,
   `INTERSECT`, and `EXCEPT` branches through the existing native dataflow

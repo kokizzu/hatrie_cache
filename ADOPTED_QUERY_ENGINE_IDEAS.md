@@ -1278,6 +1278,17 @@ atomically. It is importable and opt-in; existing batch SUM behavior and
 planner defaults remain unchanged. See
 [M037L_STATEFUL_GROUP_SUM.md](M037L_STATEFUL_GROUP_SUM.md).
 
+## M037ah: Stateful Differential Group Count + Sum
+
+Adopted a combined Materialize-style arrangement for grouped `COUNT` and
+`int64` `SUM`. `hatSql.IncrementalGroupCountSumInt64` stores one compact
+count/sum/timestamp entry per active group, so consumers needing both
+aggregates or a derived average do not maintain two keyed arrangements. It
+accepts signed duplicate weights across batches, validates multi-row batches
+atomically, and exposes deterministic snapshots. It is importable and opt-in;
+existing batch behavior and planner defaults remain unchanged. See
+[M037AH_STATEFUL_GROUP_COUNT_SUM.md](M037AH_STATEFUL_GROUP_COUNT_SUM.md).
+
 ## M065ag: Differential `ROW_NUMBER` and `LAG`
 
 Materialize-style signed differential maintenance is adopted as an importable
