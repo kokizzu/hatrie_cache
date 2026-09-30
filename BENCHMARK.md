@@ -40197,3 +40197,24 @@ its transient bytes are 3.3x the scan while CPU remains 22.1x lower. The
 transient cost scales with affected registrations, not the total catalog.
 Raw samples are in [`M235_BENCHMARK_RAW.txt`](M235_BENCHMARK_RAW.txt), with
 API and correctness details in [M235_DEPENDENCY_INVALIDATION.md](M235_DEPENDENCY_INVALIDATION.md).
+
+## M236 On-Demand Maintained-Object Refresh
+
+Workload: 8,192 registered maintained objects, with 8 affected objects for a
+single changed source and no-op refresh callbacks. Five 200 ms samples were
+collected on an AMD Ryzen 9 5950X, `linux/amd64`. The baseline scans every
+object; indexed paths use `SQLMaintainedRefreshRegistry`.
+
+| Workload | Path | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| one changed source | Linear scan and refresh | 12,795 | 0 | 0 | 1.00x |
+| one changed source | Indexed `RefreshChanged` | 1,353 | 1,000 | 13 | 0.11x |
+| one changed source | Indexed `RefreshChangedInto` with reused output | 986.4 | 152 | 9 | 0.08x |
+
+The indexed convenience path is 9.46x faster than the scan. Reusing the
+output buffer lowers the median to 986.4 ns/op, or 12.97x faster, and reduces
+the cost to 152 B/op and 9 allocations. The remaining allocations detach
+metadata for the 8 affected objects, preserving callback mutation isolation;
+unrelated registrations are not visited. Raw samples are in
+[`M236_BENCHMARK_RAW.txt`](M236_BENCHMARK_RAW.txt), with API and correctness
+details in [M236_ON_DEMAND_REFRESH.md](M236_ON_DEMAND_REFRESH.md).

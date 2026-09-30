@@ -1,0 +1,21 @@
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatSql
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkM236LinearInvalidatedRefresh-32         	   18102	     13347 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM236LinearInvalidatedRefresh-32         	   19070	     12656 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM236LinearInvalidatedRefresh-32         	   17982	     12951 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM236LinearInvalidatedRefresh-32         	   18486	     12795 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM236LinearInvalidatedRefresh-32         	   18369	     12529 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM236IndexedInvalidatedRefresh-32        	  158283	      1353 ns/op	    1000 B/op	      13 allocs/op
+BenchmarkM236IndexedInvalidatedRefresh-32        	  171106	      1345 ns/op	    1000 B/op	      13 allocs/op
+BenchmarkM236IndexedInvalidatedRefresh-32        	  162648	      1403 ns/op	    1000 B/op	      13 allocs/op
+BenchmarkM236IndexedInvalidatedRefresh-32        	  158604	      1330 ns/op	    1000 B/op	      13 allocs/op
+BenchmarkM236IndexedInvalidatedRefresh-32        	  155026	      1395 ns/op	    1000 B/op	      13 allocs/op
+BenchmarkM236IndexedInvalidatedRefreshInto-32    	  239643	       987.8 ns/op	     152 B/op	       9 allocs/op
+BenchmarkM236IndexedInvalidatedRefreshInto-32    	  251576	       986.4 ns/op	     152 B/op	       9 allocs/op
+BenchmarkM236IndexedInvalidatedRefreshInto-32    	  237828	       980.0 ns/op	     152 B/op	       9 allocs/op
+BenchmarkM236IndexedInvalidatedRefreshInto-32    	  244581	       963.9 ns/op	     152 B/op	       9 allocs/op
+BenchmarkM236IndexedInvalidatedRefreshInto-32    	  247312	      1006 ns/op	     152 B/op	       9 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatSql	5.105s
