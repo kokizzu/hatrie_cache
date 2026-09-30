@@ -40124,3 +40124,28 @@ when the caller persists a checkpoint. This is an opt-in correctness feature,
 not a claim of lower CPU than the numeric tracker. Raw samples are in
 [`M232_BENCHMARK_RAW.txt`](M232_BENCHMARK_RAW.txt), with implementation and
 usage notes in [M232_SINK_FRONTIER_CHECKPOINTS.md](M232_SINK_FRONTIER_CHECKPOINTS.md).
+
+## M233 Sink Retry And Deduplication
+
+Workload: an existing manual context-aware two-attempt retry loop, the M233
+bounded retry executor over the same exactly-once ledger, one successful
+attempt, and an already-committed duplicate. Five 200 ms samples were
+collected on an AMD Ryzen 9 5950X, `linux/amd64`; setup and executor
+construction were stopped outside the timed region.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Existing manual retry, two attempts | 2,420 | 2,256 | 13 | 1.00x |
+| M233 executor retry, two attempts | 2,815 | 2,272 | 14 | 1.16x |
+| Existing single successful attempt | 1,917 | 1,960 | 9 | 1.00x |
+| M233 executor single successful attempt | 1,896 | 1,960 | 9 | 0.99x |
+| Existing already-committed deduplication | 174.8 | 72 | 2 | 1.00x |
+| M233 executor already-committed deduplication | 181.0 | 72 | 2 | 1.04x |
+
+M233 adds a small bounded cost to the ambiguous-failure path in exchange for
+automatic transport-error classification, context-aware backoff, and replay
+with the same idempotency key. Normal successful delivery has no measured
+allocation or memory increase. Durable-store and network latency are outside
+this microbenchmark. Raw samples are in
+[`M233_BENCHMARK_RAW.txt`](M233_BENCHMARK_RAW.txt), with API and operational
+requirements in [M233_SINK_RETRY_DEDUPLICATION.md](M233_SINK_RETRY_DEDUPLICATION.md).
