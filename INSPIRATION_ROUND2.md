@@ -110,7 +110,7 @@ operator control remain the preferred deployment model.
 - [x] M219 Background index creation with observable build frontier; see [M219_BACKGROUND_INDEX_BUILD.md](M219_BACKGROUND_INDEX_BUILD.md) and [BENCHMARK.md#m219-background-index-creation](BENCHMARK.md#m219-background-index-creation).
 - [x] M220 Safe index removal after dependent readers drain; see [M220_SAFE_INDEX_RETIREMENT.md](M220_SAFE_INDEX_RETIREMENT.md) and [BENCHMARK.md#m220-safe-index-retirement](BENCHMARK.md#m220-safe-index-retirement).
 - [x] M221 Isolated compute clusters with independent resource budgets. Named `hatSql` compute clusters can enforce independent FIFO memory budgets over declared query reservations and expose live admission stats; see [M221_COMPUTE_CLUSTER_RESOURCE_BUDGET.md](M221_COMPUTE_CLUSTER_RESOURCE_BUDGET.md) and [BENCHMARK.md#m221-compute-cluster-resource-budgets](BENCHMARK.md#m221-compute-cluster-resource-budgets).
-- [ ] M222 Replicated compute workers for highly available maintained indexes.
+- [x] M222 Replicated compute workers for highly available maintained indexes. `hatPipeline.ReplicatedComputeRouter` routes each placed operator to the lowest-numbered healthy replica, shares atomic worker health across routes, and fails over without retrying application callbacks; see [M222_REPLICATED_COMPUTE_ROUTER.md](M222_REPLICATED_COMPUTE_ROUTER.md) and [BENCHMARK.md#m222-replicated-compute-router](BENCHMARK.md#m222-replicated-compute-router).
 - [ ] M223 Hydration state machines that distinguish cold, hydrating, and ready views.
 - [ ] M224 Hydration progress and estimated remaining work metrics.
 - [ ] M225 Persisted shard leases that prevent duplicate state ownership.

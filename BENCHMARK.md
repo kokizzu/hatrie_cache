@@ -39900,3 +39900,21 @@ The unbudgeted dispatch and existing admission path are allocation-neutral and
 within benchmark noise. Only clusters configured with `MemoryBudgetBytes` pay
 the new stats/admission work; the default path remains unchanged. See
 [M221_COMPUTE_CLUSTER_RESOURCE_BUDGET.md](M221_COMPUTE_CLUSTER_RESOURCE_BUDGET.md).
+
+## M222 Replicated compute router
+
+Workload: selecting the first healthy replica from a 32-replica route after
+two workers are marked unhealthy, and toggling shared worker health, five
+one-second samples on an AMD Ryzen 9 5950X. The scan is a clean T209/M221
+baseline that assumes a caller-owned slice and has no shared health state.
+
+| Operation | Baseline | M222 | Relative latency |
+| --- | ---: | ---: | ---: |
+| Replica selection | 3.43 ns/op, 0 B/op, 0 allocs/op | 14.14 ns/op, 0 B/op, 0 allocs/op | 4.12x baseline cost |
+| Worker health toggle | n/a | 26.98 ns/op, 0 B/op, 0 allocs/op | new failover control |
+
+The router's absolute selection cost remains allocation-free and is paid only
+by callers that opt into health-aware routing. The baseline is not a semantic
+replacement because it cannot share worker health across operators or report
+unavailability; the added cost is the explicit HA control-plane tradeoff. See
+[M222_REPLICATED_COMPUTE_ROUTER.md](M222_REPLICATED_COMPUTE_ROUTER.md).
