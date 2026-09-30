@@ -39722,3 +39722,18 @@ The reusable destination retains row maps and values; the stateful decoder
 retains only delta scratch in addition to that caller-owned destination. The
 existing decoder and defaults remain unchanged. See
 [ROW_BINARY_ADAPTIVE_DECODER.md](ROW_BINARY_ADAPTIVE_DECODER.md).
+
+## C185 Reusable RowBinary dictionary encoder buffers
+
+Workload: 256 rows with repeated string, bytes, and JSON dictionary values,
+ten samples on an AMD Ryzen 9 5950X. Every operation emitted 3,081 wire bytes.
+
+| Operation | Median ns/op | B/op | Allocs/op | Relative latency |
+| --- | ---: | ---: | ---: | ---: |
+| Existing `Encode` before scratch reuse | 39,704 | 15,932 | 14 | 1.00x |
+| Existing `Encode` after scratch reuse | 37,009 | 3,204 | 1 | 1.07x faster |
+| Warm `EncodeInto` with reused destination | 35,150 | 3-4 | 0 | 1.13x faster |
+
+The repeated dictionary decoder was unchanged: 84,902 -> 84,276 ns/op,
+110,964 B/op, and 1,794 allocations/op in the paired runs. See
+[ROW_BINARY_DICTIONARY_ENCODE_INTO.md](ROW_BINARY_DICTIONARY_ENCODE_INTO.md).

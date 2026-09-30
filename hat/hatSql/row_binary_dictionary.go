@@ -28,6 +28,8 @@ type SQLRowBinaryDictionaryEncoder struct {
 	columns           []SQLRowBinaryColumn
 	dictionaryColumns []bool
 	dictionaries      []sqlRowBinaryDictionary
+	pending           []sqlRowBinaryDictionary
+	rowPayload        []byte
 }
 
 // SQLRowBinaryDictionaryDecoder retains dictionary values received from prior
@@ -90,6 +92,14 @@ func (e *SQLRowBinaryDictionaryEncoder) Reset() {
 		dictionary.values = dictionary.values[:0]
 		dictionary.bytes = 0
 	}
+	for index := range e.pending {
+		pending := &e.pending[index]
+		clear(pending.index)
+		clear(pending.byteIndex)
+		pending.values = pending.values[:0]
+		pending.bytes = 0
+	}
+	e.rowPayload = e.rowPayload[:0]
 }
 
 // Reset discards all retained decoder dictionaries while keeping their
@@ -113,14 +123,32 @@ func (d *SQLRowBinaryDictionaryDecoder) Reset() {
 // Encode encodes one batch and retains any new dictionary values for later
 // batches. A failed call does not change the retained dictionaries.
 func (e *SQLRowBinaryDictionaryEncoder) Encode(rows []SQLRow) ([]byte, error) {
+	return e.EncodeInto(nil, rows)
+}
+
+// EncodeInto encodes one batch into dst when it has enough capacity and
+// retains scratch buffers for repeated batches. A failed call does not change
+// the retained dictionaries. The encoder is not safe for concurrent use.
+func (e *SQLRowBinaryDictionaryEncoder) EncodeInto(dst []byte, rows []SQLRow) ([]byte, error) {
 	if e == nil {
 		return nil, fmt.Errorf("RowBinary dictionary encoder is nil")
 	}
 	if len(rows) > maxSQLRowBinaryRows {
 		return nil, fmt.Errorf("RowBinary dictionary row count %d exceeds limit %d", len(rows), maxSQLRowBinaryRows)
 	}
-	pending := make([]sqlRowBinaryDictionary, len(e.columns))
-	rowPayload := make([]byte, 0)
+	if cap(e.pending) < len(e.columns) {
+		e.pending = make([]sqlRowBinaryDictionary, len(e.columns))
+	} else {
+		e.pending = e.pending[:len(e.columns)]
+	}
+	for index := range e.pending {
+		pending := &e.pending[index]
+		clear(pending.index)
+		clear(pending.byteIndex)
+		pending.values = pending.values[:0]
+		pending.bytes = 0
+	}
+	rowPayload := e.rowPayload[:0]
 	for rowIndex, row := range rows {
 		for columnIndex, column := range e.columns {
 			value := interface{}(nil)
@@ -144,7 +172,7 @@ func (e *SQLRowBinaryDictionaryEncoder) Encode(rows []SQLRow) ([]byte, error) {
 				}
 				dictionary := &e.dictionaries[columnIndex]
 				if !ok {
-					_, pendingID, pendingOK, err := sqlRowBinaryDictionaryLookup(&pending[columnIndex], column.Type, value, rowIndex, column.Name)
+					_, pendingID, pendingOK, err := sqlRowBinaryDictionaryLookup(&e.pending[columnIndex], column.Type, value, rowIndex, column.Name)
 					if err != nil {
 						return nil, err
 					}
@@ -155,7 +183,7 @@ func (e *SQLRowBinaryDictionaryEncoder) Encode(rows []SQLRow) ([]byte, error) {
 						if err != nil {
 							return nil, err
 						}
-						pendingID = addSQLRowBinaryDictionaryValue(&pending[columnIndex], column.Type, key)
+						pendingID = addSQLRowBinaryDictionaryValue(&e.pending[columnIndex], column.Type, key)
 						id = uint64(len(dictionary.values)) + pendingID
 					}
 				}
@@ -163,23 +191,30 @@ func (e *SQLRowBinaryDictionaryEncoder) Encode(rows []SQLRow) ([]byte, error) {
 				continue
 			}
 			var err error
-			rowPayload, err = appendSQLRowBinaryColumnValue(rowPayload, column, value, rowIndex)
+			rowPayload, err = appendSQLRowBinaryValue(rowPayload, column.Type, value, rowIndex, column.Name)
 			if err != nil {
 				return nil, err
 			}
 		}
 	}
-	if err := validateSQLRowBinaryDictionaryGrowth(e.columns, e.dictionaries, e.dictionaryColumns, pending); err != nil {
+	if err := validateSQLRowBinaryDictionaryGrowth(e.columns, e.dictionaries, e.dictionaryColumns, e.pending); err != nil {
 		return nil, err
 	}
-	encoded := make([]byte, 0, len(sqlRowBinaryDictionaryHeader)+len(rowPayload))
+	e.rowPayload = rowPayload
+	capacity := len(sqlRowBinaryDictionaryHeader) + binary.MaxVarintLen64 + len(rowPayload)
+	if cap(dst) < capacity {
+		dst = make([]byte, 0, capacity)
+	} else {
+		dst = dst[:0]
+	}
+	encoded := dst
 	encoded = append(encoded, sqlRowBinaryDictionaryHeader...)
 	encoded = appendSQLRowBinaryDictionaryUvarint(encoded, uint64(len(rows)))
 	for index, isDictionary := range e.dictionaryColumns {
 		if !isDictionary {
 			continue
 		}
-		values := pending[index].values
+		values := e.pending[index].values
 		encoded = appendSQLRowBinaryDictionaryUvarint(encoded, uint64(len(values)))
 		for _, value := range values {
 			encoded = appendSQLRowBinaryDictionaryString(encoded, value)
@@ -191,7 +226,7 @@ func (e *SQLRowBinaryDictionaryEncoder) Encode(rows []SQLRow) ([]byte, error) {
 			continue
 		}
 		dictionary := &e.dictionaries[index]
-		for _, value := range pending[index].values {
+		for _, value := range e.pending[index].values {
 			addSQLRowBinaryDictionaryValue(dictionary, e.columns[index].Type, value)
 		}
 	}

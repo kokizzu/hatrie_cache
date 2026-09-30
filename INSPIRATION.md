@@ -1238,3 +1238,18 @@ wire format. The paired 128-row benchmark measured 2.23x lower median latency,
 50,304 -> 5,120 B/op, and 641 -> 256 allocations. The APIs are opt-in because
 the caller owns the reusable destination and decoder concurrency contract.
 See [ROW_BINARY_ADAPTIVE_DECODER.md](ROW_BINARY_ADAPTIVE_DECODER.md).
+
+- [x] C185 Reusable low-cardinality RowBinary dictionary encoder scratch and output buffers. `SQLRowBinaryDictionaryEncoder.EncodeInto` preserves HDB1 bytes and dictionary semantics while warm repeated batches reuse pending dictionaries and caller-owned output. See [ROW_BINARY_DICTIONARY_ENCODE_INTO.md](ROW_BINARY_DICTIONARY_ENCODE_INTO.md).
+
+## C185: Reusable RowBinary dictionary encoder buffers
+
+ClickHouse `LowCardinality` transfer and Tarantool tuple paths benefit from
+retaining dictionary state and avoiding per-batch scratch allocation.
+`SQLRowBinaryDictionaryEncoder.EncodeInto` now reuses pending dictionary state,
+row payload capacity, and caller-owned output while `Encode` delegates to the
+same implementation. HDB1 bytes, dictionary growth limits, NULL handling,
+failure atomicity, and reset behavior remain unchanged. The ten-sample
+256-row benchmark measured 1.07x faster existing-API encoding, 4.97x lower
+allocated heap, and 14x fewer allocations; the direct reusable API measured
+1.13x faster with zero allocations. See
+[ROW_BINARY_DICTIONARY_ENCODE_INTO.md](ROW_BINARY_DICTIONARY_ENCODE_INTO.md).

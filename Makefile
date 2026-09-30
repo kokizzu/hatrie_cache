@@ -28766,3 +28766,15 @@ test-tuple-format-fields-into:
 
 verify-tuple-format-fields-into:
 	bash scripts/verify-tuple-format-fields-into.sh
+
+.PHONY: test-row-binary-dictionary-into
+test-row-binary-dictionary-into:
+	bash scripts/test-row-binary-dictionary-into.sh
+
+.PHONY: gofmt-row-binary-dictionary-into
+gofmt-row-binary-dictionary-into:
+	bash scripts/gofmt-row-binary-dictionary-into.sh
+
+.PHONY: benchmark-row-binary-dictionary
+benchmark-row-binary-dictionary:
+	bash scripts/benchmark-row-binary-dictionary.sh
