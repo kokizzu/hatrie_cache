@@ -39831,6 +39831,44 @@ exact HSD1/HSD2 bytes and trades retained destination capacity for lower
 per-batch allocation and CPU cost. See
 [ROW_BINARY_DELTA_DECODE_INTO.md](ROW_BINARY_DELTA_DECODE_INTO.md).
 
+## M226 Durable Consensus Metadata
+
+Workload: one `PartitionOwnershipConsensusDecision` for one shard on an AMD
+Ryzen 9 5950X. Each result is the median of five `go test` benchmark samples
+with `-benchtime=200ms`. The durable commit includes a temp-file write, file
+sync, atomic rename, and directory sync. The reopen benchmark reads and
+validates one record. The snapshot benchmark only clones the in-process
+record.
+
+| Operation | Median ns/op | B/op | Allocs/op | Relative latency |
+| --- | ---: | ---: | ---: | ---: |
+| Existing in-memory quorum, before M226 | 979.4 | 1,056 | 10 | 1.00x |
+| Existing in-memory quorum, after M226 | 992.2 | 1,056 | 10 | 0.99x |
+| Durable `Commit` | 2,297,128 | 2,688 | 32 | 2,315x slower than after quorum |
+| Durable `Snapshot` | 115.1 | 96 | 3 | 8.62x lower latency than after quorum |
+| Durable reopen + decode | 9,319 | 1,672 | 23 | 9.39x slower than after quorum |
+
+The before/after quorum medians differ by 1.3% while keeping identical
+1,056 B/op and 10 allocs/op; this is within ordinary benchmark noise and is
+not a claimed performance improvement or regression. The durable rows are
+different operations and are intentionally not presented as a replacement for
+the in-memory quorum hot path. Commit them on ownership/frontier checkpoints,
+not once per data row.
+
+Raw `ns/op` samples:
+
+```text
+quorum_before: 945.9 979.7 986.6 979.4 967.8
+quorum_after: 992.2 983.7 995.8 990.9 1035
+durable_commit: 1721444 2489967 10924392 1854050 2297128
+durable_snapshot: 114.3 115.1 120.8 117.1 114.2
+durable_open: 9342 9530 9260 9319 9172
+```
+
+The 10.9 ms commit sample is filesystem jitter; the median is reported rather
+than hiding it. See [M226_DURABLE_CONSENSUS_METADATA.md](M226_DURABLE_CONSENSUS_METADATA.md)
+for the record format, invariants, and writer-authority contract.
+
 ## T208 Anonymous replica quorum targets
 
 Workload: three replication targets, two voting targets, and the no-op
