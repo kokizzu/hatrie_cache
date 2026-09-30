@@ -23,11 +23,23 @@ const (
 // selected codec and preserves compatibility with callers using the legacy
 // functions.
 func EncodeSQLRowBinaryAdaptive(columns []SQLRowBinaryColumn, rows []SQLRow) ([]byte, error) {
+	return encodeSQLRowBinaryAdaptive(nil, columns, rows)
+}
+
+// EncodeSQLRowBinaryAdaptiveInto chooses the same adaptive codec as
+// EncodeSQLRowBinaryAdaptive and writes the HSA1 envelope into dst when it has
+// enough capacity. The candidate payloads retain the existing codec behavior;
+// only the final selected envelope is reused.
+func EncodeSQLRowBinaryAdaptiveInto(dst []byte, columns []SQLRowBinaryColumn, rows []SQLRow) ([]byte, error) {
+	return encodeSQLRowBinaryAdaptive(dst, columns, rows)
+}
+
+func encodeSQLRowBinaryAdaptive(dst []byte, columns []SQLRowBinaryColumn, rows []SQLRow) ([]byte, error) {
 	if err := validateSQLRowBinaryColumns(columns); err != nil {
 		return nil, err
 	}
 	if len(rows) == 0 {
-		return nil, nil
+		return dst[:0], nil
 	}
 	legacy, err := EncodeSQLRowBinary(columns, rows)
 	if err != nil {
@@ -51,7 +63,13 @@ func EncodeSQLRowBinaryAdaptive(columns []SQLRowBinaryColumn, rows []SQLRow) ([]
 		codec = SQLRowBinaryAdaptiveCodecDoubleDelta
 		selected = doubleDelta
 	}
-	encoded := make([]byte, 0, len(selected)+1+len(sqlRowBinaryAdaptiveMagic)+binary.MaxVarintLen64)
+	capacity := len(selected) + 1 + len(sqlRowBinaryAdaptiveMagic) + binary.MaxVarintLen64
+	if cap(dst) < capacity {
+		dst = make([]byte, 0, capacity)
+	} else {
+		dst = dst[:0]
+	}
+	encoded := dst
 	encoded = append(encoded, sqlRowBinaryAdaptiveMagic[:]...)
 	encoded = append(encoded, byte(codec))
 	encoded = appendSQLRowBinaryDeltaUvarint(encoded, uint64(len(selected)))

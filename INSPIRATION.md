@@ -1208,3 +1208,13 @@ measured 1.12x lower median latency, 48 -> 24 B/op, and 3 -> 2 allocations.
 The codec callback still owns payload encoding, so this remains an opt-in
 allocation reduction rather than a zero-copy codec redesign. See
 [AGGREGATE_STATE_REGISTRY_ENCODE_INTO.md](AGGREGATE_STATE_REGISTRY_ENCODE_INTO.md).
+## C181: Reusable adaptive RowBinary envelopes
+
+ClickHouse-style transfer encoders benefit from reusing the final wire buffer
+when a query repeatedly emits the same shape. `hatSql.EncodeSQLRowBinaryAdaptiveInto`
+keeps the existing legacy/delta/double-delta candidate selection and only
+reuses the selected HSA1 envelope. A paired 128-row benchmark measured 1.03x
+lower median latency, 17,784 -> 16,504 B/op, and 20 -> 19 allocations. The
+candidate payload allocations remain, so this is opt-in rather than a claim of
+zero-copy adaptive encoding. See
+[ROW_BINARY_ADAPTIVE_ENCODE_INTO.md](ROW_BINARY_ADAPTIVE_ENCODE_INTO.md).

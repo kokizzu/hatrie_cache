@@ -39665,3 +39665,16 @@ value, ten samples on an AMD Ryzen 9 5950X.
 The reusable path preserves exact HAG1 bytes and removes the final envelope
 allocation when the caller retains enough destination capacity. See
 [AGGREGATE_STATE_REGISTRY_ENCODE_INTO.md](AGGREGATE_STATE_REGISTRY_ENCODE_INTO.md).
+## C181 Adaptive RowBinary envelope reuse
+
+Workload: 128 rows with `INT64`, `DateTime`, and string columns, ten paired
+samples on an AMD Ryzen 9 5950X.
+
+| Operation | Median ns/op | B/op | Allocs/op | Relative latency |
+| --- | ---: | ---: | ---: | ---: |
+| Existing `EncodeSQLRowBinaryAdaptive` control | 29,670 | 17,784 | 20 | 1.00x |
+| Reused `EncodeSQLRowBinaryAdaptiveInto` | 28,938 | 16,504 | 19 | 1.03x faster |
+
+The adaptive candidate payloads are unchanged; the reusable path removes only
+the final HSA1 envelope allocation. See
+[ROW_BINARY_ADAPTIVE_ENCODE_INTO.md](ROW_BINARY_ADAPTIVE_ENCODE_INTO.md).
