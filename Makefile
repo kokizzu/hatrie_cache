@@ -28650,3 +28650,23 @@ vet-compiled-negative-cache:
 .PHONY: benchmark-compiled-negative-cache
 benchmark-compiled-negative-cache:
 	bash scripts/compiled-negative-cache.sh benchmark
+
+.PHONY: test-bitset-adaptive
+test-bitset-adaptive:
+	bash scripts/run-bitset-adaptive.sh test
+
+.PHONY: benchmark-bitset-adaptive
+benchmark-bitset-adaptive:
+	bash scripts/run-bitset-adaptive.sh benchmark
+
+.PHONY: race-bitset-adaptive
+race-bitset-adaptive:
+	bash scripts/run-bitset-adaptive.sh race
+
+.PHONY: format-bitset-adaptive
+format-bitset-adaptive:
+	bash scripts/run-bitset-adaptive.sh format
+
+.PHONY: full-test-bitset-adaptive
+full-test-bitset-adaptive:
+	bash scripts/run-bitset-adaptive.sh full

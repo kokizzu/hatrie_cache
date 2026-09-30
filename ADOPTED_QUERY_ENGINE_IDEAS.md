@@ -1214,3 +1214,5 @@ schema-version invalidation. Repeated invalid compiled sources improved from
 allocations; the valid compiled-plan hit remained allocation-free within
 benchmark noise. See [COMPILED_NEGATIVE_CACHE.md](COMPILED_NEGATIVE_CACHE.md)
 and [BENCHMARK.md](BENCHMARK.md#compiled-query-negative-result-cache).
+
+| ClickHouse / Tarantool | Adaptive small-cardinality bitset postings | Implemented | `BitsetIndex` keeps singleton keys inline and promotes them to the existing dense bitmap only when needed, reducing sparse build memory and lookup cost without changing the public API or dense posting behavior. See [BITSET_ADAPTIVE_POSTINGS.md](BITSET_ADAPTIVE_POSTINGS.md). |

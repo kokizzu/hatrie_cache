@@ -39519,3 +39519,17 @@ Raw valid-source samples:
 
 See [COMPILED_NEGATIVE_CACHE.md](COMPILED_NEGATIVE_CACHE.md) for bounds,
 invalidation semantics, and verification commands.
+
+## Adaptive Bitset Index Postings
+
+`make benchmark-bitset-adaptive` measured five `-benchmem` samples on an AMD
+Ryzen 9 5950X:
+
+| Workload | Before median | After median | Result | Allocation volume | Allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Singleton lookup at slot 99,999 / capacity 100,000 | 773.2 ns/op | 7.2 ns/op | 107.4x faster | 0 B/op | 0 |
+| Dense lookup of 10,000 slots / capacity 100,000 | 13,205 ns/op | 10,105 ns/op | 1.31x faster | 0 B/op | 0 |
+| Build 128 singleton keys / capacity 16,384 | 79,882 ns/op | 20,988 ns/op | 3.80x faster | 409,889 -> 144,184 B/op | 139 -> 7 |
+
+Raw samples and lifecycle coverage are in
+[BITSET_ADAPTIVE_POSTINGS.md](BITSET_ADAPTIVE_POSTINGS.md).

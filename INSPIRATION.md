@@ -1145,3 +1145,5 @@ SQL shape. See [CH035_REMOTE_SHARD_PRUNING.md](CH035_REMOTE_SHARD_PRUNING.md).
   the correct fallback. See
   [M052AD_AUTO_NATIVE_CONDITIONAL_AGGREGATES.md](M052AD_AUTO_NATIVE_CONDITIONAL_AGGREGATES.md)
   and [BENCHMARK.md](BENCHMARK.md#m052ad-automatic-native-conditional-aggregates).
+
+- [x] C169 Adaptive small-cardinality bitset postings. `BitsetIndex` stores one-slot postings inline, promotes on the second slot, and demotes after deletion; the measured singleton build used 2.84x less allocated heap and 19.9x fewer allocations, while singleton lookup was 107.4x faster and dense lookup did not regress. See [BITSET_ADAPTIVE_POSTINGS.md](BITSET_ADAPTIVE_POSTINGS.md).
