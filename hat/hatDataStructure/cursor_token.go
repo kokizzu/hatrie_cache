@@ -91,6 +91,52 @@ func (codec *CursorTokenCodec) Encode(index string, schemaVersion uint64, key []
 	return token, nil
 }
 
+// EncodeInto writes a URL-safe continuation token into dst, reusing its
+// backing array when it has enough capacity. The returned slice retains extra
+// capacity for the raw signed payload so a subsequent call can reuse it.
+func (codec *CursorTokenCodec) EncodeInto(dst []byte, index string, schemaVersion uint64, key []byte, id uint64) ([]byte, error) {
+	if codec == nil {
+		return nil, ErrCursorTokenCodecNil
+	}
+	if len(codec.secret) < MinCursorTokenSecretBytes {
+		return nil, ErrCursorTokenSecretInvalid
+	}
+	index = strings.TrimSpace(index)
+	if index == "" || len(index) > MaxCursorTokenIndexBytes {
+		return nil, fmt.Errorf("%w: index length must be between 1 and %d", ErrCursorTokenInvalid, MaxCursorTokenIndexBytes)
+	}
+	if len(key) > MaxCursorTokenKeyBytes {
+		return nil, fmt.Errorf("%w: key length must be <= %d", ErrCursorTokenInvalid, MaxCursorTokenKeyBytes)
+	}
+	payloadBytes := cursorTokenHeaderBytes + len(index) + len(key)
+	rawBytes := payloadBytes + cursorTokenMACBytes
+	encodedBytes := base64.RawURLEncoding.EncodedLen(rawBytes)
+	if encodedBytes > MaxCursorTokenBytes {
+		return nil, fmt.Errorf("%w: encoded token exceeds %d bytes", ErrCursorTokenInvalid, MaxCursorTokenBytes)
+	}
+	if cap(dst) < encodedBytes+rawBytes {
+		dst = make([]byte, encodedBytes+rawBytes)
+	} else {
+		dst = dst[:encodedBytes+rawBytes]
+	}
+	raw := dst[encodedBytes:]
+	copy(raw[:4], cursorTokenMagic)
+	raw[4] = 1
+	binary.BigEndian.PutUint16(raw[5:7], uint16(len(index)))
+	binary.BigEndian.PutUint32(raw[7:11], uint32(len(key)))
+	binary.BigEndian.PutUint64(raw[11:19], schemaVersion)
+	binary.BigEndian.PutUint64(raw[19:27], id)
+	offset := cursorTokenHeaderBytes
+	copy(raw[offset:], index)
+	offset += len(index)
+	copy(raw[offset:], key)
+	mac := hmac.New(sha256.New, codec.secret)
+	_, _ = mac.Write(raw[:payloadBytes])
+	mac.Sum(raw[payloadBytes:payloadBytes])
+	base64.RawURLEncoding.Encode(dst[:encodedBytes], raw)
+	return dst[:encodedBytes], nil
+}
+
 // Decode verifies and decodes a continuation token without trusting its
 // index, schema version, key, or row ID until the MAC has been checked.
 func (codec *CursorTokenCodec) Decode(token string) (CursorToken, error) {

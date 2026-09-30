@@ -28678,3 +28678,19 @@ test-vector-search-into:
 .PHONY: verify-vector-search
 verify-vector-search:
 	bash scripts/verify-vector-search.sh
+
+.PHONY: benchmark-cursor-token
+benchmark-cursor-token:
+	bash scripts/benchmark-cursor-token.sh
+
+.PHONY: benchmark-cursor-token-encode-into
+benchmark-cursor-token-encode-into:
+	bash scripts/benchmark-cursor-token-encode-into.sh
+
+.PHONY: test-cursor-token-encode-into
+test-cursor-token-encode-into:
+	bash scripts/test-cursor-token-encode-into.sh
+
+.PHONY: verify-cursor-token-encode-into
+verify-cursor-token-encode-into:
+	bash scripts/verify-cursor-token-encode-into.sh

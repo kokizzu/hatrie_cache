@@ -39554,3 +39554,20 @@ uses a bounded min-heap when the limit is smaller than the index.
 `SearchInto` is opt-in. It preserves exact score and ID tie ordering, filters,
 validation, and existing `Search` ownership semantics while bounding retained
 candidate output to `LIMIT`. See [VECTOR_SEARCH_INTO.md](VECTOR_SEARCH_INTO.md).
+
+## C173 Reusable Cursor-Token Encoding
+
+`make benchmark-cursor-token` and
+`make benchmark-cursor-token-encode-into` used ten `-benchmem` samples on an
+AMD Ryzen 9 5950X. Both paths encode the same small signed continuation token;
+the optimized path reuses the returned byte slice.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative |
+| --- | ---: | ---: | ---: | --- |
+| `CursorTokenCodec.Encode` | 664 | 864 | 9 | 1.00x |
+| reused `CursorTokenCodec.EncodeInto` | 571 | 480 | 5 | 1.16x faster |
+
+The existing string API is unchanged. `EncodeInto` is opt-in and requires the
+caller to retain the returned slice for the zero-growth path; HMAC-SHA256,
+base64 encoding, size bounds, and authentication behavior remain identical.
+See [CURSOR_TOKEN_ENCODE_INTO.md](CURSOR_TOKEN_ENCODE_INTO.md).
