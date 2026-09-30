@@ -2979,6 +2979,28 @@ func sqlTopNStreamBefore(left, right sqlTopNStreamItem, order []sqlOrder) bool {
 	return left.ordinal < right.ordinal
 }
 
+func sqlTopNStreamTied(left, right sqlTopNStreamItem, order []sqlOrder) bool {
+	if len(order) == 1 {
+		return sqlTopNStreamOrderKeyTied(order[0], left.key, right.key)
+	}
+	for index, item := range order {
+		if !sqlTopNStreamOrderKeyTied(item, left.keys[index], right.keys[index]) {
+			return false
+		}
+	}
+	return true
+}
+
+func sqlTopNStreamOrderKeyTied(order sqlOrder, left, right interface{}) bool {
+	if less, decided := sqlOrderLess(order, left, right); decided && less {
+		return false
+	}
+	if less, decided := sqlOrderLess(order, right, left); decided && less {
+		return false
+	}
+	return true
+}
+
 // sqlTopNStreamHeap keeps the worst retained row at index zero. It therefore
 // consumes O(LIMIT + OFFSET) memory rather than materializing every source row.
 type sqlTopNStreamHeap struct {
@@ -9639,7 +9661,7 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 		}
 		return matches
 	}
-	if len(orderFields) > 1 && !sqlColumnarTopNUniformOrderDirection(q) {
+	if !q.limitWithTies && len(orderFields) > 1 && !sqlColumnarTopNUniformOrderDirection(q) {
 		if sorted, ok := columnar.(DirectedCompositeSortedColumnarSourceResolver); ok {
 			descending := make([]bool, len(q.orderBy))
 			for index, order := range q.orderBy {
@@ -9658,7 +9680,7 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 			}
 		}
 	}
-	if len(orderFields) > 1 && sqlColumnarTopNUniformOrderDirection(q) {
+	if !q.limitWithTies && len(orderFields) > 1 && sqlColumnarTopNUniformOrderDirection(q) {
 		if sorted, ok := columnar.(CompositeSortedColumnarSourceResolver); ok {
 			order, available, err := sorted.BorrowSQLColumnarSourceOrderFields(q.from.kind, q.from.key, fields, orderFields)
 			if err != nil {
@@ -9673,7 +9695,7 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 			}
 		}
 	}
-	if len(orderFields) == 1 {
+	if !q.limitWithTies && len(orderFields) == 1 {
 		if sorted, ok := columnar.(SortedColumnarSourceResolver); ok {
 			order, available, err := sorted.BorrowSQLColumnarSourceOrder(q.from.kind, q.from.key, fields, orderFields[0])
 			if err != nil {
@@ -9691,30 +9713,37 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 	candidates := sqlTopNStreamHeap{items: make([]sqlTopNStreamItem, 0, capacity), order: q.orderBy}
 	heap.Init(&candidates)
 	matchedRows := 0
-	scanRows := func(start, end int) bool {
+	buildCandidate := func(rowIndex int) (sqlTopNStreamItem, bool) {
+		candidate := sqlTopNStreamItem{ordinal: rowIndex}
+		if len(orderFields) == 1 {
+			key, ordered := sqlColumnarTopNOrderKey(batch, orderFields[0], rowIndex)
+			if !ordered {
+				return sqlTopNStreamItem{}, false
+			}
+			candidate.key = key
+		} else {
+			candidate.keys = make([]interface{}, len(orderFields))
+			for orderIndex, field := range orderFields {
+				key, ordered := sqlColumnarTopNOrderKey(batch, field, rowIndex)
+				if !ordered {
+					return sqlTopNStreamItem{}, false
+				}
+				candidate.keys[orderIndex] = key
+			}
+		}
+		return candidate, true
+	}
+	scanRows := func(start, end int, countMetrics bool) bool {
 		for rowIndex := start; rowIndex < end; rowIndex++ {
 			if !matches(rowIndex) {
 				continue
 			}
-			if metrics != nil {
+			if countMetrics && metrics != nil {
 				matchedRows++
 			}
-			candidate := sqlTopNStreamItem{ordinal: rowIndex}
-			if len(orderFields) == 1 {
-				key, ordered := sqlColumnarTopNOrderKey(batch, orderFields[0], rowIndex)
-				if !ordered {
-					return false
-				}
-				candidate.key = key
-			} else {
-				candidate.keys = make([]interface{}, len(orderFields))
-				for orderIndex, field := range orderFields {
-					key, ordered := sqlColumnarTopNOrderKey(batch, field, rowIndex)
-					if !ordered {
-						return false
-					}
-					candidate.keys[orderIndex] = key
-				}
+			candidate, ordered := buildCandidate(rowIndex)
+			if !ordered {
+				return false
 			}
 			if candidates.Len() < capacity {
 				heap.Push(&candidates, candidate)
@@ -9740,11 +9769,11 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 					continue
 				}
 			}
-			if !scanRows(start, end) {
+			if !scanRows(start, end, true) {
 				return SQLQueryResult{}, false, nil
 			}
 		}
-	} else if !scanRows(0, batch.Rows) {
+	} else if !scanRows(0, batch.Rows, true) {
 		return SQLQueryResult{}, false, nil
 	}
 	if metrics != nil && skippedRows > 0 {
@@ -9753,6 +9782,33 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 	sort.SliceStable(candidates.items, func(left, right int) bool {
 		return sqlTopNStreamBefore(candidates.items[left], candidates.items[right], q.orderBy)
 	})
+	if q.limitWithTies && len(candidates.items) == capacity {
+		boundary := candidates.items[len(candidates.items)-1]
+		tied := make([]sqlTopNStreamItem, 0, len(candidates.items))
+		for rowIndex := 0; rowIndex < batch.Rows; rowIndex++ {
+			if !matches(rowIndex) {
+				continue
+			}
+			withinBoundary, ordered := sqlColumnarTopNRowBoundaryCompare(batch, orderFields, rowIndex, q.orderBy, boundary)
+			if !ordered {
+				return SQLQueryResult{}, false, nil
+			}
+			if !withinBoundary {
+				continue
+			}
+			candidate, ordered := buildCandidate(rowIndex)
+			if !ordered {
+				return SQLQueryResult{}, false, nil
+			}
+			if sqlTopNStreamBefore(candidate, boundary, q.orderBy) || sqlTopNStreamTied(candidate, boundary, q.orderBy) {
+				tied = append(tied, candidate)
+			}
+		}
+		candidates.items = tied
+		sort.SliceStable(candidates.items, func(left, right int) bool {
+			return sqlTopNStreamBefore(candidates.items[left], candidates.items[right], q.orderBy)
+		})
+	}
 	result := SQLQueryResult{Columns: sqlColumns(q.selects), Rows: make([]SQLRow, 0, q.limit)}
 	start := q.offset
 	if start > len(candidates.items) {
@@ -9761,6 +9817,12 @@ func executeSQLColumnarTopN(q *sqlQuery, columnar SQLColumnarSourceResolver, con
 	end := start + q.limit
 	if end > len(candidates.items) {
 		end = len(candidates.items)
+	}
+	if q.limitWithTies && end > start && end < len(candidates.items) {
+		boundary := candidates.items[end-1]
+		for end < len(candidates.items) && sqlTopNStreamTied(boundary, candidates.items[end], q.orderBy) {
+			end++
+		}
 	}
 	for _, candidate := range candidates.items[start:end] {
 		row := make(SQLRow, len(projectionFields))
@@ -9952,6 +10014,74 @@ func sqlColumnarTopNOrderKey(batch ColumnarBatch, field string, rowIndex int) (i
 	}
 	number, ok := sqlNumber(value)
 	return number, ok
+}
+
+// sqlColumnarTopNFieldBoundaryCompare avoids boxing every source value during
+// the LIMIT WITH TIES boundary pass. The general candidate builder is used only
+// after this comparison has identified a row that can be retained.
+func sqlColumnarTopNFieldBoundaryCompare(batch ColumnarBatch, field string, rowIndex int, order sqlOrder, boundary interface{}) (int, bool) {
+	value, available := batch.Value(field, rowIndex)
+	if !available || value == nil {
+		return 0, false
+	}
+	if text, ok := value.(string); ok {
+		boundaryText, ok := boundary.(string)
+		if !ok {
+			return 0, false
+		}
+		comparison := strings.Compare(text, boundaryText)
+		if comparison == 0 {
+			return 0, true
+		}
+		if order.desc {
+			if comparison > 0 {
+				return -1, true
+			}
+			return 1, true
+		}
+		if comparison < 0 {
+			return -1, true
+		}
+		return 1, true
+	}
+	number, numeric := sqlNumber(value)
+	boundaryNumber, boundaryNumeric := sqlNumber(boundary)
+	if !numeric || !boundaryNumeric {
+		return 0, false
+	}
+	if number == boundaryNumber {
+		return 0, true
+	}
+	if order.desc {
+		if number > boundaryNumber {
+			return -1, true
+		}
+		return 1, true
+	}
+	if number < boundaryNumber {
+		return -1, true
+	}
+	return 1, true
+}
+
+func sqlColumnarTopNRowBoundaryCompare(batch ColumnarBatch, fields []string, rowIndex int, order []sqlOrder, boundary sqlTopNStreamItem) (bool, bool) {
+	for index, field := range fields {
+		boundaryKey := boundary.key
+		if len(fields) > 1 {
+			boundaryKey = boundary.keys[index]
+		}
+		comparison, ordered := sqlColumnarTopNFieldBoundaryCompare(batch, field, rowIndex, order[index], boundaryKey)
+		if !ordered {
+			return false, false
+		}
+		if comparison < 0 {
+			return true, true
+		}
+		if comparison > 0 {
+			return false, true
+		}
+	}
+	return true, true
 }
 
 func sqlColumnarTopNPlan(q *sqlQuery, outer *sqlExecRow) (fields, projectionFields, orderFields []string, predicates []sqlColumnarNumericFilter, ok bool) {

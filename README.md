@@ -5045,3 +5045,8 @@ the API, tradeoff, and benchmark.
 
 Run `make test-t234`, `make race-t234`, `make vet-t234`, and
 `make benchmark-t234` for the focused checks and measurements.
+## Engine Inspiration
+
+The current ClickHouse, Materialize, and Tarantool gap catalog is tracked in
+[ENGINE_INSPIRATION_GAPS.md](ENGINE_INSPIRATION_GAPS.md). It records the audit,
+round results, and concrete candidates for future test-first performance work.

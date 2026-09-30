@@ -29349,3 +29349,38 @@ verify-round15-composite-order:
 .PHONY: ship-round15-composite-order
 ship-round15-composite-order:
 	bash ./scripts/ship-round15-composite-order.sh
+.PHONY: test-round16-columnar-ties
+test-round16-columnar-ties:
+	bash scripts/test-round16-columnar-ties.sh
+
+.PHONY: benchmark-round16-columnar-ties
+benchmark-round16-columnar-ties:
+	bash scripts/benchmark-round16-columnar-ties.sh
+
+.PHONY: verify-round16-columnar-ties
+verify-round16-columnar-ties:
+	bash scripts/verify-round16-columnar-ties.sh
+
+.PHONY: verify-round16-catalog
+verify-round16-catalog:
+	bash scripts/verify-round16-catalog.sh
+
+.PHONY: test-round16-package
+test-round16-package:
+	bash scripts/test-round16-package.sh
+
+.PHONY: status-round16-columnar-ties
+status-round16-columnar-ties:
+	bash scripts/ship-round16-columnar-ties.sh status
+
+.PHONY: stage-round16-columnar-ties
+stage-round16-columnar-ties:
+	bash scripts/ship-round16-columnar-ties.sh stage
+
+.PHONY: commit-round16-columnar-ties
+commit-round16-columnar-ties:
+	bash scripts/ship-round16-columnar-ties.sh commit
+
+.PHONY: push-round16-columnar-ties
+push-round16-columnar-ties:
+	bash scripts/ship-round16-columnar-ties.sh push
