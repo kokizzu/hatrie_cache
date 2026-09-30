@@ -14,7 +14,7 @@ measurement; `P1` needs a workload gate; `P2` is useful only after profiling.
 ## Columnar And Expression Execution
 
 1. `P0` Vectorize numeric `BETWEEN` filters in `executeSQLColumnarScan` (adopted as CHU59; see [CHU59_NUMERIC_BETWEEN.md](CHU59_NUMERIC_BETWEEN.md)).
-2. `P0` Vectorize numeric `IN` predicates with a compact typed membership set.
+2. `P0` Vectorize numeric `IN` predicates with a compact typed membership set (adopted as CHU60; see [CHU60_NUMERIC_IN.md](CHU60_NUMERIC_IN.md)).
 3. `P0` Vectorize `IS NULL` and `IS NOT NULL` over column presence bitmaps.
 4. `P0` Fuse conjunctions of direct numeric predicates into one scan.
 5. `P0` Fuse direct numeric predicates with projection and `LIMIT` stopping.

@@ -22318,3 +22318,35 @@ review-chu59-numeric-between:
 .PHONY: ship-chu59-numeric-between
 ship-chu59-numeric-between:
 	bash ./scripts/ship-chu59-numeric-between.sh
+
+.PHONY: format-chu60-numeric-in
+format-chu60-numeric-in:
+	bash ./scripts/format-chu60-numeric-in.sh
+
+.PHONY: test-chu60-numeric-in
+test-chu60-numeric-in:
+	bash ./scripts/test-chu60-numeric-in.sh
+
+.PHONY: benchmark-chu60-numeric-in
+benchmark-chu60-numeric-in:
+	bash ./scripts/benchmark-chu60-numeric-in.sh
+
+.PHONY: race-chu60-numeric-in
+race-chu60-numeric-in:
+	bash ./scripts/race-chu60-numeric-in.sh
+
+.PHONY: vet-chu60-numeric-in
+vet-chu60-numeric-in:
+	bash ./scripts/vet-chu60-numeric-in.sh
+
+.PHONY: verify-chu60-numeric-in
+verify-chu60-numeric-in:
+	bash ./scripts/verify-chu60-numeric-in.sh
+
+.PHONY: review-chu60-numeric-in
+review-chu60-numeric-in:
+	bash ./scripts/review-chu60-numeric-in.sh
+
+.PHONY: ship-chu60-numeric-in
+ship-chu60-numeric-in:
+	bash ./scripts/ship-chu60-numeric-in.sh

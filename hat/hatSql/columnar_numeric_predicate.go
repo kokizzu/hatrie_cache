@@ -3,6 +3,7 @@ package hatSql
 import (
 	"encoding/binary"
 	"math"
+	"sort"
 )
 
 // sqlColumnarNumericPredicateKernel evaluates one validated packed numeric
@@ -62,4 +63,56 @@ func sqlColumnarNumericPredicateKernels(batch ColumnarBatch, predicates []sqlCol
 		kernels[index] = kernel
 	}
 	return kernels, true
+}
+
+// sqlColumnarNumericMembershipKernel checks a sorted literal set directly
+// against packed numeric storage without boxing values through Value.
+type sqlColumnarNumericMembershipKernel struct {
+	kind     ColumnarNumericKind
+	data     []byte
+	validity []byte
+	rows     int
+	values   []float64
+}
+
+func newSQLColumnarNumericMembershipKernel(column ColumnarNumericColumn, values []float64) (sqlColumnarNumericMembershipKernel, bool) {
+	if column.Rows < 0 || column.Kind != ColumnarNumericInt64 && column.Kind != ColumnarNumericFloat64 || column.RowCount() != column.Rows || len(values) == 0 {
+		return sqlColumnarNumericMembershipKernel{}, false
+	}
+	return sqlColumnarNumericMembershipKernel{
+		kind:     column.Kind,
+		data:     column.Data,
+		validity: column.Validity,
+		rows:     column.Rows,
+		values:   values,
+	}, true
+}
+
+func (kernel sqlColumnarNumericMembershipKernel) matches(row int) bool {
+	if row < 0 || row >= kernel.rows {
+		return false
+	}
+	if kernel.validity != nil && kernel.validity[row>>3]&(1<<uint(row&7)) == 0 {
+		return false
+	}
+	bitsValue := binary.LittleEndian.Uint64(kernel.data[row<<3:])
+	number := math.Float64frombits(bitsValue)
+	if kernel.kind == ColumnarNumericInt64 {
+		number = float64(int64(bitsValue))
+	}
+	index := sort.SearchFloat64s(kernel.values, number)
+	return index < len(kernel.values) && kernel.values[index] == number
+}
+
+func sqlColumnarNumericMembershipKernelForField(batch ColumnarBatch, field string, values []float64) (sqlColumnarNumericMembershipKernel, bool) {
+	column, ok := batch.NumericColumns[field]
+	if !ok || column.Rows != batch.Rows {
+		return sqlColumnarNumericMembershipKernel{}, false
+	}
+	return newSQLColumnarNumericMembershipKernel(column, values)
+}
+
+func sqlColumnarNumericMembershipContains(values []float64, number float64) bool {
+	index := sort.SearchFloat64s(values, number)
+	return index < len(values) && values[index] == number
 }

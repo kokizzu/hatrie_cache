@@ -32611,3 +32611,34 @@ Each tuple is `ns/op / B/op / allocs/op`. The optimization only admits
 inclusive numeric literal bounds; `NOT BETWEEN`, dynamic bounds, and
 nonnumeric cases retain the general SQL evaluator. See
 [CHU59_NUMERIC_BETWEEN.md](CHU59_NUMERIC_BETWEEN.md).
+
+## CHU60 Numeric IN
+
+Commands:
+
+```sh
+make benchmark-chu60-numeric-in
+```
+
+Five samples on Linux/amd64, AMD Ryzen 9 5950X. The fixture has 16,384 packed
+`int64` rows with values `row % 4096`; the measured query contains five
+matching numeric literals.
+
+| Workload | Before median ns/op | After median ns/op | CPU improvement | Before B/op | After B/op | Memory improvement | Before allocs/op | After allocs/op | Allocation improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Literal numeric `IN` | 10,567,747 | 140,039 | 75.46x faster | 15,342,184 | 13,560 | 1,131.43x less | 97,355 | 89 | 1,093.88x fewer |
+| Equivalent equality `OR` control | 12,102,165 | 12,460,248 | control | 17,283,223 | 17,283,242 | unchanged | 76,912 | 76,912 | unchanged |
+
+Raw samples:
+
+```text
+before IN:      10567747/15342184/97355, 9910763/15342182/97355, 10326483/15342175/97355, 10841619/15342230/97355, 10949162/15342187/97355
+before OR:      11856439/17283232/76912, 11965873/17283215/76911, 12102165/17283223/76911, 12196263/17283223/76912, 12146679/17283241/76912
+after IN:        140296/13561/89,          140039/13560/89,          139765/13560/89,          140258/13560/89,          139837/13560/89
+after OR:      12815858/17283292/76912, 12433199/17283242/76912, 12397101/17283304/76912, 12707991/17283228/76912, 12460248/17283227/76912
+```
+
+Each tuple is `ns/op / B/op / allocs/op`. The fast path admits only direct
+finite numeric literal lists. `NOT IN`, NULL-containing or mixed lists, and
+dynamic expressions keep the general SQL evaluator. See
+[CHU60_NUMERIC_IN.md](CHU60_NUMERIC_IN.md).

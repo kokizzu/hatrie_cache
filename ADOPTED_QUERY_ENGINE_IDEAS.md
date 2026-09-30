@@ -744,3 +744,13 @@ bounds, and nonnumeric literals retain the general evaluator. The measured
 fixture is 5.59x faster, with 6.23x less allocated heap and 4.71x fewer
 allocations. See [CHU59_NUMERIC_BETWEEN.md](CHU59_NUMERIC_BETWEEN.md) and
 [BENCHMARK.md](BENCHMARK.md#chu59-numeric-between).
+
+## CHU60: Columnar Numeric IN
+
+Adopted as a direct columnar fast path for finite numeric literal `IN` lists.
+The implementation sorts and deduplicates a query-local membership set and
+checks packed numeric columns without per-row boxing. `NOT IN`, NULL-containing
+lists, dynamic expressions, and mixed-type lists retain the general evaluator.
+The measured fixture is 75.46x faster, with 1,131.43x less allocated heap and
+1,093.88x fewer allocations. See [CHU60_NUMERIC_IN.md](CHU60_NUMERIC_IN.md)
+and [BENCHMARK.md](BENCHMARK.md#chu60-numeric-in).

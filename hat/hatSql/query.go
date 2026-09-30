@@ -8956,6 +8956,22 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
 		}
 		return result, true, nil
+	} else if field, values, in := sqlColumnarNumericLiteralINPredicate(q.where, q.from.alias); in {
+		filterStarted := time.Now()
+		packedKernel, packed := sqlColumnarNumericMembershipKernelForField(batch, field, values)
+		result, matched := sqlColumnarStreamMaterializeWithScan(q, batch, projectionFields, func(rowIndex int) bool {
+			if packed {
+				return packedKernel.matches(rowIndex)
+			}
+			candidate, _ := batch.Value(field, rowIndex)
+			number, ok := sqlNumber(candidate)
+			return ok && sqlColumnarNumericMembershipContains(values, number)
+		}, metrics != nil)
+		if metrics != nil {
+			metrics.record("COLUMNAR NUMERIC IN FILTER", sqlExplainExpression(q.where), batch.Rows, matched, filterStarted)
+			metrics.record("COLUMNAR STREAM MATERIALIZATION", strings.Join(projectionFields, ","), matched, len(result.Rows), filterStarted)
+		}
+		return result, true, nil
 	} else if predicates, numeric := sqlColumnarNumericConjunction(q.where, q.from.alias); numeric {
 		predicates = sqlColumnarOrderNumericPredicates(segments, predicates)
 		filterStarted := time.Now()
@@ -11255,15 +11271,22 @@ func sqlColumnarPredicateFields(expr sqlExpr, alias string, add func(string)) bo
 		if add != nil {
 			add(expr.left.name)
 		}
+		stringList, numericList := true, true
 		for _, argument := range expr.args {
 			if argument.kind != "literal" {
 				return false
 			}
-			if _, ok := argument.value.(string); !ok {
-				return false
+			if _, ok := argument.value.(string); ok {
+				numericList = false
+				continue
+			}
+			stringList = false
+			number, ok := sqlNumber(argument.value)
+			if !ok || math.IsNaN(number) || math.IsInf(number, 0) {
+				numericList = false
 			}
 		}
-		return true
+		return stringList || numericList
 	case "between":
 		field, _, _, ok := sqlColumnarNumericBetweenPredicate(expr, alias)
 		if !ok {
@@ -11294,6 +11317,34 @@ func sqlColumnarNumericPredicate(expr sqlExpr, alias string) (field, operator st
 		return expr.right.name, sqlReverseComparisonOperator(expr.op), value, ok && sqlColumnarNumericOperator(expr.op)
 	}
 	return "", "", 0, false
+}
+
+// sqlColumnarNumericLiteralINPredicate recognizes a direct field and a
+// finite, non-NULL numeric literal list. The sorted set is compact and reused
+// for every row; wider IN/NULL semantics remain on the general evaluator.
+func sqlColumnarNumericLiteralINPredicate(expr sqlExpr, alias string) (field string, values []float64, ok bool) {
+	if expr.kind != "in" || expr.op != "IN" || expr.left == nil || expr.left.kind != "field" || (expr.left.qualifier != "" && expr.left.qualifier != alias) || len(expr.args) == 0 {
+		return "", nil, false
+	}
+	values = make([]float64, 0, len(expr.args))
+	for _, argument := range expr.args {
+		if argument.kind != "literal" {
+			return "", nil, false
+		}
+		number, numberOK := sqlNumber(argument.value)
+		if !numberOK || math.IsNaN(number) || math.IsInf(number, 0) {
+			return "", nil, false
+		}
+		values = append(values, number)
+	}
+	sort.Float64s(values)
+	unique := values[:0]
+	for _, value := range values {
+		if len(unique) == 0 || unique[len(unique)-1] != value {
+			unique = append(unique, value)
+		}
+	}
+	return expr.left.name, unique, true
 }
 
 // sqlColumnarNumericBetweenPredicate recognizes only an inclusive BETWEEN
