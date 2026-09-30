@@ -40686,3 +40686,40 @@ After:
 
 Only large homogeneous `int64` ascending order projections use the radix
 path. Other order shapes retain the existing generic implementation.
+
+# CH-051: Composite columnar radix order
+
+Workload: 100,000 homogeneous `int64` rows sorted by `score DESC, id ASC`
+into an ordinal projection. The generic comparator and composite radix path
+were sampled five times with `make benchmark-round15-composite-order` on the
+same machine and workload.
+
+| Metric | Before median | After median | Improvement |
+| --- | ---: | ---: | ---: |
+| CPU | 22,669,374 ns/op | 6,927,565 ns/op | 3.27x faster |
+| Heap | 6,807,720 B/op | 2,408,483 B/op | 2.83x lower |
+| Allocations | 8 allocs/op | 4 allocs/op | 2.00x fewer |
+
+Before (generic comparator):
+
+```text
+22672568 ns/op 6807725 B/op 8 allocs/op
+22669374 ns/op 6807716 B/op 8 allocs/op
+20380127 ns/op 6807726 B/op 8 allocs/op
+22969197 ns/op 6807720 B/op 8 allocs/op
+22104401 ns/op 6807715 B/op 8 allocs/op
+```
+
+After (composite radix):
+
+```text
+6974894 ns/op 2408484 B/op 4 allocs/op
+6909059 ns/op 2408484 B/op 4 allocs/op
+6927565 ns/op 2408482 B/op 4 allocs/op
+7163732 ns/op 2408483 B/op 4 allocs/op
+6834336 ns/op 2408480 B/op 4 allocs/op
+```
+
+Only large homogeneous multi-key `int64` projections use the composite radix
+path. Small batches, mixed types, strings, and unsupported values retain the
+existing generic implementation.

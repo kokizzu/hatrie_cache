@@ -144,6 +144,7 @@ name.
 ### Query Execution And SQL
 
 - [x] CH-050 ClickHouse-style typed radix order for large homogeneous columnar `int64` order projections. The stable ordinal path is admitted only for 256 or more rows and falls back to the generic comparator for mixed types and small inputs; five-sample measurement improved CPU 3.24x, heap 2.24x, and allocations 2.33x. See [CH050_COLUMNAR_RADIX_ORDER.md](CH050_COLUMNAR_RADIX_ORDER.md).
+- [x] CH-051 ClickHouse-style stable radix order for large homogeneous multi-key columnar `int64` projections. The path sorts composite keys from least to most significant, supports per-key direction, reuses its ordinal scratch buffer, and falls back for mixed types and small inputs; five-sample measurement improved CPU 3.27x, heap 2.83x, and allocations 2.00x. See [CH051_COLUMNAR_COMPOSITE_RADIX_ORDER.md](CH051_COLUMNAR_COMPOSITE_RADIX_ORDER.md).
 
 - [x] C061 Parse, analyze, optimize, execute, and format as distinct phases.
 - [x] C062 Predicate pushdown into source scans.

@@ -29319,3 +29319,33 @@ test-round14-package:
 .PHONY: ship-round14-columnar-order
 ship-round14-columnar-order:
 	@bash ./scripts/ship-round14-columnar-order.sh
+.PHONY: test-round15-composite-order
+test-round15-composite-order:
+	@bash ./scripts/test-round15-composite-order.sh
+
+.PHONY: benchmark-round15-composite-order
+benchmark-round15-composite-order:
+	@bash ./scripts/benchmark-round15-composite-order.sh
+.PHONY: format-round15-composite-order
+format-round15-composite-order:
+	bash ./scripts/format-round15-composite-order.sh
+
+.PHONY: race-round15-composite-order
+race-round15-composite-order:
+	bash ./scripts/race-round15-composite-order.sh
+
+.PHONY: vet-round15-composite-order
+vet-round15-composite-order:
+	bash ./scripts/vet-round15-composite-order.sh
+
+.PHONY: test-round15-package
+test-round15-package:
+	bash ./scripts/test-round15-package.sh
+
+.PHONY: verify-round15-composite-order
+verify-round15-composite-order:
+	bash ./scripts/verify-round15-composite-order.sh
+
+.PHONY: ship-round15-composite-order
+ship-round15-composite-order:
+	bash ./scripts/ship-round15-composite-order.sh

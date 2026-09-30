@@ -299,11 +299,103 @@ func typedTableColumnarInt64Order(batch ColumnarBatch, field string) ([]uint32, 
 	return order, len(order) * 4, true
 }
 
+func typedTableColumnarInt64OrderFields(batch ColumnarBatch, orderFields []string, descending []bool) ([]uint32, int, bool) {
+	if batch.Rows < typedTableColumnarRadixOrderMinRows || len(orderFields) < 2 || (len(descending) != 0 && len(descending) != len(orderFields)) {
+		return nil, 0, false
+	}
+	if len(orderFields) > int(^uint(0)>>1)/batch.Rows {
+		return nil, 0, false
+	}
+	for _, field := range orderFields {
+		if field == "" {
+			return nil, 0, false
+		}
+		if values, ok := typedTableColumnarPlainValues(batch, field); ok {
+			for _, value := range values {
+				if _, ok := value.(int64); !ok {
+					return nil, 0, false
+				}
+			}
+			continue
+		}
+		for row := 0; row < batch.Rows; row++ {
+			value, available := batch.Value(field, row)
+			if !available {
+				return nil, 0, false
+			}
+			if _, ok := value.(int64); !ok {
+				return nil, 0, false
+			}
+		}
+	}
+	values := make([]int64, batch.Rows*len(orderFields))
+	for fieldIndex, field := range orderFields {
+		fieldValues := values[fieldIndex*batch.Rows : (fieldIndex+1)*batch.Rows]
+		if column, ok := typedTableColumnarPlainValues(batch, field); ok {
+			for row, value := range column {
+				fieldValues[row] = value.(int64)
+			}
+			continue
+		}
+		for row := 0; row < batch.Rows; row++ {
+			value, available := batch.Value(field, row)
+			if !available {
+				return nil, 0, false
+			}
+			number, ok := value.(int64)
+			if !ok {
+				return nil, 0, false
+			}
+			fieldValues[row] = number
+		}
+	}
+	order := make([]uint32, batch.Rows)
+	for row := range order {
+		order[row] = uint32(row)
+	}
+	sortTypedTableColumnarInt64OrderFields(order, values, batch.Rows, descending)
+	return order, len(order) * 4, true
+}
+
+func typedTableColumnarPlainValues(batch ColumnarBatch, field string) ([]interface{}, bool) {
+	if batch.decompressedBlockCache != nil || batch.fieldOffsets != nil ||
+		batch.Dictionaries != nil || batch.PackedColumns != nil || batch.BoolColumns != nil ||
+		batch.NumericColumns != nil || batch.ListColumns != nil || batch.NestedColumns != nil ||
+		batch.MapColumns != nil || batch.JSONSubcolumns != nil {
+		return nil, false
+	}
+	values, ok := batch.Columns[field]
+	if !ok || len(values) < batch.Rows {
+		return nil, false
+	}
+	return values[:batch.Rows], true
+}
+
 func sortTypedTableColumnarInt64Order(order []uint32, values []int64, descending bool) {
 	if len(order) < 2 {
 		return
 	}
 	scratch := make([]uint32, len(order))
+	sortTypedTableColumnarInt64OrderWithScratch(order, scratch, values, descending)
+}
+
+func sortTypedTableColumnarInt64OrderFields(order []uint32, values []int64, rows int, descending []bool) {
+	if len(order) < 2 || rows <= 0 || len(values) < rows || len(values)%rows != 0 {
+		return
+	}
+	scratch := make([]uint32, len(order))
+	fieldCount := len(values) / rows
+	for fieldIndex := fieldCount - 1; fieldIndex >= 0; fieldIndex-- {
+		fieldValues := values[fieldIndex*rows : (fieldIndex+1)*rows]
+		isDescending := len(descending) > 0 && fieldIndex < len(descending) && descending[fieldIndex]
+		sortTypedTableColumnarInt64OrderWithScratch(order, scratch, fieldValues, isDescending)
+	}
+}
+
+func sortTypedTableColumnarInt64OrderWithScratch(order, scratch []uint32, values []int64, descending bool) {
+	if len(order) < 2 {
+		return
+	}
 	source, destination := order, scratch
 	for pass := uint(0); pass < 8; pass++ {
 		var counts [256]int
@@ -340,6 +432,9 @@ func typedTableColumnarOrderFields(batch ColumnarBatch, orderFields []string, de
 	}
 	if len(orderFields) > int(^uint(0)>>1)/batch.Rows {
 		return nil, 0, false
+	}
+	if order, bytes, ok := typedTableColumnarInt64OrderFields(batch, orderFields, descending); ok {
+		return order, bytes, true
 	}
 	values := make([]typedTableColumnarOrderValue, batch.Rows*len(orderFields))
 	kinds := make([]uint8, len(orderFields))
