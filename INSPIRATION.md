@@ -143,6 +143,8 @@ name.
 
 ### Query Execution And SQL
 
+- [x] CH-050 ClickHouse-style typed radix order for large homogeneous columnar `int64` order projections. The stable ordinal path is admitted only for 256 or more rows and falls back to the generic comparator for mixed types and small inputs; five-sample measurement improved CPU 3.24x, heap 2.24x, and allocations 2.33x. See [CH050_COLUMNAR_RADIX_ORDER.md](CH050_COLUMNAR_RADIX_ORDER.md).
+
 - [x] C061 Parse, analyze, optimize, execute, and format as distinct phases.
 - [x] C062 Predicate pushdown into source scans.
 - [x] C063 Projection pruning through joins and aggregates.

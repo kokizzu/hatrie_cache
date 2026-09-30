@@ -29292,3 +29292,30 @@ test-t043-journal:
 .PHONY: ship-t043-recovery-replay
 ship-t043-recovery-replay:
 	@bash ./scripts/ship-t043-recovery-replay.sh
+.PHONY: test-round14-order
+test-round14-order:
+	@bash ./scripts/test-round14-order.sh
+
+.PHONY: benchmark-round14-order
+benchmark-round14-order:
+	@bash ./scripts/benchmark-round14-order.sh
+
+.PHONY: format-round14-order
+format-round14-order:
+	@bash ./scripts/format-round14-order.sh
+
+.PHONY: race-round14-order
+race-round14-order:
+	@bash ./scripts/race-round14-order.sh
+
+.PHONY: vet-round14-order
+vet-round14-order:
+	@bash ./scripts/vet-round14-order.sh
+
+.PHONY: test-round14-package
+test-round14-package:
+	@bash ./scripts/test-round14-package.sh
+
+.PHONY: ship-round14-columnar-order
+ship-round14-columnar-order:
+	@bash ./scripts/ship-round14-columnar-order.sh

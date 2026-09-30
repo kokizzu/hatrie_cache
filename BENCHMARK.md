@@ -40652,3 +40652,37 @@ The optimized path is limited to binary, non-idempotent scalar records with
 no TTL or dynamic payload. JSON, TTL, idempotency, batch, outbox, and other
 commands use the existing decoder, so this measurement does not claim a speed
 up for those workloads.
+# CH-050: Typed columnar radix order
+
+Workload: 100,000 homogeneous `int64` values sorted into an ordinal
+projection by `BenchmarkRound14TypedTableColumnarInt64Order`. Each side was
+sampled five times with `make benchmark-round14-order`.
+
+| Metric | Before median | After median | Improvement |
+| --- | ---: | ---: | ---: |
+| CPU | 15,165,153 ns/op | 4,684,648 ns/op | 3.24x faster |
+| Heap | 3,604,610 B/op | 1,605,658 B/op | 2.24x lower |
+| Allocations | 7 allocs/op | 3 allocs/op | 2.33x fewer |
+
+Before:
+
+```text
+15265025 ns/op 3604911 B/op 7 allocs/op
+15137424 ns/op 3604609 B/op 7 allocs/op
+15035145 ns/op 3604610 B/op 7 allocs/op
+15165153 ns/op 3604608 B/op 7 allocs/op
+15171301 ns/op 3604610 B/op 7 allocs/op
+```
+
+After:
+
+```text
+4846283 ns/op 1605655 B/op 3 allocs/op
+4686281 ns/op 1605658 B/op 3 allocs/op
+4591067 ns/op 1605658 B/op 3 allocs/op
+4684648 ns/op 1605654 B/op 3 allocs/op
+4648028 ns/op 1605744 B/op 4 allocs/op
+```
+
+Only large homogeneous `int64` ascending order projections use the radix
+path. Other order shapes retain the existing generic implementation.

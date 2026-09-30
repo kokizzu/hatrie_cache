@@ -10,6 +10,7 @@ import (
 const (
 	typedTableColumnarOrderCacheMinReads      = 8
 	typedTableColumnarOrderCacheMaxCandidates = 128
+	typedTableColumnarRadixOrderMinRows       = 256
 )
 
 type typedTableColumnarOrderCacheKey struct {
@@ -227,6 +228,9 @@ func typedTableColumnarOrder(batch ColumnarBatch, field string) ([]uint32, int, 
 	if batch.Rows <= 0 || uint64(batch.Rows) > uint64(^uint32(0)) || field == "" {
 		return nil, 0, false
 	}
+	if order, bytes, ok := typedTableColumnarInt64Order(batch, field); ok {
+		return order, bytes, true
+	}
 	values := make([]typedTableColumnarOrderValue, batch.Rows)
 	order := make([]uint32, batch.Rows)
 	var kind uint8
@@ -269,6 +273,65 @@ func typedTableColumnarOrder(batch ColumnarBatch, field string) ([]uint32, int, 
 		return order[left] < order[right]
 	})
 	return order, len(order) * 4, true
+}
+
+func typedTableColumnarInt64Order(batch ColumnarBatch, field string) ([]uint32, int, bool) {
+	if batch.Rows < typedTableColumnarRadixOrderMinRows || field == "" {
+		return nil, 0, false
+	}
+	values := make([]int64, batch.Rows)
+	for row := 0; row < batch.Rows; row++ {
+		value, available := batch.Value(field, row)
+		if !available {
+			return nil, 0, false
+		}
+		number, ok := value.(int64)
+		if !ok {
+			return nil, 0, false
+		}
+		values[row] = number
+	}
+	order := make([]uint32, batch.Rows)
+	for row := range order {
+		order[row] = uint32(row)
+	}
+	sortTypedTableColumnarInt64Order(order, values, false)
+	return order, len(order) * 4, true
+}
+
+func sortTypedTableColumnarInt64Order(order []uint32, values []int64, descending bool) {
+	if len(order) < 2 {
+		return
+	}
+	scratch := make([]uint32, len(order))
+	source, destination := order, scratch
+	for pass := uint(0); pass < 8; pass++ {
+		var counts [256]int
+		shift := pass * 8
+		for _, row := range source {
+			key := uint64(values[int(row)]) ^ (uint64(1) << 63)
+			if descending {
+				key = ^key
+			}
+			counts[byte(key>>shift)]++
+		}
+		offset := 0
+		for index, count := range counts {
+			counts[index] = offset
+			offset += count
+		}
+		for _, row := range source {
+			key := uint64(values[int(row)]) ^ (uint64(1) << 63)
+			if descending {
+				key = ^key
+			}
+			bucket := byte(key >> shift)
+			index := counts[bucket]
+			destination[index] = row
+			counts[bucket] = index + 1
+		}
+		source, destination = destination, source
+	}
 }
 
 func typedTableColumnarOrderFields(batch ColumnarBatch, orderFields []string, descending []bool) ([]uint32, int, bool) {
