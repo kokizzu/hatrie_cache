@@ -39797,3 +39797,20 @@ and repeated string columns, ten samples on an AMD Ryzen 9 5950X.
 
 The delta bytes and adaptive codec selection are unchanged. See
 [ROW_BINARY_DELTA_ENCODE_INTO.md](ROW_BINARY_DELTA_ENCODE_INTO.md).
+
+## C190 Reusable RowBinary delta decoder buffers
+
+Workload: 4,096 rows with sequential `INT64`, `DateTime`, nullable amount, and
+repeated string columns, ten samples on an AMD Ryzen 9 5950X.
+
+| Format | Pre-change decode | Warm `DecodeSQLRowBinaryDeltaInto` | Relative latency | Heap | Allocs | Wire |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| HSD1 | 1,347,920 ns/op | 734,000 ns/op | 1.84x faster | 1,703,567 -> 226,653 B/op | 28,357 -> 16,037 | 77,518 B |
+| HSD2 | 1,362,559 ns/op | 723,127 ns/op | 1.88x faster | 1,703,370 -> 226,653 B/op | 28,357 -> 16,037 | 57,052 B |
+
+Raw warm HSD1 samples: `763046 773622 754817 768923 746880 713132 718286
+721119 711636 717867`. Raw warm HSD2 samples: `704115 702177 710560 724821
+715414 729100 721433 735696 742714 752608`. The reusable path preserves
+exact HSD1/HSD2 bytes and trades retained destination capacity for lower
+per-batch allocation and CPU cost. See
+[ROW_BINARY_DELTA_DECODE_INTO.md](ROW_BINARY_DELTA_DECODE_INTO.md).

@@ -208,85 +208,17 @@ func encodeSQLRowBinaryDeltaValidated(destination []byte, columns []SQLRowBinary
 // RowBinary delta formats. It rejects malformed headers, truncated values,
 // oversized row counts, and trailing bytes before returning any rows.
 func DecodeSQLRowBinaryDelta(columns []SQLRowBinaryColumn, encoded []byte) ([]SQLRow, error) {
+	return DecodeSQLRowBinaryDeltaInto(nil, columns, encoded)
+}
+
+// DecodeSQLRowBinaryDeltaInto decodes both RowBinary delta formats into dst.
+// It reuses dst's row and value storage when the destination has compatible
+// capacity, while preserving the same validation and wire format as DecodeSQLRowBinaryDelta.
+func DecodeSQLRowBinaryDeltaInto(dst []SQLRow, columns []SQLRowBinaryColumn, encoded []byte) ([]SQLRow, error) {
 	if err := validateSQLRowBinaryColumns(columns); err != nil {
 		return nil, err
 	}
-	if len(encoded) == 0 {
-		return nil, nil
-	}
-	if len(encoded) < len(sqlRowBinaryDeltaMagic) {
-		return nil, fmt.Errorf("RowBinary delta header is truncated")
-	}
-	doubleDelta := false
-	switch {
-	case string(encoded[:len(sqlRowBinaryDeltaMagic)]) == string(sqlRowBinaryDeltaMagic[:]):
-	case string(encoded[:len(sqlRowBinaryDoubleDeltaMagic)]) == string(sqlRowBinaryDoubleDeltaMagic[:]):
-		doubleDelta = true
-	default:
-		return nil, fmt.Errorf("RowBinary delta has an invalid format marker")
-	}
-	offset := len(sqlRowBinaryDeltaMagic)
-	rowCount, err := readSQLRowBinaryDeltaUvarint(encoded, &offset, "row count")
-	if err != nil {
-		return nil, err
-	}
-	if rowCount > maxSQLRowBinaryRows {
-		return nil, fmt.Errorf("RowBinary delta row count %d exceeds limit %d", rowCount, maxSQLRowBinaryRows)
-	}
-	rows := make([]SQLRow, int(rowCount))
-	previous := make([]uint64, len(columns))
-	previousDelta := make([]uint64, len(columns))
-	seen := make([]bool, len(columns))
-	for rowIndex := range rows {
-		row := make(SQLRow, len(columns))
-		for columnIndex, column := range columns {
-			if column.Nullable {
-				marker, markerErr := readSQLRowBinaryDeltaByte(encoded, &offset, rowIndex, column.Name, "NULL marker")
-				if markerErr != nil {
-					return nil, markerErr
-				}
-				switch marker {
-				case 0:
-				case 1:
-					row[column.Name] = nil
-					continue
-				default:
-					return nil, fmt.Errorf("RowBinary delta row %d column %q has invalid NULL marker %d", rowIndex, column.Name, marker)
-				}
-			}
-			if sqlRowBinaryDeltaType(column.Type) {
-				encodedDelta, deltaErr := readSQLRowBinaryDeltaUvarint(encoded, &offset, "value delta")
-				if deltaErr != nil {
-					return nil, fmt.Errorf("RowBinary delta row %d column %q: %w", rowIndex, column.Name, deltaErr)
-				}
-				valueDelta := sqlRowBinaryDeltaUnZigZag(encodedDelta)
-				if doubleDelta && seen[columnIndex] {
-					valueDelta += previousDelta[columnIndex]
-				}
-				current := previous[columnIndex] + valueDelta
-				value, valueErr := sqlRowBinaryDeltaDecodedValue(column.Type, current, rowIndex, column.Name)
-				if valueErr != nil {
-					return nil, valueErr
-				}
-				row[column.Name] = value
-				previousDelta[columnIndex] = valueDelta
-				previous[columnIndex] = current
-				seen[columnIndex] = true
-				continue
-			}
-			value, next, valueErr := decodeSQLRowBinaryDeltaValue(column.Type, encoded, offset, rowIndex, column.Name)
-			if valueErr != nil {
-				return nil, valueErr
-			}
-			row[column.Name] = value
-			offset = next
-		}
-		rows[rowIndex] = row
-	}
-	if offset != len(encoded) {
-		return nil, fmt.Errorf("RowBinary delta has %d trailing bytes", len(encoded)-offset)
-	}
-	return rows, nil
+	return decodeSQLRowBinaryDeltaInto(dst, columns, encoded, false, nil)
 }
 
 func sqlRowBinaryDeltaType(kind SQLRowBinaryType) bool {

@@ -1302,3 +1302,13 @@ selection. The ten-sample 4,096-row benchmark measured 1.27x faster
 first-order encoding and 1.20x faster second-order encoding, with more
 than 300x lower allocated heap and unchanged wire bytes. See
 [ROW_BINARY_DELTA_ENCODE_INTO.md](ROW_BINARY_DELTA_ENCODE_INTO.md).
+## C190: Reusable explicit HSD1/HSD2 RowBinary delta decoder buffers
+
+ClickHouse transfer consumers and Tarantool-style tuple readers benefit from
+reusing decoded rows across repeated batches. `hatSql.DecodeSQLRowBinaryDeltaInto`
+reuses caller-owned row maps and compatible string/bytes/JSON values for both
+delta formats, while `DecodeSQLRowBinaryDelta` delegates to the same validated
+path. The ten-sample 4,096-row benchmark measured 1.84x faster HSD1 decoding
+and 1.88x faster HSD2 decoding, about 7.5x lower heap, and 1.77x fewer
+allocations with unchanged wire bytes. See
+[ROW_BINARY_DELTA_DECODE_INTO.md](ROW_BINARY_DELTA_DECODE_INTO.md).

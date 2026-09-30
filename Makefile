@@ -28806,3 +28806,15 @@ test-row-binary-delta-into:
 .PHONY: benchmark-row-binary-delta
 benchmark-row-binary-delta:
 	bash scripts/benchmark-row-binary-delta.sh
+
+.PHONY: test-row-binary-delta-decode-into
+test-row-binary-delta-decode-into:
+	bash scripts/test-row-binary-delta-decode-into.sh
+
+.PHONY: race-row-binary-delta-decode-into
+race-row-binary-delta-decode-into:
+	bash scripts/race-row-binary-delta-decode-into.sh
+
+.PHONY: benchmark-row-binary-delta-decode
+benchmark-row-binary-delta-decode:
+	bash scripts/benchmark-row-binary-delta-decode.sh
