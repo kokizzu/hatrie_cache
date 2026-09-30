@@ -28794,3 +28794,15 @@ benchmark-row-binary-bitmap:
 .PHONY: benchmark-row-binary-bitmap-decode
 benchmark-row-binary-bitmap-decode:
 	bash scripts/benchmark-row-binary-bitmap-decode.sh
+
+.PHONY: gofmt-row-binary-delta-into
+gofmt-row-binary-delta-into:
+	bash scripts/gofmt-row-binary-delta-into.sh
+
+.PHONY: test-row-binary-delta-into
+test-row-binary-delta-into:
+	bash scripts/test-row-binary-delta-into.sh
+
+.PHONY: benchmark-row-binary-delta
+benchmark-row-binary-delta:
+	bash scripts/benchmark-row-binary-delta.sh

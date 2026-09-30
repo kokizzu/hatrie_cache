@@ -1291,3 +1291,14 @@ validation, NULL behavior, or ownership. The ten-sample 4,096-row
 benchmark measured 1.77x lower latency, 11.0x less heap, and 2.39x
 fewer allocations. See
 [ROW_BINARY_BITMAP_ENCODE_INTO.md](ROW_BINARY_BITMAP_ENCODE_INTO.md).
+
+- [x] C189 Reusable explicit HSD1/HSD2 RowBinary delta encoder output. `EncodeSQLRowBinaryDeltaInto` and `EncodeSQLRowBinaryDoubleDeltaInto` preserve exact delta bytes while reusing caller-owned output. See [ROW_BINARY_DELTA_ENCODE_INTO.md](ROW_BINARY_DELTA_ENCODE_INTO.md).
+
+## C189: Reusable RowBinary delta encoder output
+
+Explicit HSD1/HSD2 transfer writers now reuse caller-owned output without
+changing delta values, NULL markers, row limits, or adaptive HSA1
+selection. The ten-sample 4,096-row benchmark measured 1.27x faster
+first-order encoding and 1.20x faster second-order encoding, with more
+than 300x lower allocated heap and unchanged wire bytes. See
+[ROW_BINARY_DELTA_ENCODE_INTO.md](ROW_BINARY_DELTA_ENCODE_INTO.md).

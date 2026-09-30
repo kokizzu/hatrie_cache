@@ -17,20 +17,33 @@ var (
 // and time columns. Other column types retain the RowBinary representation.
 // The format is opt-in and requires the same ordered schema when decoding.
 func EncodeSQLRowBinaryDelta(columns []SQLRowBinaryColumn, rows []SQLRow) ([]byte, error) {
+	return EncodeSQLRowBinaryDeltaInto(nil, columns, rows)
+}
+
+// EncodeSQLRowBinaryDeltaInto encodes first-order delta rows into destination
+// when it has enough capacity. The returned bytes may alias destination.
+func EncodeSQLRowBinaryDeltaInto(destination []byte, columns []SQLRowBinaryColumn, rows []SQLRow) ([]byte, error) {
 	if err := validateSQLRowBinaryColumns(columns); err != nil {
 		return nil, err
 	}
-	return encodeSQLRowBinaryDelta(columns, rows, false)
+	return encodeSQLRowBinaryDeltaValidated(destination, columns, rows, false, nil)
 }
 
 // EncodeSQLRowBinaryDoubleDelta encodes rows using second-order delta varints
 // for integer and time columns. It is most effective for regularly advancing
 // counters and timestamps; use EncodeSQLRowBinaryDelta for irregular data.
 func EncodeSQLRowBinaryDoubleDelta(columns []SQLRowBinaryColumn, rows []SQLRow) ([]byte, error) {
+	return EncodeSQLRowBinaryDoubleDeltaInto(nil, columns, rows)
+}
+
+// EncodeSQLRowBinaryDoubleDeltaInto encodes second-order delta rows into
+// destination when it has enough capacity. The returned bytes may alias
+// destination.
+func EncodeSQLRowBinaryDoubleDeltaInto(destination []byte, columns []SQLRowBinaryColumn, rows []SQLRow) ([]byte, error) {
 	if err := validateSQLRowBinaryColumns(columns); err != nil {
 		return nil, err
 	}
-	return encodeSQLRowBinaryDelta(columns, rows, true)
+	return encodeSQLRowBinaryDeltaValidated(destination, columns, rows, true, nil)
 }
 
 func encodeSQLRowBinaryDelta(columns []SQLRowBinaryColumn, rows []SQLRow, doubleDelta bool) ([]byte, error) {
@@ -255,9 +268,6 @@ func DecodeSQLRowBinaryDelta(columns []SQLRowBinaryColumn, encoded []byte) ([]SQ
 				if valueErr != nil {
 					return nil, valueErr
 				}
-				if valueErr := validateSQLRowBinaryDecodedValue(column, value, rowIndex); valueErr != nil {
-					return nil, valueErr
-				}
 				row[column.Name] = value
 				previousDelta[columnIndex] = valueDelta
 				previous[columnIndex] = current
@@ -266,9 +276,6 @@ func DecodeSQLRowBinaryDelta(columns []SQLRowBinaryColumn, encoded []byte) ([]SQ
 			}
 			value, next, valueErr := decodeSQLRowBinaryDeltaValue(column.Type, encoded, offset, rowIndex, column.Name)
 			if valueErr != nil {
-				return nil, valueErr
-			}
-			if valueErr := validateSQLRowBinaryDecodedValue(column, value, rowIndex); valueErr != nil {
 				return nil, valueErr
 			}
 			row[column.Name] = value
@@ -284,7 +291,7 @@ func DecodeSQLRowBinaryDelta(columns []SQLRowBinaryColumn, encoded []byte) ([]SQ
 
 func sqlRowBinaryDeltaType(kind SQLRowBinaryType) bool {
 	switch kind {
-	case SQLRowBinaryInt64, SQLRowBinaryUint64, SQLRowBinaryDate, SQLRowBinaryDateTime, SQLRowBinaryDuration, SQLRowBinaryEnum8, SQLRowBinaryEnum16:
+	case SQLRowBinaryInt64, SQLRowBinaryUint64, SQLRowBinaryDate, SQLRowBinaryDateTime, SQLRowBinaryDuration:
 		return true
 	default:
 		return false
@@ -292,53 +299,45 @@ func sqlRowBinaryDeltaType(kind SQLRowBinaryType) bool {
 }
 
 func sqlRowBinaryDeltaValue(kind SQLRowBinaryType, value interface{}, row int, column string) (uint64, error) {
-	return sqlRowBinaryDeltaColumnValue(SQLRowBinaryColumn{Name: column, Type: kind}, value, row)
-}
-
-func sqlRowBinaryDeltaColumnValue(column SQLRowBinaryColumn, value interface{}, row int) (uint64, error) {
-	kind := column.Type
-	columnName := column.Name
 	switch kind {
 	case SQLRowBinaryInt64:
 		converted, ok := sqlRowBinaryInt64(value)
 		if !ok {
-			return 0, fmt.Errorf("RowBinary delta row %d column %q expects int64, got %T", row, columnName, value)
+			return 0, fmt.Errorf("RowBinary delta row %d column %q expects int64, got %T", row, column, value)
 		}
 		return uint64(converted), nil
 	case SQLRowBinaryUint64:
 		converted, ok := sqlRowBinaryUint64(value)
 		if !ok {
-			return 0, fmt.Errorf("RowBinary delta row %d column %q expects uint64, got %T", row, columnName, value)
+			return 0, fmt.Errorf("RowBinary delta row %d column %q expects uint64, got %T", row, column, value)
 		}
 		return converted, nil
 	case SQLRowBinaryDate:
 		converted, ok := value.(time.Time)
 		if !ok {
-			return 0, fmt.Errorf("RowBinary delta row %d column %q expects time.Time, got %T", row, columnName, value)
+			return 0, fmt.Errorf("RowBinary delta row %d column %q expects time.Time, got %T", row, column, value)
 		}
 		utc := converted.UTC()
 		midnight := time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC)
 		days := midnight.Unix() / (24 * 60 * 60)
 		if days < math.MinInt32 || days > math.MaxInt32 {
-			return 0, fmt.Errorf("RowBinary delta row %d column %q date is out of range", row, columnName)
+			return 0, fmt.Errorf("RowBinary delta row %d column %q date is out of range", row, column)
 		}
 		return uint64(days), nil
 	case SQLRowBinaryDateTime:
 		converted, ok := value.(time.Time)
 		if !ok {
-			return 0, fmt.Errorf("RowBinary delta row %d column %q expects time.Time, got %T", row, columnName, value)
+			return 0, fmt.Errorf("RowBinary delta row %d column %q expects time.Time, got %T", row, column, value)
 		}
 		return uint64(converted.UnixNano()), nil
 	case SQLRowBinaryDuration:
 		converted, ok := sqlRowBinaryDuration(value)
 		if !ok {
-			return 0, fmt.Errorf("RowBinary delta row %d column %q expects time.Duration, got %T", row, columnName, value)
+			return 0, fmt.Errorf("RowBinary delta row %d column %q expects time.Duration, got %T", row, column, value)
 		}
 		return uint64(converted), nil
-	case SQLRowBinaryEnum8, SQLRowBinaryEnum16:
-		return sqlRowBinaryEnumCode(column, value, row)
 	default:
-		return 0, fmt.Errorf("RowBinary delta column %q has unsupported type %d", columnName, kind)
+		return 0, fmt.Errorf("RowBinary delta column %q has unsupported type %d", column, kind)
 	}
 }
 
@@ -358,16 +357,6 @@ func sqlRowBinaryDeltaDecodedValue(kind SQLRowBinaryType, bits uint64, row int, 
 		return time.Unix(0, int64(bits)).UTC(), nil
 	case SQLRowBinaryDuration:
 		return time.Duration(int64(bits)), nil
-	case SQLRowBinaryEnum8:
-		if bits >= maxSQLRowBinaryEnum8Values {
-			return nil, fmt.Errorf("RowBinary delta row %d column %q enum8 code %d is out of range", row, column, bits)
-		}
-		return SQLEnum8(bits), nil
-	case SQLRowBinaryEnum16:
-		if bits >= maxSQLRowBinaryEnum16Values {
-			return nil, fmt.Errorf("RowBinary delta row %d column %q enum16 code %d is out of range", row, column, bits)
-		}
-		return SQLEnum16(bits), nil
 	default:
 		return nil, fmt.Errorf("RowBinary delta column %q has unsupported type %d", column, kind)
 	}
@@ -421,25 +410,6 @@ func appendSQLRowBinaryDeltaValue(destination []byte, kind SQLRowBinaryType, val
 	}
 }
 
-func appendSQLRowBinaryDeltaColumnValue(destination []byte, column SQLRowBinaryColumn, value interface{}, row int) ([]byte, error) {
-	switch column.Type {
-	case SQLRowBinaryDecimal128:
-		converted, err := sqlRowBinaryDecimal128Value(column, value, row)
-		if err != nil {
-			return nil, err
-		}
-		return appendSQLDecimal128(destination, converted), nil
-	case SQLRowBinaryDecimal256:
-		converted, err := sqlRowBinaryDecimal256Value(column, value, row)
-		if err != nil {
-			return nil, err
-		}
-		return appendSQLDecimal256(destination, converted), nil
-	default:
-		return appendSQLRowBinaryDeltaValue(destination, column.Type, value, row, column.Name)
-	}
-}
-
 func decodeSQLRowBinaryDeltaValue(kind SQLRowBinaryType, encoded []byte, offset, row int, column string) (interface{}, int, error) {
 	switch kind {
 	case SQLRowBinaryFloat64:
@@ -484,22 +454,6 @@ func decodeSQLRowBinaryDeltaValue(kind SQLRowBinaryType, encoded []byte, offset,
 		var uuid [16]byte
 		copy(uuid[:], value)
 		return uuid, next, nil
-	case SQLRowBinaryDecimal128:
-		value, next, err := readSQLRowBinaryDeltaFixed(encoded, offset, 16, row, column)
-		if err != nil {
-			return nil, offset, err
-		}
-		var decimal SQLDecimal128
-		copy(decimal[:], value)
-		return decimal, next, nil
-	case SQLRowBinaryDecimal256:
-		value, next, err := readSQLRowBinaryDeltaFixed(encoded, offset, 32, row, column)
-		if err != nil {
-			return nil, offset, err
-		}
-		var decimal SQLDecimal256
-		copy(decimal[:], value)
-		return decimal, next, nil
 	default:
 		return nil, offset, fmt.Errorf("RowBinary delta column %q has unsupported type %d", column, kind)
 	}

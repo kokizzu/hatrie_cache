@@ -39782,3 +39782,18 @@ columns, ten samples on an AMD Ryzen 9 5950X. Every operation read
 HSB1 bytes and decoded values are unchanged; the reusable API is explicit
 and caller-owned. See
 [ROW_BINARY_BITMAP_ENCODE_INTO.md](ROW_BINARY_BITMAP_ENCODE_INTO.md).
+
+## C189 Reusable RowBinary delta encoder output
+
+Workload: 4,096 rows with sequential `INT64`, `DateTime`, nullable amount,
+and repeated string columns, ten samples on an AMD Ryzen 9 5950X.
+
+| Operation | Median ns/op | B/op | Allocs/op | Wire bytes | Relative latency |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Existing HSD1 encoder | 385,192 | 337,739 | 16 | 77,518 | 1.00x |
+| Warm HSD1 `EncodeInto` | 302,599 | 618 | 10 | 77,518 | 1.27x faster |
+| Existing HSD2 encoder | 345,887 | 165,654 | 13-14 | 57,052 | 1.00x |
+| Warm HSD2 `EncodeInto` | 288,806 | 541 | 10 | 57,052 | 1.20x faster |
+
+The delta bytes and adaptive codec selection are unchanged. See
+[ROW_BINARY_DELTA_ENCODE_INTO.md](ROW_BINARY_DELTA_ENCODE_INTO.md).
