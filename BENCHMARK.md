@@ -39918,3 +39918,23 @@ by callers that opt into health-aware routing. The baseline is not a semantic
 replacement because it cannot share worker health across operators or report
 unavailability; the added cost is the explicit HA control-plane tradeoff. See
 [M222_REPLICATED_COMPUTE_ROUTER.md](M222_REPLICATED_COMPUTE_ROUTER.md).
+
+## M223 Hydration state machine
+
+Workload: detached status reads, one-unit progress updates, and one complete
+hydration generation, five 200 ms samples on an AMD Ryzen 9 5950X. The
+baseline is a clean M222-equivalent mutex-backed status copy; it is a lower
+bound for a status read, not a semantic replacement for lifecycle/error
+tracking.
+
+| Operation | Baseline | M223 | Relative |
+| --- | ---: | ---: | ---: |
+| Status snapshot | 14.44 ns/op, 0 B/op, 0 allocs/op | 19.77 ns/op, 0 B/op, 0 allocs/op | 1.37x baseline cost |
+| Progress advance | n/a | 5.49 ns/op, 0 B/op, 0 allocs/op | new lifecycle API |
+| Full begin/advance/complete lifecycle | n/a | 98.96 ns/op, 224 B/op, 2 allocs/op | once per generation |
+
+The M223 snapshot and progress paths are allocation-free. Lifecycle channel
+publication allocates only at generation transitions, not for each progress
+unit. A read-lock alternative was measured and rejected because its small
+snapshot improvement made progress and lifecycle transitions materially
+slower. See [M223_HYDRATION_STATE_MACHINE.md](M223_HYDRATION_STATE_MACHINE.md).
