@@ -25,11 +25,13 @@ Workload: a bitmap containing 100,000 sequential values, measured with
 | Operation | Median ns/op | B/op | allocs/op |
 | --- | ---: | ---: | ---: |
 | `Values()` before the change | 165,238 | 401,408 | 1 |
-| `Values()` in the comparison run | 171,824 | 401,409 | 1 |
-| `ValuesInto()` with reused buffer | 150,742 | 0 reported allocations | 0 |
+| `Values()` in the comparison run | 165,906 | 401,408 | 1 |
+| `ValuesInto()` with reused buffer | 152,281 | 0 | 0 |
 
-The reusable path was about **1.14x faster** than the same-run `Values()`
+The reusable path was about **1.09x faster** than the same-run `Values()`
 comparison and removed the result allocation. The small difference between
 the two `Values()` runs is normal benchmark variance; its implementation and
-semantics were not changed. The first `ValuesInto` call still grows the
-destination when needed, so callers should retain the returned slice.
+semantics were not changed. The benchmark resets its timer after preallocating
+the reusable destination, so the zero `B/op` result measures repeated calls,
+not one-time setup. The first `ValuesInto` call still grows the destination
+when needed, so callers should retain the returned slice.

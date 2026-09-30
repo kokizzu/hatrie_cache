@@ -39592,9 +39592,9 @@ Ryzen 9 5950X.
 
 | Operation | Median ns/op | B/op | Allocs/op | Relative latency |
 | --- | ---: | ---: | ---: | ---: |
-| `RoaringBitmap.Values()` | 171,824 | 401,409 | 1 | 1.00x |
-| `RoaringBitmap.ValuesInto()` with reused buffer | 150,742 | 0 reported allocations | 0 | 1.14x faster |
+| `RoaringBitmap.Values()` | 165,906 | 401,408 | 1 | 1.00x |
+| `RoaringBitmap.ValuesInto()` with reused buffer | 152,281 | 0 | 0 | 1.09x faster |
 
 The pre-change `Values()` median was 165,238 ns/op with 401,408 B/op and one
 allocation. Its implementation was unchanged; the small post-change
-difference is benchmark variance. See [ROARING_VALUES_INTO.md](ROARING_VALUES_INTO.md).
+difference is benchmark variance. The reusable benchmark resets its timer after preallocation. See [ROARING_VALUES_INTO.md](ROARING_VALUES_INTO.md).

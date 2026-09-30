@@ -12,6 +12,7 @@ func BenchmarkRoaringBitmapValues(b *testing.B) {
 	})
 	b.Run("values_into", func(b *testing.B) {
 		destination := make([]uint32, 0, int(bitmap.Count()))
+		b.ResetTimer()
 		for index := 0; index < b.N; index++ {
 			destination = bitmap.ValuesInto(destination)
 			roaringBitmapValuesIntoSink = destination

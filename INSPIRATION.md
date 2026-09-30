@@ -1164,5 +1164,5 @@ lower median latency for 100,000 values.
 ClickHouse/Roaring-style bitmap scans can avoid allocating a fresh result for
 every enumeration. `RoaringBitmap.ValuesInto` adds that opt-in path while
 preserving the existing sorted `Values()` API and internal container
-ownership. The 100,000-value benchmark measured about 1.14x lower same-run
+ownership. The 100,000-value benchmark measured about 1.09x lower same-run
 median latency and removed the result allocation.
