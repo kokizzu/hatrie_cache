@@ -22,4 +22,4 @@ cp "$repo_root/hat/hatSql/row_binary_dictionary.go" "$worktree/hat/hatSql/"
 cp "$repo_root/hat/hatSql/row_binary_dictionary_into_test.go" "$worktree/hat/hatSql/"
 export GOCACHE="$worktree/.gocache"
 
-(cd "$worktree" && go test ./hat/hatSql -run '^TestSQLRowBinaryDictionaryEncodeIntoMatchesEncodeAcrossBatches$')
+(cd "$worktree" && go test ./hat/hatSql -run '^TestSQLRowBinaryDictionary')

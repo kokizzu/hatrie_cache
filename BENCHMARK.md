@@ -39737,3 +39737,18 @@ ten samples on an AMD Ryzen 9 5950X. Every operation emitted 3,081 wire bytes.
 The repeated dictionary decoder was unchanged: 84,902 -> 84,276 ns/op,
 110,964 B/op, and 1,794 allocations/op in the paired runs. See
 [ROW_BINARY_DICTIONARY_ENCODE_INTO.md](ROW_BINARY_DICTIONARY_ENCODE_INTO.md).
+
+## C186 Reusable RowBinary dictionary decoder buffers
+
+Workload: 256 rows with repeated string, bytes, and JSON dictionary values,
+ten samples on an AMD Ryzen 9 5950X. Every operation emitted 3,081 wire bytes.
+
+| Operation | Median ns/op | B/op | Allocs/op | Relative latency |
+| --- | ---: | ---: | ---: | ---: |
+| Existing `Decode` before reuse | 93,216 | 110,966 | 1,794 | 1.00x |
+| Warm `DecodeInto` with reused rows | 46,214 | 16,393 | 768 | 2.02x faster |
+| Existing `Decode` after wrapper reuse | 93,459 | 110,869 | 1,793 | 1.00x |
+
+The allocating wrapper is allocation-neutral within benchmark noise; the
+reusable API is the path that reuses destination rows. See
+[ROW_BINARY_DICTIONARY_ENCODE_INTO.md](ROW_BINARY_DICTIONARY_ENCODE_INTO.md).

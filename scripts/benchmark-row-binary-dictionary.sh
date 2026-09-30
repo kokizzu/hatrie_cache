@@ -22,4 +22,4 @@ cp "$repo_root/hat/hatSql/row_binary_dictionary.go" "$worktree/hat/hatSql/"
 cp "$repo_root/hat/hatSql/row_binary_dictionary_into_benchmark_test.go" "$worktree/hat/hatSql/"
 export GOCACHE="$worktree/.gocache"
 
-(cd "$worktree" && go test ./hat/hatSql -run '^$' -bench '^BenchmarkSQLRowBinary(DictionaryEncodeReuse|DictionaryEncodeIntoReuse|DictionaryDecodeReuse)$' -benchmem -count=10)
+(cd "$worktree" && go test ./hat/hatSql -run '^$' -bench '^BenchmarkSQLRowBinary(DictionaryEncodeReuse|DictionaryEncodeIntoReuse|DictionaryDecodeReuse|DictionaryDecodeIntoReuse)$' -benchmem -count=10)

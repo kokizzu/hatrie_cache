@@ -38,6 +38,8 @@ type SQLRowBinaryDictionaryDecoder struct {
 	columns           []SQLRowBinaryColumn
 	dictionaryColumns []bool
 	dictionaries      []sqlRowBinaryDictionary
+	pending           [][]string
+	pendingBytes      []uint64
 }
 
 // NewSQLRowBinaryDictionaryEncoder creates a stateful encoder. Dictionary
@@ -117,6 +119,10 @@ func (d *SQLRowBinaryDictionaryDecoder) Reset() {
 		clear(dictionary.byteIndex)
 		dictionary.values = dictionary.values[:0]
 		dictionary.bytes = 0
+	}
+	for index := range d.pending {
+		d.pending[index] = d.pending[index][:0]
+		d.pendingBytes[index] = 0
 	}
 }
 
@@ -236,6 +242,13 @@ func (e *SQLRowBinaryDictionaryEncoder) EncodeInto(dst []byte, rows []SQLRow) ([
 // Decode decodes one batch and retains its dictionary additions for later
 // batches. A failed call does not change the retained dictionaries.
 func (d *SQLRowBinaryDictionaryDecoder) Decode(encoded []byte) ([]SQLRow, error) {
+	return d.DecodeInto(nil, encoded)
+}
+
+// DecodeInto decodes one batch into dst, reusing row maps, pending dictionary
+// additions, and bytes/JSON value buffers across calls. A failed call does not
+// change the retained dictionaries. The decoder is not safe for concurrent use.
+func (d *SQLRowBinaryDictionaryDecoder) DecodeInto(dst []SQLRow, encoded []byte) ([]SQLRow, error) {
 	if d == nil {
 		return nil, fmt.Errorf("RowBinary dictionary decoder is nil")
 	}
@@ -250,8 +263,20 @@ func (d *SQLRowBinaryDictionaryDecoder) Decode(encoded []byte) ([]SQLRow, error)
 	if rowCount > maxSQLRowBinaryRows {
 		return nil, fmt.Errorf("RowBinary dictionary row count %d exceeds limit %d", rowCount, maxSQLRowBinaryRows)
 	}
-	pending := make([][]string, len(d.columns))
-	pendingBytes := make([]uint64, len(d.columns))
+	if cap(d.pending) < len(d.columns) {
+		d.pending = make([][]string, len(d.columns))
+	} else {
+		d.pending = d.pending[:len(d.columns)]
+	}
+	if cap(d.pendingBytes) < len(d.columns) {
+		d.pendingBytes = make([]uint64, len(d.columns))
+	} else {
+		d.pendingBytes = d.pendingBytes[:len(d.columns)]
+	}
+	for index := range d.pending {
+		d.pending[index] = d.pending[index][:0]
+		d.pendingBytes[index] = 0
+	}
 	for index, isDictionary := range d.dictionaryColumns {
 		if !isDictionary {
 			continue
@@ -264,8 +289,8 @@ func (d *SQLRowBinaryDictionaryDecoder) Decode(encoded []byte) ([]SQLRow, error)
 		if additionCount > maxSQLRowBinaryDictionaryEntries || uint64(len(dictionary.values)) > maxSQLRowBinaryDictionaryEntries-additionCount {
 			return nil, fmt.Errorf("RowBinary dictionary column %q exceeds %d entries", d.columns[index].Name, maxSQLRowBinaryDictionaryEntries)
 		}
-		if additionCount > 0 {
-			pending[index] = make([]string, 0, int(additionCount))
+		if additionCount > 0 && cap(d.pending[index]) < int(additionCount) {
+			d.pending[index] = make([]string, 0, int(additionCount))
 		}
 		for entryIndex := uint64(0); entryIndex < additionCount; entryIndex++ {
 			value, next, err := decodeSQLRowBinaryDictionaryString(encoded, offset)
@@ -273,16 +298,16 @@ func (d *SQLRowBinaryDictionaryDecoder) Decode(encoded []byte) ([]SQLRow, error)
 				return nil, fmt.Errorf("RowBinary dictionary column %q entry %d: %w", d.columns[index].Name, entryIndex, err)
 			}
 			offset = next
-			pending[index] = append(pending[index], value)
-			pendingBytes[index] += uint64(len(value))
-			if len(value) > maxSQLRowBinaryDictionaryValueBytes || d.dictionaries[index].bytes+pendingBytes[index] > maxSQLRowBinaryDictionaryBytes {
+			d.pending[index] = append(d.pending[index], value)
+			d.pendingBytes[index] += uint64(len(value))
+			if len(value) > maxSQLRowBinaryDictionaryValueBytes || d.dictionaries[index].bytes+d.pendingBytes[index] > maxSQLRowBinaryDictionaryBytes {
 				return nil, fmt.Errorf("RowBinary dictionary column %q exceeds byte limit", d.columns[index].Name)
 			}
 		}
 	}
-	rows := make([]SQLRow, 0, int(rowCount))
+	rows := resizeSQLRowBinaryDecodeRows(dst, int(rowCount), d.columns)
 	for rowIndex := uint64(0); rowIndex < rowCount; rowIndex++ {
-		row := make(SQLRow, len(d.columns))
+		row := rows[rowIndex]
 		for columnIndex, column := range d.columns {
 			if column.Nullable {
 				if offset >= len(encoded) {
@@ -305,16 +330,16 @@ func (d *SQLRowBinaryDictionaryDecoder) Decode(encoded []byte) ([]SQLRow, error)
 					return nil, fmt.Errorf("RowBinary dictionary row %d column %q: %w", rowIndex, column.Name, err)
 				}
 				dictionary := &d.dictionaries[columnIndex]
-				if id >= uint64(len(dictionary.values))+uint64(len(pending[columnIndex])) {
+				if id >= uint64(len(dictionary.values))+uint64(len(d.pending[columnIndex])) {
 					return nil, fmt.Errorf("RowBinary dictionary row %d column %q references unknown id %d", rowIndex, column.Name, id)
 				}
 				value := ""
 				if id < uint64(len(dictionary.values)) {
 					value = dictionary.values[id]
 				} else {
-					value = pending[columnIndex][id-uint64(len(dictionary.values))]
+					value = d.pending[columnIndex][id-uint64(len(dictionary.values))]
 				}
-				row[column.Name] = sqlRowBinaryDictionaryValue(column.Type, value)
+				row[column.Name] = sqlRowBinaryDictionaryValueInto(column.Type, value, row[column.Name])
 				continue
 			}
 			value, next, err := decodeSQLRowBinaryValue(column.Type, encoded, offset, int(rowIndex), column.Name)
@@ -324,7 +349,6 @@ func (d *SQLRowBinaryDictionaryDecoder) Decode(encoded []byte) ([]SQLRow, error)
 			row[column.Name] = value
 			offset = next
 		}
-		rows = append(rows, row)
 	}
 	if offset != len(encoded) {
 		return nil, fmt.Errorf("RowBinary dictionary batch has %d trailing bytes", len(encoded)-offset)
@@ -334,8 +358,8 @@ func (d *SQLRowBinaryDictionaryDecoder) Decode(encoded []byte) ([]SQLRow, error)
 			continue
 		}
 		dictionary := &d.dictionaries[index]
-		dictionary.values = append(dictionary.values, pending[index]...)
-		dictionary.bytes += pendingBytes[index]
+		dictionary.values = append(dictionary.values, d.pending[index]...)
+		dictionary.bytes += d.pendingBytes[index]
 	}
 	return rows, nil
 }
@@ -498,12 +522,26 @@ func sqlRowBinaryDictionaryKey(kind SQLRowBinaryType, value interface{}, row int
 }
 
 func sqlRowBinaryDictionaryValue(kind SQLRowBinaryType, value string) interface{} {
+	return sqlRowBinaryDictionaryValueInto(kind, value, nil)
+}
+
+func sqlRowBinaryDictionaryValueInto(kind SQLRowBinaryType, value string, previous interface{}) interface{} {
 	switch kind {
 	case SQLRowBinaryString:
 		return value
 	case SQLRowBinaryBytes:
+		if old, ok := previous.([]byte); ok && cap(old) >= len(value) {
+			old = old[:len(value)]
+			copy(old, value)
+			return old
+		}
 		return append([]byte(nil), value...)
 	case SQLRowBinaryJSON:
+		if old, ok := previous.(json.RawMessage); ok && cap(old) >= len(value) {
+			old = old[:len(value)]
+			copy(old, value)
+			return old
+		}
 		return json.RawMessage(append([]byte(nil), value...))
 	default:
 		return nil

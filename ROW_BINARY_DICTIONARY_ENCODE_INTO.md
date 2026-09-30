@@ -49,6 +49,39 @@ cases. Ten samples on an AMD Ryzen 9 5950X produced these medians:
 | Existing `Encode` after scratch reuse | 37,009 | 3,204 | 1 | 1.07x faster |
 | `EncodeInto` with warm destination | 35,150 | 3-4 | 0 | 1.13x faster |
 
-The decoder path is unchanged. Its repeated-batch median moved from 84,902 to
-84,276 ns/op in the paired runs, within normal benchmark noise, with the same
-110,964 B/op and 1,794 allocations/op.
+Before the decoder reuse addition, its repeated-batch median was 84,902 ns/op
+with 110,964 B/op and 1,794 allocations/op; that path is benchmarked below.
+
+## Reusable dictionary decoding
+
+Use `DecodeInto` when the same schema and decoder process repeated batches:
+
+```go
+decoder, err := hatSql.NewSQLRowBinaryDictionaryDecoder(columns, []string{"region", "payload"})
+if err != nil {
+	return err
+}
+
+decoded, err := decoder.DecodeInto(nil, firstWire)
+if err != nil {
+	return err
+}
+for _, wire := range laterWires {
+	decoded, err = decoder.DecodeInto(decoded[:0], wire)
+	if err != nil {
+		return err
+	}
+	consume(decoded)
+}
+```
+
+`DecodeInto` retains the caller's row maps, pending dictionary additions, and
+bytes/JSON value backing buffers. The first batch must still be decoded so its
+dictionary additions are installed. `Decode` remains the allocating wrapper;
+the decoder is single-owner and `Reset` releases retained logical state while
+keeping capacity available for reuse.
+
+On the same ten-sample 256-row workload, warm `DecodeInto` measured 46,214
+ns/op, 16,393 B/op, and 768 allocations versus 93,216 ns/op, 110,966 B/op,
+and 1,794 allocations for the pre-change allocating path: 2.02x faster, 6.77x
+less allocated heap, and 2.34x fewer allocations. HDB1 bytes remain unchanged.

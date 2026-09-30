@@ -1253,3 +1253,17 @@ failure atomicity, and reset behavior remain unchanged. The ten-sample
 allocated heap, and 14x fewer allocations; the direct reusable API measured
 1.13x faster with zero allocations. See
 [ROW_BINARY_DICTIONARY_ENCODE_INTO.md](ROW_BINARY_DICTIONARY_ENCODE_INTO.md).
+
+- [x] C186 Reusable low-cardinality RowBinary dictionary decoder buffers. `SQLRowBinaryDictionaryDecoder.DecodeInto` reuses row maps, pending additions, and bytes/JSON values while preserving HDB1 decoding and dictionary atomicity. See [ROW_BINARY_DICTIONARY_ENCODE_INTO.md](ROW_BINARY_DICTIONARY_ENCODE_INTO.md).
+
+## C186: Reusable RowBinary dictionary decoder buffers
+
+Tarantool-style tuple readers and ClickHouse low-cardinality consumers
+benefit from reusing decoded rows across batches. `DecodeInto` now
+retains row maps, pending dictionary additions, and bytes/JSON value
+buffers while `Decode` delegates to it. HDB1 framing, NULL semantics,
+dictionary growth checks, malformed-input errors, and failed-call
+atomicity remain unchanged. The ten-sample 256-row benchmark measured
+2.02x lower latency, 6.77x less heap, and 2.34x fewer allocations on
+the warm reusable path. See
+[ROW_BINARY_DICTIONARY_ENCODE_INTO.md](ROW_BINARY_DICTIONARY_ENCODE_INTO.md).
