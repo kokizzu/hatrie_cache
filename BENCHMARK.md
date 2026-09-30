@@ -39866,3 +39866,20 @@ baseline is the clean T208 commit.
 The no-hook path remains the default and allocation-free. Hook dispatch is
 explicit and adds about 15 ns/op without heap allocation. See
 [T210_CONFLICT_HOOKS.md](T210_CONFLICT_HOOKS.md).
+
+## T209 Replica lag backpressure
+
+Workload: one monotone LSN observation per relay or applier batch, three
+one-second samples on an AMD Ryzen 9 5950X. The direct arithmetic row is a
+lower bound; the stateful controller is the feature under test.
+
+| Operation | Median latency | Heap | Relative latency |
+| --- | ---: | ---: | ---: |
+| Direct lag arithmetic control | 0.25 ns/op | 0 B/op, 0 allocs/op | 1.00x |
+| `ReplicaBackpressureController.Observe` | 25.89 ns/op | 0 B/op, 0 allocs/op | 103.6x direct control |
+| Existing `ApplierThrottle.Reserve` | 33.15 ns/op | 0 B/op, 0 allocs/op | 1.28x slower than controller |
+
+The controller is allocation-free and applies monotone validation plus
+pause/resume hysteresis. It is intended once per batch, not once per record,
+and remains opt-in so existing relay/applier behavior is unchanged. See
+[T209_REPLICA_LAG_BACKPRESSURE.md](T209_REPLICA_LAG_BACKPRESSURE.md).
