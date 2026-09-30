@@ -116,7 +116,7 @@ operator control remain the preferred deployment model.
 - [x] M225 Persisted shard leases that prevent duplicate state ownership. Already implemented as `hatStorage.AcquirePersistentShardLease` with OS-level exclusion, durable monotone fencing tokens, atomic state publication, validation, inspection, and idempotent release; the API remains opt-in because acquisition includes file and directory sync. See [PERSISTENT_SHARD_LEASES.md](PERSISTENT_SHARD_LEASES.md) and [BENCHMARK.md](BENCHMARK.md#persistent-shard-lease-acquisition).
 - [x] M226 Durable consensus metadata for state shard and frontier ownership. `hatTopology.DurablePartitionOwnershipStore` persists a bounded CRC32C ownership record with monotone consensus sequence/frontier and fencing checks; see [M226_DURABLE_CONSENSUS_METADATA.md](M226_DURABLE_CONSENSUS_METADATA.md) and [BENCHMARK.md](BENCHMARK.md#durable-consensus-metadata).
 - [x] M227 Source snapshot offsets coupled atomically to the first live frontier. See [M227_SOURCE_SNAPSHOT_FRONTIER.md](M227_SOURCE_SNAPSHOT_FRONTIER.md) and [BENCHMARK.md](BENCHMARK.md#m227-source-snapshot-frontier).
-- [ ] M228 Exactly-once source restart from a committed source offset.
+- [x] M228 Exactly-once source restart from a committed source offset; see [M228_EXACTLY_ONCE_SOURCE_RESTART.md](M228_EXACTLY_ONCE_SOURCE_RESTART.md) and [BENCHMARK.md](BENCHMARK.md#m228-exactly-once-source-restart).
 - [ ] M229 Source schema evolution with additive field compatibility checks.
 - [ ] M230 Source backpressure based on downstream frontier lag.
 - [ ] M231 Exactly-once upsert sinks with durable output identities.

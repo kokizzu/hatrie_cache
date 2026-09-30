@@ -67,6 +67,45 @@ metadata transaction. The coordinator does not pretend that an arbitrary
 external store is exactly once: that guarantee belongs to the store's durable
 commit protocol.
 
+## Exactly-Once Source Restart
+
+For a source that exposes a stable transaction ID and offset, use
+`NewCommandJournalExactlyOnceSourceCoordinator` instead of manually applying
+commands and calling `Commit`:
+
+```go
+journal, err := hatCache.OpenCommandJournalWithOptions(path, hatCache.CommandJournalOptions{
+	IdempotencyCapacity: 1024,
+})
+if err != nil {
+	return err
+}
+coordinator, err := hatCache.NewCommandJournalExactlyOnceSourceCoordinator(journal, store)
+if err != nil {
+	return err
+}
+result, err := coordinator.ApplyBatch(ctx, trie, hatCache.CommandJournalExactlyOnceSourceBatch{
+	SourceID:      "orders-eu",
+	TransactionID: event.TransactionID,
+	Offset:        event.Offset,
+	Commands:      event.Commands,
+})
+```
+
+The coordinator validates the public journalable commands, deep-copies caller
+inputs, applies the source transaction as one atomic `BATCH`, and saves the
+source offset under the journal persistence barrier. If the checkpoint store
+fails after the journal batch is durable, retry the same transaction ID,
+offset, and commands. The durable idempotency record recognizes the batch and
+the retry saves the checkpoint without applying the commands again. Reusing a
+transaction ID with a different offset or command fingerprint is rejected.
+
+This guarantee is bounded by idempotency retention. Keep the source's retry
+window within `IdempotencyCapacity` and journal retention; if the durable
+idempotency record has been evicted before the checkpoint retry, the caller
+must treat the source as at-least-once. The feature is opt-in and does not
+change ordinary journal writes or start a server.
+
 ## Recovery Rules
 
 - Call `Load` only after the local journal/snapshot recovery boundary is ready.

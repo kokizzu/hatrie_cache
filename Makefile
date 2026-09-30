@@ -28831,3 +28831,11 @@ race-c208-result-cache-key:
 	bash scripts/race-c208-result-cache-key.sh
 
 verify-c208-result-cache-key: test-c208-result-cache-key race-c208-result-cache-key
+
+.PHONY: test-m228 benchmark-m228
+
+test-m228:
+	sh scripts/test-m228.sh
+
+benchmark-m228:
+	sh scripts/benchmark-m228.sh

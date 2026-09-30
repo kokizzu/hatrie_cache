@@ -18,6 +18,7 @@ const (
 const DefaultCommandJournalWireFormat = CommandJournalWireFormatBinary
 
 var commandJournalTailBinaryMagic = []byte{'h', 'c', 'j', 't', 2}
+var commandJournalTailBinaryBatchMagic = []byte{'h', 'c', 'j', 't', 3}
 var commandJournalTailBinaryLegacyMagic = []byte{'h', 'c', 'j', 't', 1}
 
 func ParseCommandJournalWireFormat(value string) (CommandJournalWireFormat, error) {
@@ -35,11 +36,22 @@ func marshalCommandJournalTailBinary(tail CommandJournalTail) ([]byte, error) {
 	if tail.Limit < 0 || tail.Limit > MaxCommandJournalTailLimit || len(tail.Entries) > tail.Limit {
 		return nil, errors.New("hatriecache: invalid command journal tail size")
 	}
-	initialCapacity := len(commandJournalTailBinaryMagic) + 64 + len(tail.Entries)*32
+	includeBatch := false
+	for _, record := range tail.Entries {
+		if record.Request.Atomic || len(record.Request.Batch) > 0 {
+			includeBatch = true
+			break
+		}
+	}
+	magic := commandJournalTailBinaryMagic
+	if includeBatch {
+		magic = commandJournalTailBinaryBatchMagic
+	}
+	initialCapacity := len(magic) + 64 + len(tail.Entries)*32
 	if initialCapacity > maxCommandJournalTailResponseBytes {
 		initialCapacity = maxCommandJournalTailResponseBytes
 	}
-	writer := newBinaryFieldWriter(commandJournalTailBinaryMagic, initialCapacity)
+	writer := newBinaryFieldWriter(magic, initialCapacity)
 	writer.writeUvarint(tail.LastSequence)
 	writer.writeUvarint(tail.CompactedThrough)
 	writer.writeUvarint(uint64(tail.Limit))
@@ -58,7 +70,16 @@ func marshalCommandJournalTailBinary(tail CommandJournalTail) ([]byte, error) {
 			return nil, err
 		}
 		writer.writeUvarint(record.Sequence)
-		if err := writeCommandJournalRequestDirectBinaryFields(&writer, record.Request, values, pairs); err != nil {
+		if includeBatch {
+			batch, batchErr := marshalCommandJournalBatchBinary(record.Request.Batch)
+			if batchErr != nil {
+				return nil, batchErr
+			}
+			err = writeCommandJournalRequestDirectBinaryFields(&writer, record.Request, values, pairs, batch)
+		} else {
+			err = writeCommandJournalRequestDirectBinaryFields(&writer, record.Request, values, pairs)
+		}
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -205,6 +226,17 @@ func readCompactCommandJournalSetRequest(reader *binaryFieldReader, version uint
 	if err != nil {
 		return 0, 0, "", "", false, err
 	}
+	if version >= commandJournalBinaryBatchVersion {
+		atomic, err := reader.readBool()
+		if err != nil {
+			return 0, 0, "", "", false, err
+		}
+		batch, err := reader.readBytes()
+		if err != nil {
+			return 0, 0, "", "", false, err
+		}
+		unsupported = unsupported || atomic || len(batch) != 0
+	}
 	if unsupported || len(values) != 0 || len(pairs) != 0 {
 		return 0, 0, "", "", false, nil
 	}
@@ -223,7 +255,10 @@ func readCompactCommandJournalSetRequest(reader *binaryFieldReader, version uint
 func commandJournalTailBinaryReader(data []byte) (CommandJournalTail, uint64, binaryFieldReader, uint64, error) {
 	magic := commandJournalTailBinaryLegacyMagic
 	requestVersion := uint64(commandJournalBinaryDynamicVersion)
-	if bytes.HasPrefix(data, commandJournalTailBinaryMagic) {
+	if bytes.HasPrefix(data, commandJournalTailBinaryBatchMagic) {
+		magic = commandJournalTailBinaryBatchMagic
+		requestVersion = commandJournalBinaryBatchVersion
+	} else if bytes.HasPrefix(data, commandJournalTailBinaryMagic) {
 		magic = commandJournalTailBinaryMagic
 		requestVersion = commandJournalBinaryIdempotencyVersion
 	} else if !bytes.HasPrefix(data, commandJournalTailBinaryLegacyMagic) {

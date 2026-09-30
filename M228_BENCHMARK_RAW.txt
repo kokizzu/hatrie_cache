@@ -1,0 +1,38 @@
+M228 benchmark raw output
+Collected: 2026-09-30
+Host: linux/amd64, AMD Ryzen 9 5950X 16-Core Processor
+Controlled command: make benchmark-m228 from the repository harness
+
+Historical M227 baseline worktree (five samples):
+BenchmarkM228LegacySourceCheckpointCommit-32    1465    686919 ns/op    290 B/op    4 allocs/op
+BenchmarkM228LegacySourceCheckpointCommit-32    1801    658993 ns/op    290 B/op    4 allocs/op
+BenchmarkM228LegacySourceCheckpointCommit-32    1705    694666 ns/op    290 B/op    4 allocs/op
+BenchmarkM228LegacySourceCheckpointCommit-32    1796    672634 ns/op    290 B/op    4 allocs/op
+BenchmarkM228LegacySourceCheckpointCommit-32    1821    665406 ns/op    290 B/op    4 allocs/op
+
+M228 feature worktree (five samples per benchmark):
+BenchmarkM228LegacySourceCheckpointCommit-32    1790    657324 ns/op     298 B/op    5 allocs/op
+BenchmarkM228LegacySourceCheckpointCommit-32    1736    672257 ns/op     298 B/op    5 allocs/op
+BenchmarkM228LegacySourceCheckpointCommit-32    1785    664137 ns/op     298 B/op    5 allocs/op
+BenchmarkM228LegacySourceCheckpointCommit-32    1804    770830 ns/op     299 B/op    6 allocs/op
+BenchmarkM228LegacySourceCheckpointCommit-32    1779    670959 ns/op     298 B/op    5 allocs/op
+BenchmarkM228ExactlyOnceSourceApply-32          1609    685378 ns/op    3243 B/op   39 allocs/op
+BenchmarkM228ExactlyOnceSourceApply-32          1826    699244 ns/op    3239 B/op   39 allocs/op
+BenchmarkM228ExactlyOnceSourceApply-32          1861    700574 ns/op    3240 B/op   39 allocs/op
+BenchmarkM228ExactlyOnceSourceApply-32          1759    696538 ns/op    3240 B/op   39 allocs/op
+BenchmarkM228ExactlyOnceSourceApply-32          1791   9169922 ns/op    3286 B/op   41 allocs/op
+BenchmarkM228ExactlyOnceSourceRetry-32          638026      1667 ns/op    1033 B/op   13 allocs/op
+BenchmarkM228ExactlyOnceSourceRetry-32          661270      1745 ns/op    1033 B/op   13 allocs/op
+BenchmarkM228ExactlyOnceSourceRetry-32          713798      1727 ns/op    1033 B/op   13 allocs/op
+BenchmarkM228ExactlyOnceSourceRetry-32          628665      1656 ns/op    1033 B/op   13 allocs/op
+BenchmarkM228ExactlyOnceSourceRetry-32          712461      1739 ns/op    1033 B/op   13 allocs/op
+BenchmarkM228BinaryTailEncoding-32              3628030       331.0 ns/op   200 B/op    3 allocs/op
+BenchmarkM228BinaryTailEncoding-32              3649419       342.2 ns/op   200 B/op    3 allocs/op
+BenchmarkM228BinaryTailEncoding-32              3591482       330.6 ns/op   200 B/op    3 allocs/op
+BenchmarkM228BinaryTailEncoding-32              3631882       348.0 ns/op   200 B/op    3 allocs/op
+BenchmarkM228BinaryTailEncoding-32              3494379       336.5 ns/op   200 B/op    3 allocs/op
+
+The feature-branch wire benchmark additionally reports 77 tail-bytes/op for
+the encoded one-command atomic batch. The raw harness output predates the
+placement fix that made this custom metric visible; the byte value is from the
+reproducible branch target run and is checked by the benchmark output.

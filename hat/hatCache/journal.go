@@ -22,8 +22,9 @@ const (
 	commandJournalVersion                  = 1
 	commandJournalBinaryDynamicVersion     = 2
 	commandJournalBinaryOutboxVersion      = 3
-	commandJournalBinaryPayloadVersion     = 4
+	commandJournalBinaryPayloadVersion     = 5
 	commandJournalBinaryIdempotencyVersion = 4
+	commandJournalBinaryBatchVersion       = 5
 )
 
 const maxCommandJournalBinaryRecordBytes = 1 << 30

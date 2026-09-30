@@ -75,6 +75,7 @@ type commandJournalDirectBinaryDynamicField struct {
 type commandJournalDirectBinaryEntryFields struct {
 	values commandJournalDirectBinaryDynamicField
 	pairs  commandJournalDirectBinaryDynamicField
+	batch  []byte
 	outbox []byte
 }
 
@@ -87,6 +88,10 @@ func prepareCommandJournalDirectBinaryEntryFields(entry commandJournalEntry) (co
 	if err != nil {
 		return commandJournalDirectBinaryEntryFields{}, err
 	}
+	batch, err := marshalCommandJournalBatchBinary(entry.Request.Batch)
+	if err != nil {
+		return commandJournalDirectBinaryEntryFields{}, err
+	}
 	var outbox []byte
 	if entry.Outbox != nil {
 		outbox, err = marshalReplicationOutboxJobBinary(*entry.Outbox)
@@ -94,7 +99,7 @@ func prepareCommandJournalDirectBinaryEntryFields(entry commandJournalEntry) (co
 			return commandJournalDirectBinaryEntryFields{}, err
 		}
 	}
-	return commandJournalDirectBinaryEntryFields{values: values, pairs: pairs, outbox: outbox}, nil
+	return commandJournalDirectBinaryEntryFields{values: values, pairs: pairs, batch: batch, outbox: outbox}, nil
 }
 
 func prepareCommandJournalDirectBinaryDynamicField(value interface{}) (commandJournalDirectBinaryDynamicField, error) {
@@ -131,11 +136,16 @@ func prepareCommandJournalDirectBinaryDynamicField(value interface{}) (commandJo
 type commandJournalBinaryEntryFields struct {
 	values []byte
 	pairs  []byte
+	batch  []byte
 	outbox []byte
 }
 
 func prepareCommandJournalBinaryEntryFields(entry commandJournalEntry) (commandJournalBinaryEntryFields, error) {
 	values, pairs, err := marshalCommandJournalRequestBinaryDynamicFields(entry.Request)
+	if err != nil {
+		return commandJournalBinaryEntryFields{}, err
+	}
+	batch, err := marshalCommandJournalBatchBinary(entry.Request.Batch)
 	if err != nil {
 		return commandJournalBinaryEntryFields{}, err
 	}
@@ -146,7 +156,7 @@ func prepareCommandJournalBinaryEntryFields(entry commandJournalEntry) (commandJ
 			return commandJournalBinaryEntryFields{}, err
 		}
 	}
-	return commandJournalBinaryEntryFields{values: values, pairs: pairs, outbox: outbox}, nil
+	return commandJournalBinaryEntryFields{values: values, pairs: pairs, batch: batch, outbox: outbox}, nil
 }
 
 func marshalCommandJournalEntryBinaryPayload(entry commandJournalEntry) ([]byte, error) {
@@ -191,7 +201,7 @@ func writePreparedCommandJournalEntryDirectBinaryPayload(writer *binaryFieldWrit
 	writer.writeUvarint(commandJournalBinaryPayloadVersion)
 	writer.writeUvarint(entry.Sequence)
 	writer.writeBool(entry.Checkpoint)
-	if err := writeCommandJournalRequestDirectBinaryFields(writer, entry.Request, fields.values, fields.pairs); err != nil {
+	if err := writeCommandJournalRequestDirectBinaryFields(writer, entry.Request, fields.values, fields.pairs, fields.batch); err != nil {
 		return err
 	}
 	writer.writeBytes(entry.IdempotencyFingerprint)
@@ -199,7 +209,7 @@ func writePreparedCommandJournalEntryDirectBinaryPayload(writer *binaryFieldWrit
 	return nil
 }
 
-func writeCommandJournalRequestDirectBinaryFields(writer *binaryFieldWriter, request CacheCommandRequest, values commandJournalDirectBinaryDynamicField, pairs commandJournalDirectBinaryDynamicField) error {
+func writeCommandJournalRequestDirectBinaryFields(writer *binaryFieldWriter, request CacheCommandRequest, values commandJournalDirectBinaryDynamicField, pairs commandJournalDirectBinaryDynamicField, optionalBatch ...[]byte) error {
 	writer.writeString(request.Command)
 	writer.writeString(request.Key)
 	writer.writeString(request.Value)
@@ -211,7 +221,15 @@ func writeCommandJournalRequestDirectBinaryFields(writer *binaryFieldWriter, req
 	if err := writeCommandJournalDirectBinaryDynamicField(writer, values); err != nil {
 		return err
 	}
-	return writeCommandJournalDirectBinaryDynamicField(writer, pairs)
+	if err := writeCommandJournalDirectBinaryDynamicField(writer, pairs); err != nil {
+		return err
+	}
+	if len(optionalBatch) == 0 {
+		return nil
+	}
+	writer.writeBool(request.Atomic)
+	writer.writeBytes(firstOptionalCommandJournalBatch(optionalBatch))
+	return nil
 }
 
 func writeCommandJournalDirectBinaryDynamicField(writer *binaryFieldWriter, field commandJournalDirectBinaryDynamicField) error {
@@ -240,7 +258,7 @@ func writePreparedCommandJournalEntryBinaryPayload(writer *binaryFieldWriter, en
 	writer.writeUvarint(commandJournalBinaryPayloadVersion)
 	writer.writeUvarint(entry.Sequence)
 	writer.writeBool(entry.Checkpoint)
-	if err := writeCommandJournalRequestBinaryFieldsWithIdempotency(writer, entry.Request, fields.values, fields.pairs); err != nil {
+	if err := writeCommandJournalRequestBinaryFieldsWithIdempotency(writer, entry.Request, fields.values, fields.pairs, fields.batch); err != nil {
 		return err
 	}
 	writer.writeBytes(entry.IdempotencyFingerprint)
@@ -285,6 +303,10 @@ func commandJournalEntryBinaryPayloadCapacity(entry commandJournalEntry, valuesB
 }
 
 func commandJournalRequestBinarySize(request CacheCommandRequest, valuesBytes int, pairsBytes int) (int64, error) {
+	batch, err := marshalCommandJournalBatchBinary(request.Batch)
+	if err != nil {
+		return 0, err
+	}
 	total := int64(0)
 	for _, size := range []int64{
 		commandJournalBinaryStringSize(request.Command),
@@ -297,6 +319,8 @@ func commandJournalRequestBinarySize(request CacheCommandRequest, valuesBytes in
 		int64(commandJournalOptionalInt64BinarySize(request.UnixSeconds)),
 		commandJournalBinaryBytesSize(valuesBytes),
 		commandJournalBinaryBytesSize(pairsBytes),
+		1,
+		commandJournalBinaryBytesSize(len(batch)),
 	} {
 		next, err := addCommandJournalBinaryPayloadSize(total, size)
 		if err != nil {
@@ -362,7 +386,7 @@ func marshalCommandJournalRequestBinaryDynamicFields(request CacheCommandRequest
 	return values, pairs, nil
 }
 
-func writeCommandJournalRequestBinaryFields(writer *binaryFieldWriter, request CacheCommandRequest, values []byte, pairs []byte) error {
+func writeCommandJournalRequestBinaryFields(writer *binaryFieldWriter, request CacheCommandRequest, values []byte, pairs []byte, optionalBatch ...[]byte) error {
 	writer.writeString(request.Command)
 	writer.writeString(request.Key)
 	writer.writeString(request.Value)
@@ -372,10 +396,15 @@ func writeCommandJournalRequestBinaryFields(writer *binaryFieldWriter, request C
 	writeCommandJournalOptionalInt64Binary(writer, request.UnixSeconds)
 	writer.writeBytes(values)
 	writer.writeBytes(pairs)
+	if len(optionalBatch) == 0 {
+		return nil
+	}
+	writer.writeBool(request.Atomic)
+	writer.writeBytes(firstOptionalCommandJournalBatch(optionalBatch))
 	return nil
 }
 
-func writeCommandJournalRequestBinaryFieldsWithIdempotency(writer *binaryFieldWriter, request CacheCommandRequest, values []byte, pairs []byte) error {
+func writeCommandJournalRequestBinaryFieldsWithIdempotency(writer *binaryFieldWriter, request CacheCommandRequest, values []byte, pairs []byte, optionalBatch ...[]byte) error {
 	writer.writeString(request.Command)
 	writer.writeString(request.Key)
 	writer.writeString(request.Value)
@@ -386,7 +415,26 @@ func writeCommandJournalRequestBinaryFieldsWithIdempotency(writer *binaryFieldWr
 	writeCommandJournalOptionalInt64Binary(writer, request.UnixSeconds)
 	writer.writeBytes(values)
 	writer.writeBytes(pairs)
+	if len(optionalBatch) == 0 {
+		return nil
+	}
+	writer.writeBool(request.Atomic)
+	writer.writeBytes(firstOptionalCommandJournalBatch(optionalBatch))
 	return nil
+}
+
+func firstOptionalCommandJournalBatch(optionalBatch [][]byte) []byte {
+	if len(optionalBatch) == 0 {
+		return nil
+	}
+	return optionalBatch[0]
+}
+
+func marshalCommandJournalBatchBinary(batch []CacheCommandRequest) ([]byte, error) {
+	if len(batch) == 0 {
+		return nil, nil
+	}
+	return json.Marshal(batch)
 }
 
 func marshalJournalDynamicBinary(value interface{}) ([]byte, error) {
@@ -607,6 +655,38 @@ func readCommandJournalRequestBinaryInto(reader *binaryFieldReader, version uint
 			return err
 		}
 	}
+	if version >= commandJournalBinaryBatchVersion {
+		if request.Atomic, err = reader.readBool(); err != nil {
+			return err
+		}
+		batch, err := reader.readBytes()
+		if err != nil {
+			return err
+		}
+		if len(batch) > 0 {
+			if err := decodeCommandJournalBatchBinary(batch, &request.Batch); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func decodeCommandJournalBatchBinary(data []byte, batch *[]CacheCommandRequest) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	var decoded []CacheCommandRequest
+	if err := decoder.Decode(&decoded); err != nil {
+		return err
+	}
+	var extra interface{}
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("hatriecache: invalid trailing command journal batch data")
+		}
+		return err
+	}
+	*batch = decoded
 	return nil
 }
 

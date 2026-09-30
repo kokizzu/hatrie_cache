@@ -606,7 +606,7 @@ func parseBinaryHeader(payload []byte) (record, error) {
 	if err != nil {
 		return record{}, err
 	}
-	if version < 1 || version > 4 {
+	if version < 1 || version > 5 {
 		return record{}, errors.New("unsupported binary journal version")
 	}
 	sequence, err := reader.uvarint()
@@ -637,6 +637,14 @@ func parseBinaryHeader(payload []byte) (record, error) {
 		}
 	}
 	for range 2 { // values and pairs payloads
+		if _, err := reader.bytes(); err != nil {
+			return record{}, err
+		}
+	}
+	if version >= 5 {
+		if _, err := reader.bool(); err != nil {
+			return record{}, err
+		}
 		if _, err := reader.bytes(); err != nil {
 			return record{}, err
 		}

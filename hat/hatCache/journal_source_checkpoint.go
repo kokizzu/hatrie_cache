@@ -8,20 +8,26 @@ import (
 )
 
 const MaxCommandJournalSourceCheckpointOffsetBytes = 1 << 20
+const MaxCommandJournalSourceCheckpointTransactionIDBytes = 256
+const CommandJournalSourceCheckpointFingerprintBytes = 32
 
 var (
-	ErrNilCommandJournalSourceCheckpointStore       = errors.New("hatriecache: source checkpoint store is nil")
-	ErrInvalidCommandJournalSourceID                = errors.New("hatriecache: source checkpoint source ID is invalid")
-	ErrCommandJournalSourceCheckpointOffsetTooLarge = errors.New("hatriecache: source checkpoint offset is too large")
-	ErrCommandJournalSourceCheckpointAhead          = errors.New("hatriecache: source checkpoint is ahead of the journal")
+	ErrNilCommandJournalSourceCheckpointStore           = errors.New("hatriecache: source checkpoint store is nil")
+	ErrInvalidCommandJournalSourceID                    = errors.New("hatriecache: source checkpoint source ID is invalid")
+	ErrInvalidCommandJournalSourceTransactionID         = errors.New("hatriecache: source checkpoint transaction ID is invalid")
+	ErrCommandJournalSourceCheckpointOffsetTooLarge     = errors.New("hatriecache: source checkpoint offset is too large")
+	ErrCommandJournalSourceCheckpointFingerprintInvalid = errors.New("hatriecache: source checkpoint fingerprint is invalid")
+	ErrCommandJournalSourceCheckpointAhead              = errors.New("hatriecache: source checkpoint is ahead of the journal")
 )
 
 // CommandJournalSourceCheckpoint is the durable source position associated
 // with a fully applied journal sequence. Offset is binary-safe and is copied
 // by the coordinator before it is handed to a store.
 type CommandJournalSourceCheckpoint struct {
-	Offset          []byte `json:"offset,omitempty"`
-	JournalSequence uint64 `json:"journal_sequence"`
+	Offset           []byte `json:"offset,omitempty"`
+	JournalSequence  uint64 `json:"journal_sequence"`
+	TransactionID    string `json:"transaction_id,omitempty"`
+	BatchFingerprint []byte `json:"batch_fingerprint,omitempty"`
 }
 
 // CommandJournalSourceCheckpointStore loads and durably saves a position for
@@ -76,7 +82,11 @@ func (coordinator *CommandJournalSourceCheckpointCoordinator) Load(ctx context.C
 	if len(checkpoint.Offset) > MaxCommandJournalSourceCheckpointOffsetBytes {
 		return CommandJournalSourceCheckpoint{}, ErrCommandJournalSourceCheckpointOffsetTooLarge
 	}
+	if err := validateCommandJournalSourceCheckpointMetadata(checkpoint.TransactionID, checkpoint.BatchFingerprint); err != nil {
+		return CommandJournalSourceCheckpoint{}, err
+	}
 	checkpoint.Offset = cloneCommandJournalSourceCheckpointOffset(checkpoint.Offset)
+	checkpoint.BatchFingerprint = cloneCommandJournalSourceCheckpointFingerprint(checkpoint.BatchFingerprint)
 	journalSequence := coordinator.journal.Sequence()
 	if checkpoint.JournalSequence > journalSequence {
 		return CommandJournalSourceCheckpoint{}, fmt.Errorf("%w: checkpoint sequence %d, journal sequence %d", ErrCommandJournalSourceCheckpointAhead, checkpoint.JournalSequence, journalSequence)
@@ -89,6 +99,18 @@ func (coordinator *CommandJournalSourceCheckpointCoordinator) Load(ctx context.C
 // Commit. If persistence fails, the offset is not advanced and replaying the
 // source batch is the safe recovery behavior.
 func (coordinator *CommandJournalSourceCheckpointCoordinator) Commit(ctx context.Context, sourceID string, offset []byte) (CommandJournalSourceCheckpoint, error) {
+	return coordinator.commit(ctx, sourceID, "", offset, nil)
+}
+
+// CommitTransaction durably saves a source transaction ID and its command
+// fingerprint with the source offset and the latest fully applied journal
+// sequence. It is used by exactly-once source coordinators; legacy callers
+// should continue using Commit.
+func (coordinator *CommandJournalSourceCheckpointCoordinator) CommitTransaction(ctx context.Context, sourceID, transactionID string, offset, batchFingerprint []byte) (CommandJournalSourceCheckpoint, error) {
+	return coordinator.commit(ctx, sourceID, transactionID, offset, batchFingerprint)
+}
+
+func (coordinator *CommandJournalSourceCheckpointCoordinator) commit(ctx context.Context, sourceID, transactionID string, offset, batchFingerprint []byte) (CommandJournalSourceCheckpoint, error) {
 	if coordinator == nil || coordinator.journal == nil {
 		return CommandJournalSourceCheckpoint{}, ErrNilCommandJournal
 	}
@@ -98,6 +120,9 @@ func (coordinator *CommandJournalSourceCheckpointCoordinator) Commit(ctx context
 	if err := validateCommandJournalSourceID(sourceID); err != nil {
 		return CommandJournalSourceCheckpoint{}, err
 	}
+	if err := validateCommandJournalSourceCheckpointMetadata(transactionID, batchFingerprint); err != nil {
+		return CommandJournalSourceCheckpoint{}, err
+	}
 	if len(offset) > MaxCommandJournalSourceCheckpointOffsetBytes {
 		return CommandJournalSourceCheckpoint{}, ErrCommandJournalSourceCheckpointOffsetTooLarge
 	}
@@ -105,7 +130,11 @@ func (coordinator *CommandJournalSourceCheckpointCoordinator) Commit(ctx context
 	if err := ctx.Err(); err != nil {
 		return CommandJournalSourceCheckpoint{}, err
 	}
-	checkpoint := CommandJournalSourceCheckpoint{Offset: cloneCommandJournalSourceCheckpointOffset(offset)}
+	checkpoint := CommandJournalSourceCheckpoint{
+		Offset:           cloneCommandJournalSourceCheckpointOffset(offset),
+		TransactionID:    strings.TrimSpace(transactionID),
+		BatchFingerprint: cloneCommandJournalSourceCheckpointFingerprint(batchFingerprint),
+	}
 	err := coordinator.journal.WithPersistenceBarrier(func(sequence uint64) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -138,4 +167,25 @@ func cloneCommandJournalSourceCheckpointOffset(offset []byte) []byte {
 		return nil
 	}
 	return append([]byte(nil), offset...)
+}
+
+func validateCommandJournalSourceCheckpointMetadata(transactionID string, batchFingerprint []byte) error {
+	transactionID = strings.TrimSpace(transactionID)
+	if len([]byte(transactionID)) > MaxCommandJournalSourceCheckpointTransactionIDBytes || strings.IndexByte(transactionID, 0) >= 0 {
+		return ErrInvalidCommandJournalSourceTransactionID
+	}
+	if transactionID == "" && len(batchFingerprint) != 0 {
+		return ErrCommandJournalSourceCheckpointFingerprintInvalid
+	}
+	if transactionID != "" && len(batchFingerprint) != CommandJournalSourceCheckpointFingerprintBytes {
+		return ErrCommandJournalSourceCheckpointFingerprintInvalid
+	}
+	return nil
+}
+
+func cloneCommandJournalSourceCheckpointFingerprint(fingerprint []byte) []byte {
+	if len(fingerprint) == 0 {
+		return nil
+	}
+	return append([]byte(nil), fingerprint...)
 }

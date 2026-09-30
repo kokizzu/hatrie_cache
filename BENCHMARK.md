@@ -40054,3 +40054,31 @@ M223 row is measured before and after M224 from the same clean M223 base.
 M224 keeps the existing snapshot and progress paths allocation-free and does
 not sample the clock. Callers own rate smoothing and pay the estimate cost
 only when they request it. See [M224_HYDRATION_PROGRESS_METRICS.md](M224_HYDRATION_PROGRESS_METRICS.md).
+
+## M228 Exactly-Once Source Restart
+
+Workload: one journaled `SETINT` source command plus checkpoint persistence,
+one exactly-once source `ApplyBatch`, a duplicate retry after a saved
+checkpoint, and one binary journal-tail batch encoding. Five samples were
+collected on an AMD Ryzen 9 5950X, `linux/amd64`. The historical baseline is
+the M227 legacy checkpoint coordinator; the feature-branch legacy row is a
+same-worktree control for detecting unrelated drift.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative |
+| --- | ---: | ---: | ---: | ---: |
+| M227 legacy command plus `Commit` | 672,634 | 290 | 4 | 1.00x |
+| M228 legacy control | 670,959 | 298 | 5 | 1.00x CPU |
+| M228 exactly-once `ApplyBatch` | 699,244 | 3,240 | 39 | 1.04x CPU, 11.17x bytes, 9.75x allocs |
+| M228 duplicate retry short-circuit | 1,727 | 1,033 | 13 | 389.50x lower CPU than full legacy write |
+| M228 binary batch-tail encode | 336.5 | 200 | 3 | 77 wire bytes |
+
+At 10,000 operations, the measured full paths are approximately 6.73 seconds
+for the legacy control and 6.99 seconds for exactly-once `ApplyBatch`; 10,000
+recognized duplicate retries take approximately 0.017 seconds.
+
+This feature is correctness-oriented rather than a hot-path optimization. A
+fresh transaction pays for deep input ownership, fingerprinting, an atomic
+batch envelope, and checkpoint load/save; the retry avoids a second mutation
+and journal append. Full raw samples are in
+[`M228_BENCHMARK_RAW.txt`](M228_BENCHMARK_RAW.txt). The binary tail benchmark
+also reports `77 tail-bytes/op` for the one-command atomic batch.
