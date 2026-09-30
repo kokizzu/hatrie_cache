@@ -40576,3 +40576,40 @@ BenchmarkC193LimitZero/LimitOne-32  2847061 ns/op 5769444 B/op 48913 allocs/op
 The optimization is selected by query shape, not by a new configuration flag.
 The empty result retains a non-nil `Rows` slice for compatibility. Correctness
 and scope details are in [`C193_LIMIT_ZERO.md`](C193_LIMIT_ZERO.md).
+
+<a id="t042c-recovery-time-scalar-replay-batching"></a>
+## T042c Recovery-Time Scalar Replay Batching
+
+Five benchmark samples on Linux/amd64 with an AMD Ryzen 9 5950X. Each
+iteration replays a fixed 4,096-record binary journal into a fresh trie. The
+optimized path batches contiguous expiry-free `SET` records in bounded 256-
+record native batches. Other commands retain the serial replay path.
+
+Raw baseline samples, before batching:
+
+```text
+BenchmarkT042Replay-32 294 3729372 ns/op 4096 records/op 1360682 B/op 20515 allocs/op
+BenchmarkT042Replay-32 332 3857787 ns/op 4096 records/op 1360684 B/op 20515 allocs/op
+BenchmarkT042Replay-32 298 3932729 ns/op 4096 records/op 1360684 B/op 20515 allocs/op
+BenchmarkT042Replay-32 314 3860218 ns/op 4096 records/op 1360684 B/op 20515 allocs/op
+BenchmarkT042Replay-32 297 3816845 ns/op 4096 records/op 1360684 B/op 20515 allocs/op
+```
+
+Raw optimized samples:
+
+```text
+BenchmarkT042Replay-32 409 2971687 ns/op 4096 records/op 1360693 B/op 20515 allocs/op
+BenchmarkT042Replay-32 391 2968064 ns/op 4096 records/op 1360680 B/op 20515 allocs/op
+BenchmarkT042Replay-32 403 3132204 ns/op 4096 records/op 1360680 B/op 20515 allocs/op
+BenchmarkT042Replay-32 394 3066582 ns/op 4096 records/op 1360679 B/op 20515 allocs/op
+BenchmarkT042Replay-32 409 3137148 ns/op 4096 records/op 1360680 B/op 20515 allocs/op
+```
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Existing serial replay | 3,857,787 | 1,360,684 | 20,515 | baseline |
+| Bounded scalar batch replay | 3,066,582 | 1,360,680 | 20,515 | 1.26x faster; memory and allocations unchanged |
+
+The benchmark command is `make benchmark-t042-recovery-replay`. This change
+does not claim parallel replay: the rejected T042 parallel lanes remain
+documented above, and replay order is still deterministic.

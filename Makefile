@@ -29241,3 +29241,30 @@ commit-c193-limit-zero:
 .PHONY: push-c193-limit-zero
 push-c193-limit-zero:
 	bash scripts/run-c193-limit-zero.sh push
+.PHONY: test-t042-recovery-replay
+test-t042-recovery-replay:
+	@bash ./scripts/test-t042-recovery-replay.sh
+
+.PHONY: benchmark-t042-recovery-replay
+benchmark-t042-recovery-replay:
+	@bash ./scripts/benchmark-t042-recovery-replay.sh
+
+.PHONY: test-t042-recovery-replay-coverage
+test-t042-recovery-replay-coverage:
+	@bash ./scripts/test-t042-recovery-replay-coverage.sh
+
+.PHONY: race-t042-recovery-replay
+race-t042-recovery-replay:
+	@bash ./scripts/race-t042-recovery-replay.sh
+
+.PHONY: vet-t042-recovery-replay
+vet-t042-recovery-replay:
+	@bash ./scripts/vet-t042-recovery-replay.sh
+
+.PHONY: test-t042-recovery-backup
+test-t042-recovery-backup:
+	@bash ./scripts/test-t042-recovery-backup.sh
+
+.PHONY: ship-t042-recovery-replay
+ship-t042-recovery-replay:
+	@bash ./scripts/ship-t042-recovery-replay.sh

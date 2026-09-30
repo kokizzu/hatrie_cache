@@ -1396,35 +1396,61 @@ func (journal *CommandJournal) replayThroughWithProgress(trie *HatTrie, afterSeq
 	if targetSequence < afterSequence {
 		return 0, fmt.Errorf("hatriecache: requested journal sequence %d precedes snapshot sequence %d", targetSequence, afterSequence)
 	}
-	if _, err := scanCommandJournalSetWithEncryption(journal.path, journal.segmented(), journal.encryption, func(entry commandJournalEntry) error {
-		if entry.Checkpoint {
+	replayBatch := make([]CommandJournalRecord, 0, maxCommandJournalReplayScalarBatchRecords)
+	var replayBatchFamily nativeCommandBatchFamily
+	flushReplayBatch := func() error {
+		if len(replayBatch) == 0 {
 			return nil
+		}
+		err := journal.replayCommandJournalScalarBatch(trie, replayBatch, progress)
+		replayBatch = replayBatch[:0]
+		replayBatchFamily = nativeCommandBatchUnsupported
+		return err
+	}
+	_, scanErr := scanCommandJournalSetWithEncryption(journal.path, journal.segmented(), journal.encryption, func(entry commandJournalEntry) error {
+		if entry.Checkpoint {
+			return flushReplayBatch()
 		}
 		if entry.Sequence <= afterSequence || entry.Sequence > targetSequence {
 			return nil
 		}
+		family := journalScalarCommandBatchFamily(entry.Request)
+		batchable := family != nativeCommandBatchUnsupported && !(journal.idempotency.enabled() && strings.TrimSpace(entry.Request.IdempotencyKey) != "")
+		if batchable {
+			if len(replayBatch) > 0 && replayBatchFamily != family {
+				if err := flushReplayBatch(); err != nil {
+					return err
+				}
+			}
+			if progress != nil {
+				progress.markCurrent(entry.Sequence)
+			}
+			replayBatchFamily = family
+			replayBatch = append(replayBatch, CommandJournalRecord{Sequence: entry.Sequence, Request: entry.Request})
+			if len(replayBatch) == cap(replayBatch) {
+				return flushReplayBatch()
+			}
+			return nil
+		}
+		if err := flushReplayBatch(); err != nil {
+			return err
+		}
 		if progress != nil {
 			progress.markCurrent(entry.Sequence)
 		}
-		if journal.idempotency.enabled() && strings.TrimSpace(entry.Request.IdempotencyKey) != "" {
-			response := trie.ExecuteCommand(entry.Request)
-			if !response.OK {
-				return fmt.Errorf("hatriecache: replay command journal entry %d failed: %s", entry.Sequence, response.Message)
-			}
-			check, err := newCommandIdempotencyCheck(entry.Request)
-			if err != nil {
-				return fmt.Errorf("hatriecache: replay command journal entry %d idempotency check failed: %s", entry.Sequence, err)
-			}
-			journal.idempotency.remember(check, response, entry.Sequence)
-		} else if err := executeCommandForReplay(trie, entry.Request); err != nil {
-			return fmt.Errorf("hatriecache: replay command journal entry %d failed: %s", entry.Sequence, err)
+		if err := journal.replayCommandJournalEntry(trie, entry); err != nil {
+			return err
 		}
 		if progress != nil {
 			progress.markApplied(entry.Sequence)
 		}
 		return nil
-	}); err != nil {
-		return 0, err
+	})
+	if err := flushReplayBatch(); scanErr == nil {
+		scanErr = err
+	}
+	if scanErr != nil {
+		return 0, scanErr
 	}
 	journal.advanceSequenceLocked(maxSequence)
 	return targetSequence, nil

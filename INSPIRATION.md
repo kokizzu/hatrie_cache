@@ -773,6 +773,7 @@ explicit regional partitioning and simple backups over automatic sharding.
   4.27x more heap; see [BENCHMARK.md](BENCHMARK.md#rejected-t042-counter-parallel-replay).
 - [x] T042a Recovery replay mutation fast path - scalar durable mutations avoid constructing public command responses; unsupported commands keep the existing dispatcher (see [JOURNAL_REPLAY.md](JOURNAL_REPLAY.md)).
 - [x] T042b Single-pass ordinary journal replay metadata. The journal caches its validated tail and compaction boundary during open, checkpoint, and compaction, so default replay avoids rescanning the same metadata; progress-enabled replay keeps its counting scan.
+- [x] T042c Ordered scalar batch replay. Contiguous expiry-free `SET` and `SETINT` journal records use the existing bounded native scalar batch executor during recovery; command boundaries and unsupported records retain serial replay. See [T042_RECOVERY_REPLAY_BATCH.md](T042_RECOVERY_REPLAY_BATCH.md) and [BENCHMARK.md](BENCHMARK.md#t042c-recovery-time-scalar-replay-batching).
 - [x] T043 Recovery replay progress and ETA metrics.
 - [x] T044 Recovery point selection by logical sequence.
 - [x] T045 Crash-consistency fault injection.
