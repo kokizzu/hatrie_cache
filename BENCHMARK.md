@@ -39883,3 +39883,20 @@ The controller is allocation-free and applies monotone validation plus
 pause/resume hysteresis. It is intended once per batch, not once per record,
 and remains opt-in so existing relay/applier behavior is unchanged. See
 [T209_REPLICA_LAG_BACKPRESSURE.md](T209_REPLICA_LAG_BACKPRESSURE.md).
+
+## M221 Compute cluster resource budgets
+
+Workload: named SQL compute-cluster dispatch and the existing FIFO memory
+admission controller, five one-second samples on an AMD Ryzen 9 5950X. The
+baseline is the clean T209 branch before M221.
+
+| Operation | Baseline | M221 | Relative latency |
+| --- | ---: | ---: | ---: |
+| Unbudgeted named-cluster dispatch | 11.83 ns/op, 0 B/op, 0 allocs/op | 11.59 ns/op, 0 B/op, 0 allocs/op | 1.02x faster observed |
+| Budgeted cluster memory stats | n/a | 23.80 ns/op, 0 B/op, 0 allocs/op | new monitoring API |
+| Memory reservation acquire/release | 57.09 ns/op, 48 B/op, 2 allocs/op | 55.41 ns/op, 48 B/op, 2 allocs/op | 1.03x faster observed |
+
+The unbudgeted dispatch and existing admission path are allocation-neutral and
+within benchmark noise. Only clusters configured with `MemoryBudgetBytes` pay
+the new stats/admission work; the default path remains unchanged. See
+[M221_COMPUTE_CLUSTER_RESOURCE_BUDGET.md](M221_COMPUTE_CLUSTER_RESOURCE_BUDGET.md).

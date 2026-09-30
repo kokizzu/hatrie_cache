@@ -35,9 +35,10 @@ const (
 
 // ErrSQLQueryManagerClosed identifies execution submitted after Close.
 var (
-	ErrSQLQueryManagerClosed                 = errors.New("SQL query manager is closed")
-	ErrSQLQueryManagerComputeClusterNotFound = errors.New("SQL compute cluster is not configured")
-	ErrSQLQueryManagerComputeClusterInvalid  = errors.New("SQL compute cluster configuration is invalid")
+	ErrSQLQueryManagerClosed                                  = errors.New("SQL query manager is closed")
+	ErrSQLQueryManagerComputeClusterNotFound                  = errors.New("SQL compute cluster is not configured")
+	ErrSQLQueryManagerComputeClusterInvalid                   = errors.New("SQL compute cluster configuration is invalid")
+	ErrSQLQueryManagerComputeClusterMemoryReservationRequired = errors.New("SQL compute cluster memory reservation is required")
 )
 
 // SQLQueryState describes one managed query's lifecycle.
@@ -81,11 +82,16 @@ func (err *SQLQueryCanceledError) Error() string {
 
 func (err *SQLQueryCanceledError) Unwrap() error { return context.Canceled }
 
-// SQLComputeClusterOptions bounds one named SQL compute pool.
-// Workers must be positive; zero QueueCapacity selects the manager default.
+// SQLComputeClusterOptions bounds one named SQL compute pool. Workers must be
+// positive; zero QueueCapacity selects the manager default. A positive
+// MemoryBudgetBytes enables an independent FIFO memory admission queue for
+// the cluster. Queries routed to that cluster must provide a positive
+// SQLQueryOptions.MemoryReservationBytes.
 type SQLComputeClusterOptions struct {
-	Workers       int
-	QueueCapacity int
+	Workers                   int
+	QueueCapacity             int
+	MemoryBudgetBytes         int64
+	MemoryAdmissionMaxPending int
 }
 
 // SQLQueryManagerOptions configures SQL query history and optional compute
@@ -139,6 +145,7 @@ type managedSQLQuery struct {
 
 type sqlQueryManagerCompute struct {
 	pool             *hatPipeline.WorkStealingPool
+	memoryAdmission  *SQLMemoryAdmission
 	configurationErr error
 	closed           bool
 }
@@ -202,12 +209,24 @@ func newSQLQueryManagerWithConfiguration(options SQLQueryManagerOptions) *SQLQue
 		sort.Strings(names)
 		for _, name := range names {
 			cluster := options.ComputeClusters[name]
+			var memoryAdmission *SQLMemoryAdmission
+			var err error
+			if cluster.MemoryBudgetBytes > 0 {
+				memoryAdmission, err = NewSQLMemoryAdmission(SQLMemoryAdmissionOptions{
+					MaxBytes:   cluster.MemoryBudgetBytes,
+					MaxPending: cluster.MemoryAdmissionMaxPending,
+				})
+				if err != nil {
+					manager.configurationErr = fmt.Errorf("SQL compute cluster %q memory budget: %w", name, err)
+					break
+				}
+			}
 			pool, err := hatPipeline.NewWorkStealingPool(context.Background(), cluster.Workers, normalizedSQLComputeQueueCapacity(cluster.QueueCapacity))
 			if err != nil {
 				manager.configurationErr = fmt.Errorf("SQL compute cluster %q: %w", name, err)
 				break
 			}
-			manager.computeClusters[name] = &sqlQueryManagerCompute{pool: pool}
+			manager.computeClusters[name] = &sqlQueryManagerCompute{pool: pool, memoryAdmission: memoryAdmission}
 		}
 	}
 	return manager
@@ -240,7 +259,7 @@ func ValidateSQLQueryManagerOptions(options SQLQueryManagerOptions) error {
 		if name == "" || strings.TrimSpace(name) != name || len(name) > maxSQLComputeClusterNameBytes {
 			return ErrSQLQueryManagerComputeClusterInvalid
 		}
-		if cluster.Workers < 1 || cluster.Workers > MaxSQLQueryManagerComputeWorkers || cluster.QueueCapacity < 0 || cluster.QueueCapacity > MaxSQLQueryManagerComputeQueueCapacity {
+		if cluster.Workers < 1 || cluster.Workers > MaxSQLQueryManagerComputeWorkers || cluster.QueueCapacity < 0 || cluster.QueueCapacity > MaxSQLQueryManagerComputeQueueCapacity || cluster.MemoryBudgetBytes < 0 || cluster.MemoryAdmissionMaxPending < 0 || cluster.MemoryAdmissionMaxPending > maxSQLMemoryAdmissionMaxPending {
 			return ErrSQLQueryManagerComputeClusterInvalid
 		}
 	}
@@ -257,6 +276,9 @@ func (manager *SQLQueryManager) Close() error {
 	compute := manager.compute
 	if compute != nil {
 		compute.closed = true
+		if compute.memoryAdmission != nil {
+			compute.memoryAdmission.Close()
+		}
 	}
 	computes := make([]*sqlQueryManagerCompute, 0, len(manager.computeClusters)+1)
 	if compute != nil {
@@ -264,6 +286,9 @@ func (manager *SQLQueryManager) Close() error {
 	}
 	for _, cluster := range manager.computeClusters {
 		cluster.closed = true
+		if cluster.memoryAdmission != nil {
+			cluster.memoryAdmission.Close()
+		}
 		computes = append(computes, cluster)
 	}
 	manager.mu.Unlock()
@@ -293,6 +318,23 @@ func (manager *SQLQueryManager) ComputeClusters() []string {
 	return names
 }
 
+// ComputeClusterMemoryStats returns the independent memory-budget counters
+// for one named cluster. An unbudgeted cluster returns zero-valued stats.
+func (manager *SQLQueryManager) ComputeClusterMemoryStats(name string) (SQLMemoryAdmissionStats, error) {
+	if manager == nil {
+		return SQLMemoryAdmissionStats{}, errors.New("SQL query manager is required")
+	}
+	name = strings.TrimSpace(name)
+	compute, ok := manager.computeClusters[name]
+	if !ok {
+		return SQLMemoryAdmissionStats{}, fmt.Errorf("%w: %s", ErrSQLQueryManagerComputeClusterNotFound, name)
+	}
+	if compute.memoryAdmission == nil {
+		return SQLMemoryAdmissionStats{}, nil
+	}
+	return compute.memoryAdmission.Stats(), nil
+}
+
 // Execute runs one query under a manager-owned cancellation context. When
 // options.QueryID is empty, a bounded generated ID is returned in the result.
 func (manager *SQLQueryManager) Execute(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, options SQLQueryOptions) (result SQLQueryResult, err error) {
@@ -311,6 +353,15 @@ func (manager *SQLQueryManager) Execute(ctx context.Context, source string, reso
 	}
 	if compute != nil && compute.configurationErr != nil {
 		return SQLQueryResult{}, compute.configurationErr
+	}
+	if compute != nil && compute.memoryAdmission != nil {
+		if options.MemoryReservationBytes == 0 {
+			return SQLQueryResult{}, ErrSQLQueryManagerComputeClusterMemoryReservationRequired
+		}
+		// The cluster's admission queue is authoritative for a budgeted
+		// cluster; callers cannot accidentally bypass its resource boundary
+		// by supplying a different queue.
+		options.MemoryAdmission = compute.memoryAdmission
 	}
 	queryID, err := manager.queryID(options.QueryID)
 	if err != nil {
