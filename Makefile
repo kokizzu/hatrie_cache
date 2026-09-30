@@ -28839,3 +28839,19 @@ test-m228:
 
 benchmark-m228:
 	sh scripts/benchmark-m228.sh
+
+.PHONY: format-m231 test-m231 test-m231-package race-m231 benchmark-m231
+format-m231:
+	bash scripts/format-m231.sh
+
+test-m231:
+	bash scripts/test-m231.sh
+
+test-m231-package:
+	bash scripts/test-m231-package.sh
+
+race-m231:
+	bash scripts/race-m231.sh
+
+benchmark-m231:
+	bash scripts/benchmark-m231.sh

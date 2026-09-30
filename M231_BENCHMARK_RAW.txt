@@ -1,0 +1,36 @@
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatCache
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkM231ExistingExactlyOnceBatchWrite/batch-1-32         	163144394	         1.450 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM231ExistingExactlyOnceBatchWrite/batch-1-32         	159959781	         1.468 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM231ExistingExactlyOnceBatchWrite/batch-1-32         	164564524	         1.456 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM231ExistingExactlyOnceBatchWrite/batch-1-32         	163775706	         1.682 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM231ExistingExactlyOnceBatchWrite/batch-1-32         	142286870	         1.626 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM231ExistingExactlyOnceBatchWrite/batch-64-32        	182708983	         1.490 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM231ExistingExactlyOnceBatchWrite/batch-64-32        	144512500	         1.648 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM231ExistingExactlyOnceBatchWrite/batch-64-32        	147272636	         1.612 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM231ExistingExactlyOnceBatchWrite/batch-64-32        	151915022	         1.408 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM231ExistingExactlyOnceBatchWrite/batch-64-32        	152109103	         1.530 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM231ExistingExactlyOnceBatchWrite/batch-256-32       	156882099	         1.631 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM231ExistingExactlyOnceBatchWrite/batch-256-32       	146365773	         1.620 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM231ExistingExactlyOnceBatchWrite/batch-256-32       	167485352	         1.354 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM231ExistingExactlyOnceBatchWrite/batch-256-32       	181979391	         1.319 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM231ExistingExactlyOnceBatchWrite/batch-256-32       	159648174	         1.364 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM231ExactlyOnceUpsertBatch/batch-1-32                	 1235682	       215.8 ns/op	     272 B/op	       2 allocs/op
+BenchmarkM231ExactlyOnceUpsertBatch/batch-1-32                	 1189796	       202.1 ns/op	     272 B/op	       2 allocs/op
+BenchmarkM231ExactlyOnceUpsertBatch/batch-1-32                	 1171942	       213.0 ns/op	     272 B/op	       2 allocs/op
+BenchmarkM231ExactlyOnceUpsertBatch/batch-1-32                	 1134608	       230.3 ns/op	     272 B/op	       2 allocs/op
+BenchmarkM231ExactlyOnceUpsertBatch/batch-1-32                	 1221596	       199.2 ns/op	     272 B/op	       2 allocs/op
+BenchmarkM231ExactlyOnceUpsertBatch/batch-64-32               	   21735	     11850 ns/op	   20904 B/op	      68 allocs/op
+BenchmarkM231ExactlyOnceUpsertBatch/batch-64-32               	   19064	     11158 ns/op	   20904 B/op	      68 allocs/op
+BenchmarkM231ExactlyOnceUpsertBatch/batch-64-32               	   21937	     11157 ns/op	   20904 B/op	      68 allocs/op
+BenchmarkM231ExactlyOnceUpsertBatch/batch-64-32               	   21628	     10797 ns/op	   20904 B/op	      68 allocs/op
+BenchmarkM231ExactlyOnceUpsertBatch/batch-64-32               	   22426	     11018 ns/op	   20904 B/op	      68 allocs/op
+BenchmarkM231ExactlyOnceUpsertBatch/batch-256-32              	    5744	     43228 ns/op	   83240 B/op	     417 allocs/op
+BenchmarkM231ExactlyOnceUpsertBatch/batch-256-32              	    5508	     43738 ns/op	   83240 B/op	     417 allocs/op
+BenchmarkM231ExactlyOnceUpsertBatch/batch-256-32              	    5440	     45394 ns/op	   83240 B/op	     417 allocs/op
+BenchmarkM231ExactlyOnceUpsertBatch/batch-256-32              	    5635	     44502 ns/op	   83240 B/op	     417 allocs/op
+BenchmarkM231ExactlyOnceUpsertBatch/batch-256-32              	    5383	     43076 ns/op	   83240 B/op	     417 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatCache	11.668s

@@ -40082,3 +40082,23 @@ batch envelope, and checkpoint load/save; the retry avoids a second mutation
 and journal append. Full raw samples are in
 [`M228_BENCHMARK_RAW.txt`](M228_BENCHMARK_RAW.txt). The binary tail benchmark
 also reports `77 tail-bytes/op` for the one-command atomic batch.
+
+## M231 Exactly-Once Upsert Sinks
+
+Workload: bounded identity preparation plus one upsert call per journal record,
+compared with the existing append-shaped transactional `Write(batch)` call.
+The transactions use an observable in-process counter to prevent compiler
+elimination; they do not include network or durable-storage latency. Five
+200 ms samples were collected on an AMD Ryzen 9 5950X, `linux/amd64`.
+
+| Batch | Existing write median | Upsert median | CPU ratio | Upsert B/op | Upsert allocs/op |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 1.47 ns, 0 B, 0 | 213 ns, 272 B, 2 | 145x | 272 | 2 |
+| 64 | 1.53 ns, 0 B, 0 | 11,157 ns, 20,904 B, 68 | 7,292x | 20,904 | 68 |
+| 256 | 1.36 ns, 0 B, 0 | 43,738 ns, 83,240 B, 417 | 32,066x | 83,240 | 417 |
+
+The new path's cost is the identity string and duplicate-detection map for
+each batch. It is opt-in and intended for sinks where replay correctness is
+more important than the extra in-process bookkeeping; the durable destination
+and transaction latency are outside this microbenchmark. Raw output is in
+[`M231_BENCHMARK_RAW.txt`](M231_BENCHMARK_RAW.txt).
