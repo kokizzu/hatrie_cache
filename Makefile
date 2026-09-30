@@ -28790,3 +28790,7 @@ test-row-binary-bitmap-into:
 .PHONY: benchmark-row-binary-bitmap
 benchmark-row-binary-bitmap:
 	bash scripts/benchmark-row-binary-bitmap.sh
+
+.PHONY: benchmark-row-binary-bitmap-decode
+benchmark-row-binary-bitmap-decode:
+	bash scripts/benchmark-row-binary-bitmap-decode.sh

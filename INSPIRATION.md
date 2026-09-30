@@ -1279,3 +1279,15 @@ The ten-sample 4,096-row benchmark measured 1.38x lower latency, about
 807x less allocated heap, and 2.25x fewer allocations. Adaptive HSA1
 selection remains untouched, so callers pay no new default cost. See
 [ROW_BINARY_BITMAP_ENCODE_INTO.md](ROW_BINARY_BITMAP_ENCODE_INTO.md).
+
+- [x] C188 Reusable explicit nullable-bitmap RowBinary decoder buffers. `DecodeSQLRowBinaryBitmapInto` reuses destination rows and value buffers while preserving HSB1 decoding and ownership semantics. See [ROW_BINARY_BITMAP_ENCODE_INTO.md](ROW_BINARY_BITMAP_ENCODE_INTO.md).
+
+## C188: Reusable nullable-bitmap RowBinary decoder buffers
+
+Explicit HSB1 bitmap consumers can reuse decoded rows just like the
+adaptive and dictionary readers. `DecodeSQLRowBinaryBitmapInto` retains
+row maps and string/bytes/JSON value buffers without changing framing,
+validation, NULL behavior, or ownership. The ten-sample 4,096-row
+benchmark measured 1.77x lower latency, 11.0x less heap, and 2.39x
+fewer allocations. See
+[ROW_BINARY_BITMAP_ENCODE_INTO.md](ROW_BINARY_BITMAP_ENCODE_INTO.md).

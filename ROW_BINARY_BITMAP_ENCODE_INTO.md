@@ -38,3 +38,32 @@ produced these medians:
 
 The output is byte-for-byte identical, so the improvement is allocation and
 CPU reuse rather than a bandwidth tradeoff.
+
+## Reusable nullable-bitmap decoding
+
+`DecodeSQLRowBinaryBitmapInto` reuses row maps and string/bytes/JSON value
+buffers when the caller passes the previous result as `dst[:0]`:
+
+```go
+decoded, err := hatSql.DecodeSQLRowBinaryBitmapInto(nil, columns, wire)
+if err != nil {
+	return err
+}
+for _, nextWire := range laterWires {
+	decoded, err = hatSql.DecodeSQLRowBinaryBitmapInto(decoded[:0], columns, nextWire)
+	if err != nil {
+		return err
+	}
+	consume(decoded)
+}
+```
+
+The allocating `DecodeSQLRowBinaryBitmap` API remains available and delegates
+to the same validated implementation. HSB1 framing, malformed-input errors,
+NULL semantics, and value ownership are unchanged; the reusable decoder is
+single-owner and the caller owns the destination slice.
+
+On the same ten-sample 4,096-row workload, warm `DecodeInto` measured 745,210
+ns/op, 163,151 B/op, and 10,481 allocations versus 1,321,556 ns/op,
+1,794,134 B/op, and 25,038 allocations before reuse: 1.77x faster, 11.0x
+less allocated heap, and 2.39x fewer allocations.

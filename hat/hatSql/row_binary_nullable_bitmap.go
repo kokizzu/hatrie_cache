@@ -71,11 +71,22 @@ func encodeSQLRowBinaryBitmapValidated(destination []byte, columns []SQLRowBinar
 // rejects invalid markers, unused bitmap bits, truncated values, and trailing
 // malformed rows.
 func DecodeSQLRowBinaryBitmap(columns []SQLRowBinaryColumn, encoded []byte) ([]SQLRow, error) {
+	return DecodeSQLRowBinaryBitmapInto(nil, columns, encoded)
+}
+
+// DecodeSQLRowBinaryBitmapInto decodes nullable RowBinary rows into dst,
+// reusing row maps and bytes/JSON value buffers when the caller passes the
+// result from a previous call.
+func DecodeSQLRowBinaryBitmapInto(dst []SQLRow, columns []SQLRowBinaryColumn, encoded []byte) ([]SQLRow, error) {
 	if err := validateSQLRowBinaryColumns(columns); err != nil {
 		return nil, err
 	}
+	return decodeSQLRowBinaryBitmapInto(dst, columns, encoded)
+}
+
+func decodeSQLRowBinaryBitmapInto(dst []SQLRow, columns []SQLRowBinaryColumn, encoded []byte) ([]SQLRow, error) {
 	if len(encoded) == 0 {
-		return nil, nil
+		return dst[:0], nil
 	}
 	if len(encoded) < len(sqlRowBinaryNullableBitmapMagic) || string(encoded[:len(sqlRowBinaryNullableBitmapMagic)]) != string(sqlRowBinaryNullableBitmapMagic[:]) {
 		return nil, fmt.Errorf("RowBinary bitmap format marker is invalid or truncated")
@@ -83,9 +94,9 @@ func DecodeSQLRowBinaryBitmap(columns []SQLRowBinaryColumn, encoded []byte) ([]S
 	nullableBits, bitmapBytes, nullableCount := sqlRowBinaryNullableBitmapLayout(columns)
 	offset := len(sqlRowBinaryNullableBitmapMagic)
 	if offset == len(encoded) {
-		return nil, nil
+		return dst[:0], nil
 	}
-	rows := make([]SQLRow, 0)
+	rows := dst[:0]
 	for offset < len(encoded) {
 		if len(rows) >= maxSQLRowBinaryRows {
 			return nil, fmt.Errorf("RowBinary bitmap row count exceeds limit %d", maxSQLRowBinaryRows)
@@ -98,20 +109,20 @@ func DecodeSQLRowBinaryBitmap(columns []SQLRowBinaryColumn, encoded []byte) ([]S
 		if err := validateSQLRowBinaryNullableBitmap(bitmap, nullableCount, len(rows)); err != nil {
 			return nil, err
 		}
-		row := make(SQLRow, len(columns))
+		rows = appendSQLRowBinaryDecodeRow(rows, columns)
+		rowIndex := len(rows) - 1
 		for columnIndex, column := range columns {
 			if bit := nullableBits[columnIndex]; bit >= 0 && bitmap[bit/8]&(byte(1)<<uint(bit%8)) != 0 {
-				row[column.Name] = nil
+				rows[rowIndex][column.Name] = nil
 				continue
 			}
-			value, next, err := decodeSQLRowBinaryBitmapValue(column.Type, encoded, offset, len(rows), column.Name)
+			value, next, err := decodeSQLRowBinaryBitmapValueInto(column.Type, encoded, offset, rowIndex, column.Name, rows[rowIndex][column.Name])
 			if err != nil {
 				return nil, err
 			}
-			row[column.Name] = value
+			rows[rowIndex][column.Name] = value
 			offset = next
 		}
-		rows = append(rows, row)
 	}
 	return rows, nil
 }
@@ -217,6 +228,37 @@ func decodeSQLRowBinaryBitmapValue(kind SQLRowBinaryType, encoded []byte, offset
 		return uuid, next, nil
 	default:
 		return nil, offset, fmt.Errorf("RowBinary bitmap column %q has unsupported type %d", column, kind)
+	}
+}
+
+func decodeSQLRowBinaryBitmapValueInto(kind SQLRowBinaryType, encoded []byte, offset, row int, column string, previous interface{}) (interface{}, int, error) {
+	if kind != SQLRowBinaryString && kind != SQLRowBinaryBytes && kind != SQLRowBinaryJSON {
+		return decodeSQLRowBinaryBitmapValue(kind, encoded, offset, row, column)
+	}
+	value, next, err := decodeSQLRowBinaryBitmapBytes(encoded, offset, row, column)
+	if err != nil {
+		return nil, offset, err
+	}
+	switch kind {
+	case SQLRowBinaryString:
+		if old, ok := previous.(string); ok && sqlRowBinaryStringMatchesBytes(old, value) {
+			return old, next, nil
+		}
+		return string(value), next, nil
+	case SQLRowBinaryJSON:
+		if old, ok := previous.(json.RawMessage); ok && cap(old) >= len(value) {
+			old = old[:len(value)]
+			copy(old, value)
+			return old, next, nil
+		}
+		return json.RawMessage(append([]byte(nil), value...)), next, nil
+	default:
+		if old, ok := previous.([]byte); ok && cap(old) >= len(value) {
+			old = old[:len(value)]
+			copy(old, value)
+			return old, next, nil
+		}
+		return append([]byte(nil), value...), next, nil
 	}
 }
 

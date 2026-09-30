@@ -39767,3 +39767,18 @@ columns, ten samples on an AMD Ryzen 9 5950X. Every operation emitted
 The output is byte-for-byte identical; the reusable API is explicit and
 adaptive HSA1 selection does not encode a bitmap candidate. See
 [ROW_BINARY_BITMAP_ENCODE_INTO.md](ROW_BINARY_BITMAP_ENCODE_INTO.md).
+
+## C188 Reusable nullable-bitmap RowBinary decoder buffers
+
+Workload: 4,096 rows with nullable `INT64`, string, bytes, and boolean
+columns, ten samples on an AMD Ryzen 9 5950X. Every operation read
+124,342 wire bytes.
+
+| Operation | Median ns/op | B/op | Allocs/op | Relative latency |
+| --- | ---: | ---: | ---: | ---: |
+| Existing `DecodeSQLRowBinaryBitmap` | 1,321,556 | 1,794,134 | 25,038 | 1.00x |
+| Warm `DecodeSQLRowBinaryBitmapInto` | 745,210 | 163,151 | 10,481 | 1.77x faster |
+
+HSB1 bytes and decoded values are unchanged; the reusable API is explicit
+and caller-owned. See
+[ROW_BINARY_BITMAP_ENCODE_INTO.md](ROW_BINARY_BITMAP_ENCODE_INTO.md).
