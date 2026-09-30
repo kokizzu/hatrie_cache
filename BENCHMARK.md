@@ -40149,3 +40149,28 @@ allocation or memory increase. Durable-store and network latency are outside
 this microbenchmark. Raw samples are in
 [`M233_BENCHMARK_RAW.txt`](M233_BENCHMARK_RAW.txt), with API and operational
 requirements in [M233_SINK_RETRY_DEDUPLICATION.md](M233_SINK_RETRY_DEDUPLICATION.md).
+
+## M234 Bounded Sink Pending-Output Queue
+
+Workload: 256 output records per iteration, an 18-byte payload, and a 9-byte
+idempotency key. Five 200 ms samples were collected on an AMD Ryzen 9 5950X,
+`linux/amd64`. The existing path is an unbounded `[]SinkPendingOutput` with
+the same payload copies. The bounded path uses item and byte admission,
+head-only acknowledgement, and a 256-entry warm-start metadata ring.
+
+| Workload | Path | Median ns/op | Median B/op | Median allocs/op | Relative CPU | Relative cumulative allocation |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| enqueue and acknowledge 256 outputs | Existing unbounded slice | 14,583 | 14,336 | 768 | 1.00x | 1.00x |
+| enqueue and acknowledge 256 outputs | M234 bounded queue | 16,083 | 6,144 | 256 | 1.10x | 0.43x |
+| create and retain 256 outputs | Existing unbounded slice | 16,286 | 14,336 | 768 | 1.00x | 1.00x |
+| create and retain 256 outputs | M234 bounded queue | 15,894 | 22,752 | 259 | 0.98x | 1.59x |
+
+The steady-state bounded path is about 10% slower but uses 67% fewer
+allocations and 57% less cumulative allocation. In the retained workload it
+is slightly faster and uses 66% fewer allocations, while cumulative `B/op` is
+1.59x because the queue reserves bounded metadata capacity. `B/op` is a
+cumulative allocation metric, not a live-heap measurement. The operational
+benefit is the hard item and payload-byte ceiling: a slow sink cannot grow the
+pending output set without bound. Raw samples are in
+[`M234_BENCHMARK_RAW.txt`](M234_BENCHMARK_RAW.txt), with API and correctness
+details in [M234_SINK_BACKPRESSURE.md](M234_SINK_BACKPRESSURE.md).

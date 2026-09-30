@@ -28887,3 +28887,20 @@ race-m233:
 .PHONY: test-m233-package
 test-m233-package:
 	bash scripts/test-m233-package.sh
+
+.PHONY: test-m234
+test-m234:
+	bash scripts/test-m234.sh
+
+.PHONY: format-m234
+format-m234:
+	bash scripts/format-m234.sh
+
+.PHONY: benchmark-m234 race-m234
+benchmark-m234:
+	bash scripts/benchmark-m234.sh
+race-m234:
+	bash scripts/race-m234.sh
+.PHONY: test-m234-package
+test-m234-package:
+	bash scripts/test-m234-package.sh

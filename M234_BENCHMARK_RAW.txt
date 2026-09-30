@@ -1,0 +1,26 @@
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatPipeline
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkM234ExistingUnboundedPendingAppendAck-32    	   15180	     14821 ns/op	   14336 B/op	     768 allocs/op
+BenchmarkM234ExistingUnboundedPendingAppendAck-32    	   16176	     14583 ns/op	   14336 B/op	     768 allocs/op
+BenchmarkM234ExistingUnboundedPendingAppendAck-32    	   16004	     14435 ns/op	   14336 B/op	     768 allocs/op
+BenchmarkM234ExistingUnboundedPendingAppendAck-32    	   16515	     14479 ns/op	   14336 B/op	     768 allocs/op
+BenchmarkM234ExistingUnboundedPendingAppendAck-32    	   16033	     14838 ns/op	   14336 B/op	     768 allocs/op
+BenchmarkM234BoundedQueueTryEnqueueAck-32            	   14853	     16298 ns/op	    6144 B/op	     256 allocs/op
+BenchmarkM234BoundedQueueTryEnqueueAck-32            	   14928	     15861 ns/op	    6144 B/op	     256 allocs/op
+BenchmarkM234BoundedQueueTryEnqueueAck-32            	   15222	     16083 ns/op	    6144 B/op	     256 allocs/op
+BenchmarkM234BoundedQueueTryEnqueueAck-32            	   15032	     15823 ns/op	    6144 B/op	     256 allocs/op
+BenchmarkM234BoundedQueueTryEnqueueAck-32            	   15175	     16312 ns/op	    6144 B/op	     256 allocs/op
+BenchmarkM234ExistingUnboundedRetained256-32         	   14725	     16141 ns/op	   14336 B/op	     768 allocs/op
+BenchmarkM234ExistingUnboundedRetained256-32         	   14751	     16032 ns/op	   14336 B/op	     768 allocs/op
+BenchmarkM234ExistingUnboundedRetained256-32         	   14851	     17145 ns/op	   14336 B/op	     768 allocs/op
+BenchmarkM234ExistingUnboundedRetained256-32         	   14750	     16516 ns/op	   14336 B/op	     768 allocs/op
+BenchmarkM234ExistingUnboundedRetained256-32         	   14666	     16286 ns/op	   14336 B/op	     768 allocs/op
+BenchmarkM234BoundedQueueRetained256-32              	   14862	     15894 ns/op	   22752 B/op	     259 allocs/op
+BenchmarkM234BoundedQueueRetained256-32              	   15633	     15446 ns/op	   22752 B/op	     259 allocs/op
+BenchmarkM234BoundedQueueRetained256-32              	   14590	     16555 ns/op	   22752 B/op	     259 allocs/op
+BenchmarkM234BoundedQueueRetained256-32              	   15158	     15921 ns/op	   22752 B/op	     259 allocs/op
+BenchmarkM234BoundedQueueRetained256-32              	   15462	     15535 ns/op	   22752 B/op	     259 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatPipeline	8.020s
