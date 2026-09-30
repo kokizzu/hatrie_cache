@@ -17,6 +17,9 @@ var (
 // and time columns. Other column types retain the RowBinary representation.
 // The format is opt-in and requires the same ordered schema when decoding.
 func EncodeSQLRowBinaryDelta(columns []SQLRowBinaryColumn, rows []SQLRow) ([]byte, error) {
+	if err := validateSQLRowBinaryColumns(columns); err != nil {
+		return nil, err
+	}
 	return encodeSQLRowBinaryDelta(columns, rows, false)
 }
 
@@ -24,6 +27,9 @@ func EncodeSQLRowBinaryDelta(columns []SQLRowBinaryColumn, rows []SQLRow) ([]byt
 // for integer and time columns. It is most effective for regularly advancing
 // counters and timestamps; use EncodeSQLRowBinaryDelta for irregular data.
 func EncodeSQLRowBinaryDoubleDelta(columns []SQLRowBinaryColumn, rows []SQLRow) ([]byte, error) {
+	if err := validateSQLRowBinaryColumns(columns); err != nil {
+		return nil, err
+	}
 	return encodeSQLRowBinaryDelta(columns, rows, true)
 }
 
@@ -64,7 +70,7 @@ func encodeSQLRowBinaryDelta(columns []SQLRowBinaryColumn, rows []SQLRow, double
 				encoded = append(encoded, 0)
 			}
 			if sqlRowBinaryDeltaType(column.Type) {
-				current, err := sqlRowBinaryDeltaColumnValue(column, value, rowIndex)
+				current, err := sqlRowBinaryDeltaValue(column.Type, value, rowIndex, column.Name)
 				if err != nil {
 					return nil, err
 				}
@@ -80,7 +86,103 @@ func encodeSQLRowBinaryDelta(columns []SQLRowBinaryColumn, rows []SQLRow, double
 				continue
 			}
 			var err error
-			encoded, err = appendSQLRowBinaryDeltaColumnValue(encoded, column, value, rowIndex)
+			encoded, err = appendSQLRowBinaryDeltaValue(encoded, column.Type, value, rowIndex, column.Name)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return encoded, nil
+}
+
+type sqlRowBinaryDeltaScratch struct {
+	previous      []uint64
+	previousDelta []uint64
+	seen          []bool
+}
+
+func (scratch *sqlRowBinaryDeltaScratch) reset(columnCount int) {
+	if cap(scratch.previous) < columnCount {
+		scratch.previous = make([]uint64, columnCount)
+	} else {
+		scratch.previous = scratch.previous[:columnCount]
+	}
+	if cap(scratch.previousDelta) < columnCount {
+		scratch.previousDelta = make([]uint64, columnCount)
+	} else {
+		scratch.previousDelta = scratch.previousDelta[:columnCount]
+	}
+	if cap(scratch.seen) < columnCount {
+		scratch.seen = make([]bool, columnCount)
+	} else {
+		scratch.seen = scratch.seen[:columnCount]
+	}
+	for index := range scratch.previous {
+		scratch.previous[index] = 0
+		scratch.previousDelta[index] = 0
+		scratch.seen[index] = false
+	}
+}
+
+func encodeSQLRowBinaryDeltaValidated(destination []byte, columns []SQLRowBinaryColumn, rows []SQLRow, doubleDelta bool, scratch *sqlRowBinaryDeltaScratch) ([]byte, error) {
+	if len(rows) == 0 {
+		return destination[:0], nil
+	}
+	if len(rows) > maxSQLRowBinaryRows {
+		return nil, fmt.Errorf("RowBinary delta row count %d exceeds limit %d", len(rows), maxSQLRowBinaryRows)
+	}
+	magic := sqlRowBinaryDeltaMagic
+	if doubleDelta {
+		magic = sqlRowBinaryDoubleDeltaMagic
+	}
+	if scratch == nil {
+		scratch = &sqlRowBinaryDeltaScratch{}
+	}
+	scratch.reset(len(columns))
+	encoded := destination[:0]
+	initialCapacity := len(rows) * len(columns)
+	if cap(encoded) < initialCapacity {
+		encoded = make([]byte, 0, initialCapacity)
+	}
+	encoded = append(encoded, magic[:]...)
+	encoded = appendSQLRowBinaryDeltaUvarint(encoded, uint64(len(rows)))
+	previous := scratch.previous
+	previousDelta := scratch.previousDelta
+	seen := scratch.seen
+	for rowIndex, row := range rows {
+		for columnIndex, column := range columns {
+			value := interface{}(nil)
+			if row != nil {
+				value = row[column.Name]
+			}
+			if value == nil {
+				if !column.Nullable {
+					return nil, fmt.Errorf("RowBinary delta row %d column %q is NULL but not nullable", rowIndex, column.Name)
+				}
+				encoded = append(encoded, 1)
+				continue
+			}
+			if column.Nullable {
+				encoded = append(encoded, 0)
+			}
+			if sqlRowBinaryDeltaType(column.Type) {
+				current, err := sqlRowBinaryDeltaValue(column.Type, value, rowIndex, column.Name)
+				if err != nil {
+					return nil, err
+				}
+				delta := current - previous[columnIndex]
+				encodedDelta := delta
+				if doubleDelta {
+					encodedDelta -= previousDelta[columnIndex]
+				}
+				encoded = appendSQLRowBinaryDeltaUvarint(encoded, sqlRowBinaryDeltaZigZag(encodedDelta))
+				previousDelta[columnIndex] = delta
+				previous[columnIndex] = current
+				seen[columnIndex] = true
+				continue
+			}
+			var err error
+			encoded, err = appendSQLRowBinaryDeltaValue(encoded, column.Type, value, rowIndex, column.Name)
 			if err != nil {
 				return nil, err
 			}

@@ -60,13 +60,17 @@ func EncodeSQLRowBinary(columns []SQLRowBinaryColumn, rows []SQLRow) ([]byte, er
 	if err := validateSQLRowBinaryColumns(columns); err != nil {
 		return nil, err
 	}
+	return encodeSQLRowBinaryValidated(nil, columns, rows)
+}
+
+func encodeSQLRowBinaryValidated(destination []byte, columns []SQLRowBinaryColumn, rows []SQLRow) ([]byte, error) {
 	if len(rows) == 0 {
-		return nil, nil
+		return destination[:0], nil
 	}
 	if len(rows) > maxSQLRowBinaryRows {
 		return nil, fmt.Errorf("RowBinary row count %d exceeds limit %d", len(rows), maxSQLRowBinaryRows)
 	}
-	encoded := make([]byte, 0)
+	encoded := destination[:0]
 	for rowIndex, row := range rows {
 		for _, column := range columns {
 			value := interface{}(nil)
@@ -84,7 +88,7 @@ func EncodeSQLRowBinary(columns []SQLRowBinaryColumn, rows []SQLRow) ([]byte, er
 				encoded = append(encoded, 0)
 			}
 			var err error
-			encoded, err = appendSQLRowBinaryColumnValue(encoded, column, value, rowIndex)
+			encoded, err = appendSQLRowBinaryValue(encoded, column.Type, value, rowIndex, column.Name)
 			if err != nil {
 				return nil, err
 			}

@@ -1218,3 +1218,13 @@ lower median latency, 17,784 -> 16,504 B/op, and 20 -> 19 allocations. The
 candidate payload allocations remain, so this is opt-in rather than a claim of
 zero-copy adaptive encoding. See
 [ROW_BINARY_ADAPTIVE_ENCODE_INTO.md](ROW_BINARY_ADAPTIVE_ENCODE_INTO.md).
+## C182: Reusable adaptive RowBinary candidate state
+
+ClickHouse-style transfer loops benefit from reusing the complete candidate
+working set, not only the final envelope. `hatSql.SQLRowBinaryAdaptiveEncoder`
+retains legacy, delta, and double-delta payload buffers plus per-column delta
+scratch while preserving adaptive selection and the existing stateless APIs.
+The paired 128-row benchmark measured 1.32x lower median latency and reduced
+warm-call allocation from 16,504 B/19 allocations to 0 B/0 allocations. The
+feature is opt-in because it retains high-water memory and is not concurrent.
+See [ROW_BINARY_ADAPTIVE_ENCODER.md](ROW_BINARY_ADAPTIVE_ENCODER.md).

@@ -34,6 +34,77 @@ func EncodeSQLRowBinaryAdaptiveInto(dst []byte, columns []SQLRowBinaryColumn, ro
 	return encodeSQLRowBinaryAdaptive(dst, columns, rows)
 }
 
+// SQLRowBinaryAdaptiveEncoder retains candidate payload and delta scratch
+// buffers for repeated adaptive encodes. Its zero value is ready for use; one
+// encoder must not be used concurrently by multiple goroutines.
+type SQLRowBinaryAdaptiveEncoder struct {
+	legacy       []byte
+	delta        []byte
+	doubleDelta  []byte
+	deltaScratch sqlRowBinaryDeltaScratch
+}
+
+// Reset releases retained candidate and scratch buffers. It is useful after a
+// workload with unusually large rows so the encoder does not keep its high
+// water mark.
+func (encoder *SQLRowBinaryAdaptiveEncoder) Reset() {
+	if encoder == nil {
+		return
+	}
+	*encoder = SQLRowBinaryAdaptiveEncoder{}
+}
+
+// EncodeInto reuses the encoder's candidate buffers and writes the selected
+// HSA1 envelope into dst. It preserves the stateless adaptive selection and
+// wire format while avoiding candidate allocations after warm-up.
+func (encoder *SQLRowBinaryAdaptiveEncoder) EncodeInto(dst []byte, columns []SQLRowBinaryColumn, rows []SQLRow) ([]byte, error) {
+	if encoder == nil {
+		return EncodeSQLRowBinaryAdaptiveInto(dst, columns, rows)
+	}
+	if err := validateSQLRowBinaryColumns(columns); err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return dst[:0], nil
+	}
+	if len(rows) > maxSQLRowBinaryRows {
+		return nil, fmt.Errorf("RowBinary row count %d exceeds limit %d", len(rows), maxSQLRowBinaryRows)
+	}
+	var err error
+	encoder.legacy, err = encodeSQLRowBinaryValidated(encoder.legacy, columns, rows)
+	if err != nil {
+		return nil, err
+	}
+	encoder.delta, err = encodeSQLRowBinaryDeltaValidated(encoder.delta, columns, rows, false, &encoder.deltaScratch)
+	if err != nil {
+		return nil, err
+	}
+	encoder.doubleDelta, err = encodeSQLRowBinaryDeltaValidated(encoder.doubleDelta, columns, rows, true, &encoder.deltaScratch)
+	if err != nil {
+		return nil, err
+	}
+	codec := SQLRowBinaryAdaptiveCodecLegacy
+	selected := encoder.legacy
+	if len(encoder.delta) < len(selected) {
+		codec = SQLRowBinaryAdaptiveCodecDelta
+		selected = encoder.delta
+	}
+	if len(encoder.doubleDelta) < len(selected) {
+		codec = SQLRowBinaryAdaptiveCodecDoubleDelta
+		selected = encoder.doubleDelta
+	}
+	capacity := len(selected) + 1 + len(sqlRowBinaryAdaptiveMagic) + binary.MaxVarintLen64
+	if cap(dst) < capacity {
+		dst = make([]byte, 0, capacity)
+	} else {
+		dst = dst[:0]
+	}
+	dst = append(dst, sqlRowBinaryAdaptiveMagic[:]...)
+	dst = append(dst, byte(codec))
+	dst = appendSQLRowBinaryDeltaUvarint(dst, uint64(len(selected)))
+	return append(dst, selected...), nil
+}
+
 func encodeSQLRowBinaryAdaptive(dst []byte, columns []SQLRowBinaryColumn, rows []SQLRow) ([]byte, error) {
 	if err := validateSQLRowBinaryColumns(columns); err != nil {
 		return nil, err

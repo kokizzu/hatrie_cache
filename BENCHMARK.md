@@ -39678,3 +39678,24 @@ samples on an AMD Ryzen 9 5950X.
 The adaptive candidate payloads are unchanged; the reusable path removes only
 the final HSA1 envelope allocation. See
 [ROW_BINARY_ADAPTIVE_ENCODE_INTO.md](ROW_BINARY_ADAPTIVE_ENCODE_INTO.md).
+## C182 Reusable adaptive RowBinary candidate state
+
+Workload: 128 rows with `INT64`, `DateTime`, and string columns, ten samples on
+an AMD Ryzen 9 5950X. Both paths emitted 1,181 wire bytes.
+
+| Operation | Median ns/op | B/op | Allocs/op | Relative latency |
+| --- | ---: | ---: | ---: | ---: |
+| Stateless `EncodeSQLRowBinaryAdaptiveInto` | 29,191 | 16,504 | 19 | 1.00x |
+| Warm `SQLRowBinaryAdaptiveEncoder.EncodeInto` | 22,192 | 0 | 0 | 1.32x faster |
+
+Raw `ns/op` samples, in benchmark order:
+
+```text
+stateless_into: 28182 30065 29660 29303 30674 29608 28638 29021 28719 29078
+reusable_encoder: 20624 21746 21282 21317 23936 23700 22180 22203 23712 24003
+```
+
+The zero-allocation result is for warm calls and excludes the encoder's
+retained high-water candidate buffers and per-column scratch. The feature is
+opt-in and single-owner; `Reset` releases retained capacity. See
+[ROW_BINARY_ADAPTIVE_ENCODER.md](ROW_BINARY_ADAPTIVE_ENCODER.md).
