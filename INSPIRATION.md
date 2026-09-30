@@ -415,6 +415,11 @@ Materialize's Timely/Differential Dataflow runtime.
   batches atomically, and exposes deterministic snapshots; see
   [M037K_STATEFUL_GROUP_COUNT.md](M037K_STATEFUL_GROUP_COUNT.md) and
   [BENCHMARK.md](BENCHMARK.md#m037k-stateful-differential-group-count).
+- [x] M037l Stateful differential grouped `int64` `SUM` maintenance retains
+  one compact count/sum entry per active group, handles signed cross-batch
+  updates atomically, and exposes deterministic snapshots; see
+  [M037L_STATEFUL_GROUP_SUM.md](M037L_STATEFUL_GROUP_SUM.md) and
+  [BENCHMARK.md](BENCHMARK.md#m037l-stateful-differential-group-sum).
 - [ ] M038 Generic multiset duplicate preservation across all operators.
 - [x] M038a Duplicate multiplicity retained as signed diff weights.
 - [x] M038b Multiset-preserving expansion, union, and weighted join composition; see [DIFFERENTIAL_OPERATORS.md](DIFFERENTIAL_OPERATORS.md).
@@ -429,6 +434,9 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M038h Stateful duplicate-preserving differential grouped `COUNT`
   maintenance keeps weighted group multiplicity across batches; see
   [M037K_STATEFUL_GROUP_COUNT.md](M037K_STATEFUL_GROUP_COUNT.md).
+- [x] M038i Stateful duplicate-preserving differential grouped `int64` `SUM`
+  maintenance keeps weighted group multiplicity and exact sums across batches;
+  see [M037L_STATEFUL_GROUP_SUM.md](M037L_STATEFUL_GROUP_SUM.md).
 - [x] M038f SQL parser and executor support for duplicate-preserving
   `INTERSECT ALL` and `EXCEPT ALL`, including collation-aware multiplicity and
   left-order output; see [SQL_SET_OPERATIONS.md](SQL_SET_OPERATIONS.md).

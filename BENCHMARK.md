@@ -40285,3 +40285,24 @@ importable and opt-in, so existing batch behavior and planner defaults are
 unchanged. Raw samples are in
 [`M037K_BENCHMARK_RAW.txt`](M037K_BENCHMARK_RAW.txt), with API and correctness
 details in [`M037K_STATEFUL_GROUP_COUNT.md`](M037K_STATEFUL_GROUP_COUNT.md).
+
+<a id="m037l-stateful-differential-group-sum"></a>
+## M037L Stateful Differential Group SUM
+
+Five benchmark samples on Linux/amd64 with an AMD Ryzen 9 5950X. The workload
+uses 256 signed differential updates across 32 groups. The rebuild control
+recomputes the complete input history after every update. Stateful streaming
+uses one-row `Apply` calls; stateful batch uses one 256-row `Apply` call.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Improvement vs rebuild |
+| --- | ---: | ---: | ---: | --- |
+| Full-history rebuild after every update | 12,072,043 | 24,307,301 | 117,195 | baseline |
+| Stateful one-row streaming `Apply` | 108,478 | 186,665 | 1,223 | 111.3x faster, 130.2x lower bytes, 95.8x fewer allocations |
+| Stateful 256-row batch `Apply` | 104,472 | 209,745 | 971 | 115.6x faster, 115.9x lower bytes, 120.7x fewer allocations |
+
+The batch path uses 12.4% more transient bytes than streaming because it keeps
+pending per-group state for atomic validation, but it uses 20.6% fewer
+allocations. Both stateful paths retain only active aggregate state instead of
+historical input rows. Raw samples are in
+[`M037L_BENCHMARK_RAW.txt`](M037L_BENCHMARK_RAW.txt); API and correctness
+details are in [`M037L_STATEFUL_GROUP_SUM.md`](M037L_STATEFUL_GROUP_SUM.md).

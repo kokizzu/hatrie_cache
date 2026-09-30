@@ -1,0 +1,21 @@
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatSql
+cpu: AMD Ryzen 9 5950X 16-Core Processor            
+BenchmarkM037LSumFullHistoryRebuild-32    	      25	  12157493 ns/op	24307496 B/op	  117195 allocs/op
+BenchmarkM037LSumFullHistoryRebuild-32    	      26	  12337101 ns/op	24307310 B/op	  117195 allocs/op
+BenchmarkM037LSumFullHistoryRebuild-32    	      27	  11980522 ns/op	24307269 B/op	  117194 allocs/op
+BenchmarkM037LSumFullHistoryRebuild-32    	      27	  11873945 ns/op	24307301 B/op	  117195 allocs/op
+BenchmarkM037LSumFullHistoryRebuild-32    	      28	  12072043 ns/op	24307486 B/op	  117195 allocs/op
+BenchmarkM037LSumStatefulStreaming-32     	    3150	    108478 ns/op	  186665 B/op	    1223 allocs/op
+BenchmarkM037LSumStatefulStreaming-32     	    3178	    109625 ns/op	  186665 B/op	    1223 allocs/op
+BenchmarkM037LSumStatefulStreaming-32     	    3312	    107458 ns/op	  186665 B/op	    1223 allocs/op
+BenchmarkM037LSumStatefulStreaming-32     	    3052	    108745 ns/op	  186665 B/op	    1223 allocs/op
+BenchmarkM037LSumStatefulStreaming-32     	    3260	    103449 ns/op	  186665 B/op	    1223 allocs/op
+BenchmarkM037LSumStatefulBatch-32         	    3111	    103395 ns/op	  209745 B/op	     971 allocs/op
+BenchmarkM037LSumStatefulBatch-32         	    3483	    105063 ns/op	  209745 B/op	     971 allocs/op
+BenchmarkM037LSumStatefulBatch-32         	    3086	    100676 ns/op	  209745 B/op	     971 allocs/op
+BenchmarkM037LSumStatefulBatch-32         	    3843	    104472 ns/op	  209745 B/op	     971 allocs/op
+BenchmarkM037LSumStatefulBatch-32         	    3153	    109401 ns/op	  209745 B/op	     971 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatSql	6.614s
