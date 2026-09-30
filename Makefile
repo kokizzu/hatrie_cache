@@ -28706,3 +28706,15 @@ test-sparse-bitset-values-into:
 
 verify-sparse-bitset-values-into:
 	./scripts/verify-sparse-bitset-values-into.sh
+
+
+.PHONY: benchmark-roaring-values test-roaring-values-into verify-roaring-values-into
+
+benchmark-roaring-values:
+	bash scripts/benchmark-roaring-values.sh
+
+test-roaring-values-into:
+	bash scripts/test-roaring-values-into.sh
+
+verify-roaring-values-into:
+	bash scripts/verify-roaring-values-into.sh

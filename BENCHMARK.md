@@ -39584,3 +39584,17 @@ Workload: 100,000 sequential values, `go test -benchmem -count=10`.
 The existing allocation-returning API remains available. `ValuesInto` is the
 lower-allocation choice for callers that repeatedly enumerate into a reusable
 buffer.
+
+## C175 Reusable Roaring bitmap enumeration
+
+Workload: 100,000 sequential values, `go test -benchmem -count=10` on an AMD
+Ryzen 9 5950X.
+
+| Operation | Median ns/op | B/op | Allocs/op | Relative latency |
+| --- | ---: | ---: | ---: | ---: |
+| `RoaringBitmap.Values()` | 171,824 | 401,409 | 1 | 1.00x |
+| `RoaringBitmap.ValuesInto()` with reused buffer | 150,742 | 0 reported allocations | 0 | 1.14x faster |
+
+The pre-change `Values()` median was 165,238 ns/op with 401,408 B/op and one
+allocation. Its implementation was unchanged; the small post-change
+difference is benchmark variance. See [ROARING_VALUES_INTO.md](ROARING_VALUES_INTO.md).

@@ -1158,3 +1158,11 @@ keeps sorted enumeration semantics while letting repeated callers reuse a
 `[]uint64` buffer. The implementation was benchmarked before and after, with
 the reusable path removing the result allocation and measuring about 1.70x
 lower median latency for 100,000 values.
+
+## C175: Reusable Roaring bitmap enumeration buffer
+
+ClickHouse/Roaring-style bitmap scans can avoid allocating a fresh result for
+every enumeration. `RoaringBitmap.ValuesInto` adds that opt-in path while
+preserving the existing sorted `Values()` API and internal container
+ownership. The 100,000-value benchmark measured about 1.14x lower same-run
+median latency and removed the result allocation.

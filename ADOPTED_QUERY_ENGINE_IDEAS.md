@@ -1219,3 +1219,5 @@ and [BENCHMARK.md](BENCHMARK.md#compiled-query-negative-result-cache).
 | Tarantool / ClickHouse | Reusable authenticated cursor-token bytes | Implemented | `CursorTokenCodec.EncodeInto` reuses output plus raw-signature scratch while preserving the existing HMAC-SHA256/base64 format. Ten-sample result: 1.16x faster, 864 -> 480 B/op, and 9 -> 5 allocations versus `Encode`. See [CURSOR_TOKEN_ENCODE_INTO.md](CURSOR_TOKEN_ENCODE_INTO.md). |
 
 | C174 | ClickHouse/Roaring-style reusable scan output | Added `SparseBitset.ValuesInto` for sorted enumeration into caller-owned storage | 100,000 values: 1.70x lower median latency, 802,816 B/1 alloc -> 0 B/0 alloc | No semantic change to `Values()`; callers must retain and reuse the returned buffer |
+
+| C175 | ClickHouse/Roaring-style reusable bitmap enumeration | Added `RoaringBitmap.ValuesInto` for sorted enumeration into caller-owned storage | 100,000 values: 1.14x lower same-run median latency; 401,409 B/1 alloc -> 0 reported allocations/0 allocs | No semantic change to `Values()`; caller retains the destination buffer |
