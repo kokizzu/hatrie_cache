@@ -120,7 +120,7 @@ operator control remain the preferred deployment model.
 - [ ] M229 Source schema evolution with additive field compatibility checks.
 - [ ] M230 Source backpressure based on downstream frontier lag.
 - [x] M231 Exactly-once upsert sinks with durable output identities.
-- [ ] M232 Sink progress checkpoints coupled to emitted frontier messages.
+- [x] M232 Sink progress checkpoints coupled to emitted frontier messages; see [M232_SINK_FRONTIER_CHECKPOINTS.md](M232_SINK_FRONTIER_CHECKPOINTS.md) and [BENCHMARK.md](BENCHMARK.md#m232-sink-frontier-checkpoints).
 - [ ] M233 Sink retry and deduplication for disconnected output connections.
 - [ ] M234 Sink backpressure and bounded pending-output memory.
 - [ ] M235 Dependency graph invalidation for affected indexes and views only.

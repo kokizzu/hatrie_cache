@@ -28855,3 +28855,19 @@ race-m231:
 
 benchmark-m231:
 	bash scripts/benchmark-m231.sh
+
+.PHONY: format-m232 test-m232 test-m232-package race-m232 benchmark-m232
+format-m232:
+	bash scripts/format-m232.sh
+
+test-m232:
+	bash scripts/test-m232.sh
+
+test-m232-package:
+	bash scripts/test-m232-package.sh
+
+race-m232:
+	bash scripts/race-m232.sh
+
+benchmark-m232:
+	bash scripts/benchmark-m232.sh

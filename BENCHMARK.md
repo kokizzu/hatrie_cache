@@ -40102,3 +40102,25 @@ each batch. It is opt-in and intended for sinks where replay correctness is
 more important than the extra in-process bookkeeping; the durable destination
 and transaction latency are outside this microbenchmark. Raw output is in
 [`M231_BENCHMARK_RAW.txt`](M231_BENCHMARK_RAW.txt).
+
+## M232 Sink Frontier Checkpoints
+
+Workload: the existing numeric sink-progress acknowledgement, exact frontier
+message `Emit` plus `Acknowledge`, and a deterministic snapshot of 64 sink
+partitions. Five 200 ms samples were collected on an AMD Ryzen 9 5950X,
+`linux/amd64`. The benchmark measures in-process coordination only; network
+delivery and durable checkpoint-store I/O are excluded.
+
+| Operation | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Existing numeric progress acknowledgement | 58.78 | 0 | 0 | 1.00x |
+| Exact frontier `Emit` + `Acknowledge` | 134.4 | 0 | 0 | 2.29x |
+| Snapshot of 64 partitions | 8,971 | 5,016 | 4 | snapshot-only |
+
+The exact-message path adds 75.6 ns/op in this microbenchmark in exchange for
+retaining the subscription ID, revision, frontier, and completion bit and
+rejecting acknowledgements for superseded messages. Snapshot cost is paid only
+when the caller persists a checkpoint. This is an opt-in correctness feature,
+not a claim of lower CPU than the numeric tracker. Raw samples are in
+[`M232_BENCHMARK_RAW.txt`](M232_BENCHMARK_RAW.txt), with implementation and
+usage notes in [M232_SINK_FRONTIER_CHECKPOINTS.md](M232_SINK_FRONTIER_CHECKPOINTS.md).

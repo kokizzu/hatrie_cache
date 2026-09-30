@@ -1,0 +1,21 @@
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatSql
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkM232ExistingSinkProgressAcknowledge-32         	 3967954	        58.93 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM232ExistingSinkProgressAcknowledge-32         	 4032475	        58.64 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM232ExistingSinkProgressAcknowledge-32         	 3983364	        58.62 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM232ExistingSinkProgressAcknowledge-32         	 4040644	        59.73 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM232ExistingSinkProgressAcknowledge-32         	 4113434	        58.78 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM232FrontierCheckpointEmitAndAcknowledge-32    	 1759064	       131.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM232FrontierCheckpointEmitAndAcknowledge-32    	 1740904	       131.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM232FrontierCheckpointEmitAndAcknowledge-32    	 1813711	       135.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM232FrontierCheckpointEmitAndAcknowledge-32    	 1746379	       134.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM232FrontierCheckpointEmitAndAcknowledge-32    	 1822855	       134.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM232FrontierCheckpointSnapshot-32              	   25212	      9184 ns/op	    5016 B/op	       4 allocs/op
+BenchmarkM232FrontierCheckpointSnapshot-32              	   25929	      8971 ns/op	    5016 B/op	       4 allocs/op
+BenchmarkM232FrontierCheckpointSnapshot-32              	   25502	      9122 ns/op	    5016 B/op	       4 allocs/op
+BenchmarkM232FrontierCheckpointSnapshot-32              	   27153	      8926 ns/op	    5016 B/op	       4 allocs/op
+BenchmarkM232FrontierCheckpointSnapshot-32              	   27468	      8598 ns/op	    5016 B/op	       4 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatSql	5.042s
