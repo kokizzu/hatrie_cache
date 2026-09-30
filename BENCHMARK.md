@@ -40263,3 +40263,25 @@ allocations/op; the last column is differential relative to the control.
 Raw samples are in [`M065_BENCHMARK_RAW.txt`](M065_BENCHMARK_RAW.txt). The
 feature and tradeoffs are documented in
 [`M065_DIFFERENTIAL_ROW_NUMBER_LAG.md`](M065_DIFFERENTIAL_ROW_NUMBER_LAG.md).
+
+## M037k Stateful Differential Group Count
+
+Command: `make benchmark-m037k-stateful-group-count`.
+
+The rebuild control appends one update and recomputes the complete history
+after every update. The stateful paths maintain one count per group across the
+same 256-update stream or one batch. Five `-benchmem` samples were measured
+on Linux amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Rebuild complete history after every update | 12,650,463 | 25,086,735 | 117,420 | baseline |
+| Stateful one-update `Apply` | 114,254 | 185,897 | 1,223 | 110.7x faster, 134.9x lower bytes, 96.0x fewer allocations |
+| Stateful 256-update `Apply` | 111,205 | 205,649 | 971 | 113.8x faster, 122.0x lower bytes, 120.9x fewer allocations |
+
+The comparison measures incremental maintenance versus full-history rebuild;
+it does not claim that arbitrary grouped SQL is 118x faster. The API is
+importable and opt-in, so existing batch behavior and planner defaults are
+unchanged. Raw samples are in
+[`M037K_BENCHMARK_RAW.txt`](M037K_BENCHMARK_RAW.txt), with API and correctness
+details in [`M037K_STATEFUL_GROUP_COUNT.md`](M037K_STATEFUL_GROUP_COUNT.md).

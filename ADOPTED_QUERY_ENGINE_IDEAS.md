@@ -1257,6 +1257,16 @@ and [BENCHMARK.md](BENCHMARK.md#compiled-query-negative-result-cache).
 | ClickHouse / Tarantool | Reusable explicit HSD1/HSD2 RowBinary delta encoder output | Implemented | `EncodeSQLRowBinaryDeltaInto` and `EncodeSQLRowBinaryDoubleDeltaInto` reuse caller-owned output while preserving exact bytes and validation. The warm paths measured 1.27x/1.20x faster with more than 300x lower heap. [ROW_BINARY_DELTA_ENCODE_INTO.md](ROW_BINARY_DELTA_ENCODE_INTO.md) |
 
 | C190 | ClickHouse/Tarantool-style reusable RowBinary delta decoder buffers | Added `DecodeSQLRowBinaryDeltaInto` for HSD1/HSD2 caller-owned row reuse | 4,096 rows: 1.84x/1.88x faster, about 7.5x lower heap, and 1.77x fewer allocations; wire bytes unchanged | Destination ownership is explicit; existing decoder and HSD1/HSD2 formats remain compatible. See [ROW_BINARY_DELTA_DECODE_INTO.md](ROW_BINARY_DELTA_DECODE_INTO.md) |
+
+## M037k: Stateful Differential Group Count
+
+Adopted the Materialize-style arrangement idea for the narrow, specialized
+grouped `COUNT` case. `hatSql.IncrementalGroupCount` retains one compact count
+and timestamp per active group, accepts signed duplicate weights across
+batches, emits exact retractions and insertions, and validates batches before
+committing state. It is importable and opt-in; existing batch group counting
+and planner behavior remain unchanged. See
+[M037K_STATEFUL_GROUP_COUNT.md](M037K_STATEFUL_GROUP_COUNT.md).
 ## M065ag: Differential `ROW_NUMBER` and `LAG`
 
 Materialize-style signed differential maintenance is adopted as an importable

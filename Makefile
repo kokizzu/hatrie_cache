@@ -28990,3 +28990,37 @@ status-m065:
 .PHONY: commit-push-m065
 commit-push-m065:
 	bash scripts/commit-push-m065.sh
+.PHONY: baseline-m037k-stateful-group-count format-m037k-stateful-group-count test-m037k-stateful-group-count benchmark-m037k-stateful-group-count race-m037k-stateful-group-count vet-m037k-stateful-group-count package-test-m037k-stateful-group-count check-m037k-stateful-group-count status-m037k-stateful-group-count commit-m037k-stateful-group-count push-m037k-stateful-group-count
+
+baseline-m037k-stateful-group-count:
+	bash scripts/m037k-stateful-group-count.sh baseline
+
+format-m037k-stateful-group-count:
+	bash scripts/m037k-stateful-group-count.sh format
+
+test-m037k-stateful-group-count:
+	bash scripts/m037k-stateful-group-count.sh test
+
+benchmark-m037k-stateful-group-count:
+	bash scripts/m037k-stateful-group-count.sh benchmark
+
+race-m037k-stateful-group-count:
+	bash scripts/m037k-stateful-group-count.sh race
+
+vet-m037k-stateful-group-count:
+	bash scripts/m037k-stateful-group-count.sh vet
+
+package-test-m037k-stateful-group-count:
+	bash scripts/m037k-stateful-group-count.sh package-test
+
+check-m037k-stateful-group-count:
+	bash scripts/m037k-stateful-group-count.sh check
+
+status-m037k-stateful-group-count:
+	bash scripts/m037k-stateful-group-count.sh status
+
+commit-m037k-stateful-group-count:
+	bash scripts/m037k-stateful-group-count.sh commit
+
+push-m037k-stateful-group-count:
+	bash scripts/m037k-stateful-group-count.sh push

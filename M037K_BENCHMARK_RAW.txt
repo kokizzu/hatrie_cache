@@ -1,0 +1,21 @@
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatSql
+cpu: AMD Ryzen 9 5950X 16-Core Processor            
+BenchmarkM037KBatchRebuildGroupCount-32     	      86	  13248753 ns/op	25086873 B/op	  117420 allocs/op
+BenchmarkM037KBatchRebuildGroupCount-32     	      91	  12650463 ns/op	25086735 B/op	  117420 allocs/op
+BenchmarkM037KBatchRebuildGroupCount-32     	     100	  12280410 ns/op	25086728 B/op	  117420 allocs/op
+BenchmarkM037KBatchRebuildGroupCount-32     	     100	  12734112 ns/op	25086742 B/op	  117420 allocs/op
+BenchmarkM037KBatchRebuildGroupCount-32     	      81	  12535362 ns/op	25086714 B/op	  117420 allocs/op
+BenchmarkM037KStatefulGroupCount-32         	   10000	    105757 ns/op	  185897 B/op	    1223 allocs/op
+BenchmarkM037KStatefulGroupCount-32         	   10000	    103651 ns/op	  185897 B/op	    1223 allocs/op
+BenchmarkM037KStatefulGroupCount-32         	    9717	    117818 ns/op	  185897 B/op	    1223 allocs/op
+BenchmarkM037KStatefulGroupCount-32         	    9033	    116444 ns/op	  185897 B/op	    1223 allocs/op
+BenchmarkM037KStatefulGroupCount-32         	   10532	    114254 ns/op	  185897 B/op	    1223 allocs/op
+BenchmarkM037KStatefulGroupCountBatch-32    	   10000	    111205 ns/op	  205649 B/op	     971 allocs/op
+BenchmarkM037KStatefulGroupCountBatch-32    	   10000	    108860 ns/op	  205649 B/op	     971 allocs/op
+BenchmarkM037KStatefulGroupCountBatch-32    	   10000	    110992 ns/op	  205649 B/op	     971 allocs/op
+BenchmarkM037KStatefulGroupCountBatch-32    	   10000	    115635 ns/op	  205649 B/op	     971 allocs/op
+BenchmarkM037KStatefulGroupCountBatch-32    	    8948	    119498 ns/op	  205649 B/op	     971 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatSql	18.022s

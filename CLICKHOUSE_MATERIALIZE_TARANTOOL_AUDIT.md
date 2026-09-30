@@ -240,7 +240,15 @@ records a separate implementation boundary.
   caller-owned. See [M033_LOGICAL_TIMESTAMP_ORACLE.md](M033_LOGICAL_TIMESTAMP_ORACLE.md).
 - [ ] M037 Generic negative-diff support for every SQL operator.
 - [ ] M037e Generic keyed differential reduction was benchmarked and rolled back because the arbitrary callback path was about 7.97x slower, 6.36x larger in transient bytes, and 5.67x more allocation-heavy than the existing specialized reducer; see [BENCHMARK.md](BENCHMARK.md#rejected-generic-keyed-differential-reduction).
+- [x] M037k Stateful differential grouped `COUNT` arrangement with atomic
+  cross-batch signed updates and deterministic snapshots; generic aggregate
+  arrangement lowering remains open. See
+  [M037K_STATEFUL_GROUP_COUNT.md](M037K_STATEFUL_GROUP_COUNT.md).
 - [ ] M038 Generic multiset duplicate preservation across all operators.
+- [x] M038h Stateful duplicate-preserving grouped `COUNT` arrangement; the
+  specialized operator is importable and opt-in, while all-operator generic
+  multiset maintenance remains open. See
+  [M037K_STATEFUL_GROUP_COUNT.md](M037K_STATEFUL_GROUP_COUNT.md).
 - [ ] M052 Lowering SQL plans into reusable dataflow fragments.
 - [x] M052ac Native scalar set-operation fragments compose eligible `UNION`,
   `INTERSECT`, and `EXCEPT` branches through the existing native dataflow
