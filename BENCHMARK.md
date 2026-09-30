@@ -39851,3 +39851,18 @@ all-voter writes and reads, with one fewer allocation; the anonymous read path
 uses 80 B/op less than the legacy baseline.
 See [T208_ANONYMOUS_REPLICAS.md](T208_ANONYMOUS_REPLICAS.md) for API usage and
 the complete benchmark context.
+
+## T210 Master-master conflict hooks
+
+Workload: deterministic resolution of two `ConflictVersion` values from
+different source nodes, three one-second samples on an AMD Ryzen 9 5950X. The
+baseline is the clean T208 commit.
+
+| Operation | Baseline | Current | Relative latency |
+| --- | ---: | ---: | ---: |
+| `Resolve` without hook | 11.19 ns/op, 0 B/op, 0 allocs/op | 10.85 ns/op, 0 B/op, 0 allocs/op | 1.03x faster observed |
+| `ResolveWithHook` | n/a | 26.28 ns/op, 0 B/op, 0 allocs/op | 2.42x current no-hook latency |
+
+The no-hook path remains the default and allocation-free. Hook dispatch is
+explicit and adds about 15 ns/op without heap allocation. See
+[T210_CONFLICT_HOOKS.md](T210_CONFLICT_HOOKS.md).

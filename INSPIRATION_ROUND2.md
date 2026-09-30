@@ -151,7 +151,7 @@ operator control remain the preferred deployment model.
 - [x] T207 Replica eviction, rejoin, and stale-state recovery protocol. `hatTopology.MembershipJournal` now records explicit fenced `evict` and `rejoin` operations with atomic persistence, idempotent operation IDs, and replay visibility; snapshot/WAL recovery and traffic activation remain caller-owned. See [T207_REPLICA_EVICTION_REJOIN.md](T207_REPLICA_EVICTION_REJOIN.md) and [BENCHMARK.md#t207-replica-eviction-and-rejoin](BENCHMARK.md#t207-replica-eviction-and-rejoin).
 - [x] T208 Anonymous replicas that do not participate in quorum decisions. Implemented as opt-in `QuorumTarget` fan-out for read and write quorum execution; anonymous targets are contacted but excluded from quorum totals and read-value matching.
 - [ ] T209 Relay/applier backpressure when a replica falls behind.
-- [ ] T210 Master-master conflict hooks with source and sequence context.
+- [x] T210 Master-master conflict hooks with source and sequence context. `hatReplication.ConflictPolicyRegistry.ResolveWithHook` reports both competing `ConflictVersion` values, including source node IDs and sequences, after deterministic resolution or rejection without retaining raw keys or values. See [T210_CONFLICT_HOOKS.md](T210_CONFLICT_HOOKS.md) and [BENCHMARK.md#t210-master-master-conflict-hooks](BENCHMARK.md#t210-master-master-conflict-hooks).
 - [ ] T211 Configurable WAL synchronization modes with durability reporting.
 - [ ] T212 WAL retention and rotation policies tied to replica acknowledgments.
 - [ ] T213 Scheduled snapshots with checkpoint manifests and atomic publication.

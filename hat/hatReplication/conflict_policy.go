@@ -33,6 +33,32 @@ const (
 	ConflictPolicyReject
 )
 
+// ConflictResolutionDecision describes the outcome reported to a conflict
+// hook. Rejected conflicts have no winner.
+type ConflictResolutionDecision uint8
+
+const (
+	ConflictResolutionLeftWins ConflictResolutionDecision = iota + 1
+	ConflictResolutionRightWins
+	ConflictResolutionRejected
+)
+
+// ConflictResolutionEvent contains bounded conflict metadata for an
+// application-owned hook. ConflictVersion carries the source node and source
+// sequence for both competing writes; raw keys and values are not retained.
+type ConflictResolutionEvent struct {
+	Space    string
+	Left     ConflictVersion
+	Right    ConflictVersion
+	Winner   ConflictVersion
+	Decision ConflictResolutionDecision
+}
+
+// ConflictHook observes a non-equal conflict after the configured policy has
+// selected a winner or rejected the conflict. Hooks must be safe for concurrent
+// calls and cannot change the already selected result.
+type ConflictHook func(ConflictResolutionEvent)
+
 // ConflictPolicy configures conflict behavior for one named space. Source
 // priority is ordered highest-first and is copied when installed in a registry.
 type ConflictPolicy struct {
@@ -118,7 +144,33 @@ func (registry *ConflictPolicyRegistry) Resolve(space string, left, right Confli
 		policy = registry.defaultPolicy
 	}
 	registry.mu.RUnlock()
-	return resolveConflictWithPolicy(policy, left, right)
+	return resolveConflictWithPolicy(policy.Mode, policy.SourcePriority, left, right)
+}
+
+// ResolveWithHook resolves one conflict and invokes hook for a non-equal,
+// valid conflict after the policy selects a winner or rejects it. The hook is
+// explicit so the existing Resolve hot path remains allocation- and callback-
+// free. Hooks must be safe for concurrent calls and cannot change the result.
+func (registry *ConflictPolicyRegistry) ResolveWithHook(space string, left, right ConflictVersion, hook ConflictHook) (ConflictVersion, error) {
+	winner, resolveErr := registry.Resolve(space, left, right)
+	if hook == nil || resolveErr != nil && !errors.Is(resolveErr, ErrConflictRejected) {
+		return winner, resolveErr
+	}
+	comparison, compareErr := CompareConflictVersions(left, right)
+	if compareErr != nil || comparison == 0 {
+		return winner, resolveErr
+	}
+	event := ConflictResolutionEvent{Space: strings.TrimSpace(space), Left: left, Right: right, Winner: winner}
+	if resolveErr != nil {
+		event.Decision = ConflictResolutionRejected
+		event.Winner = ConflictVersion{}
+	} else if winner == left {
+		event.Decision = ConflictResolutionLeftWins
+	} else {
+		event.Decision = ConflictResolutionRightWins
+	}
+	hook(event)
+	return winner, resolveErr
 }
 
 func normalizeConflictPolicy(policy ConflictPolicy) (ConflictPolicy, error) {
@@ -151,8 +203,8 @@ func normalizeConflictPolicy(policy ConflictPolicy) (ConflictPolicy, error) {
 	}
 }
 
-func resolveConflictWithPolicy(policy ConflictPolicy, left, right ConflictVersion) (ConflictVersion, error) {
-	switch policy.Mode {
+func resolveConflictWithPolicy(mode ConflictPolicyMode, sourcePriority []string, left, right ConflictVersion) (ConflictVersion, error) {
+	switch mode {
 	case ConflictPolicyLastWriteWins:
 		return ResolveConflictVersion(left, right)
 	case ConflictPolicyReject:
@@ -165,8 +217,8 @@ func resolveConflictWithPolicy(policy ConflictPolicy, left, right ConflictVersio
 		}
 		return ConflictVersion{}, ErrConflictRejected
 	case ConflictPolicySourcePriority:
-		leftPriority := conflictSourcePriority(policy.SourcePriority, left.NodeID)
-		rightPriority := conflictSourcePriority(policy.SourcePriority, right.NodeID)
+		leftPriority := conflictSourcePriority(sourcePriority, left.NodeID)
+		rightPriority := conflictSourcePriority(sourcePriority, right.NodeID)
 		if leftPriority < rightPriority {
 			if _, err := CompareConflictVersions(left, right); err != nil {
 				return ConflictVersion{}, err
@@ -181,7 +233,7 @@ func resolveConflictWithPolicy(policy ConflictPolicy, left, right ConflictVersio
 		}
 		return ResolveConflictVersion(left, right)
 	default:
-		return ConflictVersion{}, fmt.Errorf("%w: unsupported mode %d", ErrConflictPolicyInvalid, policy.Mode)
+		return ConflictVersion{}, fmt.Errorf("%w: unsupported mode %d", ErrConflictPolicyInvalid, mode)
 	}
 }
 
