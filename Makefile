@@ -29172,3 +29172,33 @@ commit-c191-reusable-query-iterator:
 
 push-c191-reusable-query-iterator:
 	bash scripts/c191-reusable-query-iterator.sh push
+.PHONY: format-c192-rowbinary-client test-c192-rowbinary-client race-c192-rowbinary-client benchmark-c192-rowbinary-client vet-c192-rowbinary-client compile-c192-rowbinary-client package-c192-rowbinary-client status-c192-rowbinary-client commit-c192-rowbinary-client push-c192-rowbinary-client
+format-c192-rowbinary-client:
+	bash scripts/c192-rowbinary-client.sh format
+
+test-c192-rowbinary-client:
+	bash scripts/c192-rowbinary-client.sh test
+
+race-c192-rowbinary-client:
+	bash scripts/c192-rowbinary-client.sh race
+
+benchmark-c192-rowbinary-client:
+	bash scripts/c192-rowbinary-client.sh bench
+
+vet-c192-rowbinary-client:
+	bash scripts/c192-rowbinary-client.sh vet
+
+compile-c192-rowbinary-client:
+	bash scripts/c192-rowbinary-client.sh compile
+
+package-c192-rowbinary-client:
+	bash scripts/c192-rowbinary-client.sh package
+
+status-c192-rowbinary-client:
+	bash scripts/c192-rowbinary-client.sh status
+
+commit-c192-rowbinary-client:
+	bash scripts/c192-rowbinary-client.sh commit
+
+push-c192-rowbinary-client:
+	bash scripts/c192-rowbinary-client.sh push

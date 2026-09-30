@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"reflect"
 	"strings"
@@ -157,12 +158,17 @@ func QueryIterator[T any](ctx context.Context, conn *Conn, query string, paramet
 	return &RowIterator[T]{response: response, decoder: json.NewDecoder(response.Body)}, nil
 }
 
-// QueryRowBinaryIterator opens a pull-based typed RowBinary row iterator.
-// The stream is decoded incrementally and does not materialize all rows.
-func QueryRowBinaryIterator(ctx context.Context, conn *Conn, query string, parameters []interface{}) (*SQLRowBinaryStreamReader, error) {
+// QueryRowBinaryStream opens a pull-based RowBinary SQL stream. The stream is
+// decoded incrementally and does not materialize all rows.
+func (conn *Conn) QueryRowBinaryStream(ctx context.Context, query string, parameters []interface{}) (*SQLRowBinaryStreamReader, error) {
 	response, err := conn.streamRequestWithAccept(ctx, QueryRequest{Query: query, Parameters: parameters, Stream: true}, SQLRowBinaryStreamContentType)
 	if err != nil {
 		return nil, err
+	}
+	mediaType, _, parseErr := mime.ParseMediaType(response.Header.Get("Content-Type"))
+	if parseErr != nil || !strings.EqualFold(mediaType, SQLRowBinaryStreamContentType) {
+		_ = response.Body.Close()
+		return nil, fmt.Errorf("SQL RowBinary stream returned Content-Type %q", response.Header.Get("Content-Type"))
 	}
 	reader, err := NewSQLRowBinaryStreamReader(response.Body)
 	if err != nil {
@@ -170,6 +176,11 @@ func QueryRowBinaryIterator(ctx context.Context, conn *Conn, query string, param
 		return nil, err
 	}
 	return reader, nil
+}
+
+// QueryRowBinaryIterator is retained as an alias for the RowBinary stream API.
+func QueryRowBinaryIterator(ctx context.Context, conn *Conn, query string, parameters []interface{}) (*SQLRowBinaryStreamReader, error) {
+	return conn.QueryRowBinaryStream(ctx, query, parameters)
 }
 
 // Next advances to the next row. It returns false at completion or when Err
@@ -329,4 +340,25 @@ func QueryRows[T any](ctx context.Context, conn *Conn, query string, visit func(
 		}
 	}
 	return count, iterator.Err()
+}
+
+// QueryRowBinaryRows invokes visit for every RowBinary row. Returning an error
+// stops it while preserving the number of rows already delivered.
+func QueryRowBinaryRows(ctx context.Context, conn *Conn, query string, visit func(Row) error) (int, error) {
+	if visit == nil {
+		return 0, fmt.Errorf("SQL row callback is required")
+	}
+	reader, err := conn.QueryRowBinaryStream(ctx, query, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer reader.Close()
+	count := 0
+	for reader.Next() {
+		count++
+		if err := visit(reader.Row()); err != nil {
+			return count, err
+		}
+	}
+	return count, reader.Err()
 }

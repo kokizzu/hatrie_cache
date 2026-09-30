@@ -253,6 +253,12 @@ func QueryRows[T any](ctx context.Context, conn *SQLConn, query string, visit fu
 	return hatSql.QueryRows(ctx, conn, query, visit)
 }
 
+// QueryRowBinaryRows invokes visit for every row from the compact RowBinary
+// SQL stream and returns the number of rows delivered.
+func QueryRowBinaryRows(ctx context.Context, conn *SQLConn, query string, visit func(SQLRow) error) (int, error) {
+	return hatSql.QueryRowBinaryRows(ctx, conn, query, visit)
+}
+
 // QuerySQLTimeSeries evaluates SQL once, then returns gap-aware buckets and
 // optional rolling means.
 func QuerySQLTimeSeries(ctx context.Context, source string, resolver SQLSourceResolver, parameters []interface{}, queryOptions SQLQueryOptions, options SQLTimeSeriesOptions) (SQLTimeSeriesResult, error) {

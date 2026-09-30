@@ -40416,3 +40416,36 @@ BenchmarkRowIteratorNextInto-32     265328 ns/op  41969 B/op  2061 allocs/op
 
 `NextInto` is opt-in because the caller owns the reusable destination and its
 retained capacity. Existing `Next` remains the independent-row control.
+
+<a id="c192-client-sql-rowbinary-stream"></a>
+## C192 Client SQL RowBinary Stream
+
+Five benchmark samples on Linux/amd64 with an AMD Ryzen 9 5950X. Each
+iteration decodes 128 rows through an in-memory HTTP transport. The NDJSON
+control uses the existing `QueryRows` API; RowBinary uses the new
+`QueryRowBinaryRows` API. Wire bytes are fixed fixture lengths, and MB/s is
+the benchmark's in-memory decode throughput, not an end-to-end network claim.
+
+Raw samples:
+
+```text
+BenchmarkSQLClientNDJSONRows-32        5170  228979 ns/op  27.30 MB/s  6250 wire-bytes  82050 B/op  1953 allocs/op
+BenchmarkSQLClientNDJSONRows-32        4879  234584 ns/op  26.64 MB/s  6250 wire-bytes  82051 B/op  1953 allocs/op
+BenchmarkSQLClientNDJSONRows-32        5168  233267 ns/op  26.79 MB/s  6250 wire-bytes  82051 B/op  1953 allocs/op
+BenchmarkSQLClientNDJSONRows-32        4552  229212 ns/op  27.27 MB/s  6250 wire-bytes  82049 B/op  1953 allocs/op
+BenchmarkSQLClientNDJSONRows-32        5113  230449 ns/op  27.12 MB/s  6250 wire-bytes  82051 B/op  1953 allocs/op
+BenchmarkSQLClientRowBinaryRows-32    27504   48386 ns/op  50.86 MB/s  2461 wire-bytes  58902 B/op   812 allocs/op
+BenchmarkSQLClientRowBinaryRows-32    25284   46397 ns/op  53.04 MB/s  2461 wire-bytes  58903 B/op   812 allocs/op
+BenchmarkSQLClientRowBinaryRows-32    26274   46561 ns/op  52.86 MB/s  2461 wire-bytes  58902 B/op   812 allocs/op
+BenchmarkSQLClientRowBinaryRows-32    27049   45594 ns/op  53.98 MB/s  2461 wire-bytes  58903 B/op   812 allocs/op
+BenchmarkSQLClientRowBinaryRows-32    27486   44557 ns/op  55.23 MB/s  2461 wire-bytes  58902 B/op   812 allocs/op
+```
+
+| Path | Median ns/op | Median wire bytes | Median B/op | Median allocs/op | Improvement vs NDJSON |
+| --- | ---: | ---: | ---: | ---: | --- |
+| NDJSON `QueryRows` | 230,449 | 6,250 | 82,051 | 1,953 | baseline |
+| RowBinary `QueryRowBinaryRows` | 46,397 | 2,461 | 58,903 | 812 | 4.97x faster, 2.54x less wire, 28.2% lower bytes, 58.4% fewer allocations |
+
+The RowBinary path is opt-in and the existing JSON/NDJSON APIs remain
+available. Full API and fallback guidance is in
+[`SQL_ROWBINARY_CLIENT.md`](SQL_ROWBINARY_CLIENT.md).

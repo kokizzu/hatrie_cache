@@ -1355,3 +1355,15 @@ independent-row `Next` contract, and reuses the protocol envelope. The
 128-row benchmark measured about 1.10x lower median latency, 51.2% lower bytes
 and 15.7% fewer allocations; the API is opt-in because callers own the
 destination and its retained capacity. See [ROW_ITERATOR_NEXT_INTO.md](ROW_ITERATOR_NEXT_INTO.md).
+
+## C192: Client-side SQL RowBinary HTTP streams
+
+ClickHouse-style compact transfer and Tarantool-style tuple consumers suggest
+exposing the server's existing RowBinary stream on the Go client. `hatSql.Conn`
+now provides `QueryRowBinaryStream`, while `QueryRowBinaryIterator` remains a
+compatibility alias and `QueryRowBinaryRows` provides callback consumption.
+The client validates the response media type, preserves incremental decoding,
+supports positional parameters on the stream API, and leaves JSON/NDJSON APIs
+unchanged as the fallback. The 128-row benchmark measured 4.97x lower median
+decode latency, 2.54x less wire data, 28.2% lower allocated bytes, and 58.4%
+fewer allocations. See [SQL_ROWBINARY_CLIENT.md](SQL_ROWBINARY_CLIENT.md).
