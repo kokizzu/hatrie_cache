@@ -23738,6 +23738,51 @@ The complete disabled and post-change baseline samples are reproducible with
 `make benchmark-ch006`. Reproduce the archived pre-change samples with
 `make benchmark-ch006-baseline`.
 
+<a id="ch-006-composite-sparse-primary-marks-after-layout-eviction"></a>
+## CH-006 Composite Sparse-primary Marks After Layout Eviction
+
+This benchmark keeps the full typed-table layout cache at one byte so every
+query rebuilds the current batch while the separate sparse-mark cache retains
+only metadata. The baseline configures the same `(tenant, id)` workload with
+the previous first-field-only retention behavior; the current config retains
+the composite tuple marks as well. It ran on Linux/amd64 with an AMD Ryzen 9
+5950X and five `-benchmem` samples. The query is
+`tenant = 15 AND id >= 900` over 16 tenants, 1,024 rows per tenant, and 64
+rows per segment.
+
+| Case | Median ns/op | B/op | Allocs/op | Relative time | Relative bytes | Relative allocs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Before, first-field marks only | 663,893 | 677,460 | 12,599 | 1.00x | 1.00x | 1.00x |
+| After, composite marks retained | 640,699 | 677,460 | 12,599 | 1.04x faster | 1.00x | 1.00x |
+
+The end-to-end CPU improvement is modest because rebuilding the 16,384-row
+batch dominates this workload. Query allocations and bytes are unchanged. The
+retained mark budget for this fixture increases from 6,214 bytes for one
+field's bounds to 14,408 bytes for the leading bounds plus two-field tuple
+minima/maxima (2.32x); this remains bounded by `SparsePrimaryMarkMaxBytes` and
+is opt-in. The gain is preserving composite pruning after full-layout eviction,
+not reducing mark memory.
+
+Raw baseline output:
+
+```text
+BenchmarkCHU58CompositeSparseMarkQueryBaseline-32    1713    638744 ns/op    677474 B/op   12599 allocs/op
+BenchmarkCHU58CompositeSparseMarkQueryBaseline-32    1804    646154 ns/op    677460 B/op   12599 allocs/op
+BenchmarkCHU58CompositeSparseMarkQueryBaseline-32    1780    663893 ns/op    677463 B/op   12599 allocs/op
+BenchmarkCHU58CompositeSparseMarkQueryBaseline-32    1718    671111 ns/op    677460 B/op   12599 allocs/op
+BenchmarkCHU58CompositeSparseMarkQueryBaseline-32    1784    669336 ns/op    677460 B/op   12599 allocs/op
+```
+
+Raw current output:
+
+```text
+BenchmarkCHU58CompositeSparseMarkQuery-32            1790    673760 ns/op    677460 B/op   12599 allocs/op
+BenchmarkCHU58CompositeSparseMarkQuery-32            1627    647786 ns/op    677460 B/op   12599 allocs/op
+BenchmarkCHU58CompositeSparseMarkQuery-32            1887    640699 ns/op    677460 B/op   12599 allocs/op
+BenchmarkCHU58CompositeSparseMarkQuery-32            1820    620408 ns/op    677460 B/op   12599 allocs/op
+BenchmarkCHU58CompositeSparseMarkQuery-32            1880    620788 ns/op    677460 B/op   12599 allocs/op
+```
+
 ## CH-007 Decompressed Column Block Cache With Admission
 
 This benchmark measures a 65,536-row typed table with one fixed-width numeric

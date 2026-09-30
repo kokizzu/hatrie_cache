@@ -38,7 +38,11 @@ ordering violation fall back to the existing scan and single-field metadata;
 they never produce an unsafe skip.
 
 There is no wire or persistence-format change. The tuple arrays are in-memory
-columnar-cache metadata and are rebuilt or discarded with that cache.
+columnar-cache metadata and are rebuilt or discarded with that cache. When
+`SparsePrimaryMarkCache` is enabled, the tuple metadata is retained alongside
+the leading-field bounds in the separate byte-bounded LRU, so the same
+lexicographic pruning remains available after the full columnar layout is
+evicted. Mutations clear both caches before changing rows.
 
 ## Tradeoffs
 
@@ -47,4 +51,6 @@ mark lookup, but can avoid scanning the rest of a leading-key group. The
 benchmark uses 100 tenants, 8,192 ordered rows per tenant, 256 rows per
 segment, and a query for `tenant = 42 AND id >= 7000`. It reports planner
 nanoseconds, allocations, and retained segments together so selectivity is
-visible alongside CPU cost. See [BENCHMARK.md](BENCHMARK.md#ch-u18-composite-primary-mark-pruning).
+visible alongside CPU cost. The layout-eviction extension is measured
+separately under the CH-006 benchmark section because it isolates the LRU
+retention path. See [BENCHMARK.md](BENCHMARK.md#ch-u18-composite-primary-mark-pruning).

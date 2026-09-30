@@ -22292,3 +22292,17 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+test-chu58-composite-sparse-mark-cache:
+	bash scripts/test-chu58-composite-sparse-mark-cache.sh
+
+benchmark-chu58-composite-sparse-mark-cache:
+	bash scripts/benchmark-chu58-composite-sparse-mark-cache.sh
+
+format-chu58-composite-sparse-mark-cache:
+	bash scripts/format-chu58-composite-sparse-mark-cache.sh
+
+verify-chu58-composite-sparse-mark-cache:
+	bash scripts/verify-chu58-composite-sparse-mark-cache.sh
+
+ship-chu58-composite-sparse-mark-cache:
+	bash scripts/ship-chu58-composite-sparse-mark-cache.sh $(MODE)

@@ -51,7 +51,13 @@ func (cache *typedTableColumnarCache) observeSparsePrimaryMarkLocked(key string,
 	if !found || len(bounds) == 0 {
 		return
 	}
+	composite := len(segments.SparsePrimaryFields) >= 2 &&
+		len(segments.SparsePrimaryTupleMinimum) == len(bounds)*len(segments.SparsePrimaryFields) &&
+		len(segments.SparsePrimaryTupleMaximum) == len(segments.SparsePrimaryTupleMinimum)
 	bytes := typedTableSparsePrimaryMarkBytes(field, len(bounds))
+	if composite {
+		bytes = typedTableSparsePrimaryMarkTupleBytes(segments.SparsePrimaryFields, len(bounds), len(segments.SparsePrimaryTupleMinimum))
+	}
 	if bytes > cache.options.SparsePrimaryMarkMaxBytes {
 		return
 	}
@@ -71,15 +77,17 @@ func (cache *typedTableColumnarCache) observeSparsePrimaryMarkLocked(key string,
 		cache.sparsePrimaryMarks.layouts = make(map[string]typedTableSparsePrimaryMarkLayout)
 	}
 	cache.sparsePrimaryMarks.tick++
-	cache.sparsePrimaryMarks.layouts[key] = typedTableSparsePrimaryMarkLayout{
-		segments: &ColumnarNumericSegments{
-			RowsPerSegment:     segments.RowsPerSegment,
-			SparsePrimaryField: field,
-			Columns:            map[string][]ColumnarNumericSegment{field: bounds},
-		},
-		bytes:   bytes,
-		touched: cache.sparsePrimaryMarks.tick,
+	retained := &ColumnarNumericSegments{
+		RowsPerSegment:     segments.RowsPerSegment,
+		SparsePrimaryField: field,
+		Columns:            map[string][]ColumnarNumericSegment{field: append([]ColumnarNumericSegment(nil), bounds...)},
 	}
+	if composite {
+		retained.SparsePrimaryFields = append([]string(nil), segments.SparsePrimaryFields...)
+		retained.SparsePrimaryTupleMinimum = append([]float64(nil), segments.SparsePrimaryTupleMinimum...)
+		retained.SparsePrimaryTupleMaximum = append([]float64(nil), segments.SparsePrimaryTupleMaximum...)
+	}
+	cache.sparsePrimaryMarks.layouts[key] = typedTableSparsePrimaryMarkLayout{segments: retained, bytes: bytes, touched: cache.sparsePrimaryMarks.tick}
 	cache.sparsePrimaryMarks.bytes += bytes
 }
 
@@ -106,4 +114,15 @@ func (cache *typedTableColumnarCache) clearSparsePrimaryMarksLocked() {
 
 func typedTableSparsePrimaryMarkBytes(field string, segmentCount int) int {
 	return 64 + len(field) + segmentCount*24
+}
+
+func typedTableSparsePrimaryMarkTupleBytes(fields []string, segmentCount, tupleValueCount int) int {
+	if len(fields) == 0 {
+		return 0
+	}
+	bytes := typedTableSparsePrimaryMarkBytes(fields[0], segmentCount)
+	for _, field := range fields[1:] {
+		bytes += len(field)
+	}
+	return bytes + tupleValueCount*16
 }
