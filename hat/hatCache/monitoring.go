@@ -313,6 +313,14 @@ func (resolver monitoringSQLResolver) ResolveSQLTextPrefixSource(name, key, fiel
 	return indexed.ResolveSQLTextPrefixSource(name, key, field, prefix)
 }
 
+func (resolver monitoringSQLResolver) ResolveSQLTextProximityMultiFieldUnionSource(name, key string, queries []hatSql.SQLTextProximityFieldQuery) ([]SQLRow, bool, error) {
+	indexed, ok := resolver.source.(hatSql.TextProximityMultiFieldUnionIndexedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return indexed.ResolveSQLTextProximityMultiFieldUnionSource(name, key, queries)
+}
+
 func (resolver monitoringSQLResolver) ResolveSQLCompositeIndexedSource(name, key string, fields []string, values []interface{}) ([]SQLRow, bool, error) {
 	indexed, ok := resolver.source.(SQLCompositeIndexedSourceResolver)
 	if !ok {

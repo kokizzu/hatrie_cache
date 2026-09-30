@@ -146,6 +146,36 @@ func (source *MaterializedSource) lookupTextUnion(field string, queries []hatSql
 	return rows, true
 }
 
+func (source *MaterializedSource) lookupTextMultiFieldUnion(queries []hatSql.SQLTextProximityFieldQuery) ([]Row, bool) {
+	if source == nil || len(queries) == 0 {
+		return nil, false
+	}
+	source.mu.RLock()
+	defer source.mu.RUnlock()
+	matched := make([]bool, len(source.rows))
+	for _, query := range queries {
+		if query.Query.MaxGap < 0 {
+			return nil, false
+		}
+		index := source.textIndexes[strings.TrimSpace(query.Field)]
+		if index == nil {
+			return nil, false
+		}
+		for _, position := range index.matchingRows(query.Query.Query, query.Query.MaxGap) {
+			if position >= 0 && position < len(matched) {
+				matched[position] = true
+			}
+		}
+	}
+	rows := make([]Row, 0)
+	for position, rowMatched := range matched {
+		if rowMatched {
+			rows = append(rows, cloneRow(source.rows[position]))
+		}
+	}
+	return rows, true
+}
+
 func (source *MaterializedSource) addTextIndexesForInsertLocked(row Row, position int) {
 	for field, index := range source.textIndexes {
 		if index != nil {

@@ -122,6 +122,80 @@ func (ht *HatTrie) resolveSQLTextProximityUnionSource(name, key, field string, q
 	return rows, true, nil
 }
 
+// ResolveSQLTextProximityMultiFieldUnionSource resolves an OR of ordered
+// phrase or proximity predicates across multiple positional sidecars. Every
+// requested field must have an index; the SQL executor rechecks the complete
+// expression after this conservative candidate scan.
+func (ht *HatTrie) ResolveSQLTextProximityMultiFieldUnionSource(name, key string, queries []hatSql.SQLTextProximityFieldQuery) ([]SQLRow, bool, error) {
+	if name != "CACHE" || len(queries) == 0 {
+		return nil, false, nil
+	}
+	for _, query := range queries {
+		if query.Field == "" {
+			return nil, false, nil
+		}
+		if query.Query.MaxGap < 0 || query.Query.MaxGap > maxSQLTextProximityGap {
+			return nil, false, fmt.Errorf("CONTAINS_PROXIMITY distance must be a non-negative integer no larger than %d", maxSQLTextProximityGap)
+		}
+	}
+	source, err := ht.sqlJSONSource(key)
+	if err != nil {
+		return nil, false, err
+	}
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	indexesByField := ht.sqlJSONTextIndexes[key]
+	if indexesByField == nil {
+		return nil, false, nil
+	}
+	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
+	if err != nil {
+		if err == errSQLJSONIndexAdmissionDenied {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	indexes := make([]*sqlJSONTextIndex, len(queries))
+	for index, query := range queries {
+		textIndex := indexesByField[query.Field]
+		if textIndex == nil {
+			return nil, false, nil
+		}
+		if err := refreshSQLJSONTextIndexSourceRows(textIndex, query.Field, source, snapshot.rows); err != nil {
+			return nil, false, err
+		}
+		ensureSQLJSONTextPositions(textIndex, query.Field)
+		indexes[index] = textIndex
+	}
+	matched := make([]bool, len(indexes[0].rows))
+	for index, query := range queries {
+		queryPositions := hatSql.TextTokenPositions(query.Query.Query)
+		if len(queryPositions) == 0 {
+			continue
+		}
+		textIndex := indexes[index]
+		anchorToken := queryPositions[0].Token
+		for _, token := range queryPositions[1:] {
+			if len(textIndex.tokens[token.Token]) < len(textIndex.tokens[anchorToken]) {
+				anchorToken = token.Token
+			}
+		}
+		for _, rowIndex := range textIndex.tokens[anchorToken] {
+			if rowIndex < 0 || rowIndex >= len(textIndex.rows) || rowIndex >= len(matched) || !sqlJSONTextRowMatchesProximity(textIndex.positions, uint32(rowIndex), queryPositions, query.Query.MaxGap) {
+				continue
+			}
+			matched[rowIndex] = true
+		}
+	}
+	rows := make([]SQLRow, 0)
+	for rowIndex, rowMatched := range matched {
+		if rowMatched {
+			rows = append(rows, indexes[0].rows[rowIndex])
+		}
+	}
+	return rows, true, nil
+}
+
 func sqlJSONTextProximityRows(index *sqlJSONTextIndex, queryPositions []hatSql.TextTokenPosition, maxGap int) []SQLRow {
 	anchorToken := queryPositions[0].Token
 	for _, token := range queryPositions[1:] {

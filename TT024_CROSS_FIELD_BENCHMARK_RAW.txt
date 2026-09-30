@@ -1,0 +1,16 @@
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatSchema
+cpu: AMD Ryzen 9 5950X 16-Core Processor            
+BenchmarkTT024CrossFieldTextScan-32       	      37	  31713601 ns/op	30008742 B/op	  280123 allocs/op
+BenchmarkTT024CrossFieldTextScan-32       	      37	  31904627 ns/op	30006265 B/op	  280119 allocs/op
+BenchmarkTT024CrossFieldTextScan-32       	      36	  32422830 ns/op	30006259 B/op	  280119 allocs/op
+BenchmarkTT024CrossFieldTextScan-32       	      37	  31363846 ns/op	30006410 B/op	  280119 allocs/op
+BenchmarkTT024CrossFieldTextScan-32       	      37	  32094619 ns/op	30006415 B/op	  280119 allocs/op
+BenchmarkTT024CrossFieldTextIndexed-32    	   13839	     86740 ns/op	   94696 B/op	     610 allocs/op
+BenchmarkTT024CrossFieldTextIndexed-32    	   13542	     87817 ns/op	   94696 B/op	     610 allocs/op
+BenchmarkTT024CrossFieldTextIndexed-32    	   13714	     86805 ns/op	   94696 B/op	     610 allocs/op
+BenchmarkTT024CrossFieldTextIndexed-32    	   14193	     85047 ns/op	   94696 B/op	     610 allocs/op
+BenchmarkTT024CrossFieldTextIndexed-32    	   14107	     85414 ns/op	   94696 B/op	     610 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatSchema	12.426s

@@ -43,3 +43,22 @@ func (adapter SQLResolverAdapter) ResolveSQLTextProximityUnionSource(name, key, 
 	}
 	return nil, false, nil
 }
+
+// ResolveSQLTextProximityMultiFieldUnionSource exposes source-ordered,
+// deduplicated positional candidates across multiple indexed fields. The
+// complete OR expression is still evaluated by hatSql.
+func (adapter SQLResolverAdapter) ResolveSQLTextProximityMultiFieldUnionSource(name, key string, queries []hatSql.SQLTextProximityFieldQuery) ([]hatSql.Row, bool, error) {
+	if strings.EqualFold(name, "CACHE") {
+		if source := adapter.Sources[strings.ToLower(key)]; source != nil {
+			rows, available := source.lookupTextMultiFieldUnion(queries)
+			if !available {
+				return nil, false, nil
+			}
+			return sqlRows(rows), true, nil
+		}
+	}
+	if indexed, ok := adapter.Base.(hatSql.TextProximityMultiFieldUnionIndexedSourceResolver); ok {
+		return indexed.ResolveSQLTextProximityMultiFieldUnionSource(name, key, queries)
+	}
+	return nil, false, nil
+}

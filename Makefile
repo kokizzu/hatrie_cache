@@ -29093,3 +29093,36 @@ commit-m037ah-stateful-group-count-sum:
 
 push-m037ah-stateful-group-count-sum:
 	bash scripts/m037ah-stateful-group-count-sum.sh push
+.PHONY: baseline-tt024-cross-field-text format-tt024-cross-field-text test-tt024-cross-field-text benchmark-tt024-cross-field-text race-tt024-cross-field-text vet-tt024-cross-field-text package-test-tt024-cross-field-text check-tt024-cross-field-text status-tt024-cross-field-text commit-tt024-cross-field-text push-tt024-cross-field-text
+baseline-tt024-cross-field-text:
+	bash scripts/tt024-cross-field-text.sh baseline
+
+format-tt024-cross-field-text:
+	bash scripts/tt024-cross-field-text.sh format
+
+test-tt024-cross-field-text:
+	bash scripts/tt024-cross-field-text.sh test
+
+benchmark-tt024-cross-field-text:
+	bash scripts/tt024-cross-field-text.sh benchmark
+
+race-tt024-cross-field-text:
+	bash scripts/tt024-cross-field-text.sh race
+
+vet-tt024-cross-field-text:
+	bash scripts/tt024-cross-field-text.sh vet
+
+package-test-tt024-cross-field-text:
+	bash scripts/tt024-cross-field-text.sh package-test
+
+check-tt024-cross-field-text:
+	bash scripts/tt024-cross-field-text.sh check
+
+status-tt024-cross-field-text:
+	bash scripts/tt024-cross-field-text.sh status
+
+commit-tt024-cross-field-text:
+	bash scripts/tt024-cross-field-text.sh commit
+
+push-tt024-cross-field-text:
+	bash scripts/tt024-cross-field-text.sh push

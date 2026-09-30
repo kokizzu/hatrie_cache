@@ -37551,6 +37551,28 @@ BenchmarkTT024TextPhraseUnion/indexed_union-32 100     66088 ns/op     83872 B/o
 BenchmarkTT024TextPhraseUnion/indexed_union-32 100     69110 ns/op     83873 B/op    527 allocs/op
 ```
 
+<a id="tt-024-cross-field-text-index-union"></a>
+## TT-024 Cross-Field Positional Text Index Union
+
+This benchmark compares the pre-change cross-field fallback with the new
+candidate union across separate `title` and `body` positional sidecars. The
+20,000-row fixture returns 40 rows. Five samples ran with `-benchmem` on
+Linux/amd64 and an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Pre-change cross-field full scan | 29,321,564 | 29,985,684 | 280,117 | baseline |
+| Post-change full-scan control | 31,904,627 | 30,006,259 | 280,119 | control |
+| Post-change indexed cross-field union | 86,740 | 94,696 | 610 | 338x faster, 317x lower bytes, 459x fewer allocations |
+
+The planner only selects the new path when every phrase/proximity leaf is
+indexable and every referenced field has a sidecar. Missing sidecars and mixed
+boolean expressions retain the existing full scan. Residual evaluation still
+checks the complete `OR`, so candidate lookup does not change SQL semantics.
+Raw samples are in
+[`TT024_CROSS_FIELD_BENCHMARK_BASELINE_RAW.txt`](TT024_CROSS_FIELD_BENCHMARK_BASELINE_RAW.txt)
+and [`TT024_CROSS_FIELD_BENCHMARK_RAW.txt`](TT024_CROSS_FIELD_BENCHMARK_RAW.txt).
+
 <a id="tt-021-materializedsource-spatial-index"></a>
 ## TT-021 MaterializedSource Spatial Index
 

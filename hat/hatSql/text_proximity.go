@@ -68,13 +68,11 @@ func resolveSQLTextProximityUnionIndexedSource(source sqlSource, condition sqlEx
 	if condition.kind != "binary" || condition.op != "OR" || condition.left == nil || condition.right == nil {
 		return nil, false, nil
 	}
-	indexed, ok := resolver.(TextProximityUnionIndexedSourceResolver)
-	if !ok {
-		return nil, false, nil
-	}
 	fieldName := ""
 	allMatched := true
+	sameField := true
 	queries := make([]SQLTextProximityQuery, 0, 2)
+	fieldQueries := []SQLTextProximityFieldQuery(nil)
 	var collect func(sqlExpr) error
 	collect = func(expression sqlExpr) error {
 		if expression.kind == "binary" && expression.op == "OR" && expression.left != nil && expression.right != nil {
@@ -95,17 +93,48 @@ func resolveSQLTextProximityUnionIndexedSource(source sqlSource, condition sqlEx
 		if fieldName == "" {
 			fieldName = field
 		} else if fieldName != field {
-			allMatched = false
-			fieldName = ""
-			return nil
+			if sameField {
+				fieldQueries = make([]SQLTextProximityFieldQuery, len(queries), len(queries)+1)
+				for index, previous := range queries {
+					fieldQueries[index] = SQLTextProximityFieldQuery{Field: fieldName, Query: previous}
+				}
+			}
+			sameField = false
 		}
 		queries = append(queries, query)
+		if !sameField {
+			fieldQueries = append(fieldQueries, SQLTextProximityFieldQuery{Field: field, Query: query})
+		}
 		return nil
 	}
 	if err := collect(condition); err != nil {
 		return nil, false, err
 	}
-	if !allMatched || fieldName == "" || len(queries) < 2 || !hint.allowsField(source, fieldName) {
+	if !allMatched || len(queries) < 2 {
+		return nil, false, nil
+	}
+	if !sameField {
+		for _, fieldQuery := range fieldQueries {
+			if !hint.allowsField(source, fieldQuery.Field) {
+				return nil, false, nil
+			}
+		}
+		indexed, ok := resolver.(TextProximityMultiFieldUnionIndexedSourceResolver)
+		if !ok {
+			return nil, false, nil
+		}
+		started := time.Now()
+		rows, available, err := indexed.ResolveSQLTextProximityMultiFieldUnionSource(source.kind, source.key, fieldQueries)
+		if available && metrics != nil {
+			metrics.record("TEXT PROXIMITY MULTI-FIELD UNION", sqlExplainSource(source), len(fieldQueries), len(rows), started)
+		}
+		return rows, available, err
+	}
+	if fieldName == "" || !hint.allowsField(source, fieldName) {
+		return nil, false, nil
+	}
+	indexed, ok := resolver.(TextProximityUnionIndexedSourceResolver)
+	if !ok {
 		return nil, false, nil
 	}
 	started := time.Now()
