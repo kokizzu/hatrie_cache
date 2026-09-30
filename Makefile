@@ -28694,3 +28694,15 @@ test-cursor-token-encode-into:
 .PHONY: verify-cursor-token-encode-into
 verify-cursor-token-encode-into:
 	bash scripts/verify-cursor-token-encode-into.sh
+
+
+.PHONY: benchmark-sparse-bitset-values test-sparse-bitset-values-into verify-sparse-bitset-values-into
+
+benchmark-sparse-bitset-values:
+	./scripts/benchmark-sparse-bitset-values.sh
+
+test-sparse-bitset-values-into:
+	./scripts/test-sparse-bitset-values-into.sh
+
+verify-sparse-bitset-values-into:
+	./scripts/verify-sparse-bitset-values-into.sh

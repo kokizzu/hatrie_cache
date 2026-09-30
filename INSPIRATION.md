@@ -1148,3 +1148,13 @@ SQL shape. See [CH035_REMOTE_SHARD_PRUNING.md](CH035_REMOTE_SHARD_PRUNING.md).
 - [x] C171 ClickHouse-style reusable bounded result buffers for approximate Top-K output. `TopK.EntriesInto` reuses caller-owned storage, preserves `Entries` ordering and subsequent heap updates, and measured 2.68x lower latency with zero per-call bytes and allocations versus repeated `Entries` copies. See [TOP_K_ENTRIES_INTO.md](TOP_K_ENTRIES_INTO.md).
 - [x] C172 ClickHouse-style bounded Top-N vector search with caller-owned result buffers. `VectorIndex.SearchInto` keeps only the best `LIMIT` candidates during the scan, preserves cosine/ID ordering and filters, and measured 11.1x faster with `LIMIT 10` and 1.83x faster at the full limit, with zero output allocations. See [VECTOR_SEARCH_INTO.md](VECTOR_SEARCH_INTO.md).
 - [x] C173 Tarantool/ClickHouse-style reusable binary cursor-token encoding. `CursorTokenCodec.EncodeInto` preserves the existing HMAC-SHA256/base64 wire format while reusing caller-owned bytes; the ten-sample encode benchmark measured 1.16x lower latency, 864 -> 480 B/op, and 9 -> 5 allocations. See [CURSOR_TOKEN_ENCODE_INTO.md](CURSOR_TOKEN_ENCODE_INTO.md).
+
+## C174: Reusable sparse-bitset enumeration buffer
+
+ClickHouse and Roaring-style columnar structures avoid repeated result
+allocation on hot scans by allowing callers to reuse output storage. Hatrie
+cache now applies the same idea to `SparseBitset` through `ValuesInto`, which
+keeps sorted enumeration semantics while letting repeated callers reuse a
+`[]uint64` buffer. The implementation was benchmarked before and after, with
+the reusable path removing the result allocation and measuring about 1.70x
+lower median latency for 100,000 values.

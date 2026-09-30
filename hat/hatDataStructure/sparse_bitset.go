@@ -274,6 +274,24 @@ func (bitset SparseBitset) Values() []uint64 {
 	}
 	return out
 }
+
+// ValuesInto appends all values in sorted order to dst, reusing its backing
+// array when it has enough capacity. The returned slice does not retain the
+// bitset's internal container storage.
+func (bitset SparseBitset) ValuesInto(dst []uint64) []uint64 {
+	dst = dst[:0]
+	if bitset.count == 0 {
+		return dst
+	}
+	required := int(bitset.count)
+	if cap(dst) < required {
+		dst = make([]uint64, 0, required)
+	}
+	for idx := range bitset.containers {
+		dst = bitset.containers[idx].appendValues(dst)
+	}
+	return dst
+}
 func (bitset SparseBitset) Info() SparseBitsetInfo {
 	info := SparseBitsetInfo{Cardinality: bitset.count, Containers: uint64(len(bitset.containers)), EncodedBytes: uint64(bitset.EncodedSize())}
 	for idx := range bitset.containers {

@@ -39571,3 +39571,16 @@ The existing string API is unchanged. `EncodeInto` is opt-in and requires the
 caller to retain the returned slice for the zero-growth path; HMAC-SHA256,
 base64 encoding, size bounds, and authentication behavior remain identical.
 See [CURSOR_TOKEN_ENCODE_INTO.md](CURSOR_TOKEN_ENCODE_INTO.md).
+
+## SparseBitset reusable enumeration
+
+Workload: 100,000 sequential values, `go test -benchmem -count=10`.
+
+| Command | Median ns/op | B/op | allocs/op | Relative latency |
+| --- | ---: | ---: | ---: | ---: |
+| `SparseBitset.Values()` | 216,916 | 802,816 | 1 | 1.00x |
+| `SparseBitset.ValuesInto()` with reused buffer | 127,518 | 0 | 0 | 1.70x faster |
+
+The existing allocation-returning API remains available. `ValuesInto` is the
+lower-allocation choice for callers that repeatedly enumerate into a reusable
+buffer.
