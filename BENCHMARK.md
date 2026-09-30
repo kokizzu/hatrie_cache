@@ -40241,3 +40241,25 @@ The cold lazy path is 158.4x faster than hydrating the full catalog and its
 allocation cost is bounded by one object's detached metadata. Ready reads are
 allocation-free. Raw samples are in [`M237_BENCHMARK_RAW.txt`](M237_BENCHMARK_RAW.txt),
 with API and correctness details in [M237_LAZY_HYDRATION.md](M237_LAZY_HYDRATION.md).
+## M065ag: Differential `ROW_NUMBER` and `LAG`
+
+Command: `make benchmark-m065`.
+
+This compares one 1,024-row partition, `LAG(1)`, one tail or front insert plus
+matching retraction per operation, and five `100ms` samples on Linux amd64 with
+an AMD Ryzen 9 5950X. The full-rebuild control materializes old and new windows
+and emits the same correction shape. Values are median `ns/op`, `B/op`, and
+allocations/op; the last column is differential relative to the control.
+
+| Workload | Differential | Full rebuild | Relative result |
+| --- | ---: | ---: | --- |
+| Tail CPU | 76,898 ns | 4,848,617 ns | 63.05x faster |
+| Tail bytes | 1,946 B | 3,828,871 B | 1,967.6x lower |
+| Tail allocations | 15 | 41,186 | 2,745.7x fewer |
+| Front CPU | 2,681,924 ns | 2,450,608 ns | 0.91x; 9.4% slower |
+| Front bytes | 5,403,791 B | 5,333,127 B | 1.01x; 1.3% higher |
+| Front allocations | 16,456 | 16,553 | 1.01x; 0.6% fewer |
+
+Raw samples are in [`M065_BENCHMARK_RAW.txt`](M065_BENCHMARK_RAW.txt). The
+feature and tradeoffs are documented in
+[`M065_DIFFERENTIAL_ROW_NUMBER_LAG.md`](M065_DIFFERENTIAL_ROW_NUMBER_LAG.md).

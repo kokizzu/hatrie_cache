@@ -1,0 +1,26 @@
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatSql
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkM065DifferentialRowNumberLagTail-32     	    1536	     79067 ns/op	    1947 B/op	      15 allocs/op
+BenchmarkM065DifferentialRowNumberLagTail-32     	    1478	     78076 ns/op	    1948 B/op	      15 allocs/op
+BenchmarkM065DifferentialRowNumberLagTail-32     	    1572	     75763 ns/op	    1946 B/op	      15 allocs/op
+BenchmarkM065DifferentialRowNumberLagTail-32     	    1538	     76898 ns/op	    1946 B/op	      15 allocs/op
+BenchmarkM065DifferentialRowNumberLagTail-32     	    1582	     76789 ns/op	    1946 B/op	      15 allocs/op
+BenchmarkM065FullRebuildCorrectionTail-32        	      24	   4848617 ns/op	 3827531 B/op	   41169 allocs/op
+BenchmarkM065FullRebuildCorrectionTail-32        	      21	   5063770 ns/op	 3829763 B/op	   41197 allocs/op
+BenchmarkM065FullRebuildCorrectionTail-32        	      22	   4871360 ns/op	 3828888 B/op	   41187 allocs/op
+BenchmarkM065FullRebuildCorrectionTail-32        	      22	   4707921 ns/op	 3828871 B/op	   41186 allocs/op
+BenchmarkM065FullRebuildCorrectionTail-32        	      25	   4631975 ns/op	 3826634 B/op	   41161 allocs/op
+BenchmarkM065DifferentialRowNumberLagFront-32    	      40	   2768122 ns/op	 5403786 B/op	   16456 allocs/op
+BenchmarkM065DifferentialRowNumberLagFront-32    	      42	   2554287 ns/op	 5403791 B/op	   16456 allocs/op
+BenchmarkM065DifferentialRowNumberLagFront-32    	      46	   2680439 ns/op	 5403800 B/op	   16456 allocs/op
+BenchmarkM065DifferentialRowNumberLagFront-32    	      42	   2681924 ns/op	 5403789 B/op	   16456 allocs/op
+BenchmarkM065DifferentialRowNumberLagFront-32    	      36	   2780032 ns/op	 5403792 B/op	   16456 allocs/op
+BenchmarkM065FullRebuildCorrectionFront-32       	      52	   2450608 ns/op	 5332655 B/op	   16548 allocs/op
+BenchmarkM065FullRebuildCorrectionFront-32       	      49	   2559295 ns/op	 5333127 B/op	   16553 allocs/op
+BenchmarkM065FullRebuildCorrectionFront-32       	      49	   2362824 ns/op	 5333129 B/op	   16553 allocs/op
+BenchmarkM065FullRebuildCorrectionFront-32       	      49	   2443083 ns/op	 5333122 B/op	   16553 allocs/op
+BenchmarkM065FullRebuildCorrectionFront-32       	      43	   2545488 ns/op	 5334309 B/op	   16567 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatSql	3.006s

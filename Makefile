@@ -28967,3 +28967,26 @@ benchmark-m235:
 .PHONY: race-m235
 race-m235:
 	bash scripts/race-m235.sh
+test-m065:
+	bash scripts/test-m065.sh
+
+format-m065:
+	bash scripts/format-m065.sh
+
+benchmark-m065:
+	bash scripts/benchmark-m065.sh
+.PHONY: race-m065
+race-m065:
+	bash scripts/race-m065.sh
+
+.PHONY: vet-m065
+vet-m065:
+	bash scripts/vet-m065.sh
+
+.PHONY: status-m065
+status-m065:
+	bash scripts/status-m065.sh
+
+.PHONY: commit-push-m065
+commit-push-m065:
+	bash scripts/commit-push-m065.sh

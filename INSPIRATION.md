@@ -1312,3 +1312,10 @@ path. The ten-sample 4,096-row benchmark measured 1.84x faster HSD1 decoding
 and 1.88x faster HSD2 decoding, about 7.5x lower heap, and 1.77x fewer
 allocations with unchanged wire bytes. See
 [ROW_BINARY_DELTA_DECODE_INTO.md](ROW_BINARY_DELTA_DECODE_INTO.md).
+## M065ag: Differential `ROW_NUMBER` and `LAG`
+
+Materialize's signed arrangements motivate an opt-in differential window
+state. The implementation retains keyed weighted rows, maintains ordered
+partition slices, and emits deterministic negative/positive corrections after
+out-of-order updates without changing the append-only default. See
+[`M065_DIFFERENTIAL_ROW_NUMBER_LAG.md`](M065_DIFFERENTIAL_ROW_NUMBER_LAG.md).
