@@ -39627,3 +39627,16 @@ Workload: 4,096 retained integer dead letters, ten samples on an AMD Ryzen 9
 The pre-change median was 131,910 ns/op. Failure order and shallow-copy
 semantics are unchanged. See
 [DEAD_LETTER_QUEUE_DEAD_LETTERS_INTO.md](DEAD_LETTER_QUEUE_DEAD_LETTERS_INTO.md).
+
+## C178 Tuple format reusable decode
+
+Workload: five typed fields, ten samples on an AMD Ryzen 9 5950X.
+
+| Operation | Median ns/op | B/op | Allocs/op | Relative latency |
+| --- | ---: | ---: | ---: | ---: |
+| Existing `TupleFormat.Unpack()` baseline | 345.7 | 592 | 3 | 1.00x |
+| Reused `TupleFormat.UnpackInto()` | 237.7 | 16 | 2 | 1.45x faster |
+
+The reusable path clears the destination before decoding and keeps validation,
+NULL, and ownership semantics. See
+[TUPLE_FORMAT_UNPACK_INTO.md](TUPLE_FORMAT_UNPACK_INTO.md).

@@ -1183,3 +1183,11 @@ without allocating a new snapshot on every poll. `DeadLettersInto` adds that
 opt-in path while preserving failure order and the existing shallow-copy
 contract. On 4,096 retained items it measured about 20.19x lower latency and
 removed the snapshot allocation.
+
+## C178: Reusable tuple decode buffers
+
+Tarantool-style tuple readers can reuse a typed output vector when decoding a
+stable format repeatedly. `TupleFormat.UnpackInto` adds that opt-in path,
+clears reused slots to preserve NULL semantics, and retains the existing
+ownership/error behavior. The five-field benchmark measured about 1.45x lower
+latency and reduced `592 B/3 allocs` to `16 B/2 allocs`.

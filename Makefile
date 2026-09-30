@@ -28742,3 +28742,15 @@ test-dead-letter-queue-dead-letters-into:
 
 verify-dead-letter-queue-dead-letters-into:
 	bash scripts/verify-dead-letter-queue-dead-letters-into.sh
+
+
+.PHONY: benchmark-tuple-format-unpack test-tuple-format-unpack-into verify-tuple-format-unpack-into
+
+benchmark-tuple-format-unpack:
+	bash scripts/benchmark-tuple-format-unpack.sh
+
+test-tuple-format-unpack-into:
+	bash scripts/test-tuple-format-unpack-into.sh
+
+verify-tuple-format-unpack-into:
+	bash scripts/verify-tuple-format-unpack-into.sh

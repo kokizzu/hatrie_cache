@@ -247,10 +247,26 @@ func (format TupleFormat) validateTuple(tuple TupleFieldOffsetCache) error {
 
 // Unpack validates and decodes a packed tuple into independent typed values.
 func (format TupleFormat) Unpack(tuple TupleFieldOffsetCache) ([]TupleFieldValue, error) {
-	if err := format.Validate(tuple); err != nil {
+	values, err := format.UnpackInto(tuple, nil)
+	if err != nil {
 		return nil, err
 	}
-	values := make([]TupleFieldValue, len(format.fields))
+	return values, nil
+}
+
+// UnpackInto validates and decodes a packed tuple into dst, reusing its
+// backing array when it has enough capacity. The returned values are
+// independent typed values; a reused destination is cleared before decoding.
+func (format TupleFormat) UnpackInto(tuple TupleFieldOffsetCache, dst []TupleFieldValue) ([]TupleFieldValue, error) {
+	dst = dst[:0]
+	if err := format.Validate(tuple); err != nil {
+		return dst, err
+	}
+	if cap(dst) < len(format.fields) {
+		dst = make([]TupleFieldValue, 0, len(format.fields))
+	}
+	dst = dst[:len(format.fields)]
+	clear(dst)
 	for index, field := range format.fields {
 		valid, _ := tuple.FieldValid(index)
 		if !valid {
@@ -259,11 +275,11 @@ func (format TupleFormat) Unpack(tuple TupleFieldOffsetCache) ([]TupleFieldValue
 		data, _ := tuple.Field(index)
 		value, err := decodeTupleField(field.Type, data)
 		if err != nil {
-			return nil, fmt.Errorf("hatDataStructure: tuple field %q: %w", field.Name, err)
+			return dst[:0], fmt.Errorf("hatDataStructure: tuple field %q: %w", field.Name, err)
 		}
-		values[index] = value
+		dst[index] = value
 	}
-	return values, nil
+	return dst, nil
 }
 
 func (format TupleFormat) validateDefinition() error {
