@@ -40613,3 +40613,42 @@ BenchmarkT042Replay-32 409 3137148 ns/op 4096 records/op 1360680 B/op 20515 allo
 The benchmark command is `make benchmark-t042-recovery-replay`. This change
 does not claim parallel replay: the rejected T042 parallel lanes remain
 documented above, and replay order is still deterministic.
+# T043: Scalar journal replay arena
+
+This benchmark measures default binary recovery of 4,096 scalar journal
+records. The workload and machine were held constant; each side was sampled
+five times with `make benchmark-t043-replay`. The implementation uses the
+general decoder before T043 and the bounded borrowed-string arena after T043.
+
+| Feature | Before median | After median | Improvement |
+| --- | ---: | ---: | ---: |
+| Scalar journal replay CPU | 3,117,838 ns/op | 2,368,588 ns/op | 1.32x faster |
+| Scalar journal replay heap | 1,360,680 B/op | 441,598 B/op | 3.08x lower |
+| Scalar journal replay allocations | 20,515 allocs/op | 8,247 allocs/op | 2.49x fewer |
+
+## Raw samples
+
+Before T043:
+
+```text
+3058188 ns/op 1360695 B/op 20515 allocs/op
+2941110 ns/op 1360679 B/op 20515 allocs/op
+3119888 ns/op 1360680 B/op 20515 allocs/op
+3322985 ns/op 1360681 B/op 20515 allocs/op
+3117838 ns/op 1360679 B/op 20515 allocs/op
+```
+
+After T043:
+
+```text
+2375663 ns/op 441598 B/op 8247 allocs/op
+2396570 ns/op 441598 B/op 8247 allocs/op
+2356680 ns/op 441598 B/op 8247 allocs/op
+2354593 ns/op 441597 B/op 8247 allocs/op
+2368588 ns/op 441597 B/op 8247 allocs/op
+```
+
+The optimized path is limited to binary, non-idempotent scalar records with
+no TTL or dynamic payload. JSON, TTL, idempotency, batch, outbox, and other
+commands use the existing decoder, so this measurement does not claim a speed
+up for those workloads.

@@ -1397,17 +1397,29 @@ func (journal *CommandJournal) replayThroughWithProgress(trie *HatTrie, afterSeq
 		return 0, fmt.Errorf("hatriecache: requested journal sequence %d precedes snapshot sequence %d", targetSequence, afterSequence)
 	}
 	replayBatch := make([]CommandJournalRecord, 0, maxCommandJournalReplayScalarBatchRecords)
+	useScalarArena := !journal.idempotency.enabled() && journal.format == CommandJournalFormatBinary
+	var replayBatchArena commandJournalReplayScalarBatchArena
 	var replayBatchFamily nativeCommandBatchFamily
 	flushReplayBatch := func() error {
 		if len(replayBatch) == 0 {
 			return nil
 		}
+		if useScalarArena {
+			replayBatch = replayBatchArena.materialize(replayBatch)
+		}
 		err := journal.replayCommandJournalScalarBatch(trie, replayBatch, progress)
 		replayBatch = replayBatch[:0]
+		if useScalarArena {
+			replayBatchArena.reset()
+		}
 		replayBatchFamily = nativeCommandBatchUnsupported
 		return err
 	}
-	_, scanErr := scanCommandJournalSetWithEncryption(journal.path, journal.segmented(), journal.encryption, func(entry commandJournalEntry) error {
+	scanReplay := scanCommandJournalSetWithEncryption
+	if useScalarArena {
+		scanReplay = scanCommandJournalSetWithEncryptionBorrowing
+	}
+	_, scanErr := scanReplay(journal.path, journal.segmented(), journal.encryption, func(entry commandJournalEntry) error {
 		if entry.Checkpoint {
 			return flushReplayBatch()
 		}
@@ -1426,7 +1438,12 @@ func (journal *CommandJournal) replayThroughWithProgress(trie *HatTrie, afterSeq
 				progress.markCurrent(entry.Sequence)
 			}
 			replayBatchFamily = family
-			replayBatch = append(replayBatch, CommandJournalRecord{Sequence: entry.Sequence, Request: entry.Request})
+			if useScalarArena {
+				replayBatchArena.append(entry, family)
+				replayBatch = append(replayBatch, CommandJournalRecord{})
+			} else {
+				replayBatch = append(replayBatch, CommandJournalRecord{Sequence: entry.Sequence, Request: entry.Request})
+			}
 			if len(replayBatch) == cap(replayBatch) {
 				return flushReplayBatch()
 			}
@@ -2217,6 +2234,10 @@ func scanCommandJournalEntries(path string, visit func(commandJournalEntry) erro
 }
 
 func scanCommandJournalEntriesWithEncryption(path string, encryption hatJournal.EncryptionOptions, visit func(commandJournalEntry) error) (int64, error) {
+	return scanCommandJournalEntriesWithEncryptionMode(path, encryption, false, visit)
+}
+
+func scanCommandJournalEntriesWithEncryptionMode(path string, encryption hatJournal.EncryptionOptions, borrowStrings bool, visit func(commandJournalEntry) error) (int64, error) {
 	file, reader, compression, err := hatJournal.OpenReaderWithEncryption(path, encryption)
 	if errors.Is(err, os.ErrNotExist) {
 		return 0, nil
@@ -2230,7 +2251,7 @@ func scanCommandJournalEntriesWithEncryption(path string, encryption hatJournal.
 	validPhysicalBytes := int64(-1)
 	var previousSequence uint64
 	var hasPreviousSequence bool
-	var readBuffer commandJournalReadBuffer
+	readBuffer := commandJournalReadBuffer{borrowStrings: borrowStrings}
 	for {
 		entry, bytesRead, complete, err := readCommandJournalEntryBuffered(reader, &readBuffer)
 		if err != nil {
@@ -2280,7 +2301,8 @@ func scanCommandJournalEntriesWithEncryption(path string, encryption hatJournal.
 }
 
 type commandJournalReadBuffer struct {
-	payload []byte
+	payload       []byte
+	borrowStrings bool
 }
 
 func readCommandJournalEntry(reader *bufio.Reader) (commandJournalEntry, int, bool, error) {
@@ -2371,6 +2393,15 @@ func readCommandJournalBinaryEntry(reader *bufio.Reader, buffer *commandJournalR
 		return commandJournalEntry{}, 0, false, err
 	}
 	bytesRead += len(payload)
+	if buffer != nil && buffer.borrowStrings {
+		entry, _, used, err := decodeCommandJournalScalarRecordBinaryPayload(payload)
+		if err != nil {
+			return commandJournalEntry{}, 0, false, err
+		}
+		if used {
+			return entry, bytesRead, true, nil
+		}
+	}
 	entry, err := decodeCommandJournalEntryBinaryPayload(payload)
 	if err != nil {
 		return commandJournalEntry{}, 0, false, err

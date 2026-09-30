@@ -1397,3 +1397,4 @@ explicit memory cap, not a fast-path optimization. See
 composite section in [BENCHMARK.md](BENCHMARK.md).
 
 - [x] C194 Composite external `GROUP BY` spill keys.
+- [x] T043 ClickHouse-style arena-backed scalar journal replay. Default binary recovery borrows scalar fields while decoding, retains only bounded key/value batch state, and falls back to the general decoder for JSON, TTL, idempotency, dynamic, and non-scalar commands. The five-sample replay benchmark improved from a 3.12 ms median to 2.37 ms, with 3.08x lower bytes and 2.49x fewer allocations. See [T043_RECOVERY_SCALAR_ARENA.md](T043_RECOVERY_SCALAR_ARENA.md).

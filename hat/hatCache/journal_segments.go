@@ -51,8 +51,16 @@ func scanCommandJournalSet(path string, segmented bool, visit func(commandJourna
 }
 
 func scanCommandJournalSetWithEncryption(path string, segmented bool, encryption hatJournal.EncryptionOptions, visit func(commandJournalEntry) error) (int64, error) {
+	return scanCommandJournalSetWithEncryptionMode(path, segmented, encryption, false, visit)
+}
+
+func scanCommandJournalSetWithEncryptionBorrowing(path string, segmented bool, encryption hatJournal.EncryptionOptions, visit func(commandJournalEntry) error) (int64, error) {
+	return scanCommandJournalSetWithEncryptionMode(path, segmented, encryption, true, visit)
+}
+
+func scanCommandJournalSetWithEncryptionMode(path string, segmented bool, encryption hatJournal.EncryptionOptions, borrowStrings bool, visit func(commandJournalEntry) error) (int64, error) {
 	if !segmented {
-		return scanCommandJournalEntriesWithEncryption(path, encryption, visit)
+		return scanCommandJournalEntriesWithEncryptionMode(path, encryption, borrowStrings, visit)
 	}
 	segments, err := listCommandJournalSegments(path)
 	if err != nil {
@@ -71,7 +79,7 @@ func scanCommandJournalSetWithEncryption(path string, segmented bool, encryption
 		firstEntry := true
 		var firstMutation uint64
 		var lastMutation uint64
-		validBytes, err := scanCommandJournalEntriesWithEncryption(filePath, encryption, func(entry commandJournalEntry) error {
+		validBytes, err := scanCommandJournalEntriesWithEncryptionMode(filePath, encryption, borrowStrings, func(entry commandJournalEntry) error {
 			if firstEntry && fileIndex > 0 && entry.Checkpoint {
 				firstEntry = false
 				if !hasPreviousSequence || entry.Sequence != previousSequence {

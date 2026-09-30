@@ -29268,3 +29268,27 @@ test-t042-recovery-backup:
 .PHONY: ship-t042-recovery-replay
 ship-t042-recovery-replay:
 	@bash ./scripts/ship-t042-recovery-replay.sh
+.PHONY: test-t043-replay
+test-t043-replay:
+	@bash ./scripts/test-t043-replay.sh
+.PHONY: format-t043-replay
+format-t043-replay:
+	@bash ./scripts/format-t043-replay.sh
+.PHONY: benchmark-t043-replay
+benchmark-t043-replay:
+	@bash ./scripts/benchmark-t043-replay.sh
+
+.PHONY: race-t043-replay
+race-t043-replay:
+	@bash ./scripts/race-t043-replay.sh
+
+.PHONY: vet-t043-replay
+vet-t043-replay:
+	@bash ./scripts/vet-t043-replay.sh
+
+.PHONY: test-t043-journal
+test-t043-journal:
+	@bash ./scripts/test-t043-journal.sh
+.PHONY: ship-t043-recovery-replay
+ship-t043-recovery-replay:
+	@bash ./scripts/ship-t043-recovery-replay.sh
