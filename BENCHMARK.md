@@ -32580,3 +32580,34 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## CHU59 Numeric BETWEEN
+
+Commands:
+
+```sh
+make benchmark-chu59-numeric-between
+```
+
+Five samples on Linux/amd64, AMD Ryzen 9 5950X. The fixture has 16,384 packed
+`int64` rows with values `row % 4096`; the measured query selects values from
+1,000 through 3,000.
+
+| Workload | Before median ns/op | After median ns/op | CPU improvement | Before B/op | After B/op | Memory improvement | Before allocs/op | After allocs/op | Allocation improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Literal `BETWEEN` | 12,624,036 | 2,259,046 | 5.59x faster | 18,546,526 | 2,978,893 | 6.23x less | 113,320 | 24,050 | 4.71x fewer |
+| Equivalent `>=` + `<=` control | 2,080,976 | 2,285,638 | control | 2,983,541 | 2,983,540 | unchanged | 24,070 | 24,070 | unchanged |
+
+Raw samples:
+
+```text
+before BETWEEN: 11182679/18547142/113320, 12001828/18547157/113320, 12800680/18547213/113320, 12624036/18546564/113320, 12612616/18546526/113319
+before control:  2119201/2983544/24070,   1984871/2983538/24070,   2080976/2983541/24070,   2182563/2983541/24070,   1953597/2983536/24070
+after BETWEEN:  2259046/2979218/24050,   2350182/2978893/24050,   2231572/2978894/24050,   2318182/2978895/24050,   2099376/2978888/24050
+after control:  2365608/2983541/24070,   2285638/2983539/24070,   2413534/2983540/24070,   2243941/2983539/24070,   2055708/2983540/24070
+```
+
+Each tuple is `ns/op / B/op / allocs/op`. The optimization only admits
+inclusive numeric literal bounds; `NOT BETWEEN`, dynamic bounds, and
+nonnumeric cases retain the general SQL evaluator. See
+[CHU59_NUMERIC_BETWEEN.md](CHU59_NUMERIC_BETWEEN.md).

@@ -22292,3 +22292,29 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+format-chu59-numeric-between:
+	bash ./scripts/format-chu59-numeric-between.sh
+
+test-chu59-numeric-between:
+	bash ./scripts/test-chu59-numeric-between.sh
+
+benchmark-chu59-numeric-between:
+	bash ./scripts/benchmark-chu59-numeric-between.sh
+
+race-chu59-numeric-between:
+	bash ./scripts/race-chu59-numeric-between.sh
+
+vet-chu59-numeric-between:
+	bash ./scripts/vet-chu59-numeric-between.sh
+
+.PHONY: verify-chu59-numeric-between
+verify-chu59-numeric-between:
+	bash ./scripts/verify-chu59-numeric-between.sh
+
+.PHONY: review-chu59-numeric-between
+review-chu59-numeric-between:
+	bash ./scripts/review-chu59-numeric-between.sh
+
+.PHONY: ship-chu59-numeric-between
+ship-chu59-numeric-between:
+	bash ./scripts/ship-chu59-numeric-between.sh

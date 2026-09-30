@@ -734,3 +734,13 @@ Adopted as opt-in `hatStorage.CompactionDiagnostics`: bounded arrangement regist
 ## Materialize M-U41: Webhook Event Idempotency
 
 Adopted as opt-in `hatSql.WebhookEventDeduplicator`: bounded source/event-ID admission, payload-fingerprint conflict detection, expiry, deterministic CRC-protected HWE1 snapshots, and atomic restore. The caller owns application, durable storage, acknowledgement, and HTTP/webhook wiring; existing defaults remain unchanged. See [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md) and [BENCHMARK.md](BENCHMARK.md#m-u41-webhook-event-idempotency).
+
+## CHU59: Columnar Numeric BETWEEN
+
+Adopted as a conservative columnar fast path for literal numeric `BETWEEN`.
+The planner lowers inclusive bounds to the existing two numeric predicates,
+reusing packed numeric kernels and segment pruning. `NOT BETWEEN`, dynamic
+bounds, and nonnumeric literals retain the general evaluator. The measured
+fixture is 5.59x faster, with 6.23x less allocated heap and 4.71x fewer
+allocations. See [CHU59_NUMERIC_BETWEEN.md](CHU59_NUMERIC_BETWEEN.md) and
+[BENCHMARK.md](BENCHMARK.md#chu59-numeric-between).

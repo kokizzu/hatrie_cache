@@ -11264,6 +11264,15 @@ func sqlColumnarPredicateFields(expr sqlExpr, alias string, add func(string)) bo
 			}
 		}
 		return true
+	case "between":
+		field, _, _, ok := sqlColumnarNumericBetweenPredicate(expr, alias)
+		if !ok {
+			return false
+		}
+		if add != nil {
+			add(field)
+		}
+		return true
 	default:
 		return false
 	}
@@ -11287,6 +11296,27 @@ func sqlColumnarNumericPredicate(expr sqlExpr, alias string) (field, operator st
 	return "", "", 0, false
 }
 
+// sqlColumnarNumericBetweenPredicate recognizes only an inclusive BETWEEN
+// whose bounds are numeric literals. NOT BETWEEN and dynamic bounds stay on
+// the general evaluator because their SQL null and type behavior is broader.
+func sqlColumnarNumericBetweenPredicate(expr sqlExpr, alias string) (field string, lower, upper float64, ok bool) {
+	if expr.kind != "between" || expr.op != "BETWEEN" || expr.left == nil || len(expr.args) != 2 {
+		return "", 0, 0, false
+	}
+	if expr.left.kind != "field" || expr.left.qualifier != "" && expr.left.qualifier != alias {
+		return "", 0, 0, false
+	}
+	if expr.args[0].kind != "literal" || expr.args[1].kind != "literal" {
+		return "", 0, 0, false
+	}
+	lower, lowerOK := sqlNumber(expr.args[0].value)
+	upper, upperOK := sqlNumber(expr.args[1].value)
+	if !lowerOK || !upperOK {
+		return "", 0, 0, false
+	}
+	return expr.left.name, lower, upper, true
+}
+
 type sqlColumnarNumericFilter struct {
 	field    string
 	operator string
@@ -11301,6 +11331,13 @@ func sqlColumnarNumericConjunction(expr sqlExpr, alias string) ([]sqlColumnarNum
 	collect = func(current sqlExpr) bool {
 		if current.kind == "binary" && current.op == "AND" && current.left != nil && current.right != nil {
 			return collect(*current.left) && collect(*current.right)
+		}
+		if field, lower, upper, ok := sqlColumnarNumericBetweenPredicate(current, alias); ok {
+			predicates = append(predicates,
+				sqlColumnarNumericFilter{field: field, operator: ">=", value: lower},
+				sqlColumnarNumericFilter{field: field, operator: "<=", value: upper},
+			)
+			return true
 		}
 		field, operator, value, ok := sqlColumnarNumericPredicate(current, alias)
 		if !ok {
