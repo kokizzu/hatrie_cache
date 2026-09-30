@@ -123,7 +123,7 @@ operator control remain the preferred deployment model.
 - [x] M232 Sink progress checkpoints coupled to emitted frontier messages; see [M232_SINK_FRONTIER_CHECKPOINTS.md](M232_SINK_FRONTIER_CHECKPOINTS.md) and [BENCHMARK.md](BENCHMARK.md#m232-sink-frontier-checkpoints).
 - [x] M233 Sink retry and deduplication for disconnected output connections; see [M233_SINK_RETRY_DEDUPLICATION.md](M233_SINK_RETRY_DEDUPLICATION.md) and [BENCHMARK.md](BENCHMARK.md#m233-sink-retry-and-deduplication).
 - [x] M234 Sink backpressure and bounded pending-output memory; see [M234_SINK_BACKPRESSURE.md](M234_SINK_BACKPRESSURE.md) and [BENCHMARK.md](BENCHMARK.md#m234-bounded-sink-pending-output-queue).
-- [ ] M235 Dependency graph invalidation for affected indexes and views only.
+- [x] M235 Dependency graph invalidation for affected indexes and views only; see [M235_DEPENDENCY_INVALIDATION.md](M235_DEPENDENCY_INVALIDATION.md) and [BENCHMARK.md](BENCHMARK.md#m235-maintained-object-dependency-invalidation).
 - [ ] M236 On-demand refresh of only invalidated maintained objects.
 - [ ] M237 Lazy hydration triggered by the first reader with cancellation support.
 - [x] M238 Explain output for filter pushdown and arrangement reuse; structured pruning telemetry and bounded arrangement metadata are already available through `ExplainStep.Pruning` and `ExplainStep.Arrangements`. See [CH022_EXPLAIN_PRUNING.md](CH022_EXPLAIN_PRUNING.md), [MU012_ARRANGEMENT_EXPLAIN.md](MU012_ARRANGEMENT_EXPLAIN.md), and [BENCHMARK.md#mu-012-arrangement-explain](BENCHMARK.md#mu-012-arrangement-explain).

@@ -40174,3 +40174,26 @@ benefit is the hard item and payload-byte ceiling: a slow sink cannot grow the
 pending output set without bound. Raw samples are in
 [`M234_BENCHMARK_RAW.txt`](M234_BENCHMARK_RAW.txt), with API and correctness
 details in [M234_SINK_BACKPRESSURE.md](M234_SINK_BACKPRESSURE.md).
+
+## M235 Maintained-Object Dependency Invalidation
+
+Workload: 8,192 registered maintained objects, with 8 affected objects for a
+single changed source and 9 affected objects for two changed sources. Five
+200 ms samples were collected on an AMD Ryzen 9 5950X, `linux/amd64`. The
+baseline scans every object and checks its dependency list; the indexed path
+uses `SQLDependencyGraph` and returns detached, deterministic metadata.
+
+| Workload | Path | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| one changed source | Linear scan | 15,572 | 128 | 8 | 1.00x |
+| one changed source | Indexed graph | 767 | 152 | 9 | 0.05x |
+| two changed sources | Linear scan | 26,394 | 144 | 9 | 1.00x |
+| two changed sources | Indexed graph | 1,195 | 480 | 12 | 0.05x |
+
+The indexed graph is about 20.3x faster for one source and 22.1x faster for
+two sources. The single-source path adds only 24 B/op and one allocation. The
+two-source path uses a bounded candidate-key slice to deduplicate overlaps;
+its transient bytes are 3.3x the scan while CPU remains 22.1x lower. The
+transient cost scales with affected registrations, not the total catalog.
+Raw samples are in [`M235_BENCHMARK_RAW.txt`](M235_BENCHMARK_RAW.txt), with
+API and correctness details in [M235_DEPENDENCY_INVALIDATION.md](M235_DEPENDENCY_INVALIDATION.md).

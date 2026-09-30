@@ -1,0 +1,26 @@
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatSql
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkM235LinearMaintainedObjectScan-32               	   14520	     15572 ns/op	     128 B/op	       8 allocs/op
+BenchmarkM235LinearMaintainedObjectScan-32               	   14684	     16148 ns/op	     128 B/op	       8 allocs/op
+BenchmarkM235LinearMaintainedObjectScan-32               	   15699	     15098 ns/op	     128 B/op	       8 allocs/op
+BenchmarkM235LinearMaintainedObjectScan-32               	   15303	     15692 ns/op	     128 B/op	       8 allocs/op
+BenchmarkM235LinearMaintainedObjectScan-32               	   16312	     15439 ns/op	     128 B/op	       8 allocs/op
+BenchmarkM235IndexedDependencyGraphLookup-32             	  309025	       769.4 ns/op	     152 B/op	       9 allocs/op
+BenchmarkM235IndexedDependencyGraphLookup-32             	  293992	       767.5 ns/op	     152 B/op	       9 allocs/op
+BenchmarkM235IndexedDependencyGraphLookup-32             	  315766	       767.0 ns/op	     152 B/op	       9 allocs/op
+BenchmarkM235IndexedDependencyGraphLookup-32             	  319995	       760.9 ns/op	     152 B/op	       9 allocs/op
+BenchmarkM235IndexedDependencyGraphLookup-32             	  312602	       762.5 ns/op	     152 B/op	       9 allocs/op
+BenchmarkM235IndexedDependencyGraphTwoSourceLookup-32    	  206346	      1195 ns/op	     480 B/op	      12 allocs/op
+BenchmarkM235IndexedDependencyGraphTwoSourceLookup-32    	  176779	      1203 ns/op	     480 B/op	      12 allocs/op
+BenchmarkM235IndexedDependencyGraphTwoSourceLookup-32    	  172404	      1199 ns/op	     480 B/op	      12 allocs/op
+BenchmarkM235IndexedDependencyGraphTwoSourceLookup-32    	  201343	      1166 ns/op	     480 B/op	      12 allocs/op
+BenchmarkM235IndexedDependencyGraphTwoSourceLookup-32    	  169278	      1192 ns/op	     480 B/op	      12 allocs/op
+BenchmarkM235LinearMaintainedObjectTwoSourceScan-32      	    7734	     26061 ns/op	     144 B/op	       9 allocs/op
+BenchmarkM235LinearMaintainedObjectTwoSourceScan-32      	    9438	     26169 ns/op	     144 B/op	       9 allocs/op
+BenchmarkM235LinearMaintainedObjectTwoSourceScan-32      	    9799	     28003 ns/op	     144 B/op	       9 allocs/op
+BenchmarkM235LinearMaintainedObjectTwoSourceScan-32      	    9494	     26394 ns/op	     144 B/op	       9 allocs/op
+BenchmarkM235LinearMaintainedObjectTwoSourceScan-32      	    9404	     27705 ns/op	     144 B/op	       9 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatSql	7.109s
