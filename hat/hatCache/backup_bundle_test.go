@@ -423,13 +423,13 @@ func TestPartitionLocalBackupFiltersKeysAndRequiresMatchingRestoreSelector(t *te
 	}
 }
 
-func TestPartitionLocalBackupRejectsNonSnapshotModes(t *testing.T) {
+func TestPartitionLocalBackupRejectsIncrementalMode(t *testing.T) {
 	partition := BackupPartitionMetadata{
 		Mode:        "partitioned",
 		Partitions:  []string{"sg"},
 		KeyPrefixes: []string{"sg:"},
 	}
-	for _, mode := range []BackupMode{BackupModePebbleCheckpoint, BackupModePebbleIncremental} {
+	for _, mode := range []BackupMode{BackupModePebbleIncremental} {
 		_, err := CreateBackupBundle(filepath.Join(t.TempDir(), "backup.tar.gz"), newTestTrie(t), nil, BackupBundleOptions{
 			Mode:           mode,
 			Partition:      partition,

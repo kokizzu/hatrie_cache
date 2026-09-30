@@ -256,7 +256,7 @@ func rebuildBackupBundleWithJournal(t testing.TB, bundlePath string, journalPath
 	return output
 }
 
-func TestRestoreBackupBundleRejectsPartitionSubsetForPebbleCheckpoint(t *testing.T) {
+func TestRestoreBackupBundleSupportsPartitionSubsetForPebbleCheckpoint(t *testing.T) {
 	source := CreateHatTrie()
 	defer source.Destroy()
 	source.UpsertString("region:sg/user:1", "Singapore")
@@ -288,9 +288,26 @@ func TestRestoreBackupBundleRejectsPartitionSubsetForPebbleCheckpoint(t *testing
 		Partitions:  []string{"sg"},
 		KeyPrefixes: []string{"region:sg/"},
 	}
-	_, err = RestoreBackupBundle(bundlePath, filepath.Join(t.TempDir(), "restored"), BackupBundleRestoreOptions{Partition: selector})
-	if err == nil || !strings.Contains(err.Error(), "snapshot backup") {
-		t.Fatalf("RestoreBackupBundle(partition subset checkpoint) error = %v, want snapshot-only rejection", err)
+	restoreDir := filepath.Join(t.TempDir(), "restored")
+	report, err := RestoreBackupBundle(bundlePath, restoreDir, BackupBundleRestoreOptions{Partition: selector})
+	if err != nil {
+		t.Fatalf("RestoreBackupBundle(partition subset checkpoint) error = %v", err)
+	}
+	if report.RecoveredKeys != 1 {
+		t.Fatalf("RecoveredKeys = %d, want 1", report.RecoveredKeys)
+	}
+	restoredStore, err := OpenPebbleStoreReadOnly(report.Store)
+	if err != nil {
+		t.Fatalf("OpenPebbleStoreReadOnly() error = %v", err)
+	}
+	defer restoredStore.Close()
+	restored := CreateHatTrie()
+	defer restored.Destroy()
+	if _, err := restoredStore.Load(restored); err != nil {
+		t.Fatalf("Load(restored) error = %v", err)
+	}
+	if !restored.Exists("region:sg/user:1") || restored.Exists("region:us/user:1") {
+		t.Fatalf("restored partition keys = sg:%v us:%v, want sg:true us:false", restored.Exists("region:sg/user:1"), restored.Exists("region:us/user:1"))
 	}
 }
 

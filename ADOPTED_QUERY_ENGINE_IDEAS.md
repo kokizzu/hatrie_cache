@@ -579,18 +579,20 @@ measurements in [BENCHMARK.md](BENCHMARK.md).
 
 `RestoreBackupBundle` now accepts an opt-in strict subset of a region-local
 partition selector when each selected partition is paired with its declared
-key prefix. The extracted snapshot is atomically rewritten to the selected
-prefixes and verified again, so the published restore contains only the
-requested partition data. Checkpoint-only journal markers are validated and
-preserved. A post-snapshot replay tail is also supported for single-key
-`SET*`, `INC`, `DEL`, `EXPIRE`, and `EXPIREAT` mutations: selected commands are
-applied to the filtered snapshot and the staged journal is atomically advanced
-to a checkpoint. Batches, outbox/idempotency-bearing entries, unsupported
-complex commands, and Pebble checkpoint/repository subset restores remain
-rejected before destination mutation.
+key prefix. Snapshot bundles and Pebble checkpoint bundles are atomically
+rewritten to the selected prefixes and verified again, so the published
+restore contains only the requested partition data. Partition-local Pebble
+checkpoint creation also filters out keys outside the declared topology.
+Checkpoint-only journal markers are validated and preserved. A post-snapshot
+replay tail is also supported for single-key `SET*`, `INC`, `DEL`, `EXPIRE`,
+and `EXPIREAT` mutations: selected commands are applied to the filtered
+snapshot and the staged journal is atomically advanced to a checkpoint.
+Batches, outbox/idempotency-bearing entries, unsupported complex commands, and
+incremental repository subset restores remain rejected before destination
+mutation.
 
-See [BENCHMARK.md#ch-064-selective-partition-restore](BENCHMARK.md#ch-064-selective-partition-restore)
-for the measured size reduction and restore-cost tradeoff.
+See [BENCHMARK.md#ch-023-tt-010-persistent-pebble-partition-restore](BENCHMARK.md#ch-023-tt-010-persistent-pebble-partition-restore)
+for the measured restore-cost tradeoff.
 
 ### CHG02: Small-cardinality `GROUP BY` index
 

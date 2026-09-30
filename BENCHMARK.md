@@ -23701,6 +23701,39 @@ make benchmark-selective-backup
 Raw benchmark output is emitted by the target and is not stored in the backup
 directory.
 
+<a id="ch-023-tt-010-persistent-pebble-partition-restore"></a>
+## CH-023 / TT-010 Persistent Pebble Partition Restore
+
+This benchmark measures opt-in partition-subset restore from a Pebble
+checkpoint against the unchanged full-checkpoint restore path. The fixture has
+string, counter, and bytes values across `region:sg/`, `region:us/`, and a
+global key. The selected path restores the three Singapore keys; the full
+control restores all five keys. Five samples use `-benchmem -count=5` on the
+same Linux amd64 host. Checkpoint creation is outside the timed restore loop.
+
+### Raw Samples
+
+| Workload | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| Pebble selected partition | 112,993,922; 82,355,482; 61,837,404; 71,253,240; 115,313,091 | 4,320,567; 4,316,595; 4,310,600; 4,305,368; 4,308,062 | 8,660; 8,641; 8,613; 8,620; 8,622 |
+| Pebble full restore | 254,531,157; 13,248,544; 27,787,246; 9,120,398; 10,229,236 | 793,083; 791,635; 794,903; 789,671; 792,153 | 1,358; 1,312; 1,320; 1,311; 1,310 |
+
+### Median Comparison
+
+| Workload | Median ns/op | Median B/op | Median allocs/op | Relative to full restore |
+| --- | ---: | ---: | ---: | --- |
+| Pebble selected partition | 82,355,482 | 4,310,600 | 8,622 | `6.22x` slower, `5.44x` higher allocation, `6.57x` more allocations |
+| Pebble full restore | 13,248,544 | 792,153 | 1,312 | `1.00x` |
+
+The selected path deliberately trades restore CPU and transient allocation for
+an atomically filtered persistent store. Full restore remains the default and
+keeps the original fast path. Incremental repository subset restore remains
+unsupported. Reproduce with:
+
+```sh
+make benchmark-tt023-selective-persistent-restore
+```
+
 <a id="tt-042-restore-resume-checkpoints"></a>
 ## TT-042 Restore Resume Checkpoints
 

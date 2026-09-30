@@ -73,9 +73,6 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 	if mode != BackupModeSnapshot && mode != BackupModePebbleCheckpoint {
 		return BackupBundleRestoreReport{}, fmt.Errorf("hatriecache: unsupported backup bundle restore mode %q", mode)
 	}
-	if selectivePartition && mode != BackupModeSnapshot {
-		return BackupBundleRestoreReport{}, errors.New("hatriecache: selective partition restore requires a snapshot backup")
-	}
 	verificationManifest := manifest
 	restoredJournalSequence := manifest.JournalSequence
 	if selectivePartition {
@@ -102,12 +99,21 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 		return BackupBundleRestoreReport{}, err
 	}
 	if selectivePartition {
-		journalSequence, err := filterRestoredSnapshotByPartitionAtSequence(destination.StagingPath(), manifest, options.Partition, options.MaxJournalSequence)
-		if err != nil {
-			return BackupBundleRestoreReport{}, err
+		if mode == BackupModeSnapshot {
+			journalSequence, filterErr := filterRestoredSnapshotByPartitionAtSequence(destination.StagingPath(), manifest, options.Partition, options.MaxJournalSequence)
+			if filterErr != nil {
+				return BackupBundleRestoreReport{}, filterErr
+			}
+			restoredJournalSequence = journalSequence
+			verificationManifest.JournalSequence = journalSequence
+		} else {
+			if _, err := verifyPebbleBackupRoot(bundlePath, "bundle", manifest, destination.StagingPath()); err != nil {
+				return BackupBundleRestoreReport{}, err
+			}
+			if _, err := filterRestoredPebbleStoreByPartition(destination.StagingPath(), manifest, options.Partition); err != nil {
+				return BackupBundleRestoreReport{}, err
+			}
 		}
-		restoredJournalSequence = journalSequence
-		verificationManifest.JournalSequence = journalSequence
 	} else if options.MaxJournalSequence > 0 && options.MaxJournalSequence < manifest.JournalSequence {
 		journalPath := filepath.Join(destination.StagingPath(), filepath.FromSlash(manifest.Snapshot))
 		loaded := CreateHatTrie()
@@ -133,7 +139,7 @@ func RestoreBackupBundle(bundlePath string, dataDir string, options BackupBundle
 	case BackupModeSnapshot:
 		doctor, err = verifySnapshotBackupRoot(bundlePath, "bundle", verificationManifest, destination.StagingPath())
 	case BackupModePebbleCheckpoint:
-		doctor, err = verifyPebbleBackupRoot(bundlePath, "bundle", manifest, destination.StagingPath())
+		doctor, err = verifyPebbleBackupRoot(bundlePath, "bundle", verificationManifest, destination.StagingPath())
 	}
 	if err != nil {
 		return BackupBundleRestoreReport{}, err

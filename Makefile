@@ -29126,3 +29126,22 @@ commit-tt024-cross-field-text:
 
 push-tt024-cross-field-text:
 	bash scripts/tt024-cross-field-text.sh push
+.PHONY: format-tt023-selective-persistent-restore test-tt023-selective-persistent-restore race-tt023-selective-persistent-restore vet-tt023-selective-persistent-restore benchmark-tt023-selective-persistent-restore package-tt023-selective-persistent-restore status-tt023-selective-persistent-restore commit-tt023-selective-persistent-restore push-tt023-selective-persistent-restore
+format-tt023-selective-persistent-restore:
+	bash scripts/tt023-selective-persistent-restore.sh format
+test-tt023-selective-persistent-restore:
+	bash scripts/tt023-selective-persistent-restore.sh test
+race-tt023-selective-persistent-restore:
+	bash scripts/tt023-selective-persistent-restore.sh race
+vet-tt023-selective-persistent-restore:
+	bash scripts/tt023-selective-persistent-restore.sh vet
+benchmark-tt023-selective-persistent-restore:
+	bash scripts/tt023-selective-persistent-restore.sh benchmark
+package-tt023-selective-persistent-restore:
+	bash scripts/tt023-selective-persistent-restore.sh package
+status-tt023-selective-persistent-restore:
+	bash scripts/tt023-selective-persistent-restore.sh status
+commit-tt023-selective-persistent-restore:
+	bash scripts/tt023-selective-persistent-restore.sh commit
+push-tt023-selective-persistent-restore:
+	bash scripts/tt023-selective-persistent-restore.sh push

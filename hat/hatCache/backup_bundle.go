@@ -117,7 +117,7 @@ func CreateBackupBundleWithContext(ctx context.Context, path string, trie *HatTr
 	if len(keyPrefixes) > 0 && options.PartitionLocal {
 		return BackupBundleManifest{}, errors.New("hatriecache: backup key prefixes cannot be combined with partition-local mode")
 	}
-	if options.PartitionLocal && mode != BackupModeAuto && mode != BackupModeSnapshot {
+	if options.PartitionLocal && mode != BackupModeAuto && mode != BackupModeSnapshot && mode != BackupModePebbleCheckpoint {
 		return BackupBundleManifest{}, errors.New("hatriecache: partition-local backup requires snapshot mode")
 	}
 	if mode == BackupModePebbleIncremental {
@@ -233,8 +233,26 @@ func createBackupBundleLocked(ctx context.Context, path string, tmpDir string, t
 		manifest.RestoreHint = "extract snapshot.hc and commands.journal into DATA_DIR, then start with SNAPSHOT_PATH=DATA_DIR/snapshot.hc JOURNAL_PATH=DATA_DIR/commands.journal"
 	case BackupModePebbleCheckpoint:
 		store := persistentStore.(*PebbleStore)
+		checkpointTrie := trie
+		var filteredCheckpointTrie *HatTrie
+		if partitionLocal {
+			filteredCheckpointTrie = CreateHatTrie()
+			defer filteredCheckpointTrie.Destroy()
+			filteredSnapshotPath := filepath.Join(tmpDir, ".partition-filter.hc")
+			if err := writeFileAtomicStream(filteredSnapshotPath, func(writer io.Writer) error {
+				return trie.writeSnapshotWithKeyFilter(writer, journalSequence, SnapshotFormatBinary, func(key string) bool {
+					return backupPartitionKeyCoveredByPrefix(key, partition.KeyPrefixes)
+				})
+			}); err != nil {
+				return BackupBundleManifest{}, err
+			}
+			if _, err := filteredCheckpointTrie.LoadSnapshotWithMetadata(filteredSnapshotPath); err != nil {
+				return BackupBundleManifest{}, err
+			}
+			checkpointTrie = filteredCheckpointTrie
+		}
 		checkpointPath := filepath.Join(tmpDir, backupBundleStorePath)
-		if err := store.SaveCheckpointWithJournalSequence(trie, checkpointPath, journalSequence); err != nil {
+		if err := store.SaveCheckpointWithJournalSequence(checkpointTrie, checkpointPath, journalSequence); err != nil {
 			return BackupBundleManifest{}, err
 		}
 		if err := checkBackupContext(ctx); err != nil {
