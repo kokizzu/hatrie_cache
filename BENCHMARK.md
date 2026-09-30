@@ -39519,3 +39519,19 @@ Raw valid-source samples:
 
 See [COMPILED_NEGATIVE_CACHE.md](COMPILED_NEGATIVE_CACHE.md) for bounds,
 invalidation semantics, and verification commands.
+
+## Adaptive Hash Index Postings
+
+`make benchmark-hash-index-adaptive` measured five `-benchmem` samples on an
+AMD Ryzen 9 5950X:
+
+| Workload | Before median | After median | Result | Allocation volume | Allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| One-ID exact lookup | 8.342 ns/op | 7.751 ns/op | 1.08x faster | 0 B/op | 0 |
+| 10,000-ID dense lookup | 1,203 ns/op | 1,228 ns/op | 2.1% slower | 0 B/op | 0 |
+| Build 128 singleton keys | 10,499 ns/op | 7,594 ns/op | 1.38x faster | 17,264 -> 17,648 B/op | 137 -> 9 |
+
+The dense-path cost is documented and bounded; the dual-map variant was
+rejected because it raised sparse build allocation volume by 22.8%. Raw
+samples and ID `0` coverage are in
+[HASH_INDEX_ADAPTIVE_POSTINGS.md](HASH_INDEX_ADAPTIVE_POSTINGS.md).

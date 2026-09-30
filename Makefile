@@ -28650,3 +28650,23 @@ vet-compiled-negative-cache:
 .PHONY: benchmark-compiled-negative-cache
 benchmark-compiled-negative-cache:
 	bash scripts/compiled-negative-cache.sh benchmark
+
+.PHONY: test-hash-index-adaptive
+test-hash-index-adaptive:
+	bash scripts/run-hash-index-adaptive.sh test
+
+.PHONY: benchmark-hash-index-adaptive
+benchmark-hash-index-adaptive:
+	bash scripts/run-hash-index-adaptive.sh benchmark
+
+.PHONY: race-hash-index-adaptive
+race-hash-index-adaptive:
+	bash scripts/run-hash-index-adaptive.sh race
+
+.PHONY: format-hash-index-adaptive
+format-hash-index-adaptive:
+	bash scripts/run-hash-index-adaptive.sh format
+
+.PHONY: full-test-hash-index-adaptive
+full-test-hash-index-adaptive:
+	bash scripts/run-hash-index-adaptive.sh full

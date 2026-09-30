@@ -1214,3 +1214,5 @@ schema-version invalidation. Repeated invalid compiled sources improved from
 allocations; the valid compiled-plan hit remained allocation-free within
 benchmark noise. See [COMPILED_NEGATIVE_CACHE.md](COMPILED_NEGATIVE_CACHE.md)
 and [BENCHMARK.md](BENCHMARK.md#compiled-query-negative-result-cache).
+
+| ClickHouse / Tarantool | Adaptive non-unique hash-index postings | Implemented | `HashIndex` keeps singleton IDs inline and promotes to its existing sorted slice on the second ID, reducing sparse allocations while preserving deterministic order, duplicate handling, and ID `0`. See [HASH_INDEX_ADAPTIVE_POSTINGS.md](HASH_INDEX_ADAPTIVE_POSTINGS.md). |

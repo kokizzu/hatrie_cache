@@ -2,6 +2,7 @@ package hatDataStructure
 
 import (
 	"errors"
+	"sort"
 	"sync"
 )
 
@@ -34,6 +35,11 @@ type hashIndexEntry[T any, K comparable] struct {
 	value T
 }
 
+type hashIndexPosting struct {
+	ids       []uint64
+	singleton uint64
+}
+
 // HashIndex is a typed exact-match secondary index. It uses a hash map for
 // key lookup and keeps a reverse ID map so updates and deletes are exact.
 type HashIndex[T any, K comparable] struct {
@@ -42,7 +48,7 @@ type HashIndex[T any, K comparable] struct {
 	unique      bool
 	entries     map[uint64]hashIndexEntry[T, K]
 	uniqueByKey map[K]uint64
-	postings    map[K]u64PostingList
+	postings    map[K]hashIndexPosting
 }
 
 // NewHashIndex creates an empty typed hash index.
@@ -61,7 +67,7 @@ func NewHashIndex[T any, K comparable](extractor func(T) K, options HashIndexOpt
 	if options.Unique {
 		index.uniqueByKey = make(map[K]uint64, options.Capacity)
 	} else {
-		index.postings = make(map[K]u64PostingList, options.Capacity)
+		index.postings = make(map[K]hashIndexPosting, options.Capacity)
 	}
 	return index, nil
 }
@@ -89,13 +95,13 @@ func (index *HashIndex[T, K]) Upsert(id uint64, value T) error {
 		if index.unique {
 			index.uniqueByKey[key] = id
 		} else {
-			index.insertPostingLocked(key, id)
+			index.addHashIndexPostingLocked(key, id)
 		}
 	} else if current.key != key {
 		if index.unique {
 			index.uniqueByKey[key] = id
 		} else {
-			index.insertPostingLocked(key, id)
+			index.addHashIndexPostingLocked(key, id)
 		}
 	}
 	index.entries[id] = hashIndexEntry[T, K]{key: key, value: value}
@@ -138,7 +144,10 @@ func (index *HashIndex[T, K]) LookupOne(key K) (HashIndexEntry[T, K], bool) {
 	if !ok {
 		return HashIndexEntry[T, K]{}, false
 	}
-	id := posting.first
+	id := posting.singleton
+	if len(posting.ids) > 0 {
+		id = posting.ids[0]
+	}
 	entry := index.entries[id]
 	return HashIndexEntry[T, K]{ID: id, Key: entry.key, Value: entry.value}, true
 }
@@ -184,22 +193,11 @@ func (index *HashIndex[T, K]) LookupInto(key K, dst []T) []T {
 	if !ok {
 		return dst
 	}
-	if posting.rest == nil {
-		if entry, ok := index.entries[posting.first]; ok {
-			dst = append(dst, entry.value)
-		}
-		return dst
+	if len(posting.ids) == 0 {
+		return append(dst, index.entries[posting.singleton].value)
 	}
-	if entry, ok := index.entries[posting.first]; ok {
-		dst = append(dst, entry.value)
-	}
-	if entry, ok := index.entries[posting.rest.first]; ok {
-		dst = append(dst, entry.value)
-	}
-	for _, id := range posting.rest.rest {
-		if entry, ok := index.entries[id]; ok {
-			dst = append(dst, entry.value)
-		}
+	for _, id := range posting.ids {
+		dst = append(dst, index.entries[id].value)
 	}
 	return dst
 }
@@ -227,7 +225,10 @@ func (index *HashIndex[T, K]) LookupIDsInto(key K, dst []uint64) []uint64 {
 	if !ok {
 		return dst
 	}
-	return posting.values(dst)
+	if len(posting.ids) == 0 {
+		return append(dst, posting.singleton)
+	}
+	return append(dst, posting.ids...)
 }
 
 // Len returns the number of indexed IDs.
@@ -276,8 +277,17 @@ func (index *HashIndex[T, K]) ensureInitializedLocked() {
 		return
 	}
 	if index.postings == nil {
-		index.postings = make(map[K]u64PostingList)
+		index.postings = make(map[K]hashIndexPosting)
 	}
+}
+
+func (index *HashIndex[T, K]) addHashIndexPostingLocked(key K, id uint64) {
+	posting, exists := index.postings[key]
+	if !exists {
+		index.postings[key] = hashIndexPosting{singleton: id}
+		return
+	}
+	index.postings[key] = insertHashIndexPosting(posting, id)
 }
 
 func (index *HashIndex[T, K]) removeKeyLocked(key K, id uint64) {
@@ -289,21 +299,47 @@ func (index *HashIndex[T, K]) removeKeyLocked(key K, id uint64) {
 	if !ok {
 		return
 	}
-	next, removed, empty := posting.removeSorted(id)
-	if !removed {
+	if len(posting.ids) == 0 {
+		if posting.singleton == id {
+			delete(index.postings, key)
+		}
 		return
 	}
-	if empty {
+	ids := posting.ids
+	position := sort.Search(len(ids), func(position int) bool { return ids[position] >= id })
+	if position >= len(ids) || ids[position] != id {
+		return
+	}
+	copy(ids[position:], ids[position+1:])
+	ids[len(ids)-1] = 0
+	ids = ids[:len(ids)-1]
+	if len(ids) == 0 {
 		delete(index.postings, key)
+	} else if len(ids) == 1 {
+		index.postings[key] = hashIndexPosting{singleton: ids[0]}
 		return
+	} else {
+		index.postings[key] = hashIndexPosting{ids: ids}
 	}
-	index.postings[key] = next
 }
 
-func (index *HashIndex[T, K]) insertPostingLocked(key K, id uint64) {
-	if posting, ok := index.postings[key]; ok {
-		index.postings[key] = posting.insertSorted(id)
-		return
+func insertHashIndexPosting(posting hashIndexPosting, id uint64) hashIndexPosting {
+	if len(posting.ids) == 0 {
+		if posting.singleton == id {
+			return posting
+		}
+		if posting.singleton < id {
+			return hashIndexPosting{ids: []uint64{posting.singleton, id}}
+		}
+		return hashIndexPosting{ids: []uint64{id, posting.singleton}}
 	}
-	index.postings[key] = newU64PostingList(id)
+	ids := posting.ids
+	position := sort.Search(len(ids), func(position int) bool { return ids[position] >= id })
+	if position < len(ids) && ids[position] == id {
+		return posting
+	}
+	ids = append(ids, 0)
+	copy(ids[position+1:], ids[position:])
+	ids[position] = id
+	return hashIndexPosting{ids: ids}
 }

@@ -1145,3 +1145,5 @@ SQL shape. See [CH035_REMOTE_SHARD_PRUNING.md](CH035_REMOTE_SHARD_PRUNING.md).
   the correct fallback. See
   [M052AD_AUTO_NATIVE_CONDITIONAL_AGGREGATES.md](M052AD_AUTO_NATIVE_CONDITIONAL_AGGREGATES.md)
   and [BENCHMARK.md](BENCHMARK.md#m052ad-automatic-native-conditional-aggregates).
+
+- [x] C170 Adaptive non-unique hash-index postings. `HashIndex` stores one ID inline and promotes sorted postings on demand; the measured singleton build was 1.38x faster with 15.2x fewer allocations and singleton lookup was 1.08x faster, accepting a bounded ~2% dense lookup cost. See [HASH_INDEX_ADAPTIVE_POSTINGS.md](HASH_INDEX_ADAPTIVE_POSTINGS.md).
