@@ -3235,7 +3235,8 @@ func executeSQLExternalSortStream(ctx context.Context, query *sqlQuery, resolver
 		}
 		allPaths[run.path] = struct{}{}
 		runs = append(runs, run)
-		chunk = make([]sqlSpillOutput, 0)
+		clear(chunk)
+		chunk = chunk[:0]
 		chunkBytes = 0
 		return nil
 	}

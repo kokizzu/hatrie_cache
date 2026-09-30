@@ -29088,6 +29088,52 @@ materialized baseline: Maximum resident set size: 26044 kbytes
 streaming external spill: Maximum resident set size: 25084 kbytes
 ```
 
+### CH-U02 Spill-Run Chunk Reuse
+
+This follow-up keeps the CH-U02 external `ORDER BY` semantics and wire format
+unchanged. After a spill run is synchronously encoded, the executor clears and
+reuses the chunk backing array instead of allocating a new slice. Five samples
+before and after were collected on an AMD Ryzen 9 5950X Linux `amd64` host with
+the same 4,096-row fixture and `-count=5`.
+
+| Streaming path | Median ns/op | Median B/op | Median allocs/op | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| New chunk backing per run | 30,083,255 | 9,884,070 | 198,629 | baseline |
+| Clear and reuse chunk backing | 28,624,384 | 9,291,477 | 198,535 | 1.05x faster, 1.06x lower cumulative bytes, 0.05% fewer allocations |
+
+Raw samples before the change:
+
+```text
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/materialized_baseline-32 7273312 ns/op 5413453 B/op 44578 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/materialized_baseline-32 7057340 ns/op 5413413 B/op 44578 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/materialized_baseline-32 7767898 ns/op 5413679 B/op 44579 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/materialized_baseline-32 7225620 ns/op 5413379 B/op 44578 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/materialized_baseline-32 7223252 ns/op 5413632 B/op 44579 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/streaming_external_spill-32 28419782 ns/op 9883332 B/op 198626 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/streaming_external_spill-32 28573321 ns/op 9884070 B/op 198626 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/streaming_external_spill-32 30544868 ns/op 9884935 B/op 198632 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/streaming_external_spill-32 30552141 ns/op 9884717 B/op 198632 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/streaming_external_spill-32 30083255 ns/op 9883514 B/op 198629 allocs/op
+```
+
+Raw samples after the change:
+
+```text
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/materialized_baseline-32 7439259 ns/op 5413577 B/op 44579 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/materialized_baseline-32 7379997 ns/op 5413453 B/op 44579 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/materialized_baseline-32 7287625 ns/op 5413588 B/op 44579 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/materialized_baseline-32 7209529 ns/op 5413738 B/op 44579 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/materialized_baseline-32 7358132 ns/op 5413432 B/op 44578 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/streaming_external_spill-32 28088393 ns/op 9290874 B/op 198531 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/streaming_external_spill-32 28178907 ns/op 9291975 B/op 198535 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/streaming_external_spill-32 28624384 ns/op 9291954 B/op 198535 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/streaming_external_spill-32 28832818 ns/op 9290961 B/op 198533 allocs/op
+BenchmarkCHU02ExternalOrderByBaselineAndStreaming/streaming_external_spill-32 30079614 ns/op 9291477 B/op 198535 allocs/op
+```
+
+The materialized control varied within the same fixture and remains outside
+the optimization; the comparison of interest is the streaming spill path.
+
 ## CH-U04 External `DISTINCT` Spill
 
 CH-U04 extends the exact bounded external set operator to direct

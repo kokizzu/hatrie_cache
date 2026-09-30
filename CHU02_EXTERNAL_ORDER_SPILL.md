@@ -86,3 +86,24 @@ and wall-clock time, while `B/op` and `allocs/op` expose Go heap pressure. The
 streaming path is expected to trade additional spill I/O for bounded in-memory
 sort state; the result table in [BENCHMARK.md](BENCHMARK.md) records that tradeoff
 instead of presenting it as a universal speedup.
+
+## Spill-Run Chunk Reuse
+
+The spill path now reuses the output chunk backing array after each run is
+encoded. It clears the consumed records before reslicing so row maps and key
+payloads are not retained by the reusable backing array. This changes neither
+the output order nor the spill format; it only removes repeated chunk-backing
+allocations from the already opt-in streaming path.
+
+Five samples before and after were collected on the same AMD Ryzen 9 5950X
+Linux `amd64` host with the 4,096-row fixture. The materialized path remained
+the control and its behavior was unchanged.
+
+| Streaming path | Median ns/op | Median B/op | Median allocs/op | Result |
+| --- | ---: | ---: | ---: | --- |
+| New chunk backing per run | 30,083,255 | 9,884,070 | 198,629 | baseline |
+| Clear and reuse chunk backing | 28,624,384 | 9,291,477 | 198,535 | 1.05x faster, 1.06x lower cumulative bytes, 0.05% fewer allocations |
+
+The improvement is intentionally modest because spill-run encoding, filesystem
+I/O, and merge allocations dominate this fixture. The change has no new
+configuration and preserves the existing memory-budget tradeoff.
