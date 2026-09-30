@@ -16427,6 +16427,7 @@ type sqlSpillGroupAggregate struct {
 type sqlSpillGroupRecord struct {
 	Key        string
 	Value      interface{}
+	Values     []interface{}
 	Ordinal    int
 	Aggregates []sqlSpillGroupAggregate
 }
@@ -16460,8 +16461,23 @@ func sqlSpillGroupRecordBefore(left, right sqlSpillGroupRecord, order sqlOrder) 
 	return left.Ordinal < right.Ordinal
 }
 
+func sqlSpillGroupRecordValue(record sqlSpillGroupRecord, index int) interface{} {
+	if len(record.Values) > 0 && index >= 0 && index < len(record.Values) {
+		return record.Values[index]
+	}
+	return record.Value
+}
+
 func sqlSpillGroupRecordBytes(record sqlSpillGroupRecord) int {
-	return len(record.Key) + sqlRowBytes(SQLRow{"group": record.Value}) + len(record.Aggregates)*64 + 32
+	groupBytes := 0
+	if len(record.Values) == 0 {
+		groupBytes = sqlRowBytes(SQLRow{"group": record.Value})
+	} else {
+		for _, value := range record.Values {
+			groupBytes += sqlRowBytes(SQLRow{"group": value})
+		}
+	}
+	return len(record.Key) + groupBytes + len(record.Aggregates)*64 + 32
 }
 
 func sqlSpillGroupMergeRecordBytes(record sqlSpillGroupRecord) int {
@@ -16518,6 +16534,7 @@ func sqlMergeSpillGroupRecord(left, right sqlSpillGroupRecord) sqlSpillGroupReco
 	if right.Ordinal < left.Ordinal {
 		left.Ordinal = right.Ordinal
 		left.Value = right.Value
+		left.Values = right.Values
 	}
 	for index := range left.Aggregates {
 		other := right.Aggregates[index]
@@ -17123,9 +17140,10 @@ func sqlCheckGroupKeys(groups [][]sqlExecRow, maximum int) error {
 }
 
 type sqlOrderedGroupProjection struct {
-	column    string
-	group     bool
-	aggregate *sqlOrderedAggregate
+	column     string
+	group      bool
+	groupIndex int
+	aggregate  *sqlOrderedAggregate
 }
 
 type sqlOrderedAggregate struct {
@@ -17148,15 +17166,30 @@ func sqlSameField(left, right sqlExpr) bool {
 // through the established materialized evaluator rather than approximating its
 // representative-row, HAVING, window, or function semantics.
 func sqlOrderedGroupProjections(q *sqlQuery) ([]sqlOrderedGroupProjection, bool) {
-	if q == nil || len(q.groupBy) != 1 || q.groupBy[0].kind != "field" || q.having.kind != "" || q.distinct || len(q.unions) != 0 || sqlQueryHasWindow(q) {
+	return sqlOrderedGroupProjectionsFor(q, false)
+}
+
+func sqlOrderedGroupProjectionsFor(q *sqlQuery, allowComposite bool) ([]sqlOrderedGroupProjection, bool) {
+	if q == nil || len(q.groupBy) == 0 || !allowComposite && len(q.groupBy) != 1 || q.having.kind != "" || q.distinct || len(q.unions) != 0 || sqlQueryHasWindow(q) {
 		return nil, false
+	}
+	for _, group := range q.groupBy {
+		if group.kind != "field" {
+			return nil, false
+		}
 	}
 	columns := sqlColumns(q.selects)
 	projections := make([]sqlOrderedGroupProjection, len(q.selects))
 	for index, item := range q.selects {
 		projection := sqlOrderedGroupProjection{column: columns[index]}
-		if sqlSameField(item.expr, q.groupBy[0]) {
-			projection.group = true
+		for groupIndex, group := range q.groupBy {
+			if sqlSameField(item.expr, group) {
+				projection.group = true
+				projection.groupIndex = groupIndex
+				break
+			}
+		}
+		if projection.group {
 			projections[index] = projection
 			continue
 		}
@@ -17320,7 +17353,7 @@ func executeSQLOrderedGroupAggregate(q *sqlQuery, rows []sqlExecRow, control *sq
 }
 
 func sqlSpilledGroupAggregateProjections(q *sqlQuery) ([]sqlOrderedGroupProjection, sqlOrder, bool) {
-	projections, ok := sqlOrderedGroupProjections(q)
+	projections, ok := sqlOrderedGroupProjectionsFor(q, true)
 	if !ok {
 		return nil, sqlOrder{}, false
 	}
@@ -17377,9 +17410,10 @@ func sqlAddSpillGroupAggregate(state *sqlSpillGroupAggregate, definition *sqlOrd
 }
 
 // executeSQLSpilledGroupAggregate implements the direct aggregate subset with
-// bounded contribution runs. It deliberately requires ORDER BY the same single
-// group field, allowing sorted spill-run merging to preserve query order and
-// source-order floating-point accumulation without retaining group rows.
+// bounded contribution runs. It supports field-based single and composite
+// group keys; an explicit ORDER BY remains limited to the first group field so
+// sorted spill-run merging can preserve query order and source-order floating-
+// point accumulation without retaining group rows.
 func sqlCanStreamSpilledGroupAggregate(q *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) bool {
 	if q == nil || q.from == nil || control == nil || control.options.MaxGroupBytes <= 0 || control.options.MaxGroupKeys > 0 || control.options.SpillDirectory == "" || control.options.MaxSpillBytes <= 0 || len(q.ctes) != 0 || len(q.joins) != 0 || len(q.from.fieldTypes) != 0 {
 		return false
@@ -17512,18 +17546,36 @@ func executeSQLSpilledGroupAggregateRows(q *sqlQuery, stream func(func(sqlExecRo
 		if err := control.check(); err != nil {
 			return err
 		}
-		value := evalSQLExpr(q.groupBy[0], []sqlExecRow{row}, row)
-		if err := sqlExpressionError(value); err != nil {
-			return err
+		groupValues := make([]interface{}, len(q.groupBy))
+		var keyBuilder strings.Builder
+		for index, group := range q.groupBy {
+			value := evalSQLExpr(group, []sqlExecRow{row}, row)
+			if err := sqlExpressionError(value); err != nil {
+				return err
+			}
+			groupValues[index] = value
+			if index > 0 {
+				keyBuilder.WriteByte('\x00')
+			}
+			keyBuilder.WriteString(sqlCollationValueKey(group.collation, value))
 		}
-		key := fmt.Sprintf("%#v", value)
+		key := fmt.Sprintf("%#v", groupValues[0])
+		if len(groupValues) > 1 {
+			key = keyBuilder.String()
+		}
 		if groupRows != nil {
 			groupRows[key]++
 			if groupRows[key] > control.options.MaxGroupRowsPerKey {
 				return fmt.Errorf("SQL group skew limit exceeded: group has %d rows, maximum %d", groupRows[key], control.options.MaxGroupRowsPerKey)
 			}
 		}
-		record := sqlSpillGroupRecord{Key: key, Value: value, Ordinal: inputRows, Aggregates: make([]sqlSpillGroupAggregate, len(projections))}
+		record := sqlSpillGroupRecord{Key: key, Value: groupValues[0], Ordinal: inputRows, Aggregates: make([]sqlSpillGroupAggregate, len(projections))}
+		if len(groupValues) > 1 {
+			record.Values = groupValues
+			if order.expr.kind == "" {
+				record.Value = nil
+			}
+		}
 		for index, projection := range projections {
 			if projection.aggregate != nil {
 				record.Aggregates[index] = sqlSpillGroupAggregateFromOrdered(*projection.aggregate)
@@ -17618,7 +17670,7 @@ func executeSQLSpilledGroupAggregateRows(q *sqlQuery, stream func(func(sqlExecRo
 			row := make(SQLRow, len(projections))
 			for index, projection := range projections {
 				if projection.group {
-					row[projection.column] = record.Value
+					row[projection.column] = sqlSpillGroupRecordValue(record, projection.groupIndex)
 				} else {
 					row[projection.column] = record.Aggregates[index].value()
 				}

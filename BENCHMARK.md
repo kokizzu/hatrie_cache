@@ -29940,6 +29940,38 @@ The normal unbounded path remains unchanged when the cap is disabled.
 13945430 ns/op 1.000 supported 5871305 B/op 68108 allocs/op
 ```
 
+### Composite group keys
+
+This extension covers two direct `GROUP BY` fields while preserving the
+bounded spill controls. The workload contains 2,048 unique `(region, channel)`
+groups. Ratios are `composite spill / composite in-memory`, so values above
+`1.00x` are the expected cost of the disk-backed fallback.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Supported | Relative result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Composite, unbounded in-memory | 2,594,815 | 3,570,388 | 26,689 | 1.000 | Reference |
+| Composite, bounded external spill | 25,752,718 | 11,051,650 | 154,575 | 1.000 | 9.93x time, 3.10x bytes, 5.79x allocations |
+
+The default in-memory path is unchanged. The composite spill path exists to
+complete under an explicit group-memory cap; it is not enabled by default and
+is not a raw throughput improvement.
+
+```text
+# after: BenchmarkCHG01CompositeGroupBaseline
+2567779 ns/op 3570385 B/op 26689 allocs/op
+2594815 ns/op 3570389 B/op 26689 allocs/op
+2543204 ns/op 3570388 B/op 26689 allocs/op
+2640084 ns/op 3570387 B/op 26689 allocs/op
+2631711 ns/op 3570386 B/op 26689 allocs/op
+
+# after: BenchmarkCHG01CompositeGroupSpill
+25752718 ns/op 1.000 supported 11051695 B/op 154573 allocs/op
+35787905 ns/op 1.000 supported 11050690 B/op 154576 allocs/op
+25693966 ns/op 1.000 supported 11051650 B/op 154575 allocs/op
+25640591 ns/op 1.000 supported 11050348 B/op 154575 allocs/op
+26838568 ns/op 1.000 supported 11051839 B/op 154575 allocs/op
+```
+
 The implementation and configuration scope are documented in
 [CHG01_EXTERNAL_GROUP_SPILL.md](CHG01_EXTERNAL_GROUP_SPILL.md).
 

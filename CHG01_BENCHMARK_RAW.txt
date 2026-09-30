@@ -14,3 +14,16 @@ BenchmarkCHG01BoundedUnorderedGroup-32     	      18	  14556379 ns/op	         1
 BenchmarkCHG01BoundedUnorderedGroup-32     	      16	  14634314 ns/op	         1.000 supported	 5877187 B/op	   68113 allocs/op
 PASS
 ok  	hatrie_cache/hat/hatSql	3.489s
+# after: BenchmarkCHG01CompositeGroupBaseline (round8)
+2567779 ns/op 3570385 B/op 26689 allocs/op
+2594815 ns/op 3570389 B/op 26689 allocs/op
+2543204 ns/op 3570388 B/op 26689 allocs/op
+2640084 ns/op 3570387 B/op 26689 allocs/op
+2631711 ns/op 3570386 B/op 26689 allocs/op
+
+# after: BenchmarkCHG01CompositeGroupSpill (round8)
+25752718 ns/op 1.000 supported 11051695 B/op 154573 allocs/op
+35787905 ns/op 1.000 supported 11050690 B/op 154576 allocs/op
+25693966 ns/op 1.000 supported 11051650 B/op 154575 allocs/op
+25640591 ns/op 1.000 supported 11050348 B/op 154575 allocs/op
+26838568 ns/op 1.000 supported 11051839 B/op 154575 allocs/op

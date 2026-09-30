@@ -104,3 +104,63 @@ GROUP BY src.region`, resolver, hatSql.SQLQueryOptions{
 		t.Fatalf("cache-stream grouped spill rows = %#v, want %#v", result.Rows, want)
 	}
 }
+
+func TestCHG01CompositeGroupByWithoutOrderUsesExternalSpill(t *testing.T) {
+	spillDirectory := t.TempDir()
+	result, err := hatSql.ExecuteSQLQueryContext(context.Background(), `
+FROM VALUES
+  ('us', 'web', 2),
+  ('eu', 'web', 3),
+  ('us', 'web', 5),
+  ('eu', 'mobile', 7),
+  ('apac', 'web', 11)
+AS src(region, channel, amount)
+SELECT src.region, src.channel, COUNT(*) AS total, SUM(src.amount) AS amount
+GROUP BY src.region, src.channel`, nil, hatSql.SQLQueryOptions{
+		MaxGroupBytes:  1,
+		SpillDirectory: spillDirectory,
+		MaxSpillBytes:  1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("composite grouped spill: %v", err)
+	}
+	want := []hatSql.SQLRow{
+		{"region": "apac", "channel": "web", "total": int64(1), "amount": float64(11)},
+		{"region": "eu", "channel": "mobile", "total": int64(1), "amount": float64(7)},
+		{"region": "eu", "channel": "web", "total": int64(1), "amount": float64(3)},
+		{"region": "us", "channel": "web", "total": int64(2), "amount": float64(7)},
+	}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("composite grouped spill rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
+func TestCHG01CompositeGroupByOrdersByFirstKey(t *testing.T) {
+	result, err := hatSql.ExecuteSQLQueryContext(context.Background(), `
+FROM VALUES
+  ('us', 'web', 2),
+  ('eu', 'web', 3),
+  ('us', 'web', 5),
+  ('eu', 'mobile', 7),
+  ('apac', 'web', 11)
+AS src(region, channel, amount)
+SELECT src.region, src.channel, COUNT(*) AS total, SUM(src.amount) AS amount
+GROUP BY src.region, src.channel
+ORDER BY src.region`, nil, hatSql.SQLQueryOptions{
+		MaxGroupBytes:  1,
+		SpillDirectory: t.TempDir(),
+		MaxSpillBytes:  1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("ordered composite grouped spill: %v", err)
+	}
+	want := []hatSql.SQLRow{
+		{"region": "apac", "channel": "web", "total": int64(1), "amount": float64(11)},
+		{"region": "eu", "channel": "mobile", "total": int64(1), "amount": float64(7)},
+		{"region": "eu", "channel": "web", "total": int64(1), "amount": float64(3)},
+		{"region": "us", "channel": "web", "total": int64(2), "amount": float64(7)},
+	}
+	if !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("ordered composite grouped spill rows = %#v, want %#v", result.Rows, want)
+	}
+}

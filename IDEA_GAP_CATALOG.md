@@ -243,7 +243,8 @@ Primary references: [Tarantool reference](https://www.tarantool.io/en/doc/latest
    proven not to include another session's staged or unstaged changes. A mixed
    shared worktree must not be force-cleaned to manufacture a commit.
 
-Current status: the catalog is complete. `CH-G01` external grouped aggregation,
+Current status: the catalog is complete. `CH-G01` external grouped aggregation
+now also handles direct composite group keys with bounded spill records;
 `CH-G02` external sort, and `CH-G05` grouped `WITH TOTALS` now have passed
 red-green benchmark gates; `CH-G05` is documented in `CHG05_WITH_TOTALS.md`.
 `M-G07` now has an implemented bounded source-health registry

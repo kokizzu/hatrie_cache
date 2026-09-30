@@ -1381,3 +1381,18 @@ allocations for a 16,384-row source, with no new cost on the `LIMIT 1`
 control. See [C193_LIMIT_ZERO.md](C193_LIMIT_ZERO.md).
 
 - [x] C193 `LIMIT 0` source short-circuit.
+
+## C194: Composite external `GROUP BY` spill keys
+
+ClickHouse-style external aggregation now accepts multiple direct grouping
+fields in the opt-in bounded spill path. Composite keys retain exact group
+values across gob spill runs, merge duplicate partial aggregates, and support
+ordering by the first group field. The in-memory executor and its default
+configuration are unchanged. The 2,048-group benchmark measured a 9.93x
+spill-path time cost, 3.10x allocated bytes, and 5.79x allocations versus the
+in-memory composite control; this is an availability fallback under an
+explicit memory cap, not a fast-path optimization. See
+[CHG01_EXTERNAL_GROUP_SPILL.md](CHG01_EXTERNAL_GROUP_SPILL.md) and the
+composite section in [BENCHMARK.md](BENCHMARK.md).
+
+- [x] C194 Composite external `GROUP BY` spill keys.

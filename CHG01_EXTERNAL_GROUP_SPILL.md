@@ -10,16 +10,16 @@ budget instead of rejecting the query because its groups do not fit.
 The current path is deliberately conservative. It applies to streamable
 `CACHE` and `VALUES` sources with:
 
-- one direct `GROUP BY` field;
+- one or more direct `GROUP BY` fields;
 - direct `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` projections supported by the
   existing mergeable aggregate path; and
-- either no `ORDER BY`, or one `ORDER BY` on the same group field.
+- either no `ORDER BY`, or one `ORDER BY` on the first group field.
 
-Queries with multiple group fields, `HAVING`, joins, CTEs, expressions that are
-not in the direct aggregate subset, or incompatible ordering retain their
-existing executor and fallback behavior. No-order SQL results remain
-semantically unordered; the spill merge emits group keys in its deterministic
-merge order only as an implementation detail.
+Queries with `HAVING`, joins, CTEs, expressions that are not in the direct
+aggregate subset, or incompatible ordering retain their existing executor and
+fallback behavior. No-order SQL results remain semantically unordered; the
+spill merge emits composite group keys in its deterministic merge order only
+as an implementation detail.
 
 ## Configuration
 
@@ -51,6 +51,8 @@ The regression tests cover:
 
 - duplicate groups and exact aggregate results for an unordered `VALUES`
   query;
+- composite `(region, channel)` groups, including duplicate-key aggregate
+  merging and ordering by the first group field;
 - the same result through a streaming `CACHE` resolver;
 - disk-budget failure and cleanup of all temporary spill files; and
 - the pre-existing ordered spill path and aggregate fallback coverage.
@@ -65,11 +67,12 @@ make vet-chg01
 
 ## Measurement
 
-The benchmark uses 2,048 unique groups and a 16 KiB group-memory budget. The
-unbounded baseline is the same query with the normal in-memory executor. The
-bounded baseline is also run against the pre-feature source: it cannot support
-the workload and reports `supported=0`, because it rejects the query when the
-group budget is exceeded.
+The single-key benchmark uses 2,048 unique groups and a 16 KiB group-memory
+budget. The unbounded baseline is the same query with the normal in-memory
+executor. The bounded baseline is also run against the pre-feature source: it
+cannot support the workload and reports `supported=0`, because it rejects the
+query when the group budget is exceeded. The composite benchmark uses 2,048
+unique `(region, channel)` groups with the same budget.
 
 | Path | Median ns/op | Median B/op | Median allocs/op | Supported |
 | --- | ---: | ---: | ---: | ---: |
@@ -101,3 +104,9 @@ A fresh post-adoption run on the current worktree is retained in
 [CHG01_BENCHMARK_RAW.txt](CHG01_BENCHMARK_RAW.txt). It measured 3.77-4.05 ms
 for the unbounded path and 13.80-14.63 ms for the bounded spill path across
 five 200 ms samples, confirming the documented opt-in CPU and allocation cost.
+
+The composite post-change samples measured a 2.59 ms median in-memory control
+and a 25.75 ms median bounded spill path. The bounded composite path allocated
+11.05 MB and 154,575 objects per operation versus 3.57 MB and 26,689 objects
+for the control. This is an opt-in bounded-memory fallback, not a fast-path
+optimization.
