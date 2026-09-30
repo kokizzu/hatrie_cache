@@ -1175,3 +1175,11 @@ provides that opt-in path, and the shared implementation replaces the old
 reflective stable sort with typed `slices.SortFunc`; equal-timestamp order was
 already unspecified. On 4,096 records, the reusable path measured about 7.31x
 faster than the old `Records()` baseline and removed all per-call allocations.
+
+## C177: Reusable dead-letter inspection snapshots
+
+Tarantool-style queue administration benefits from inspecting retained failures
+without allocating a new snapshot on every poll. `DeadLettersInto` adds that
+opt-in path while preserving failure order and the existing shallow-copy
+contract. On 4,096 retained items it measured about 20.19x lower latency and
+removed the snapshot allocation.

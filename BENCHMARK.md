@@ -39613,3 +39613,17 @@ samples on an AMD Ryzen 9 5950X.
 The typed sort preserves timestamp ordering; relative order for equal
 timestamps remains unspecified. See
 [LOGICAL_COMPACTION_RECORDS_INTO.md](LOGICAL_COMPACTION_RECORDS_INTO.md).
+
+## C177 Dead-letter snapshot reuse
+
+Workload: 4,096 retained integer dead letters, ten samples on an AMD Ryzen 9
+5950X.
+
+| Operation | Median ns/op | B/op | Allocs/op | Relative latency |
+| --- | ---: | ---: | ---: | ---: |
+| `DeadLetters()` | 130,978 | 360,448 | 1 | 1.00x |
+| Reused `DeadLettersInto()` | 6,487 | 0 | 0 | 20.19x faster |
+
+The pre-change median was 131,910 ns/op. Failure order and shallow-copy
+semantics are unchanged. See
+[DEAD_LETTER_QUEUE_DEAD_LETTERS_INTO.md](DEAD_LETTER_QUEUE_DEAD_LETTERS_INTO.md).

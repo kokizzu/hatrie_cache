@@ -169,6 +169,21 @@ func (queue *DeadLetterQueue[T]) DeadLetters() []DeadLetterItem[T] {
 	return out
 }
 
+// DeadLettersInto appends retained failures in failure order to dst, reusing
+// its backing array when it has enough capacity. The returned slice is an
+// independent shallow copy of the queue's retained items.
+func (queue *DeadLetterQueue[T]) DeadLettersInto(dst []DeadLetterItem[T]) []DeadLetterItem[T] {
+	dst = dst[:0]
+	if queue == nil || len(queue.dead) == 0 {
+		return dst
+	}
+	if cap(dst) < len(queue.dead) {
+		dst = make([]DeadLetterItem[T], 0, len(queue.dead))
+	}
+	dst = append(dst, queue.dead...)
+	return dst
+}
+
 // ReplayAt removes a failure and puts its value back into the pending queue at
 // readyAt.
 func (queue *DeadLetterQueue[T]) ReplayAt(id uint64, readyAt time.Time) bool {

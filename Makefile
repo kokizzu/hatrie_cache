@@ -28730,3 +28730,15 @@ test-logical-compaction-records-into:
 
 verify-logical-compaction-records-into:
 	bash scripts/verify-logical-compaction-records-into.sh
+
+
+.PHONY: benchmark-dead-letter-queue-dead-letters test-dead-letter-queue-dead-letters-into verify-dead-letter-queue-dead-letters-into
+
+benchmark-dead-letter-queue-dead-letters:
+	bash scripts/benchmark-dead-letter-queue-dead-letters.sh
+
+test-dead-letter-queue-dead-letters-into:
+	bash scripts/test-dead-letter-queue-dead-letters-into.sh
+
+verify-dead-letter-queue-dead-letters-into:
+	bash scripts/verify-dead-letter-queue-dead-letters-into.sh

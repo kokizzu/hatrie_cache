@@ -1223,3 +1223,5 @@ and [BENCHMARK.md](BENCHMARK.md#compiled-query-negative-result-cache).
 | C175 | ClickHouse/Roaring-style reusable bitmap enumeration | Added `RoaringBitmap.ValuesInto` for sorted enumeration into caller-owned storage | 100,000 values: 1.09x lower same-run median latency; 401,408 B/1 alloc -> 0 B/0 allocs | No semantic change to `Values()`; caller retains the destination buffer |
 
 | C176 | Materialize-style reusable differential-arrangement snapshots | Added `LogicalCompaction.RecordsInto`; `Records()` now shares typed sorting | 4,096 records: 7.31x faster than old `Records()`, 98,400 B/4 allocs -> 0 B/0 allocs; `Records()` is 6.55x faster | Equal-timestamp order remains unspecified; `Records()` ownership semantics are preserved |
+
+| C177 | Tarantool-style reusable dead-letter inspection snapshots | Added `DeadLetterQueue.DeadLettersInto` for caller-owned monitoring/export buffers | 4,096 items: 20.19x lower same-run median latency; 360,448 B/1 alloc -> 0 B/0 allocs | Failure order and existing shallow-copy ownership semantics are preserved |
