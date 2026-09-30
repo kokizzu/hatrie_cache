@@ -39830,3 +39830,24 @@ Raw warm HSD1 samples: `763046 773622 754817 768923 746880 713132 718286
 exact HSD1/HSD2 bytes and trades retained destination capacity for lower
 per-batch allocation and CPU cost. See
 [ROW_BINARY_DELTA_DECODE_INTO.md](ROW_BINARY_DELTA_DECODE_INTO.md).
+
+## T208 Anonymous replica quorum targets
+
+Workload: three replication targets, two voting targets, and the no-op
+transport callback used by the package benchmarks. Three one-second samples
+were run on an AMD Ryzen 9 5950X. The baseline is the clean C208 commit.
+
+| Operation | Baseline | Target-aware voters | Target-aware with anonymous target |
+| --- | ---: | ---: | ---: |
+| Write latency | 1,274 ns/op | 1,303 ns/op | 1,171 ns/op |
+| Write heap | 544 B/op, 10 allocs/op | 496 B/op, 9 allocs/op | 496 B/op, 9 allocs/op |
+| Read latency | 1,628 ns/op | 1,361 ns/op | 1,333 ns/op |
+| Read heap | 864 B/op, 12 allocs/op | 816 B/op, 11 allocs/op | 784 B/op, 11 allocs/op |
+
+Target-aware execution is opt-in and preserves the legacy APIs. Anonymous
+targets are contacted but excluded from quorum totals and matching read-value
+groups. The target-aware path reduces normalized-target memory by 48 B/op for
+all-voter writes and reads, with one fewer allocation; the anonymous read path
+uses 80 B/op less than the legacy baseline.
+See [T208_ANONYMOUS_REPLICAS.md](T208_ANONYMOUS_REPLICAS.md) for API usage and
+the complete benchmark context.

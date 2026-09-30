@@ -30,6 +30,7 @@ type ReadQuorumEqualFunc func(left, right any) bool
 // ReadQuorumAttempt records one replica callback outcome in input order.
 type ReadQuorumAttempt struct {
 	Node         string `json:"node"`
+	Anonymous    bool   `json:"anonymous,omitempty"`
 	Acknowledged bool   `json:"acknowledged"`
 	Error        string `json:"error,omitempty"`
 }
@@ -121,6 +122,95 @@ func ExecuteReadQuorum(ctx context.Context, nodes []string, required int, read R
 		for index := range groups {
 			if equal(groups[index].value, response.value) {
 				groupIndex = index
+				break
+			}
+		}
+		if groupIndex < 0 {
+			groups = append(groups, readQuorumGroup{value: response.value, count: 1})
+			groupIndex = len(groups) - 1
+		} else {
+			groups[groupIndex].count++
+		}
+		if bestGroup < 0 || groups[groupIndex].count > groups[bestGroup].count {
+			bestGroup = groupIndex
+		}
+	}
+
+	if bestGroup >= 0 {
+		result.Decision.Acknowledged = groups[bestGroup].count
+	}
+	if successful < required {
+		result.Decision.Acknowledged = successful
+		return result, fmt.Errorf("%w: acknowledged=%d required=%d", ErrReadQuorumUnsatisfied, successful, required)
+	}
+	if result.Decision.Acknowledged < required {
+		return result, fmt.Errorf("%w: matching=%d required=%d", ErrReadQuorumInconsistent, result.Decision.Acknowledged, required)
+	}
+	result.Decision.Satisfied = true
+	result.Value = groups[bestGroup].value
+	return result, nil
+}
+
+// ExecuteReadQuorumTargets reads every target concurrently. Anonymous targets
+// are queried and reported, but cannot satisfy the required read quorum or be
+// used in matching-value groups.
+func ExecuteReadQuorumTargets(ctx context.Context, targets []QuorumTarget, required int, read ReadQuorumReadFunc, equal ReadQuorumEqualFunc) (ReadQuorumResult, error) {
+	normalized, eligible, ok := normalizeQuorumTargets(targets)
+	if !ok || required < 1 || required > eligible || read == nil {
+		return ReadQuorumResult{}, ErrReadQuorumExecutorInvalid
+	}
+	if ctx == nil {
+		return ReadQuorumResult{}, fmt.Errorf("%w: context is nil", ErrReadQuorumExecutorInvalid)
+	}
+	if err := ctx.Err(); err != nil {
+		return ReadQuorumResult{}, fmt.Errorf("%w: %v", ErrReadQuorumContextCanceled, err)
+	}
+	if equal == nil {
+		equal = reflect.DeepEqual
+	}
+	if len(normalized) == 1 {
+		return executeSingleReadQuorum(ctx, normalized[0].Node, read)
+	}
+
+	result := ReadQuorumResult{
+		Decision: WriteQuorumDecision{Total: eligible, Required: required},
+		Attempts: make([]ReadQuorumAttempt, len(normalized)),
+	}
+	responses := make([]readQuorumResponse, len(normalized))
+	var waitGroup sync.WaitGroup
+	waitGroup.Add(len(normalized))
+	for index, target := range normalized {
+		result.Attempts[index].Node = target.Node
+		result.Attempts[index].Anonymous = target.Anonymous
+		go func(index int, target QuorumTarget) {
+			defer waitGroup.Done()
+			value, err := read(ctx, target.Node)
+			if err != nil {
+				responses[index].err = err
+				result.Attempts[index].Error = err.Error()
+				return
+			}
+			responses[index] = readQuorumResponse{value: value, ok: true}
+			result.Attempts[index].Acknowledged = true
+		}(index, target)
+	}
+	waitGroup.Wait()
+	if err := ctx.Err(); err != nil {
+		return result, fmt.Errorf("%w: %v", ErrReadQuorumContextCanceled, err)
+	}
+
+	groups := make([]readQuorumGroup, 0, eligible)
+	bestGroup := -1
+	successful := 0
+	for index, response := range responses {
+		if !response.ok || normalized[index].Anonymous {
+			continue
+		}
+		successful++
+		groupIndex := -1
+		for groupIndexCandidate := range groups {
+			if equal(groups[groupIndexCandidate].value, response.value) {
+				groupIndex = groupIndexCandidate
 				break
 			}
 		}

@@ -25,6 +25,7 @@ type WriteQuorumWriteFunc func(context.Context, string) error
 // the target list passed to ExecuteWriteQuorum.
 type WriteQuorumAttempt struct {
 	Node         string `json:"node"`
+	Anonymous    bool   `json:"anonymous,omitempty"`
 	Acknowledged bool   `json:"acknowledged"`
 	Error        string `json:"error,omitempty"`
 }
@@ -84,6 +85,63 @@ func ExecuteWriteQuorum(ctx context.Context, nodes []string, required int, write
 
 	for _, attempt := range result.Attempts {
 		if attempt.Acknowledged {
+			result.Decision.Acknowledged++
+		}
+	}
+	decision, decisionErr := EvaluateWriteQuorum(result.Decision.Total, result.Decision.Acknowledged, result.Decision.Required)
+	result.Decision = decision
+	if decisionErr != nil {
+		return result, decisionErr
+	}
+	return result, nil
+}
+
+// ExecuteWriteQuorumTargets runs a write against every target concurrently.
+// Anonymous targets are included in fan-out and returned in Attempts, but do
+// not count toward the required acknowledgement threshold.
+func ExecuteWriteQuorumTargets(ctx context.Context, targets []QuorumTarget, required int, write WriteQuorumWriteFunc) (WriteQuorumResult, error) {
+	normalized, eligible, ok := normalizeQuorumTargets(targets)
+	if !ok || required < 1 || required > eligible || write == nil {
+		return WriteQuorumResult{}, ErrWriteQuorumExecutorInvalid
+	}
+	result := WriteQuorumResult{
+		Decision: WriteQuorumDecision{Total: eligible, Required: required},
+		Attempts: make([]WriteQuorumAttempt, len(normalized)),
+	}
+	for index, target := range normalized {
+		result.Attempts[index].Node = target.Node
+		result.Attempts[index].Anonymous = target.Anonymous
+	}
+	if ctx == nil {
+		return WriteQuorumResult{}, fmt.Errorf("%w: context is nil", ErrWriteQuorumExecutorInvalid)
+	}
+	if ctx.Err() != nil {
+		for index := range result.Attempts {
+			result.Attempts[index].Error = ctx.Err().Error()
+		}
+		return result, fmt.Errorf("%w: %v", ErrWriteQuorumContextCanceled, ctx.Err())
+	}
+
+	var waitGroup sync.WaitGroup
+	waitGroup.Add(len(normalized))
+	for index, target := range normalized {
+		go func(index int, target QuorumTarget) {
+			defer waitGroup.Done()
+			if err := ctx.Err(); err != nil {
+				result.Attempts[index].Error = err.Error()
+				return
+			}
+			if err := write(ctx, target.Node); err != nil {
+				result.Attempts[index].Error = err.Error()
+				return
+			}
+			result.Attempts[index].Acknowledged = true
+		}(index, target)
+	}
+	waitGroup.Wait()
+
+	for index, attempt := range result.Attempts {
+		if !normalized[index].Anonymous && attempt.Acknowledged {
 			result.Decision.Acknowledged++
 		}
 	}
