@@ -39652,3 +39652,16 @@ Workload: 64 fixed-width fields, ten samples on an AMD Ryzen 9 5950X.
 
 Default values remain deep-copied. See
 [TUPLE_FORMAT_FIELDS_INTO.md](TUPLE_FORMAT_FIELDS_INTO.md).
+## C180 Aggregate-state registry envelope reuse
+
+Workload: the existing `registrySumState` codec producing a 32-byte HAG1 wire
+value, ten samples on an AMD Ryzen 9 5950X.
+
+| Operation | Median ns/op | B/op | Allocs/op | Relative latency |
+| --- | ---: | ---: | ---: | ---: |
+| Existing `AggregateStateRegistry.Encode()` baseline | 125.5 | 48 | 3 | 1.00x |
+| Reused `AggregateStateRegistry.EncodeInto()` | 111.6 | 24 | 2 | 1.12x faster |
+
+The reusable path preserves exact HAG1 bytes and removes the final envelope
+allocation when the caller retains enough destination capacity. See
+[AGGREGATE_STATE_REGISTRY_ENCODE_INTO.md](AGGREGATE_STATE_REGISTRY_ENCODE_INTO.md).

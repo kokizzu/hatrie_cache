@@ -1198,3 +1198,13 @@ Tarantool-style tuple formats are often inspected repeatedly by protocol and
 administration paths. `TupleFormat.FieldsInto` reuses the metadata result
 buffer while preserving independent default-value copies. On 64 fixed-width
 fields it measured about 1.96x lower latency and removed the result allocation.
+## C180: Reusable aggregate-state envelope encoding
+
+ClickHouse and Materialize-style worker exchange paths repeatedly serialize
+small partial states. `AggregateStateRegistry.EncodeInto` reuses the final HAG1
+envelope buffer while preserving the allocating `Encode` API, codec error
+wrapping, payload bounds, and CRC validation. On a 32-byte wire value it
+measured 1.12x lower median latency, 48 -> 24 B/op, and 3 -> 2 allocations.
+The codec callback still owns payload encoding, so this remains an opt-in
+allocation reduction rather than a zero-copy codec redesign. See
+[AGGREGATE_STATE_REGISTRY_ENCODE_INTO.md](AGGREGATE_STATE_REGISTRY_ENCODE_INTO.md).

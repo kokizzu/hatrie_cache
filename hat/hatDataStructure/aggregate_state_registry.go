@@ -109,6 +109,22 @@ func (registry *AggregateStateRegistry) Encode(kind string, version uint64, stat
 	return MarshalAggregateStateEnvelope(codec.Kind, codec.Version, payload)
 }
 
+// EncodeInto applies the exact registered codec and writes its bounded,
+// checksummed HAG1 envelope into dst when it has enough capacity. The codec
+// callback contract still owns payload encoding, so callers can avoid the
+// final envelope allocation by reusing dst across calls.
+func (registry *AggregateStateRegistry) EncodeInto(dst []byte, kind string, version uint64, state interface{}) ([]byte, error) {
+	codec, err := registry.lookup(kind, version)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := codec.Encode(state)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s v%d: %v", ErrAggregateStateCodecEncode, codec.Kind, codec.Version, err)
+	}
+	return marshalAggregateStateEnvelopeInto(dst, codec.Kind, codec.Version, payload)
+}
+
 // Decode validates one HAG1 envelope, selects its exact kind/version codec,
 // and passes a detached bounded payload to the registered decoder.
 func (registry *AggregateStateRegistry) Decode(data []byte) (AggregateStateEnvelope, interface{}, error) {
