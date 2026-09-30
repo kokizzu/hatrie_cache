@@ -43,6 +43,8 @@ var (
 	ErrHydrationFailed = errors.New("hatPipeline: hydration failed")
 	// ErrHydrationContextNil reports a nil context passed to Wait.
 	ErrHydrationContextNil = errors.New("hatPipeline: hydration wait context is nil")
+	// ErrHydrationRateInvalid reports a negative, NaN, or infinite work rate.
+	ErrHydrationRateInvalid = errors.New("hatPipeline: hydration rate is invalid")
 )
 
 // HydrationSnapshot is a detached view of one state-machine read. Failure is
@@ -67,6 +69,7 @@ type HydrationStateMachine struct {
 	generation uint64
 	completed  uint64
 	total      uint64
+	rate       float64
 	failure    error
 }
 
@@ -106,6 +109,7 @@ func (machine *HydrationStateMachine) Begin(total uint64) error {
 	}
 	machine.completed = 0
 	machine.total = total
+	machine.rate = 0
 	machine.failure = nil
 	if total == 0 {
 		machine.state = HydrationStateReady
@@ -188,6 +192,7 @@ func (machine *HydrationStateMachine) Reset() error {
 	machine.state = HydrationStateCold
 	machine.completed = 0
 	machine.total = 0
+	machine.rate = 0
 	machine.failure = nil
 	machine.signalLocked()
 	return nil

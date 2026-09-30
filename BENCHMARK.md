@@ -39938,3 +39938,19 @@ publication allocates only at generation transitions, not for each progress
 unit. A read-lock alternative was measured and rejected because its small
 snapshot improvement made progress and lifecycle transitions materially
 slower. See [M223_HYDRATION_STATE_MACHINE.md](M223_HYDRATION_STATE_MACHINE.md).
+
+## M224 Hydration progress metrics
+
+Workload: the existing M223 snapshot path, the new caller-supplied rate-based
+estimate, and rate updates, five 200 ms samples on an AMD Ryzen 9 5950X. The
+M223 row is measured before and after M224 from the same clean M223 base.
+
+| Operation | Before M224 | After M224 | Relative |
+| --- | ---: | ---: | ---: |
+| Existing `HydrationStateMachine.Snapshot` | 19.92 ns/op, 0 B/op, 0 allocs/op | 19.82 ns/op, 0 B/op, 0 allocs/op | 1.01x faster observed |
+| `HydrationStateMachine.Estimate` | n/a | 39.16 ns/op, 0 B/op, 0 allocs/op | new opt-in API |
+| `HydrationStateMachine.SetRate` | n/a | 4.20 ns/op, 0 B/op, 0 allocs/op | new opt-in API |
+
+M224 keeps the existing snapshot and progress paths allocation-free and does
+not sample the clock. Callers own rate smoothing and pay the estimate cost
+only when they request it. See [M224_HYDRATION_PROGRESS_METRICS.md](M224_HYDRATION_PROGRESS_METRICS.md).
