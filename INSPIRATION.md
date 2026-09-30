@@ -1345,3 +1345,13 @@ state. The implementation retains keyed weighted rows, maintains ordered
 partition slices, and emits deterministic negative/positive corrections after
 out-of-order updates without changing the append-only default. See
 [`M065_DIFFERENTIAL_ROW_NUMBER_LAG.md`](M065_DIFFERENTIAL_ROW_NUMBER_LAG.md).
+
+## C191: Reusable SQL row iterator buffers
+
+Tarantool-style tuple consumers and ClickHouse/Materialize-style batch
+consumers can decode repeated HTTP NDJSON rows into caller-owned storage.
+`hatSql.RowIterator.NextInto` clears reusable destinations, keeps the existing
+independent-row `Next` contract, and reuses the protocol envelope. The
+128-row benchmark measured about 1.10x lower median latency, 51.2% lower bytes
+and 15.7% fewer allocations; the API is opt-in because callers own the
+destination and its retained capacity. See [ROW_ITERATOR_NEXT_INTO.md](ROW_ITERATOR_NEXT_INTO.md).

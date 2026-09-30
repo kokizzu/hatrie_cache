@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 )
 
@@ -133,8 +134,16 @@ type RowIterator[T any] struct {
 	decoder  *json.Decoder
 	columns  []string
 	row      T
+	message  rowIteratorMessage
 	err      error
 	done     bool
+}
+
+type rowIteratorMessage struct {
+	Type    string          `json:"type"`
+	Columns []string        `json:"columns"`
+	Row     json.RawMessage `json:"row"`
+	Error   string          `json:"error"`
 }
 
 // QueryIterator opens a pull-based typed row iterator. Positional parameters
@@ -169,14 +178,39 @@ func (iterator *RowIterator[T]) Next() bool {
 	if iterator == nil || iterator.done || iterator.err != nil {
 		return false
 	}
+	var value T
+	if !iterator.nextInto(&value) {
+		return false
+	}
+	iterator.row = value
+	return true
+}
+
+// NextInto advances to the next row and decodes it into destination. Map,
+// slice, pointer, and struct destinations are cleared or reset before decode
+// so callers can reuse their storage without retaining fields from a prior
+// row. The existing Next method remains independent-row and allocating.
+func (iterator *RowIterator[T]) NextInto(destination *T) bool {
+	if iterator == nil || iterator.done || iterator.err != nil {
+		return false
+	}
+	if destination == nil {
+		iterator.err = fmt.Errorf("SQL row destination is required")
+		iterator.done = true
+		_ = iterator.Close()
+		return false
+	}
+	return iterator.nextInto(destination)
+}
+
+func (iterator *RowIterator[T]) nextInto(destination *T) bool {
 	for {
-		var message struct {
-			Type    string          `json:"type"`
-			Columns []string        `json:"columns"`
-			Row     json.RawMessage `json:"row"`
-			Error   string          `json:"error"`
-		}
-		if err := iterator.decoder.Decode(&message); err != nil {
+		message := &iterator.message
+		message.Type = ""
+		message.Columns = message.Columns[:0]
+		message.Row = message.Row[:0]
+		message.Error = ""
+		if err := iterator.decoder.Decode(message); err != nil {
 			if err != io.EOF {
 				iterator.err = err
 			}
@@ -197,14 +231,13 @@ func (iterator *RowIterator[T]) Next() bool {
 			_ = iterator.Close()
 			return false
 		case "row":
-			var value T
-			if err := json.Unmarshal(message.Row, &value); err != nil {
+			resetRowIteratorDestination(destination)
+			if err := json.Unmarshal(message.Row, destination); err != nil {
 				iterator.err = err
 				iterator.done = true
 				_ = iterator.Close()
 				return false
 			}
-			iterator.row = value
 			return true
 		default:
 			iterator.err = fmt.Errorf("SQL stream returned unknown message type %q", message.Type)
@@ -212,6 +245,33 @@ func (iterator *RowIterator[T]) Next() bool {
 			_ = iterator.Close()
 			return false
 		}
+	}
+}
+
+func resetRowIteratorDestination[T any](destination *T) {
+	value := reflect.ValueOf(destination).Elem()
+	resetRowIteratorValue(value)
+}
+
+func resetRowIteratorValue(value reflect.Value) {
+	if !value.IsValid() {
+		return
+	}
+	switch value.Kind() {
+	case reflect.Map:
+		if !value.IsNil() {
+			value.Clear()
+		}
+	case reflect.Slice:
+		value.SetLen(0)
+	case reflect.Pointer:
+		if !value.IsNil() {
+			resetRowIteratorValue(value.Elem())
+		}
+	case reflect.Struct:
+		value.Set(reflect.Zero(value.Type()))
+	default:
+		value.Set(reflect.Zero(value.Type()))
 	}
 }
 
@@ -247,6 +307,7 @@ func (iterator *RowIterator[T]) Close() error {
 	}
 	response := iterator.response
 	iterator.response = nil
+	iterator.message = rowIteratorMessage{}
 	return response.Body.Close()
 }
 

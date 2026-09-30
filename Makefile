@@ -29145,3 +29145,30 @@ commit-tt023-selective-persistent-restore:
 	bash scripts/tt023-selective-persistent-restore.sh commit
 push-tt023-selective-persistent-restore:
 	bash scripts/tt023-selective-persistent-restore.sh push
+.PHONY: format-c191-reusable-query-iterator test-c191-reusable-query-iterator race-c191-reusable-query-iterator benchmark-c191-reusable-query-iterator vet-c191-reusable-query-iterator package-c191-reusable-query-iterator status-c191-reusable-query-iterator commit-c191-reusable-query-iterator push-c191-reusable-query-iterator
+format-c191-reusable-query-iterator:
+	bash scripts/c191-reusable-query-iterator.sh format
+
+test-c191-reusable-query-iterator:
+	bash scripts/c191-reusable-query-iterator.sh test
+
+race-c191-reusable-query-iterator:
+	bash scripts/c191-reusable-query-iterator.sh race
+
+benchmark-c191-reusable-query-iterator:
+	bash scripts/c191-reusable-query-iterator.sh bench
+
+vet-c191-reusable-query-iterator:
+	bash scripts/c191-reusable-query-iterator.sh vet
+
+package-c191-reusable-query-iterator:
+	bash scripts/c191-reusable-query-iterator.sh package
+
+status-c191-reusable-query-iterator:
+	bash scripts/c191-reusable-query-iterator.sh status
+
+commit-c191-reusable-query-iterator:
+	bash scripts/c191-reusable-query-iterator.sh commit
+
+push-c191-reusable-query-iterator:
+	bash scripts/c191-reusable-query-iterator.sh push

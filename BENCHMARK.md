@@ -40385,3 +40385,34 @@ input rows. Raw samples are in
 [`M037AH_BENCHMARK_RAW.txt`](M037AH_BENCHMARK_RAW.txt); API and correctness
 details are in
 [`M037AH_STATEFUL_GROUP_COUNT_SUM.md`](M037AH_STATEFUL_GROUP_COUNT_SUM.md).
+
+<a id="c191-reusable-sql-row-iterator-buffers"></a>
+## C191 Reusable SQL Row Iterator Buffers
+
+Five benchmark samples on Linux/amd64 with an AMD Ryzen 9 5950X. Each
+iteration decodes 128 HTTP NDJSON row messages. `Next` allocates an independent
+row per message; `NextInto` reuses one caller-owned `SQLRow` destination and
+the iterator's protocol envelope.
+
+Raw samples:
+
+```text
+BenchmarkRowIteratorNext-32         297784 ns/op  86011 B/op  2446 allocs/op
+BenchmarkRowIteratorNext-32         294944 ns/op  86010 B/op  2446 allocs/op
+BenchmarkRowIteratorNext-32         291093 ns/op  86010 B/op  2446 allocs/op
+BenchmarkRowIteratorNext-32         292179 ns/op  86010 B/op  2446 allocs/op
+BenchmarkRowIteratorNext-32         294360 ns/op  86011 B/op  2446 allocs/op
+BenchmarkRowIteratorNextInto-32     268323 ns/op  41969 B/op  2061 allocs/op
+BenchmarkRowIteratorNextInto-32     268211 ns/op  41969 B/op  2061 allocs/op
+BenchmarkRowIteratorNextInto-32     266677 ns/op  41969 B/op  2061 allocs/op
+BenchmarkRowIteratorNextInto-32     269184 ns/op  41969 B/op  2061 allocs/op
+BenchmarkRowIteratorNextInto-32     265328 ns/op  41969 B/op  2061 allocs/op
+```
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Improvement vs `Next` |
+| --- | ---: | ---: | ---: | --- |
+| `Next` | 294,360 | 86,010 | 2,446 | baseline |
+| `NextInto` | 268,211 | 41,969 | 2,061 | 1.10x faster, 51.2% lower bytes, 15.7% fewer allocations |
+
+`NextInto` is opt-in because the caller owns the reusable destination and its
+retained capacity. Existing `Next` remains the independent-row control.
