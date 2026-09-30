@@ -1227,3 +1227,5 @@ and [BENCHMARK.md](BENCHMARK.md#compiled-query-negative-result-cache).
 | C177 | Tarantool-style reusable dead-letter inspection snapshots | Added `DeadLetterQueue.DeadLettersInto` for caller-owned monitoring/export buffers | 4,096 items: 20.19x lower same-run median latency; 360,448 B/1 alloc -> 0 B/0 allocs | Failure order and existing shallow-copy ownership semantics are preserved |
 
 | C178 | Tarantool-style reusable tuple decode buffers | Added `TupleFormat.UnpackInto` for caller-owned typed value vectors | Five fields: 1.45x lower median latency; 592 B/3 allocs -> 16 B/2 allocs | Destination is cleared before reuse; existing `Unpack` validation and error shape remain |
+
+| C179 | Tarantool-style reusable tuple schema snapshots | Added `TupleFormat.FieldsInto` for caller-owned metadata buffers | 64 fields: 1.96x lower median latency; 2,688 B/1 alloc -> 0 B/0 allocs | Default values remain independently cloned; existing `Fields()` behavior is preserved |

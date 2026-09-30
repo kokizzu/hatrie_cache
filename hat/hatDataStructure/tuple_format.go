@@ -130,15 +130,29 @@ func (format TupleFormat) FieldCount() int { return len(format.fields) }
 
 // Fields returns an independent format definition copy.
 func (format TupleFormat) Fields() []TupleFieldSpec {
-	fields := make([]TupleFieldSpec, len(format.fields))
+	if len(format.fields) == 0 {
+		return []TupleFieldSpec{}
+	}
+	return format.FieldsInto(nil)
+}
+
+// FieldsInto appends an independent format definition copy to dst, reusing
+// its backing array when it has enough capacity. Default values are cloned so
+// callers cannot mutate the immutable format through the returned slice.
+func (format TupleFormat) FieldsInto(dst []TupleFieldSpec) []TupleFieldSpec {
+	dst = dst[:0]
+	if cap(dst) < len(format.fields) {
+		dst = make([]TupleFieldSpec, 0, len(format.fields))
+	}
+	dst = dst[:len(format.fields)]
 	for index, field := range format.fields {
-		fields[index] = field
+		dst[index] = field
 		if field.Default != nil {
 			value := cloneTupleFieldValue(*field.Default)
-			fields[index].Default = &value
+			dst[index].Default = &value
 		}
 	}
-	return fields
+	return dst
 }
 
 // Pack resolves supplied values, defaults, and generated fields into one

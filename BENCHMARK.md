@@ -39640,3 +39640,15 @@ Workload: five typed fields, ten samples on an AMD Ryzen 9 5950X.
 The reusable path clears the destination before decoding and keeps validation,
 NULL, and ownership semantics. See
 [TUPLE_FORMAT_UNPACK_INTO.md](TUPLE_FORMAT_UNPACK_INTO.md).
+
+## C179 Tuple schema snapshot reuse
+
+Workload: 64 fixed-width fields, ten samples on an AMD Ryzen 9 5950X.
+
+| Operation | Median ns/op | B/op | Allocs/op | Relative latency |
+| --- | ---: | ---: | ---: | ---: |
+| Pre-change `TupleFormat.Fields()` | 699.6 | 2,688 | 1 | 1.00x |
+| Reused `TupleFormat.FieldsInto()` | 357.0 | 0 | 0 | 1.96x faster |
+
+Default values remain deep-copied. See
+[TUPLE_FORMAT_FIELDS_INTO.md](TUPLE_FORMAT_FIELDS_INTO.md).

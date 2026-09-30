@@ -1191,3 +1191,10 @@ stable format repeatedly. `TupleFormat.UnpackInto` adds that opt-in path,
 clears reused slots to preserve NULL semantics, and retains the existing
 ownership/error behavior. The five-field benchmark measured about 1.45x lower
 latency and reduced `592 B/3 allocs` to `16 B/2 allocs`.
+
+## C179: Reusable tuple schema snapshots
+
+Tarantool-style tuple formats are often inspected repeatedly by protocol and
+administration paths. `TupleFormat.FieldsInto` reuses the metadata result
+buffer while preserving independent default-value copies. On 64 fixed-width
+fields it measured about 1.96x lower latency and removed the result allocation.

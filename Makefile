@@ -28754,3 +28754,15 @@ test-tuple-format-unpack-into:
 
 verify-tuple-format-unpack-into:
 	bash scripts/verify-tuple-format-unpack-into.sh
+
+
+.PHONY: benchmark-tuple-format-fields test-tuple-format-fields-into verify-tuple-format-fields-into
+
+benchmark-tuple-format-fields:
+	bash scripts/benchmark-tuple-format-fields.sh
+
+test-tuple-format-fields-into:
+	bash scripts/test-tuple-format-fields-into.sh
+
+verify-tuple-format-fields-into:
+	bash scripts/verify-tuple-format-fields-into.sh
