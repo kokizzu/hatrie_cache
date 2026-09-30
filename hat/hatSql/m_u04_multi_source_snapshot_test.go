@@ -12,21 +12,25 @@ import (
 func TestSQLMultiSourceSnapshotCoordinatorPublishesAtomicViewAndRecovers(t *testing.T) {
 	orders := &mU03SnapshotProvider{
 		metadata: hatSql.SQLExternalSnapshotMetadata{
-			Source:     "orders-source",
-			Key:        "orders",
-			Kind:       "POSTGRES",
-			SnapshotID: "orders-lsn-7",
-			Offsets:    []hatSql.SQLExternalSnapshotOffset{{Source: "orders-source", Partition: "wal", Offset: 7}},
+			Source:               "orders-source",
+			Key:                  "orders",
+			Kind:                 "POSTGRES",
+			SnapshotID:           "orders-lsn-7",
+			FirstLiveFrontier:    42,
+			FirstLiveFrontierSet: true,
+			Offsets:              []hatSql.SQLExternalSnapshotOffset{{Source: "orders-source", Partition: "wal", Offset: 7}},
 		},
 		pages: [][]hatSql.Row{{{"id": int64(1), "total": 10.5}}},
 	}
 	customers := &mU03SnapshotProvider{
 		metadata: hatSql.SQLExternalSnapshotMetadata{
-			Source:     "customers-source",
-			Key:        "customers",
-			Kind:       "CDC",
-			SnapshotID: "customers-tx-3",
-			Offsets:    []hatSql.SQLExternalSnapshotOffset{{Source: "customers-source", Partition: "stream", Offset: 3}},
+			Source:               "customers-source",
+			Key:                  "customers",
+			Kind:                 "CDC",
+			SnapshotID:           "customers-tx-3",
+			FirstLiveFrontier:    43,
+			FirstLiveFrontierSet: true,
+			Offsets:              []hatSql.SQLExternalSnapshotOffset{{Source: "customers-source", Partition: "stream", Offset: 3}},
 		},
 		pages: [][]hatSql.Row{{{"id": int64(9), "name": "Ada"}}},
 	}
@@ -52,6 +56,9 @@ func TestSQLMultiSourceSnapshotCoordinatorPublishesAtomicViewAndRecovers(t *test
 	}
 	if got := result.Snapshot.Sources[0].Metadata.Source; got != "customers-source" {
 		t.Fatalf("sources are not deterministic: %#v", result.Snapshot.Sources)
+	}
+	if result.Snapshot.Sources[0].Metadata.FirstLiveFrontier != 43 || !result.Snapshot.Sources[0].Metadata.FirstLiveFrontierSet || result.Snapshot.Sources[1].Metadata.FirstLiveFrontier != 42 || !result.Snapshot.Sources[1].Metadata.FirstLiveFrontierSet {
+		t.Fatalf("first live frontiers = %#v", result.Snapshot.Sources)
 	}
 	ordersRows, err := result.View.ResolveSQLSource("POSTGRES", "orders")
 	if err != nil {
@@ -80,6 +87,9 @@ func TestSQLMultiSourceSnapshotCoordinatorPublishesAtomicViewAndRecovers(t *test
 	}
 	if !recovery.Restored || recovery.Checkpointed || recovery.Generation != 1 || failingOrders.authenticateCalls != 0 {
 		t.Fatalf("recovery result = %#v, auth calls = %d", recovery, failingOrders.authenticateCalls)
+	}
+	if recovery.Snapshot.Sources[0].Metadata.FirstLiveFrontier != 43 || !recovery.Snapshot.Sources[0].Metadata.FirstLiveFrontierSet || recovery.Snapshot.Sources[1].Metadata.FirstLiveFrontier != 42 || !recovery.Snapshot.Sources[1].Metadata.FirstLiveFrontierSet {
+		t.Fatalf("recovered first live frontiers = %#v", recovery.Snapshot.Sources)
 	}
 	if rows, err := recovery.View.ResolveSQLSource("CDC", "customers"); err != nil || len(rows) != 1 {
 		t.Fatalf("recovered customer view = %#v/%v", rows, err)

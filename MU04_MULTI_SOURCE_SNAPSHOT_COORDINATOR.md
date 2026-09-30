@@ -60,8 +60,11 @@ authorize their storage location, use restrictive file permissions or an
 encrypted backend, and commit atomically.
 
 `RequireSnapshotIDs: true` should be used when a live tail must start at an
-exact upstream position. The returned metadata contains one source snapshot ID
-and sorted `(partition, offset)` values per source.
+exact upstream position. The returned metadata contains one source snapshot ID,
+sorted `(partition, offset)` values, and the optional first-live frontier per
+source. `FirstLiveFrontierSet` distinguishes a real frontier of `0` from a
+legacy checkpoint that predates this metadata. All of those values are
+checkpointed in the same coordinated payload.
 
 ## Benchmark
 

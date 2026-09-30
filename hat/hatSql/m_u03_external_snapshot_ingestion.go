@@ -42,13 +42,17 @@ var (
 // SQLExternalSnapshotMetadata identifies a point-in-time source snapshot.
 // Offsets describe the source positions at or before which the snapshot rows
 // are complete, allowing a connector to start its change stream after the
-// cutover without rereading the snapshot.
+// cutover without rereading the snapshot. FirstLiveFrontier is the first
+// live-stream frontier after that cutover; zero is valid when
+// FirstLiveFrontierSet is true.
 type SQLExternalSnapshotMetadata struct {
-	Source     string                      `json:"source"`
-	Key        string                      `json:"key"`
-	Kind       string                      `json:"kind"`
-	SnapshotID string                      `json:"snapshot_id"`
-	Offsets    []SQLExternalSnapshotOffset `json:"offsets"`
+	Source               string                      `json:"source"`
+	Key                  string                      `json:"key"`
+	Kind                 string                      `json:"kind"`
+	SnapshotID           string                      `json:"snapshot_id"`
+	FirstLiveFrontier    uint64                      `json:"first_live_frontier"`
+	FirstLiveFrontierSet bool                        `json:"first_live_frontier_set"`
+	Offsets              []SQLExternalSnapshotOffset `json:"offsets"`
 }
 
 // SQLExternalSnapshotOffset is a connector-neutral high-watermark. Partition
@@ -69,7 +73,10 @@ type SQLExternalSnapshot struct {
 
 // SQLExternalSnapshotProvider authenticates and streams one bounded snapshot
 // into the supplied sink. Implementations may use Kafka, PostgreSQL, CDC, or
-// another source without adding that client's dependency to hatSql.
+// another source without adding that client's dependency to hatSql. The
+// returned metadata should include FirstLiveFrontier and set
+// FirstLiveFrontierSet when the source can identify the first live position
+// after the snapshot offsets.
 type SQLExternalSnapshotProvider interface {
 	Authenticate(context.Context) error
 	Snapshot(context.Context, SQLExternalSnapshotSink) (SQLExternalSnapshotMetadata, error)
@@ -112,29 +119,33 @@ type SQLExternalSnapshotIngestOptions struct {
 
 // SQLExternalSnapshotIngestResult reports the committed or restored cutover.
 type SQLExternalSnapshotIngestResult struct {
-	SnapshotID   string
-	Rows         int
-	Offsets      int
-	Pages        int
-	Checkpointed bool
-	Restored     bool
+	SnapshotID           string
+	FirstLiveFrontier    uint64
+	FirstLiveFrontierSet bool
+	Rows                 int
+	Offsets              int
+	Pages                int
+	Checkpointed         bool
+	Restored             bool
 }
 
 // SQLExternalSnapshotIngestor exposes an atomically replaced external source
 // snapshot through SourceResolver. Normal SQL reads only take a read lock and
 // never contact the external provider.
 type SQLExternalSnapshotIngestor struct {
-	mu          sync.RWMutex
-	source      string
-	key         string
-	kind        string
-	maxRows     int
-	maxOffsets  int
-	maxPageRows int
-	rows        []Row
-	offsets     []SQLExternalSnapshotOffset
-	snapshotID  string
-	generation  uint64
+	mu                   sync.RWMutex
+	source               string
+	key                  string
+	kind                 string
+	maxRows              int
+	maxOffsets           int
+	maxPageRows          int
+	rows                 []Row
+	offsets              []SQLExternalSnapshotOffset
+	snapshotID           string
+	firstLiveFrontier    uint64
+	firstLiveFrontierSet bool
+	generation           uint64
 }
 
 var _ SourceResolver = (*SQLExternalSnapshotIngestor)(nil)
@@ -264,10 +275,12 @@ func (ingestor *SQLExternalSnapshotIngestor) IngestSnapshotWithCheckpoint(ctx co
 		ingestor.installSnapshotLocked(normalized)
 		ingestor.mu.Unlock()
 		return SQLExternalSnapshotIngestResult{
-			SnapshotID: normalized.Metadata.SnapshotID,
-			Rows:       len(normalized.Rows),
-			Offsets:    len(normalized.Metadata.Offsets),
-			Restored:   true,
+			SnapshotID:           normalized.Metadata.SnapshotID,
+			FirstLiveFrontier:    normalized.Metadata.FirstLiveFrontier,
+			FirstLiveFrontierSet: normalized.Metadata.FirstLiveFrontierSet,
+			Rows:                 len(normalized.Rows),
+			Offsets:              len(normalized.Metadata.Offsets),
+			Restored:             true,
 		}, nil
 	}
 	snapshot, pages, err := ingestor.captureSnapshot(ctx, provider, maxRows, maxOffsets, maxPageRows, options.RequireSnapshotID)
@@ -289,11 +302,13 @@ func (ingestor *SQLExternalSnapshotIngestor) IngestSnapshotWithCheckpoint(ctx co
 	}
 	ingestor.mu.Unlock()
 	return SQLExternalSnapshotIngestResult{
-		SnapshotID:   snapshot.Metadata.SnapshotID,
-		Rows:         len(snapshot.Rows),
-		Offsets:      len(snapshot.Metadata.Offsets),
-		Pages:        pages,
-		Checkpointed: true,
+		SnapshotID:           snapshot.Metadata.SnapshotID,
+		FirstLiveFrontier:    snapshot.Metadata.FirstLiveFrontier,
+		FirstLiveFrontierSet: snapshot.Metadata.FirstLiveFrontierSet,
+		Rows:                 len(snapshot.Rows),
+		Offsets:              len(snapshot.Metadata.Offsets),
+		Pages:                pages,
+		Checkpointed:         true,
 	}, nil
 }
 
@@ -405,17 +420,19 @@ func (ingestor *SQLExternalSnapshotIngestor) normalizeSnapshot(snapshot SQLExter
 }
 
 func (ingestor *SQLExternalSnapshotIngestor) hasStateLocked() bool {
-	return len(ingestor.rows) > 0 || len(ingestor.offsets) > 0 || ingestor.snapshotID != ""
+	return len(ingestor.rows) > 0 || len(ingestor.offsets) > 0 || ingestor.snapshotID != "" || ingestor.firstLiveFrontierSet
 }
 
 func (ingestor *SQLExternalSnapshotIngestor) snapshotLocked() SQLExternalSnapshot {
 	return SQLExternalSnapshot{
 		Metadata: SQLExternalSnapshotMetadata{
-			Source:     ingestor.source,
-			Key:        ingestor.key,
-			Kind:       ingestor.kind,
-			SnapshotID: ingestor.snapshotID,
-			Offsets:    append([]SQLExternalSnapshotOffset(nil), ingestor.offsets...),
+			Source:               ingestor.source,
+			Key:                  ingestor.key,
+			Kind:                 ingestor.kind,
+			SnapshotID:           ingestor.snapshotID,
+			FirstLiveFrontier:    ingestor.firstLiveFrontier,
+			FirstLiveFrontierSet: ingestor.firstLiveFrontierSet,
+			Offsets:              append([]SQLExternalSnapshotOffset(nil), ingestor.offsets...),
 		},
 		Rows: cloneSQLExternalSnapshotRows(ingestor.rows),
 	}
@@ -425,6 +442,8 @@ func (ingestor *SQLExternalSnapshotIngestor) installSnapshotLocked(snapshot SQLE
 	ingestor.rows = cloneSQLExternalSnapshotRows(snapshot.Rows)
 	ingestor.offsets = append([]SQLExternalSnapshotOffset(nil), snapshot.Metadata.Offsets...)
 	ingestor.snapshotID = snapshot.Metadata.SnapshotID
+	ingestor.firstLiveFrontier = snapshot.Metadata.FirstLiveFrontier
+	ingestor.firstLiveFrontierSet = snapshot.Metadata.FirstLiveFrontierSet
 	ingestor.generation++
 }
 
@@ -432,6 +451,8 @@ func (ingestor *SQLExternalSnapshotIngestor) restoreSnapshotLocked(snapshot SQLE
 	ingestor.rows = cloneSQLExternalSnapshotRows(snapshot.Rows)
 	ingestor.offsets = append([]SQLExternalSnapshotOffset(nil), snapshot.Metadata.Offsets...)
 	ingestor.snapshotID = snapshot.Metadata.SnapshotID
+	ingestor.firstLiveFrontier = snapshot.Metadata.FirstLiveFrontier
+	ingestor.firstLiveFrontierSet = snapshot.Metadata.FirstLiveFrontierSet
 	ingestor.generation = generation
 }
 

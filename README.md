@@ -4799,7 +4799,7 @@ The opt-in T-U44 report exposes portable Go heap placement, reusable idle bytes,
 
 - Materialize-style connector schema evolution with deterministic compatibility plans, mixed-version row projection, atomic catalog generations, and rollback: [MU02_CONNECTOR_SCHEMA_EVOLUTION.md](MU02_CONNECTOR_SCHEMA_EVOLUTION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m-u02-connector-schema-evolution).
 
-- Provider-neutral external snapshot ingestion for Kafka/PostgreSQL/CDC adapters with authentication, bounded page backpressure, offset cutover, atomic checkpoints, and restart recovery: [MU03_EXTERNAL_SNAPSHOT_INGESTION.md](MU03_EXTERNAL_SNAPSHOT_INGESTION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m-u03-external-snapshot-ingestion).
+- Provider-neutral external snapshot ingestion for Kafka/PostgreSQL/CDC adapters with authentication, bounded page backpressure, offset cutover, atomic checkpoints, restart recovery, and zero-safe first-live-frontier metadata: [MU03_EXTERNAL_SNAPSHOT_INGESTION.md](MU03_EXTERNAL_SNAPSHOT_INGESTION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m-u03-external-snapshot-ingestion).
 
 ## Multi-Source Snapshot Coordination
 
@@ -4812,6 +4812,14 @@ security guidance, and measurements.
 
 Run the focused checks and benchmarks with make test-m054,
 make benchmark-m054-baseline, and make benchmark-m054.
+
+## Snapshot Frontier Cutover
+
+External SQL snapshots can persist the first live-stream frontier together
+with rows, source offsets, and the snapshot ID. `FirstLiveFrontierSet` keeps a
+real frontier of `0` distinct from legacy metadata that did not provide one;
+the contract is documented in [M227_SOURCE_SNAPSHOT_FRONTIER.md](M227_SOURCE_SNAPSHOT_FRONTIER.md)
+and measured in [BENCHMARK.md](BENCHMARK.md#m227-source-snapshot-frontier).
 
 ## Arrangement-Only Recovery
 

@@ -39869,6 +39869,68 @@ The 10.9 ms commit sample is filesystem jitter; the median is reported rather
 than hiding it. See [M226_DURABLE_CONSENSUS_METADATA.md](M226_DURABLE_CONSENSUS_METADATA.md)
 for the record format, invariants, and writer-authority contract.
 
+<a id="m227-source-snapshot-frontier"></a>
+## M227 Source Snapshot Frontier
+
+M227 adds a zero-safe `FirstLiveFrontier` marker to the existing external and
+multi-source SQL snapshot checkpoint contract. The marker is stored with rows,
+source offsets, and snapshot IDs, so recovery cannot silently mix a snapshot
+with a separately advanced live-stream position. `FirstLiveFrontierSet` keeps a
+real frontier of `0` distinct from legacy metadata that did not provide one.
+
+Commands used for the comparison:
+
+```sh
+make benchmark-m227-before
+make benchmark-m227-after
+```
+
+Five samples per benchmark on Linux/amd64, AMD Ryzen 9 5950X, Go
+`-benchmem`, `-benchtime=200ms`. The before run is the M226 commit; the after
+run is M227. The comparison uses the existing SQL snapshot control paths and
+the same two-source workload.
+
+| Workload | M226 median | M227 median | CPU change | CPU ratio M227/M226 | M226 memory | M227 memory | Memory change | Allocs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| External snapshot control | 31,572 ns/op | 30,745 ns/op | -2.6% | 0.974x | 44,161 B/op | 44,160 B/op | ~0% | 257 |
+| External snapshot resolve | 34,053 ns/op | 33,248 ns/op | -2.4% | 0.976x | 44,160 B/op | 44,160 B/op | 0% | 257 |
+| External snapshot ingest | 184,146 ns/op | 176,563 ns/op | -4.1% | 0.959x | 221,855 B/op | 221,856 B/op | ~0% | 1,293 |
+| Multi-source capture | 11,832 ns/op | 12,062 ns/op | +1.9% | 1.019x | 8,416 B/op | 8,688 B/op | +3.2% | 81 |
+| Multi-source recovery | 5,039 ns/op | 4,999 ns/op | -0.8% | 0.992x | 5,872 B/op | 6,080 B/op | +3.5% | 57 |
+| Multi-source resolve | 272.4 ns/op | 267.6 ns/op | -1.8% | 0.982x | 344 B/op | 344 B/op | 0% | 3 |
+
+The small external-path differences are benchmark noise around the same
+allocation counts, not evidence of a hot-path speedup. Multi-source capture
+and recovery copy one additional zero-safe boolean alongside each source
+metadata record, which explains the small bounded memory increase; the
+steady-state resolve path is unchanged.
+This feature is control-plane metadata and does not add work to ordinary SQL
+row reads or live updates.
+
+Raw M226 output:
+
+```text
+BenchmarkSQLExternalSnapshotControl: 32726 30860 31110 32212 31572 ns/op; 44160-44161 B/op; 257 allocs/op
+BenchmarkSQLExternalSnapshotResolve: 34053 33896 34532 36939 33779 ns/op; 44160-44161 B/op; 257 allocs/op
+BenchmarkSQLExternalSnapshotIngest: 184146 188839 186645 182269 175713 ns/op; 221851-221859 B/op; 1293 allocs/op
+BenchmarkSQLMultiSourceSnapshotControlResolve: 241.6 243.2 247.6 252.6 244.7 ns/op; 344 B/op; 3 allocs/op
+BenchmarkSQLMultiSourceSnapshotCapture: 12101 11629 12101 11832 11828 ns/op; 8416 B/op; 81 allocs/op
+BenchmarkSQLMultiSourceSnapshotRecover: 4920 5167 5039 5127 4936 ns/op; 5872 B/op; 57 allocs/op
+BenchmarkSQLMultiSourceSnapshotResolve: 272.4 270.4 270.4 276.7 274.3 ns/op; 344 B/op; 3 allocs/op
+```
+
+Raw M227 output:
+
+```text
+BenchmarkSQLExternalSnapshotControl: 31072 30650 31340 30745 30659 ns/op; 44160-44161 B/op; 257 allocs/op
+BenchmarkSQLExternalSnapshotResolve: 33119 33521 33248 33184 33252 ns/op; 44160 B/op; 257 allocs/op
+BenchmarkSQLExternalSnapshotIngest: 173915 179979 175005 176563 178989 ns/op; 221855-221858 B/op; 1293 allocs/op
+BenchmarkSQLMultiSourceSnapshotControlResolve: 239.6 246.0 249.6 252.2 257.5 ns/op; 344 B/op; 3 allocs/op
+BenchmarkSQLMultiSourceSnapshotCapture: 12244 12062 11677 12436 11888 ns/op; 8688-8689 B/op; 81 allocs/op
+BenchmarkSQLMultiSourceSnapshotRecover: 5103 5048 4970 4909 4999 ns/op; 6080 B/op; 57 allocs/op
+BenchmarkSQLMultiSourceSnapshotResolve: 267.6 257.6 271.0 267.9 263.7 ns/op; 344 B/op; 3 allocs/op
+```
+
 ## T208 Anonymous replica quorum targets
 
 Workload: three replication targets, two voting targets, and the no-op

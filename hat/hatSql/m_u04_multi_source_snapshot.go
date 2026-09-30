@@ -58,8 +58,9 @@ type SQLMultiSourceSnapshotRequest struct {
 }
 
 // SQLMultiSourceSnapshot retains the exact source snapshots that form one
-// atomic initial view. Generation and each source's SnapshotID/Offsets are
-// retained so live tails can start after the captured point.
+// atomic initial view. Generation and each source's SnapshotID, Offsets, and
+// optional first-live frontier are retained so live tails can start after the
+// captured point.
 type SQLMultiSourceSnapshot struct {
 	Generation uint64
 	Sources    []SQLExternalSnapshot
@@ -476,11 +477,13 @@ func cloneSQLMultiSourceSnapshot(snapshot SQLMultiSourceSnapshot) SQLMultiSource
 	for index, source := range snapshot.Sources {
 		cloned.Sources[index] = SQLExternalSnapshot{
 			Metadata: SQLExternalSnapshotMetadata{
-				Source:     source.Metadata.Source,
-				Key:        source.Metadata.Key,
-				Kind:       source.Metadata.Kind,
-				SnapshotID: source.Metadata.SnapshotID,
-				Offsets:    append([]SQLExternalSnapshotOffset(nil), source.Metadata.Offsets...),
+				Source:               source.Metadata.Source,
+				Key:                  source.Metadata.Key,
+				Kind:                 source.Metadata.Kind,
+				SnapshotID:           source.Metadata.SnapshotID,
+				FirstLiveFrontier:    source.Metadata.FirstLiveFrontier,
+				FirstLiveFrontierSet: source.Metadata.FirstLiveFrontierSet,
+				Offsets:              append([]SQLExternalSnapshotOffset(nil), source.Metadata.Offsets...),
 			},
 			Rows: cloneSQLExternalSnapshotRows(source.Rows),
 		}

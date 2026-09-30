@@ -12,8 +12,9 @@ The provider must:
 
 1. Authenticate before reading upstream data.
 2. Stream bounded pages through `SQLExternalSnapshotSink.AppendRows`.
-3. Return source identity, a snapshot ID, and source-partition offsets after
-   all pages have been accepted.
+3. Return source identity, a snapshot ID, source-partition offsets, and,
+   when available, the first live-stream frontier after all pages have been
+   accepted.
 
 The ingestor then validates identity and offset uniqueness, clones rows, and
 publishes one checkpoint. It implements `SourceResolver`, so SQL reads see a
@@ -57,15 +58,24 @@ partition number, PostgreSQL can use a WAL position, and a CDC adapter can use
 its stream or transaction boundary. The offset source must match the ingestor
 source, and duplicate source/partition entries are rejected.
 
+`FirstLiveFrontier` is an optional source-specific frontier coupled to the
+same checkpoint as the rows and offsets. Set `FirstLiveFrontierSet` when the
+value is meaningful; frontier `0` is valid when that bit is set. The marker
+identifies the first live-stream position after snapshot cutover. It is not a
+wall-clock timestamp or a continuously updated lag value. Older checkpoints
+with the bit unset remain readable, but callers that require an exact cutover
+must reject them or obtain a fresh snapshot.
+
 ## Recovery And Cutover
 
 `IngestSnapshotWithCheckpoint` first checks the checkpoint store. A valid
 checkpoint is restored without contacting the upstream provider, so a restart
 does not require credentials or a live source before local recovery. When no
 checkpoint exists, authentication and snapshot paging occur, then the complete
-row set and offsets are installed under one lock and committed as one durable
-payload. A failed checkpoint commit restores the exact previous in-memory
-state.
+row set, offsets, snapshot ID, and first-live frontier metadata are installed
+under one lock and committed as one durable payload. A failed checkpoint
+commit restores the exact previous in-memory state, including whether the
+frontier marker was set.
 
 The snapshot ID is optional for compatibility, but production adapters should
 set `RequireSnapshotID: true`. It makes a point-in-time boundary auditable and
@@ -98,7 +108,7 @@ text.
 | Wrong source, key, or kind | Snapshot is rejected before install. |
 | Duplicate or foreign offset | Snapshot is rejected before install. |
 | Page/row/offset bound exceeded | The sink rejects the page; the checkpoint is not attempted. |
-| Checkpoint commit failure | In-memory rows, offsets, ID, and generation roll back. |
+| Checkpoint commit failure | In-memory rows, offsets, ID, frontier marker, and generation roll back. |
 | Existing checkpoint | It is restored and upstream authentication is skipped. |
 | Existing in-memory state without checkpoint | Replacement is rejected unless `AllowReplaceExisting` is explicit. |
 
