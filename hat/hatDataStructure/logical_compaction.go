@@ -2,7 +2,7 @@ package hatDataStructure
 
 import (
 	"errors"
-	"sort"
+	"slices"
 )
 
 var (
@@ -134,15 +134,33 @@ func (compaction *LogicalCompaction[T]) ForEach(visit func(DifferentialRecord[T]
 // Records returns an owned time-ordered copy of retained records. Records at
 // the same timestamp have unspecified relative order because T is generic.
 func (compaction *LogicalCompaction[T]) Records() []DifferentialRecord[T] {
+	return compaction.RecordsInto(nil)
+}
+
+// RecordsInto appends retained records in time order to dst, reusing its
+// backing array when it has enough capacity. Records at the same timestamp
+// have unspecified relative order because T is generic.
+func (compaction *LogicalCompaction[T]) RecordsInto(dst []DifferentialRecord[T]) []DifferentialRecord[T] {
+	dst = dst[:0]
 	if compaction == nil || len(compaction.entries) == 0 {
-		return nil
+		return dst
 	}
-	records := make([]DifferentialRecord[T], 0, len(compaction.entries))
-	compaction.ForEach(func(record DifferentialRecord[T]) { records = append(records, record) })
-	sort.SliceStable(records, func(left, right int) bool {
-		return records[left].Time < records[right].Time
+	if cap(dst) < len(compaction.entries) {
+		dst = make([]DifferentialRecord[T], 0, len(compaction.entries))
+	}
+	for key, diff := range compaction.entries {
+		dst = append(dst, DifferentialRecord[T]{Data: key.data, Time: key.time, Diff: diff})
+	}
+	slices.SortFunc(dst, func(left, right DifferentialRecord[T]) int {
+		if left.Time < right.Time {
+			return -1
+		}
+		if left.Time > right.Time {
+			return 1
+		}
+		return 0
 	})
-	return records
+	return dst
 }
 
 func addLogicalCompactionDiff(current, delta int64) (int64, bool) {

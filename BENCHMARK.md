@@ -39598,3 +39598,18 @@ Ryzen 9 5950X.
 The pre-change `Values()` median was 165,238 ns/op with 401,408 B/op and one
 allocation. Its implementation was unchanged; the small post-change
 difference is benchmark variance. The reusable benchmark resets its timer after preallocation. See [ROARING_VALUES_INTO.md](ROARING_VALUES_INTO.md).
+
+## C176 Logical compaction reusable records
+
+Workload: 4,096 retained records with distinct timestamps, ten benchmark
+samples on an AMD Ryzen 9 5950X.
+
+| Operation | Median ns/op | B/op | Allocs/op | Relative to old `Records()` |
+| --- | ---: | ---: | ---: | ---: |
+| Old `Records()` with stable reflective sort | 2,055,789 | 98,400 | 4 | 1.00x |
+| Current `Records()` with typed sort | 313,854 | 98,304 | 1 | 6.55x faster |
+| Reused `RecordsInto()` with typed sort | 281,138 | 0 | 0 | 7.31x faster |
+
+The typed sort preserves timestamp ordering; relative order for equal
+timestamps remains unspecified. See
+[LOGICAL_COMPACTION_RECORDS_INTO.md](LOGICAL_COMPACTION_RECORDS_INTO.md).

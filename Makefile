@@ -28718,3 +28718,15 @@ test-roaring-values-into:
 
 verify-roaring-values-into:
 	bash scripts/verify-roaring-values-into.sh
+
+
+.PHONY: benchmark-logical-compaction-records test-logical-compaction-records-into verify-logical-compaction-records-into
+
+benchmark-logical-compaction-records:
+	bash scripts/benchmark-logical-compaction-records.sh
+
+test-logical-compaction-records-into:
+	bash scripts/test-logical-compaction-records-into.sh
+
+verify-logical-compaction-records-into:
+	bash scripts/verify-logical-compaction-records-into.sh

@@ -1166,3 +1166,12 @@ every enumeration. `RoaringBitmap.ValuesInto` adds that opt-in path while
 preserving the existing sorted `Values()` API and internal container
 ownership. The 100,000-value benchmark measured about 1.09x lower same-run
 median latency and removed the result allocation.
+
+## C176: Reusable differential-arrangement snapshots
+
+Materialize-style arrangement snapshots benefit from reusing result storage
+when a frontier is inspected repeatedly. `LogicalCompaction.RecordsInto`
+provides that opt-in path, and the shared implementation replaces the old
+reflective stable sort with typed `slices.SortFunc`; equal-timestamp order was
+already unspecified. On 4,096 records, the reusable path measured about 7.31x
+faster than the old `Records()` baseline and removed all per-call allocations.

@@ -1221,3 +1221,5 @@ and [BENCHMARK.md](BENCHMARK.md#compiled-query-negative-result-cache).
 | C174 | ClickHouse/Roaring-style reusable scan output | Added `SparseBitset.ValuesInto` for sorted enumeration into caller-owned storage | 100,000 values: 1.70x lower median latency, 802,816 B/1 alloc -> 0 B/0 alloc | No semantic change to `Values()`; callers must retain and reuse the returned buffer |
 
 | C175 | ClickHouse/Roaring-style reusable bitmap enumeration | Added `RoaringBitmap.ValuesInto` for sorted enumeration into caller-owned storage | 100,000 values: 1.09x lower same-run median latency; 401,408 B/1 alloc -> 0 B/0 allocs | No semantic change to `Values()`; caller retains the destination buffer |
+
+| C176 | Materialize-style reusable differential-arrangement snapshots | Added `LogicalCompaction.RecordsInto`; `Records()` now shares typed sorting | 4,096 records: 7.31x faster than old `Records()`, 98,400 B/4 allocs -> 0 B/0 allocs; `Records()` is 6.55x faster | Equal-timestamp order remains unspecified; `Records()` ownership semantics are preserved |
