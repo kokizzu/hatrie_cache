@@ -3,6 +3,7 @@ package hatDataStructure
 import (
 	"errors"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -120,6 +121,110 @@ func (index *VectorIndex) Search(query []float32, limit int, filter func(string)
 		matches = matches[:limit]
 	}
 	return matches, nil
+}
+
+// SearchInto ranks up to limit vectors into dst, reusing its backing array
+// when possible. Small limits use a bounded min-heap while scanning, so the
+// method does not retain or sort non-winning candidates.
+func (index *VectorIndex) SearchInto(dst []VectorMatch, query []float32, limit int, filter func(string) bool) ([]VectorMatch, error) {
+	if index == nil {
+		return nil, errors.New("hatriecache: vector index is nil")
+	}
+	if limit < 0 {
+		return nil, errors.New("hatriecache: vector result limit must be non-negative")
+	}
+	dst = dst[:0]
+	if limit == 0 {
+		return dst, nil
+	}
+	norm, err := vectorNorm(query, index.dimensions)
+	if err != nil {
+		return nil, err
+	}
+
+	index.mu.RLock()
+	maxResults := limit
+	if maxResults > len(index.entries) {
+		maxResults = len(index.entries)
+	}
+	if cap(dst) < maxResults {
+		dst = make([]VectorMatch, 0, maxResults)
+	}
+	bounded := limit < len(index.entries)
+	for id, entry := range index.entries {
+		if filter != nil && !filter(id) {
+			continue
+		}
+		dot := 0.0
+		for position, value := range query {
+			dot += float64(value) * float64(entry.values[position])
+		}
+		match := VectorMatch{ID: id, Score: dot / (norm * entry.norm)}
+		if !bounded {
+			dst = append(dst, match)
+			continue
+		}
+		if len(dst) < limit {
+			dst = append(dst, match)
+			vectorMatchSiftUp(dst, len(dst)-1)
+			continue
+		}
+		if vectorMatchCompare(match, dst[0]) >= 0 {
+			continue
+		}
+		dst[0] = match
+		vectorMatchSiftDown(dst, 0)
+	}
+	index.mu.RUnlock()
+
+	slices.SortFunc(dst, vectorMatchCompare)
+	return dst, nil
+}
+
+func vectorMatchCompare(left, right VectorMatch) int {
+	if left.Score != right.Score {
+		if left.Score > right.Score {
+			return -1
+		}
+		return 1
+	}
+	if left.ID < right.ID {
+		return -1
+	}
+	if left.ID > right.ID {
+		return 1
+	}
+	return 0
+}
+
+func vectorMatchSiftUp(matches []VectorMatch, index int) {
+	for index > 0 {
+		parent := (index - 1) / 2
+		if vectorMatchCompare(matches[index], matches[parent]) <= 0 {
+			return
+		}
+		matches[index], matches[parent] = matches[parent], matches[index]
+		index = parent
+	}
+}
+
+func vectorMatchSiftDown(matches []VectorMatch, index int) {
+	for {
+		left := index*2 + 1
+		if left >= len(matches) {
+			return
+		}
+		worst := left
+		right := left + 1
+		if right < len(matches) && vectorMatchCompare(matches[right], matches[left]) > 0 {
+			worst = right
+		}
+		if vectorMatchCompare(matches[worst], matches[index]) <= 0 {
+			return
+		}
+		matches[index], matches[worst] = matches[worst], matches[index]
+		index = worst
+	}
 }
 
 func vectorNorm(values []float32, dimensions int) (float64, error) {

@@ -39538,3 +39538,19 @@ buffer, and restores the internal min-heap before returning; no query result or
 future update behavior changes. A destination with insufficient capacity still
 grows once, so callers should size it to `TopK.Capacity()` for the zero-allocation
 path. See [TOP_K_ENTRIES_INTO.md](TOP_K_ENTRIES_INTO.md).
+
+## C172 Reusable Bounded Vector Search
+
+`make benchmark-vector-search` used ten `-benchmem` samples over 10,000
+eight-dimensional vectors on an AMD Ryzen 9 5950X. The baseline is the
+existing `VectorIndex.Search`; the optimized path reuses a destination and
+uses a bounded min-heap when the limit is smaller than the index.
+
+| Workload | Existing `Search` median | Reusable `SearchInto` median | Result | Allocation result |
+| --- | ---: | ---: | --- | --- |
+| `LIMIT 10` | 1,780,621 ns/op | 160,016 ns/op | 11.1x faster | 977,328 B / 18 -> 0 B / 0 allocs |
+| `LIMIT 10,000` | 1,696,887 ns/op | 928,903 ns/op | 1.83x faster | 245,856 B / 4 -> 0 B / 0 allocs |
+
+`SearchInto` is opt-in. It preserves exact score and ID tie ordering, filters,
+validation, and existing `Search` ownership semantics while bounding retained
+candidate output to `LIMIT`. See [VECTOR_SEARCH_INTO.md](VECTOR_SEARCH_INTO.md).

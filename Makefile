@@ -28662,3 +28662,19 @@ test-top-k-entries-into:
 .PHONY: verify-top-k-entries
 verify-top-k-entries:
 	bash scripts/verify-top-k-entries.sh
+
+.PHONY: benchmark-vector-search
+benchmark-vector-search:
+	bash scripts/benchmark-vector-search.sh
+
+.PHONY: benchmark-vector-search-into
+benchmark-vector-search-into:
+	bash scripts/benchmark-vector-search-into.sh
+
+.PHONY: test-vector-search-into
+test-vector-search-into:
+	bash scripts/test-vector-search-into.sh
+
+.PHONY: verify-vector-search
+verify-vector-search:
+	bash scripts/verify-vector-search.sh
