@@ -1,0 +1,21 @@
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatSql
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkM237EagerHydrateAll8192-32     	    7732	     28451 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM237EagerHydrateAll8192-32     	    8732	     28166 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM237EagerHydrateAll8192-32     	    8630	     28283 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM237EagerHydrateAll8192-32     	    8000	     28518 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM237EagerHydrateAll8192-32     	    8511	     28249 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM237LazyHydrateOneOf8192-32    	 1395492	       181.6 ns/op	     128 B/op	       2 allocs/op
+BenchmarkM237LazyHydrateOneOf8192-32    	 1326453	       178.6 ns/op	     128 B/op	       2 allocs/op
+BenchmarkM237LazyHydrateOneOf8192-32    	 1368852	       178.3 ns/op	     128 B/op	       2 allocs/op
+BenchmarkM237LazyHydrateOneOf8192-32    	 1311475	       176.8 ns/op	     128 B/op	       2 allocs/op
+BenchmarkM237LazyHydrateOneOf8192-32    	 1356663	       178.8 ns/op	     128 B/op	       2 allocs/op
+BenchmarkM237LazyReadyRead-32           	 8048730	        29.31 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM237LazyReadyRead-32           	 8307733	        28.34 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM237LazyReadyRead-32           	 8065506	        28.58 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM237LazyReadyRead-32           	 8288084	        28.72 ns/op	       0 B/op	       0 allocs/op
+BenchmarkM237LazyReadyRead-32           	 8027955	        29.04 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatSql	5.740s

@@ -28912,6 +28912,22 @@ test-m235:
 test-m236:
 	bash scripts/test-m236.sh
 
+.PHONY: test-m237
+test-m237:
+	bash scripts/test-m237.sh
+
+.PHONY: format-m237
+format-m237:
+	bash scripts/format-m237.sh
+
+.PHONY: benchmark-m237
+benchmark-m237:
+	bash scripts/benchmark-m237.sh
+
+.PHONY: race-m237
+race-m237:
+	bash scripts/race-m237.sh
+
 .PHONY: format-m236
 format-m236:
 	bash scripts/format-m236.sh

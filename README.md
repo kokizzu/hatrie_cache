@@ -130,6 +130,7 @@ security guidance before exposing it on a network.
 - Opt-in bounded sink pending-output memory with FIFO acknowledgement: [M234_SINK_BACKPRESSURE.md](M234_SINK_BACKPRESSURE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m234-bounded-sink-pending-output-queue)
 - Importable maintained-view/index dependency invalidation: [M235_DEPENDENCY_INVALIDATION.md](M235_DEPENDENCY_INVALIDATION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m235-maintained-object-dependency-invalidation)
 - Caller-driven on-demand refresh of only invalidated maintained views and indexes: [M236_ON_DEMAND_REFRESH.md](M236_ON_DEMAND_REFRESH.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m236-on-demand-maintained-object-refresh)
+- First-reader lazy hydration with single-flight cancellation: [M237_LAZY_HYDRATION.md](M237_LAZY_HYDRATION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m237-lazy-hydration)
 - Kafka-style consumer-group rebalance fencing: [MZ012_CONSUMER_GROUP_FENCING.md](MZ012_CONSUMER_GROUP_FENCING.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-012-kafka-style-consumer-group-fencing)
 - ClickHouse-inspired bounded asynchronous insert buffering: [CH009_ASYNC_INSERT_BUFFER.md](CH009_ASYNC_INSERT_BUFFER.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-009-bounded-async-insert-buffer)
 - ClickHouse-inspired durable asynchronous-insert deduplication: [CHU01_DURABLE_ASYNC_INSERT_DEDUP.md](CHU01_DURABLE_ASYNC_INSERT_DEDUP.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u01-durable-asynchronous-insert-deduplication)

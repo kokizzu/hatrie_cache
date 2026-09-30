@@ -40218,3 +40218,21 @@ metadata for the 8 affected objects, preserving callback mutation isolation;
 unrelated registrations are not visited. Raw samples are in
 [`M236_BENCHMARK_RAW.txt`](M236_BENCHMARK_RAW.txt), with API and correctness
 details in [M236_ON_DEMAND_REFRESH.md](M236_ON_DEMAND_REFRESH.md).
+
+## M237 Lazy Hydration
+
+Workload: 8,192 registered maintained objects with no-op hydration callbacks.
+Five 200 ms samples were collected on an AMD Ryzen 9 5950X, `linux/amd64`.
+The eager baseline invokes every callback; the cold lazy path invalidates and
+hydrates one object; the ready path only checks an already-hydrated object.
+
+| Workload | Path | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| one invalidation cycle | Eagerly hydrate all 8,192 | 28,283 | 0 | 0 | 1.00x |
+| one invalidation cycle | Lazy hydrate one object | 178.6 | 128 | 2 | 0.006x |
+| ready reader | Lazy ready read | 28.72 | 0 | 0 | 0.001x |
+
+The cold lazy path is 158.4x faster than hydrating the full catalog and its
+allocation cost is bounded by one object's detached metadata. Ready reads are
+allocation-free. Raw samples are in [`M237_BENCHMARK_RAW.txt`](M237_BENCHMARK_RAW.txt),
+with API and correctness details in [M237_LAZY_HYDRATION.md](M237_LAZY_HYDRATION.md).
