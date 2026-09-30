@@ -1145,3 +1145,4 @@ SQL shape. See [CH035_REMOTE_SHARD_PRUNING.md](CH035_REMOTE_SHARD_PRUNING.md).
   the correct fallback. See
   [M052AD_AUTO_NATIVE_CONDITIONAL_AGGREGATES.md](M052AD_AUTO_NATIVE_CONDITIONAL_AGGREGATES.md)
   and [BENCHMARK.md](BENCHMARK.md#m052ad-automatic-native-conditional-aggregates).
+- [x] C171 ClickHouse-style reusable bounded result buffers for approximate Top-K output. `TopK.EntriesInto` reuses caller-owned storage, preserves `Entries` ordering and subsequent heap updates, and measured 2.68x lower latency with zero per-call bytes and allocations versus repeated `Entries` copies. See [TOP_K_ENTRIES_INTO.md](TOP_K_ENTRIES_INTO.md).

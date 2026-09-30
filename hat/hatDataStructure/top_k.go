@@ -2,6 +2,7 @@ package hatDataStructure
 
 import (
 	"errors"
+	"slices"
 	"sort"
 )
 
@@ -165,6 +166,48 @@ func (top *TopK[K]) Entries() []TopKEntry[K] {
 		entries[index] = item.entry
 	}
 	return entries
+}
+
+// EntriesInto writes entries into dst, reusing its backing array when it has
+// enough capacity. The returned slice is sorted with the same deterministic
+// ordering as Entries.
+func (top *TopK[K]) EntriesInto(dst []TopKEntry[K]) []TopKEntry[K] {
+	dst = dst[:0]
+	if top == nil || len(top.counters) == 0 {
+		return dst
+	}
+	if cap(dst) < len(top.counters) {
+		dst = make([]TopKEntry[K], len(top.counters))
+	} else {
+		dst = dst[:len(top.counters)]
+	}
+	slices.SortFunc(top.counters, func(left, right topKCounter[K]) int {
+		if left.count != right.count {
+			if left.count > right.count {
+				return -1
+			}
+			return 1
+		}
+		if left.err != right.err {
+			if left.err < right.err {
+				return -1
+			}
+			return 1
+		}
+		if left.order < right.order {
+			return -1
+		}
+		if left.order > right.order {
+			return 1
+		}
+		return 0
+	})
+	for index, counter := range top.counters {
+		top.positions[counter.key] = index
+		dst[index] = TopKEntry[K]{Key: counter.key, Count: counter.count, Error: counter.err}
+	}
+	top.rebuildHeap()
+	return dst
 }
 
 // Snapshot returns a portable copy of the current summary.

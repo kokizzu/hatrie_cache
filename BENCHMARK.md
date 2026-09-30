@@ -39519,3 +39519,22 @@ Raw valid-source samples:
 
 See [COMPILED_NEGATIVE_CACHE.md](COMPILED_NEGATIVE_CACHE.md) for bounds,
 invalidation semantics, and verification commands.
+
+## C171 Reusable Top-K Results
+
+`make benchmark-top-k-entries` used ten `-benchmem` samples with 128 retained
+counters on an AMD Ryzen 9 5950X. The baseline is the existing `Entries()`
+copy; the optimized path reuses a preallocated destination with
+`EntriesInto`.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative |
+| --- | ---: | ---: | ---: | --- |
+| `TopK.Entries()` | 10,519 | 10,360 | 5 | 1.00x |
+| `TopK.EntriesInto` with reused destination | 3,923 | 0 | 0 | 2.68x faster |
+
+The API is opt-in, so existing callers retain independent-copy semantics.
+The new path temporarily reorders private bounded counters, fills the caller's
+buffer, and restores the internal min-heap before returning; no query result or
+future update behavior changes. A destination with insufficient capacity still
+grows once, so callers should size it to `TopK.Capacity()` for the zero-allocation
+path. See [TOP_K_ENTRIES_INTO.md](TOP_K_ENTRIES_INTO.md).

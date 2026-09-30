@@ -1214,3 +1214,4 @@ schema-version invalidation. Repeated invalid compiled sources improved from
 allocations; the valid compiled-plan hit remained allocation-free within
 benchmark noise. See [COMPILED_NEGATIVE_CACHE.md](COMPILED_NEGATIVE_CACHE.md)
 and [BENCHMARK.md](BENCHMARK.md#compiled-query-negative-result-cache).
+| ClickHouse | Reusable bounded result buffers for approximate Top-K output | Implemented | `TopK.EntriesInto` reuses caller-owned output, preserves deterministic ordering, and restores the internal min-heap before returning. Ten-sample measurement: 2.68x lower latency, 10,360 B/op to 0, and 5 allocs/op to 0 versus `Entries()`. See [TOP_K_ENTRIES_INTO.md](TOP_K_ENTRIES_INTO.md). |

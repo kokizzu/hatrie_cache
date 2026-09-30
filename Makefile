@@ -28650,3 +28650,15 @@ vet-compiled-negative-cache:
 .PHONY: benchmark-compiled-negative-cache
 benchmark-compiled-negative-cache:
 	bash scripts/compiled-negative-cache.sh benchmark
+
+.PHONY: benchmark-top-k-entries
+benchmark-top-k-entries:
+	bash scripts/benchmark-top-k-entries.sh
+
+.PHONY: test-top-k-entries-into
+test-top-k-entries-into:
+	bash scripts/test-top-k-entries-into.sh
+
+.PHONY: verify-top-k-entries
+verify-top-k-entries:
+	bash scripts/verify-top-k-entries.sh
