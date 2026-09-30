@@ -226,6 +226,15 @@ explicitly opt-in operational control.
 | ClickHouse | Async-insert queue status and explicit flush | Adopted as the bounded importable `AsyncInsertQueueRegistry` with payload-free status snapshots and authenticated targeted/all-queue flush endpoints. It is disabled unless explicitly configured. | [CHU23_ASYNC_INSERT_QUEUE.md](CHU23_ASYNC_INSERT_QUEUE.md), [BENCHMARK.md#ch-u23-async-insert-queue-status-and-flush](BENCHMARK.md#ch-u23-async-insert-queue-status-and-flush) |
 | ClickHouse | Prepared-plan cache admission and eviction metrics | Adopted as additive bounded cache counters | `SQLPreparedQueryCacheStats.Admissions` counts newly retained parsed templates and `Evictions` counts LRU capacity removals. Hits, normalized aliases, explicit invalidation, disabled caches, query text, parameters, and result rows retain their existing behavior. See [CHG14_PREPARED_CACHE_METRICS.md](CHG14_PREPARED_CACHE_METRICS.md) and [BENCHMARK.md#chg14-prepared-plan-cache-metrics](BENCHMARK.md#chg14-prepared-plan-cache-metrics). |
 
+## C208: Result-Cache Key Byte Fastpath
+
+The existing ClickHouse-inspired result-cache metrics and settings-aware key
+namespace now avoid an intermediate parameter-byte string during key
+construction. The retained key bytes and cache semantics are unchanged. A
+paired benchmark improved from 2,289 to 2,262 ns/op, 1,683 to 1,619 B/op, and
+24 to 23 allocs/op. See
+[C208_RESULT_CACHE_KEY_FASTPATH.md](C208_RESULT_CACHE_KEY_FASTPATH.md).
+
 ## Measured Results
 
 | Feature | Result |

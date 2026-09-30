@@ -24819,6 +24819,22 @@ BenchmarkSQLResultCacheKeySettingsFingerprint-32 408286  2879 ns/op  2612 B/op  
 
 Reproduce with `make benchmark-ch008-baseline` and `make benchmark-ch008`.
 
+## C208 Result-Cache Key Byte Fastpath
+
+This keeps the existing result-cache key bytes and avoids converting gob
+parameter bytes to an intermediate string before appending them. Results are
+Linux/amd64 on an AMD Ryzen 9 5950X, from a paired `-benchmem -count=12`
+benchmark that runs the string baseline and byte fastpath in the same binary.
+
+| Workload | String baseline median | Byte fastpath median | Improvement | Before B/op | After B/op | Before allocs/op | After allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Paired parameterized key | 2,289 ns/op | 2,262 ns/op | 1.01x faster | 1,683 | 1,619 | 24 | 23 |
+
+The cached-query end-to-end benchmark retained the same `2,091 allocs/op` and
+approximately `362 KiB/op`; the improvement is isolated to key construction.
+See [C208_RESULT_CACHE_KEY_FASTPATH.md](C208_RESULT_CACHE_KEY_FASTPATH.md) for
+the raw paired samples and verification commands.
+
 ## MZ-024 Signed Journal Tail Cursors
 
 This benchmark measures the opt-in cursor codec and the JSON tail envelope with

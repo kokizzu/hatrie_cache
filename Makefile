@@ -28818,3 +28818,16 @@ race-row-binary-delta-decode-into:
 .PHONY: benchmark-row-binary-delta-decode
 benchmark-row-binary-delta-decode:
 	bash scripts/benchmark-row-binary-delta-decode.sh
+
+.PHONY: test-c208-result-cache-key benchmark-c208-result-cache-key race-c208-result-cache-key verify-c208-result-cache-key
+
+test-c208-result-cache-key:
+	bash scripts/test-c208-result-cache-key.sh
+
+benchmark-c208-result-cache-key:
+	bash scripts/benchmark-c208-result-cache-key.sh
+
+race-c208-result-cache-key:
+	bash scripts/race-c208-result-cache-key.sh
+
+verify-c208-result-cache-key: test-c208-result-cache-key race-c208-result-cache-key

@@ -37,7 +37,7 @@ operator control remain the preferred deployment model.
 - [x] C205 Query-cache controls scoped to individual subqueries; see [C205_SUBQUERY_RESULT_CACHE.md](C205_SUBQUERY_RESULT_CACHE.md) and [BENCHMARK.md](BENCHMARK.md#c205-subquery-result-cache).
 - [x] C206 Query-cache eligibility checks that reject nondeterministic expressions; verified in [C206_QUERY_CACHE_ELIGIBILITY.md](C206_QUERY_CACHE_ELIGIBILITY.md).
 - [x] C207 Query-condition cache with data-generation invalidation for repeated filters; verified in [C207_QUERY_CONDITION_CACHE.md](C207_QUERY_CONDITION_CACHE.md).
-- [x] C208 Query-cache hit, miss, bypass, and eviction metrics via `ResultCache`; see [C208_RESULT_CACHE_METRICS.md](C208_RESULT_CACHE_METRICS.md).
+- [x] C208 Query-cache hit, miss, bypass, and eviction metrics via `ResultCache`; the key-construction fastpath also avoids one intermediate byte-to-string allocation without changing key bytes; see [C208_RESULT_CACHE_METRICS.md](C208_RESULT_CACHE_METRICS.md) and [C208_RESULT_CACHE_KEY_FASTPATH.md](C208_RESULT_CACHE_KEY_FASTPATH.md).
 - [x] C209 Automatic basic column statistics for row count, null count, min, and max via `TypedTable.Stats()`; see [C209_TYPED_TABLE_STATS.md](C209_TYPED_TABLE_STATS.md).
 - [x] C210 Compact histograms for cardinality and selectivity estimates via `TypedTable.Histogram()`; see [C210_TYPED_TABLE_HISTOGRAM.md](C210_TYPED_TABLE_HISTOGRAM.md).
 - [x] C211 Statistics-driven join-order selection with deterministic fallback via `SourceCardinalityResolver`; see [C211_STATISTICS_JOIN_ORDER.md](C211_STATISTICS_JOIN_ORDER.md).

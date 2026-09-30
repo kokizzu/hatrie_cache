@@ -123,7 +123,7 @@ func sqlResultCacheKeyParts(source string, parameters []interface{}, options SQL
 	var key strings.Builder
 	key.WriteString("hatsql-result-cache-v2")
 	appendSQLResultCachePart(&key, source)
-	appendSQLResultCachePart(&key, encoded.String())
+	appendSQLResultCacheBytesPart(&key, encoded.Bytes())
 	appendSQLResultCachePart(&key, string(options.Collation))
 	appendSQLResultCachePart(&key, options.PreparedSchemaVersion)
 	appendSQLResultCachePart(&key, strconv.FormatBool(options.PlanSnapshot != nil))
@@ -137,6 +137,12 @@ func appendSQLResultCachePart(key *strings.Builder, value string) {
 	key.WriteString(strconv.Itoa(len(value)))
 	key.WriteByte(':')
 	key.WriteString(value)
+}
+
+func appendSQLResultCacheBytesPart(key *strings.Builder, value []byte) {
+	key.WriteString(strconv.Itoa(len(value)))
+	key.WriteByte(':')
+	key.Write(value)
 }
 
 func sqlResultCacheOptionsEligible(options SQLQueryOptions) bool {
