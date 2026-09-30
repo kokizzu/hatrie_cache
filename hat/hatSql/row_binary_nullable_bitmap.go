@@ -14,17 +14,32 @@ var sqlRowBinaryNullableBitmapMagic = [4]byte{'H', 'S', 'B', '1'}
 // nullable columns. The schema remains out of band; non-null values retain
 // the existing RowBinary representation.
 func EncodeSQLRowBinaryBitmap(columns []SQLRowBinaryColumn, rows []SQLRow) ([]byte, error) {
+	return EncodeSQLRowBinaryBitmapInto(nil, columns, rows)
+}
+
+// EncodeSQLRowBinaryBitmapInto encodes nullable RowBinary rows into dst when
+// it has enough capacity. The returned bytes may alias dst and are invalidated
+// when the caller reuses that destination.
+func EncodeSQLRowBinaryBitmapInto(destination []byte, columns []SQLRowBinaryColumn, rows []SQLRow) ([]byte, error) {
 	if err := validateSQLRowBinaryColumns(columns); err != nil {
 		return nil, err
 	}
+	return encodeSQLRowBinaryBitmapValidated(destination, columns, rows)
+}
+
+func encodeSQLRowBinaryBitmapValidated(destination []byte, columns []SQLRowBinaryColumn, rows []SQLRow) ([]byte, error) {
 	if len(rows) == 0 {
-		return nil, nil
+		return destination[:0], nil
 	}
 	if len(rows) > maxSQLRowBinaryRows {
 		return nil, fmt.Errorf("RowBinary bitmap row count %d exceeds limit %d", len(rows), maxSQLRowBinaryRows)
 	}
 	nullableBits, bitmapBytes, _ := sqlRowBinaryNullableBitmapLayout(columns)
-	encoded := make([]byte, 0, len(sqlRowBinaryNullableBitmapMagic)+len(rows)*(bitmapBytes+len(columns)))
+	encoded := destination[:0]
+	initialCapacity := len(sqlRowBinaryNullableBitmapMagic) + len(rows)*(bitmapBytes+len(columns))
+	if cap(encoded) < initialCapacity {
+		encoded = make([]byte, 0, initialCapacity)
+	}
 	encoded = append(encoded, sqlRowBinaryNullableBitmapMagic[:]...)
 	for rowIndex, row := range rows {
 		bitmapStart := len(encoded)
@@ -43,7 +58,7 @@ func EncodeSQLRowBinaryBitmap(columns []SQLRowBinaryColumn, rows []SQLRow) ([]by
 				continue
 			}
 			var err error
-			encoded, err = appendSQLRowBinaryColumnValue(encoded, column, value, rowIndex)
+			encoded, err = appendSQLRowBinaryValue(encoded, column.Type, value, rowIndex, column.Name)
 			if err != nil {
 				return nil, err
 			}
@@ -91,9 +106,6 @@ func DecodeSQLRowBinaryBitmap(columns []SQLRowBinaryColumn, encoded []byte) ([]S
 			}
 			value, next, err := decodeSQLRowBinaryBitmapValue(column.Type, encoded, offset, len(rows), column.Name)
 			if err != nil {
-				return nil, err
-			}
-			if err := validateSQLRowBinaryDecodedValue(column, value, len(rows)); err != nil {
 				return nil, err
 			}
 			row[column.Name] = value
@@ -203,48 +215,6 @@ func decodeSQLRowBinaryBitmapValue(kind SQLRowBinaryType, encoded []byte, offset
 		var uuid [16]byte
 		copy(uuid[:], value)
 		return uuid, next, nil
-	case SQLRowBinaryIPv4:
-		value, next, err := readSQLRowBinaryBitmapFixed(encoded, offset, 4, row, column)
-		if err != nil {
-			return nil, offset, err
-		}
-		return SQLIPv4(binary.BigEndian.Uint32(value)), next, nil
-	case SQLRowBinaryIPv6:
-		value, next, err := readSQLRowBinaryBitmapFixed(encoded, offset, 16, row, column)
-		if err != nil {
-			return nil, offset, err
-		}
-		var ip SQLIPv6
-		copy(ip[:], value)
-		return ip, next, nil
-	case SQLRowBinaryEnum8:
-		value, next, err := readSQLRowBinaryBitmapFixed(encoded, offset, 1, row, column)
-		if err != nil {
-			return nil, offset, err
-		}
-		return SQLEnum8(value[0]), next, nil
-	case SQLRowBinaryEnum16:
-		value, next, err := readSQLRowBinaryBitmapFixed(encoded, offset, 2, row, column)
-		if err != nil {
-			return nil, offset, err
-		}
-		return SQLEnum16(binary.LittleEndian.Uint16(value)), next, nil
-	case SQLRowBinaryDecimal128:
-		value, next, err := readSQLRowBinaryBitmapFixed(encoded, offset, 16, row, column)
-		if err != nil {
-			return nil, offset, err
-		}
-		var decimal SQLDecimal128
-		copy(decimal[:], value)
-		return decimal, next, nil
-	case SQLRowBinaryDecimal256:
-		value, next, err := readSQLRowBinaryBitmapFixed(encoded, offset, 32, row, column)
-		if err != nil {
-			return nil, offset, err
-		}
-		var decimal SQLDecimal256
-		copy(decimal[:], value)
-		return decimal, next, nil
 	default:
 		return nil, offset, fmt.Errorf("RowBinary bitmap column %q has unsupported type %d", column, kind)
 	}

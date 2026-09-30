@@ -1267,3 +1267,15 @@ atomicity remain unchanged. The ten-sample 256-row benchmark measured
 2.02x lower latency, 6.77x less heap, and 2.34x fewer allocations on
 the warm reusable path. See
 [ROW_BINARY_DICTIONARY_ENCODE_INTO.md](ROW_BINARY_DICTIONARY_ENCODE_INTO.md).
+
+- [x] C187 Reusable explicit nullable-bitmap RowBinary encoder output. `EncodeSQLRowBinaryBitmapInto` preserves HSB1 bytes and validation while reusing caller-owned output; adaptive HSA1 selection remains unchanged. See [ROW_BINARY_BITMAP_ENCODE_INTO.md](ROW_BINARY_BITMAP_ENCODE_INTO.md).
+
+## C187: Reusable nullable-bitmap RowBinary encoder output
+
+ClickHouse-style block writers benefit from reusing a complete explicit
+transfer buffer. `EncodeSQLRowBinaryBitmapInto` reuses caller-owned HSB1
+output without changing NULL semantics, limits, validation, or bytes.
+The ten-sample 4,096-row benchmark measured 1.38x lower latency, about
+807x less allocated heap, and 2.25x fewer allocations. Adaptive HSA1
+selection remains untouched, so callers pay no new default cost. See
+[ROW_BINARY_BITMAP_ENCODE_INTO.md](ROW_BINARY_BITMAP_ENCODE_INTO.md).

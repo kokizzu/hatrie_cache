@@ -39752,3 +39752,18 @@ ten samples on an AMD Ryzen 9 5950X. Every operation emitted 3,081 wire bytes.
 The allocating wrapper is allocation-neutral within benchmark noise; the
 reusable API is the path that reuses destination rows. See
 [ROW_BINARY_DICTIONARY_ENCODE_INTO.md](ROW_BINARY_DICTIONARY_ENCODE_INTO.md).
+
+## C187 Reusable nullable-bitmap RowBinary encoder output
+
+Workload: 4,096 rows with nullable `INT64`, string, bytes, and boolean
+columns, ten samples on an AMD Ryzen 9 5950X. Every operation emitted
+124,342 wire bytes.
+
+| Operation | Median ns/op | B/op | Allocs/op | Relative latency |
+| --- | ---: | ---: | ---: | ---: |
+| Existing `EncodeSQLRowBinaryBitmap` | 384,008 | 451,075 | 18 | 1.00x |
+| Warm `EncodeSQLRowBinaryBitmapInto` | 277,549 | 559 | 8 | 1.38x faster |
+
+The output is byte-for-byte identical; the reusable API is explicit and
+adaptive HSA1 selection does not encode a bitmap candidate. See
+[ROW_BINARY_BITMAP_ENCODE_INTO.md](ROW_BINARY_BITMAP_ENCODE_INTO.md).

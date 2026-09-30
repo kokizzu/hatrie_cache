@@ -28778,3 +28778,15 @@ gofmt-row-binary-dictionary-into:
 .PHONY: benchmark-row-binary-dictionary
 benchmark-row-binary-dictionary:
 	bash scripts/benchmark-row-binary-dictionary.sh
+
+.PHONY: gofmt-row-binary-bitmap-into
+gofmt-row-binary-bitmap-into:
+	bash scripts/gofmt-row-binary-bitmap-into.sh
+
+.PHONY: test-row-binary-bitmap-into
+test-row-binary-bitmap-into:
+	bash scripts/test-row-binary-bitmap-into.sh
+
+.PHONY: benchmark-row-binary-bitmap
+benchmark-row-binary-bitmap:
+	bash scripts/benchmark-row-binary-bitmap.sh
