@@ -197,6 +197,7 @@ func captureTypedTableAggregateArrangementCheckpoint(aggregate *TypedTableAggreg
 		SourceSequence: sourceSequence,
 		Checkpoint:     aggregate.checkpoint,
 	}
+	aggregate.ensureGroupKeys()
 	groups := make([]TypedTableAggregateGroupCheckpoint, 0, aggregate.groupCount)
 	for _, bucket := range aggregate.groups {
 		groups = append(groups, typedTableAggregateGroupCheckpointFromGroup(bucket.group))
