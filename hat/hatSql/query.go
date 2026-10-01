@@ -10271,6 +10271,11 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 			return SQLQueryResult{}, true, fmt.Errorf("SQL columnar source %q returned %d values for field %q, want %d", q.from.key, batch.FieldRows(field), field, batch.Rows)
 		}
 	}
+	for index := range projections {
+		if projections[index].aggregate != nil {
+			sqlColumnarPrepareNumericAggregateColumn(projections[index].aggregate, batch)
+		}
+	}
 	predicates = sqlColumnarOrderNumericPredicates(segments, predicates)
 	filterDictionaryField, filterDictionary, filterOperator, filterValue, filterCollation, dictionaryFilter := sqlColumnarDictionaryPredicateInConjunction(q.where, q.from.alias, batch)
 	filterDictionaryINField, filterDictionaryIN, filterDictionaryINCodes, dictionaryINFilter := sqlColumnarDictionaryLiteralINPredicateInConjunction(q.where, q.from.alias, batch)
@@ -10343,7 +10348,11 @@ func executeSQLColumnarDictionaryGroupAggregate(q *sqlQuery, columnar SQLColumna
 			matched++
 			for index, projection := range projections {
 				if projection.aggregate != nil {
-					states[code][index].add(batch, rowIndex)
+					if states[code][index].numericPacked {
+						states[code][index].addPackedNumeric(states[code][index].numericColumn, rowIndex)
+					} else {
+						states[code][index].add(batch, rowIndex)
+					}
 				}
 			}
 		}

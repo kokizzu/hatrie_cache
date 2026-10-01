@@ -22506,3 +22506,31 @@ review-chu65-typed-numeric-aggregate:
 .PHONY: ship-chu65-typed-numeric-aggregate
 ship-chu65-typed-numeric-aggregate:
 	bash scripts/ship-chu65-typed-numeric-aggregate.sh ship
+.PHONY: format-chu66-grouped-numeric-aggregate
+format-chu66-grouped-numeric-aggregate:
+	bash scripts/run-chu66-grouped-numeric-aggregate.sh format
+
+.PHONY: test-chu66-grouped-numeric-aggregate
+test-chu66-grouped-numeric-aggregate:
+	bash scripts/run-chu66-grouped-numeric-aggregate.sh test
+
+
+.PHONY: benchmark-chu66-grouped-numeric-aggregate
+benchmark-chu66-grouped-numeric-aggregate:
+	bash scripts/run-chu66-grouped-numeric-aggregate.sh benchmark
+
+.PHONY: race-chu66-grouped-numeric-aggregate
+race-chu66-grouped-numeric-aggregate:
+	bash scripts/run-chu66-grouped-numeric-aggregate.sh race
+
+.PHONY: vet-chu66-grouped-numeric-aggregate
+vet-chu66-grouped-numeric-aggregate:
+	bash scripts/run-chu66-grouped-numeric-aggregate.sh vet
+
+.PHONY: review-chu66-grouped-numeric-aggregate
+review-chu66-grouped-numeric-aggregate:
+	bash scripts/ship-chu66-grouped-numeric-aggregate.sh review
+
+.PHONY: ship-chu66-grouped-numeric-aggregate
+ship-chu66-grouped-numeric-aggregate:
+	bash scripts/ship-chu66-grouped-numeric-aggregate.sh ship

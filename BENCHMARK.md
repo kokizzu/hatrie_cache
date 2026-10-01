@@ -32769,3 +32769,34 @@ after:   8,177,806   8,109,897   7,089,845   7,426,704   7,497,930 ns/op
 Only validated packed numeric aggregate fields use the raw-word kernel.
 Filtered queries keep predicate evaluation and NULL semantics; unsupported
 physical layouts use the established generic accessor. See [CHU65_TYPED_NUMERIC_AGGREGATE.md](CHU65_TYPED_NUMERIC_AGGREGATE.md).
+
+## CHU66 Grouped Numeric Aggregate Kernel
+
+Command:
+
+```sh
+make benchmark-chu66-grouped-numeric-aggregate
+```
+
+Five samples on Linux/amd64, AMD Ryzen 9 5950X. The workload uses 100,000
+rows, 64 dictionary groups, `SUM`/`AVG`/`MIN`/`MAX`, and 20% NULL values. The
+query includes `ORDER BY group` to select the dictionary-group executor rather
+than the separate unordered vector-group executor.
+
+| Version | Median ns/op | Median B/op | Median allocs/op | CPU improvement | Heap improvement | Allocation improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Round24 control | 24,313,868 | 2,642,677 | 320,556 | 1.00x | 1.00x | 1.00x |
+| CHU66 | 9,238,571 | 82,589 | 553 | 2.63x faster | 32.00x less | 579.67x fewer |
+
+Raw samples (`ns/op / B/op / allocs/op`):
+
+```text
+control: 24286863/2643534/320559, 24313868/2642677/320556, 24307231/2642675/320556, 24484933/2642676/320556, 24566246/2642680/320556
+CHU66:    9253236/82588/553,       9258455/82631/553,       9238571/82588/553,       9227202/82589/553,       9221945/82589/553
+```
+
+CHU66 is limited to the dictionary-group executor and validated packed numeric
+aggregate fields. Plain, missing, malformed, unsupported, and NULL values
+retain the established semantics. An unordered simple `GROUP BY` can be
+handled by the earlier vector-group executor and is outside this measurement.
+See [CHU66_GROUPED_NUMERIC_AGGREGATE.md](CHU66_GROUPED_NUMERIC_AGGREGATE.md).

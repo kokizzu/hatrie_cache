@@ -35,17 +35,20 @@ func (aggregate *sqlColumnarNumericAggregate) addPackedNumeric(column ColumnarNu
 	}
 }
 
+func sqlColumnarPrepareNumericAggregateColumn(aggregate *sqlColumnarNumericAggregate, batch ColumnarBatch) {
+	if aggregate == nil || aggregate.field == "" {
+		return
+	}
+	column, ok := batch.NumericColumns[aggregate.field]
+	if !ok || column.Rows != batch.Rows || column.RowCount() != batch.Rows {
+		return
+	}
+	aggregate.numericColumn = column
+	aggregate.numericPacked = true
+}
+
 func sqlColumnarPrepareNumericAggregateColumns(aggregates []sqlColumnarNumericAggregate, batch ColumnarBatch) {
 	for index := range aggregates {
-		aggregate := &aggregates[index]
-		if aggregate.field == "" {
-			continue
-		}
-		column, ok := batch.NumericColumns[aggregate.field]
-		if !ok || column.Rows != batch.Rows || column.RowCount() != batch.Rows {
-			continue
-		}
-		aggregate.numericColumn = column
-		aggregate.numericPacked = true
+		sqlColumnarPrepareNumericAggregateColumn(&aggregates[index], batch)
 	}
 }

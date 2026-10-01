@@ -177,6 +177,7 @@ explicitly opt-in operational control.
 | Source | Idea | Status | Evidence |
 |---|---|---|---|
 | ClickHouse | Typed numeric aggregate kernels | Adopted automatically for validated packed columns | Direct `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` aggregate state reads packed `int64`/`float64` words and validity bits without generic value boxing. Plain, dictionary, missing, and malformed layouts fall back. The 100,000-row four-aggregate benchmark measured 2.55x lower latency, 244.55x lower heap, and 9,698.03x fewer allocations. See [CHU65_TYPED_NUMERIC_AGGREGATE.md](CHU65_TYPED_NUMERIC_AGGREGATE.md) and [BENCHMARK.md](BENCHMARK.md#chu65-typed-numeric-aggregate-kernel). |
+| ClickHouse | Dictionary-code grouped numeric aggregate kernels | Adopted for the ordered dictionary-group executor | Grouped `SUM`/`AVG`/`MIN`/`MAX` states read validated packed numeric words and validity bits directly. The matched 100,000-row benchmark measured 2.63x lower latency, 32.00x lower heap, and 579.67x fewer allocations. The unordered vector-group executor remains a separate path. See [CHU66_GROUPED_NUMERIC_AGGREGATE.md](CHU66_GROUPED_NUMERIC_AGGREGATE.md) and [BENCHMARK.md](BENCHMARK.md#chu66-grouped-numeric-aggregate-kernel). |
 
 ## Latest Adoption
 
