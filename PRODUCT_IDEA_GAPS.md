@@ -189,3 +189,9 @@ generic `hat*` primitives are preferred when they provide a real reusable
 contract rather than an unintegrated placeholder. Large or irreversible ideas
 such as VShard migration, a new scripting runtime, or a consensus log remain
 proposal-only until their recovery and security contracts are complete.
+### T-U03 stored procedure registry
+
+Partial importable support is implemented in `hatProcedure.Registry` with
+explicit authorization, bounded versioned definitions, copied byte payloads,
+and panic isolation. It intentionally does not add a scripting runtime or
+network exposure. See [TU03_STORED_PROCEDURE_REGISTRY.md](TU03_STORED_PROCEDURE_REGISTRY.md).

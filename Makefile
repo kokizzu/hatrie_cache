@@ -22292,3 +22292,42 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: test-round35-procedure
+test-round35-procedure:
+	bash scripts/test-round35-procedure.sh
+
+.PHONY: format-round35-procedure
+format-round35-procedure:
+	bash scripts/format-round35-procedure.sh
+
+.PHONY: benchmark-round35-procedure
+benchmark-round35-procedure:
+	bash scripts/benchmark-round35-procedure.sh
+
+.PHONY: race-round35-procedure
+race-round35-procedure:
+	bash scripts/race-round35-procedure.sh
+
+.PHONY: vet-round35-procedure
+vet-round35-procedure:
+	bash scripts/vet-round35-procedure.sh
+
+.PHONY: verify-round35-procedure-docs
+verify-round35-procedure-docs:
+	bash scripts/verify-round35-procedure-docs.sh
+
+.PHONY: review-round35-procedure
+review-round35-procedure:
+	bash scripts/review-round35-procedure.sh
+
+.PHONY: stage-round35-procedure
+stage-round35-procedure:
+	bash scripts/stage-round35-procedure.sh
+
+.PHONY: commit-round35-procedure
+commit-round35-procedure:
+	bash scripts/commit-round35-procedure.sh
+
+.PHONY: push-round35-procedure
+push-round35-procedure:
+	bash scripts/push-round35-procedure.sh

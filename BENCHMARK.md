@@ -32580,3 +32580,10 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+## T-U03 Stored Procedure Registry
+
+The secure registry costs 120.4 ns/op and 24 B/3 allocs per authorized call,
+versus 0.483 ns/op and zero allocation for a direct handler call (249.2x
+slower). This is an intentional command-boundary tradeoff for authorization,
+copy isolation, bounded state, and panic containment; it is not suitable for
+inner loops. Details: [TU03_STORED_PROCEDURE_REGISTRY.md](TU03_STORED_PROCEDURE_REGISTRY.md).
