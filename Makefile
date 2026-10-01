@@ -22459,3 +22459,55 @@ check-chg07-diff:
 .PHONY: deliver-chg07-procedure
 deliver-chg07-procedure:
 	bash ./scripts/deliver-chg07-procedure.sh
+
+
+
+
+
+.PHONY: test-chg08-bootstrap
+test-chg08-bootstrap:
+	@sh ./scripts/test-chg08-bootstrap.sh test
+
+.PHONY: format-chg08-bootstrap
+format-chg08-bootstrap:
+	@sh ./scripts/test-chg08-bootstrap.sh format
+
+.PHONY: benchmark-chg08-bootstrap
+benchmark-chg08-bootstrap:
+	@sh ./scripts/test-chg08-bootstrap.sh benchmark
+
+.PHONY: test-chg08-bootstrap-package
+test-chg08-bootstrap-package:
+	@sh ./scripts/test-chg08-bootstrap.sh package
+
+.PHONY: test-chg08-all
+test-chg08-all:
+	@sh ./scripts/test-chg08-bootstrap.sh all
+
+.PHONY: race-chg08-bootstrap
+race-chg08-bootstrap:
+	@sh ./scripts/test-chg08-bootstrap.sh race
+
+.PHONY: vet-chg08-bootstrap
+vet-chg08-bootstrap:
+	@sh ./scripts/test-chg08-bootstrap.sh vet
+
+.PHONY: check-chg08-bootstrap
+check-chg08-bootstrap:
+	@sh ./scripts/deliver-chg08-bootstrap.sh check
+
+.PHONY: status-chg08-bootstrap
+status-chg08-bootstrap:
+	@sh ./scripts/deliver-chg08-bootstrap.sh status
+
+.PHONY: stage-chg08-bootstrap
+stage-chg08-bootstrap:
+	@sh ./scripts/deliver-chg08-bootstrap.sh stage
+
+.PHONY: commit-chg08-bootstrap
+commit-chg08-bootstrap:
+	@sh ./scripts/deliver-chg08-bootstrap.sh commit
+
+.PHONY: push-chg08-bootstrap
+push-chg08-bootstrap:
+	@sh ./scripts/deliver-chg08-bootstrap.sh push

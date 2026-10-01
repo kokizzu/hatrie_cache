@@ -197,6 +197,7 @@ security guidance before exposing it on a network.
 - Tarantool-inspired bounded read-only SQL procedure registry: [TU03_STORED_PROCEDURE_REGISTRY.md](TU03_STORED_PROCEDURE_REGISTRY.md), with measurements in [BENCHMARK.md](BENCHMARK.md#t-u03-read-only-sql-procedure-registry)
 - Clock-independent bounded replica RPO status: [REPLICA_RPO_STATUS.md](REPLICA_RPO_STATUS.md)
 - Online snapshot manifest with exact journal coordinate: [SNAPSHOT_MANIFEST.md](SNAPSHOT_MANIFEST.md)
+- Opt-in bounded snapshot-plus-WAL join bootstrap fencing and atomic activation: [TU09_SNAPSHOT_WAL_JOIN_BOOTSTRAP.md](TU09_SNAPSHOT_WAL_JOIN_BOOTSTRAP.md), with measured control-plane overhead in [BENCHMARK.md](BENCHMARK.md#t-u09-snapshot-plus-wal-join-bootstrap)
 - Per-space conflict policy registry: [CONFLICT_POLICY.md](CONFLICT_POLICY.md)
 - Named versioned space catalog: [SPACE_CATALOG.md](SPACE_CATALOG.md)
 - Authenticated cursor-after pagination: [CURSOR_PAGINATION.md](CURSOR_PAGINATION.md)

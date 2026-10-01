@@ -31983,6 +31983,38 @@ fixture because it creates a second gzip-binary snapshot. This is a deliberate
 correctness-first implementation tradeoff; the API should not be used as a
 per-row batching mechanism. The full semantics and future undo-log direction
 are documented in [TR034_SQL_SAVEPOINTS.md](TR034_SQL_SAVEPOINTS.md).
+<a id="t-u09-snapshot-plus-wal-join-bootstrap"></a>
+## T-U09: Snapshot-plus-WAL join bootstrap
+
+Command: `make benchmark-chg08-bootstrap`.
+
+This is a safety/control-plane benchmark, not a hot-path optimization. The
+direct control performs only a source-sequence assignment, fence boolean, and
+catch-up comparison. The coordinator workflow includes bounded session
+allocation, exact snapshot acknowledgement, monotonic source/applied updates,
+source fencing, and atomic activation. Five `-benchmem` samples ran on
+Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Direct sequence checks | 0.2302 | 0 | 0 | 1.00x control |
+| Full coordinator workflow | 447.9 | 496 | 4 | 1,946x control cost |
+
+The coordinator cost is paid once per join workflow, not per snapshot byte or
+WAL record. It is intentionally opt-in and has no effect on ordinary cache or
+replication paths. The comparison is reported as overhead because the control
+does not provide the safety semantics of the coordinator.
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+direct_sequence_checks: 0.2237/0/0; 0.2229/0/0; 0.2303/0/0; 0.2302/0/0; 0.2307/0/0
+coordinator_workflow:   447.9/496/4; 464.0/496/4; 437.6/496/4; 439.2/496/4; 448.8/496/4
+```
+
+See [TU09_SNAPSHOT_WAL_JOIN_BOOTSTRAP.md](TU09_SNAPSHOT_WAL_JOIN_BOOTSTRAP.md)
+for the API, failure semantics, deployment boundaries, and limits.
+
 ## C206 Query-cache eligibility
 
 The existing result-cache admission guard was verified with five benchmark
