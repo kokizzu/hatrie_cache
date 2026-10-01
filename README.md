@@ -235,6 +235,7 @@ security guidance before exposing it on a network.
 - Materialize-inspired opt-in batched logical timestamps: [M033_LOGICAL_TIMESTAMP_ORACLE.md](M033_LOGICAL_TIMESTAMP_ORACLE.md)
 - Opt-in snapshot rotation and byte-budgeted backup retention: [TU36_SNAPSHOT_ROTATION.md](TU36_SNAPSHOT_ROTATION.md)
 - Tarantool-inspired opt-in replica applier throttling: [TU37_REPLICA_APPLIER_THROTTLE.md](TU37_REPLICA_APPLIER_THROTTLE.md)
+- Opt-in HMAC-redacted bounded conflict introspection with durable replay: [TU38_CONFLICT_EVENT_LOG.md](TU38_CONFLICT_EVENT_LOG.md), with measurements in [BENCHMARK.md](BENCHMARK.md#tu38-conflict-introspection-stream)
 - Compact small-entry ordered indexes: [TR052_ORDERED_INDEX_SMALL_VECTOR.md](TR052_ORDERED_INDEX_SMALL_VECTOR.md)
 - Generic composite-key ordered ranges: [TT020_ORDERED_INDEX_RANGES.md](TT020_ORDERED_INDEX_RANGES.md)
 - Canonical compiled-plan reuse: [MZ045_COMPILED_PLAN_EQUIVALENCE.md](MZ045_COMPILED_PLAN_EQUIVALENCE.md)

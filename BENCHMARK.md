@@ -32153,6 +32153,29 @@ reservation path also stayed at zero allocations.
 Raw samples and the latency/throughput tradeoff are documented in
 [TU37_REPLICA_APPLIER_THROTTLE.md](TU37_REPLICA_APPLIER_THROTTLE.md).
 
+<a id="tu38-conflict-introspection-stream"></a>
+## T-U38 Conflict Introspection Stream
+
+Command: `make benchmark-chg15-conflict-events`.
+
+The benchmark compares the existing deterministic conflict resolver with the
+opt-in redacted event record and its replay path. It also measures a durable
+append with `fsync`; the durable sample stays below the 4,096-event retention
+capacity, so it measures steady-state append cost rather than rollover rewrite.
+
+| Path | Median ns/op | B/op | allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Existing conflict resolution | 3.68 | 0 | 0 | 1.00x |
+| Resolution plus in-memory event record | 768.6 | 832 | 12 | 209.1x |
+| One-event replay page | 194.3 | 288 | 4 | n/a |
+| Durable append with `fsync` | 681,743 | 2,172 | 16 | 185,500x |
+
+The feature is default-off and caller-owned. The measured CPU, heap, and
+allocation costs therefore apply only to applications that explicitly record
+conflicts; the existing resolver has no event-log overhead. Full semantics and
+the security/retention tradeoff are documented in
+[TU38_CONFLICT_EVENT_LOG.md](TU38_CONFLICT_EVENT_LOG.md).
+
 <a id="m033-batched-logical-timestamp-oracle"></a>
 ## M033: Batched Logical Timestamp Oracle
 

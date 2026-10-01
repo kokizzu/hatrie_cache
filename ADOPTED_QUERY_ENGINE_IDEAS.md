@@ -720,6 +720,17 @@ throughput for bounded foreground impact. See
 [TU37_REPLICA_APPLIER_THROTTLE.md](TU37_REPLICA_APPLIER_THROTTLE.md) and
 [BENCHMARK.md](BENCHMARK.md#tu37-replica-applier-throttling).
 
+## T-U38: Conflict Introspection Stream
+
+Added an opt-in bounded `hatReplication.ConflictEventLog` for callers that
+already resolve replicated writes. It stores HMAC-SHA256 key fingerprints,
+source/version metadata, and the conflict decision, supports bounded replay and
+context-aware waiting, and persists CRC-protected HCE1 frames with atomic
+retention rollover. It is not wired into the default conflict path, so normal
+resolution remains unchanged. See
+[TU38_CONFLICT_EVENT_LOG.md](TU38_CONFLICT_EVENT_LOG.md) and
+[BENCHMARK.md](BENCHMARK.md#tu38-conflict-introspection-stream).
+
 ## M033: Batched Logical Timestamp Oracle
 
 M033 is partially adopted through the opt-in

@@ -22748,3 +22748,33 @@ cleanup-chg14-preview:
 
 cleanup-chg14:
 	bash ./scripts/cleanup-chg14.sh
+
+test-chg15-conflict-events:
+	bash ./scripts/test-chg15-conflict-events.sh
+
+format-chg15-conflict-events:
+	bash ./scripts/format-chg15-conflict-events.sh
+
+benchmark-chg15-conflict-events:
+	bash ./scripts/benchmark-chg15-conflict-events.sh
+
+test-chg15-conflict-events-package:
+	bash ./scripts/test-chg15-conflict-events-package.sh
+
+race-chg15-conflict-events:
+	bash ./scripts/race-chg15-conflict-events.sh
+
+vet-chg15-conflict-events:
+	bash ./scripts/vet-chg15-conflict-events.sh
+
+status-chg15-conflict-events:
+	bash ./scripts/status-chg15-conflict-events.sh
+
+stage-chg15-conflict-events:
+	bash ./scripts/stage-chg15-conflict-events.sh
+
+commit-chg15-conflict-events:
+	bash ./scripts/commit-chg15-conflict-events.sh
+
+push-chg15-conflict-events:
+	bash ./scripts/push-chg15-conflict-events.sh
