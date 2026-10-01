@@ -32672,3 +32672,20 @@ point membership dominates. The focused source-file, race, and vet targets
 pass. The ordinary package target is currently blocked by unrelated missing
 baseline symbols in this branch: `MaxDataflowTextBytes`, `TypedTableDate`, and
 `TypedTableTimestamp`.
+## CH-U28 Default-Off Merge Scheduler Fast Path
+
+This follow-up removes the zero-estimate I/O bookkeeping call from the legacy
+zero-rate compaction schedule path. It does not change `ScheduleWithIO`,
+`ScheduleWithPriorityAndIO`, throttling, retry, or cancellation behavior. Five
+standalone `-benchmem` samples used `BenchmarkCompactionSchedulerRunC207` on
+an AMD Ryzen 9 5950X.
+
+| Queued tasks | Before | After | Relative |
+| ---: | ---: | ---: | ---: |
+| 1 | 271.3 ns/op; 40 B/op; 2 allocs | 260.7 ns/op; 40 B/op; 2 allocs | 1.04x faster |
+| 4 | 2,515 ns/op; 680 B/op; 12 allocs | 2,437 ns/op; 680 B/op; 12 allocs | 1.03x faster |
+| 64 | 18,443 ns/op; 3,464 B/op; 12 allocs | 18,099 ns/op; 3,464 B/op; 12 allocs | 1.02x faster |
+
+The focused tests, race test, and vet test pass. The ordinary `hatStorage`
+package targets are currently blocked by unrelated missing `hatSql` baseline
+symbols (`MaxDataflowTextBytes`, `TypedTableDate`, and `TypedTableTimestamp`).

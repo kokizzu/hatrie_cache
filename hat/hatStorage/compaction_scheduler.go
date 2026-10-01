@@ -127,7 +127,9 @@ func (scheduler *CompactionScheduler) schedule(name string, ioBytes uint64, run 
 			scheduler.oldestPending = scheduler.now()
 		}
 		scheduler.priorityPending[name] = compactionPriorityTask{run: run}
-		scheduler.setIOEstimateLocked(name, ioBytes)
+		if ioBytes > 0 {
+			scheduler.setIOEstimateLocked(name, ioBytes)
+		}
 		return true, nil
 	}
 	if scheduler.pending == nil {
@@ -143,7 +145,9 @@ func (scheduler *CompactionScheduler) schedule(name string, ioBytes uint64, run 
 		scheduler.oldestPending = scheduler.now()
 	}
 	scheduler.pending[name] = compactionPendingTask{run: run}
-	scheduler.setIOEstimateLocked(name, ioBytes)
+	if ioBytes > 0 {
+		scheduler.setIOEstimateLocked(name, ioBytes)
+	}
 	return true, nil
 }
 
@@ -190,14 +194,18 @@ func (scheduler *CompactionScheduler) scheduleWithPriority(name string, priority
 			pending.priority = priority
 		}
 		scheduler.priorityPending[name] = pending
-		scheduler.setIOEstimateLocked(name, ioBytes)
+		if ioBytes > 0 {
+			scheduler.setIOEstimateLocked(name, ioBytes)
+		}
 		return false, nil
 	}
 	if scheduler.oldestPending.IsZero() {
 		scheduler.oldestPending = scheduler.now()
 	}
 	scheduler.priorityPending[name] = compactionPriorityTask{priority: priority, run: run}
-	scheduler.setIOEstimateLocked(name, ioBytes)
+	if ioBytes > 0 {
+		scheduler.setIOEstimateLocked(name, ioBytes)
+	}
 	return true, nil
 }
 

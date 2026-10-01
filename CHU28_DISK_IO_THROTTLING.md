@@ -77,3 +77,23 @@ make race-chu28
 make vet-chu28
 make benchmark-chu28
 ```
+## Default-Off Fast Path
+
+The legacy zero-rate `Schedule` and `ScheduleWithPriority` paths now skip the
+zero-estimate I/O bookkeeping call entirely. Explicit nonzero I/O estimates
+still use the existing pacing, retry, cancellation, and statistics behavior.
+This keeps the default-off configuration allocation-free and avoids adding
+throttling work to callers that do not opt in.
+
+Five standalone `-benchmem` samples measured
+`BenchmarkCompactionSchedulerRunC207` on an AMD Ryzen 9 5950X:
+
+| Queued tasks | Before | After | Relative |
+| ---: | ---: | ---: | ---: |
+| 1 | 271.3 ns/op; 40 B/op; 2 allocs | 260.7 ns/op; 40 B/op; 2 allocs | 1.04x faster |
+| 4 | 2,515 ns/op; 680 B/op; 12 allocs | 2,437 ns/op; 680 B/op; 12 allocs | 1.03x faster |
+| 64 | 18,443 ns/op; 3,464 B/op; 12 allocs | 18,099 ns/op; 3,464 B/op; 12 allocs | 1.02x faster |
+
+The focused test, race, and vet checks pass. The ordinary `hatStorage`
+package targets remain blocked by unrelated missing `hatSql` baseline symbols:
+`MaxDataflowTextBytes`, `TypedTableDate`, and `TypedTableTimestamp`.

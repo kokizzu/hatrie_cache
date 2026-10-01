@@ -22374,3 +22374,32 @@ commit-ch-u06-delete-bitmap:
 .PHONY: push-ch-u06-delete-bitmap
 push-ch-u06-delete-bitmap:
 	bash ./scripts/push-ch-u06-delete-bitmap.sh
+.PHONY: benchmark-chu28-standalone
+benchmark-chu28-standalone:
+	bash ./scripts/benchmark-chu28-standalone.sh
+.PHONY: test-chu28-standalone
+test-chu28-standalone:
+	bash ./scripts/test-chu28-standalone.sh
+.PHONY: format-chu28-standalone
+format-chu28-standalone:
+	bash ./scripts/format-chu28-standalone.sh
+.PHONY: race-chu28-standalone
+race-chu28-standalone:
+	bash ./scripts/race-chu28-standalone.sh
+
+.PHONY: vet-chu28-standalone
+vet-chu28-standalone:
+	bash ./scripts/vet-chu28-standalone.sh
+.PHONY: verify-chu28-fastpath stage-chu28-fastpath commit-chu28-fastpath push-chu28-fastpath
+
+verify-chu28-fastpath:
+	bash ./scripts/verify-chu28-fastpath.sh
+
+stage-chu28-fastpath:
+	bash ./scripts/stage-chu28-fastpath.sh
+
+commit-chu28-fastpath:
+	bash ./scripts/commit-chu28-fastpath.sh
+
+push-chu28-fastpath:
+	bash ./scripts/push-chu28-fastpath.sh

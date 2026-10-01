@@ -967,3 +967,7 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   four normalized `GROUP BY` keys use an inline linear index and promote to the
   existing map for larger groups; see [CHG02_SMALL_GROUP_INDEX.md](CHG02_SMALL_GROUP_INDEX.md)
   and [BENCHMARK.md](BENCHMARK.md#chg02-small-cardinality-group-by-index).
+- [x] CH-U28 default-off merge pacing fast path. Zero-estimate legacy
+  compaction schedules skip I/O bookkeeping while explicit byte pacing stays
+  unchanged; the five-sample scheduler drain improved 1.02-1.04x with no
+  allocation change. See [CHU28_DISK_IO_THROTTLING.md](CHU28_DISK_IO_THROTTLING.md).
