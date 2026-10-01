@@ -32947,3 +32947,19 @@ retention, subscriber state, checkpoint binding, or backpressure. The final
 feed deliberately copies input and output row bytes to prevent aliasing and
 rejects publication when an unacknowledged subscriber fills the configured
 event/byte budget. See [TU039_SPACE_CHANGEFEED.md](TU039_SPACE_CHANGEFEED.md).
+
+## T-U03 Stored Function Registry
+
+This benchmark compares one authorized, version-pinned registry call with a
+direct handler that performs the same owned input/output copy. Five
+`-benchmem` samples ran on an AMD Ryzen 9 5950X.
+
+| Path | Raw samples | Median | Bytes/op | Allocs/op | Relative |
+| --- | --- | ---: | ---: | ---: | --- |
+| Direct owned handler call | 15.45, 15.72, 15.20, 15.43, 15.33 ns/op | 15.43 ns/op | 8 | 1 | baseline |
+| Authorized registry call | 64.21, 64.03, 65.77, 66.31, 65.40 ns/op | 65.40 ns/op | 16 | 2 | 4.24x slower; 2x bytes; 2x allocations |
+
+The registry cost is the authorization check, version lookup, synchronization,
+and two ownership copies. This is an explicit opt-in security/control-plane
+tradeoff; ordinary cache and SQL command paths are unchanged. See
+[TU003_STORED_FUNCTION_REGISTRY.md](TU003_STORED_FUNCTION_REGISTRY.md).

@@ -22645,3 +22645,29 @@ verify-t-u39:
 
 deliver-t-u39:
 	@bash ./scripts/deliver-t-u39.sh
+test-t-u03:
+	@bash ./scripts/test-t-u03.sh test
+
+format-t-u03:
+	@bash ./scripts/test-t-u03.sh format
+
+benchmark-t-u03:
+	@bash ./scripts/test-t-u03.sh benchmark
+
+test-t-u03-package:
+	@bash ./scripts/test-t-u03.sh package
+
+race-t-u03:
+	@bash ./scripts/test-t-u03.sh race
+
+vet-t-u03:
+	@bash ./scripts/test-t-u03.sh vet
+
+verify-t-u03:
+	@bash ./scripts/test-t-u03.sh verify
+
+status-t-u03:
+	@bash ./scripts/test-t-u03.sh status
+
+deliver-t-u03:
+	@bash ./scripts/deliver-t-u03.sh
