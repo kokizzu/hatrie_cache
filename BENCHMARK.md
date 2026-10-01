@@ -32823,3 +32823,29 @@ median of 1,714,557 ns/op, 2,298,267 B/op, and 14,130 allocations/op.
 
 Raw output and reproduction targets are in
 [M-G07_SOURCE_HEALTH.md](M-G07_SOURCE_HEALTH.md).
+
+## T-U14: Typed-table field updates
+
+The Tarantool-inspired `TypedTable.Update` path supports bounded atomic `SET`
+and numeric `ADD` operations on existing rows. The control reads a full row
+through `ResolveSQLSource` and writes it with `Upsert`; the optimized path
+updates the same `Int64` field directly. Five `go test -benchmem` samples on
+Linux/amd64, AMD Ryzen 9 5950X. Lower is better.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | CPU improvement | Allocation-byte improvement | Allocation-count improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Before: read plus full `Upsert` | 1,098 | 1,374 | 10 | 1.00x | 1.00x | 1.00x |
+| After: direct field `ADD` | 647.2 | 916 | 4 | 1.70x faster | 1.50x less | 2.50x fewer |
+| After control rerun | 1,029 | 1,386 | 10 | 1.07x faster | 0.99x | 1.00x |
+
+Raw samples (`ns/op / B/op / allocs/op`):
+
+```text
+before control: 1098/1374/10, 1070/1380/10, 1019/1374/9, 1100/1374/9, 1127/1374/10
+after direct:    677.1/919/4, 689.0/925/4, 638.9/877/4, 647.2/916/4, 646.3/916/4
+after control:  1002/1341/10, 1051/1389/10, 1050/1369/10, 1029/1386/10, 997.1/1386/10
+```
+
+Generated-column tables intentionally reject this narrow path so generated
+dependencies cannot become stale; `Upsert` remains the complete-row path.
+See [T-U14_TYPED_TABLE_FIELD_UPDATES.md](T-U14_TYPED_TABLE_FIELD_UPDATES.md).

@@ -22560,6 +22560,12 @@ vet-mg07-source-health-cache:
 review-mg07-source-health:
 	bash scripts/review-mg07-source-health.sh
 
+
+
+
+benchmark-t-u14-before:
+	go test ./hat/hatSql -run '^$' -bench 'BenchmarkTypedTableFieldUpdateReadUpsertBaseline' -benchmem -count=5
+
 ship-mg07-source-health:
 	bash scripts/ship-mg07-source-health.sh
 
@@ -22577,3 +22583,38 @@ race-mg07-source-health:
 .PHONY: vet-mg07-source-health
 vet-mg07-source-health:
 	bash scripts/run-mg07-source-health.sh vet
+format-t-u14-typed-table-update:
+	bash scripts/run-t-u14-typed-table-update.sh format
+
+benchmark-t-u14-before-script:
+	bash scripts/run-t-u14-typed-table-update.sh benchmark-baseline
+
+benchmark-t-u14-typed-table-update:
+	bash scripts/run-t-u14-typed-table-update.sh benchmark
+
+test-t-u14-typed-table-update:
+	bash scripts/run-t-u14-typed-table-update.sh test
+
+race-t-u14-typed-table-update:
+	bash scripts/run-t-u14-typed-table-update.sh race
+
+vet-t-u14-typed-table-update:
+	bash scripts/run-t-u14-typed-table-update.sh vet
+
+test-t-u14-package:
+	bash scripts/run-t-u14-typed-table-update.sh package
+
+test-t-u14-all:
+	bash scripts/run-t-u14-typed-table-update.sh all
+
+verify-t-u14-ship:
+	bash scripts/verify-t-u14-ship.sh
+
+review-t-u14:
+	bash scripts/ship-t-u14.sh review
+
+commit-t-u14:
+	bash scripts/ship-t-u14.sh commit
+
+push-t-u14:
+	bash scripts/ship-t-u14.sh push

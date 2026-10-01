@@ -801,6 +801,17 @@ was 2.30x faster, with 2.43x less allocated heap and 1.36x fewer allocations.
 See [CHU63_CASE_PROJECTION.md](CHU63_CASE_PROJECTION.md) and
 [BENCHMARK.md](BENCHMARK.md#chu63-columnar-case-projection).
 
+## T-U14: Typed-table tuple field updates
+
+Partially adopted as `hatSql.TypedTable.Update`, a bounded atomic field
+operation API with `SET` and numeric `ADD`. It validates the complete request
+before mutation, preserves typed-table changefeeds, TTL refresh, derived-cache
+invalidation, and memory-budget admission, and rejects generated-column tables
+until dependency recomputation has a dedicated safe path. Inserts and complete
+row replacement remain on `Upsert`. See
+[T-U14_TYPED_TABLE_FIELD_UPDATES.md](T-U14_TYPED_TABLE_FIELD_UPDATES.md) and
+[BENCHMARK.md](BENCHMARK.md#t-u14-typed-table-field-updates).
+
 ## M-G07: Source Health And Lag Records
 
 Partially adopted as an importable, bounded, opt-in source health registry.
