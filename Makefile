@@ -22547,3 +22547,29 @@ commit-m-u34:
 .PHONY: push-m-u34
 push-m-u34:
 	bash ./scripts/deliver-m-u34.sh push
+benchmark-t-u23-baseline:
+	bash ./scripts/benchmark-t-u23-baseline.sh
+
+format-t-u23:
+	bash ./scripts/format-t-u23.sh
+
+benchmark-t-u23:
+	bash ./scripts/benchmark-t-u23.sh
+
+test-t-u23:
+	bash ./scripts/test-t-u23.sh
+
+test-t-u23-package:
+	bash ./scripts/test-t-u23-package.sh
+
+race-t-u23:
+	bash ./scripts/race-t-u23.sh
+
+vet-t-u23:
+	bash ./scripts/vet-t-u23.sh
+
+review-t-u23:
+	bash ./scripts/review-t-u23.sh
+
+deliver-t-u23:
+	bash ./scripts/deliver-t-u23.sh

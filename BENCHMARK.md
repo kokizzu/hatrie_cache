@@ -32795,3 +32795,31 @@ The benchmark builds 256 rows with two alternate string keys and recreates the s
 | Atomic constraint set | 30.3 us | 49,576 | 17 | 1.40x faster, 46.8% less bytes, 1 fewer allocation |
 
 The new set also validates every alternate key before removing old ownership, which is the correctness feature being measured. It is an in-memory primitive; durable commit/rollback and persistence remain outside this package.
+
+## T-U23 Automatic Tuple Multikey Indexes
+
+This benchmark compares the opt-in `hatDataStructure.TupleMultikeyIndex` with
+the manual map-of-slices approach it replaces for nested-array tuple lookups.
+The workload has 10,000 rows, two dimensions, two values per dimension, and a
+reusable lookup destination. Five `-benchmem` samples were run on an AMD Ryzen
+9 5950X after the sorted-unique normalization fast path.
+
+| Operation | Manual map-of-slices | TupleMultikeyIndex | Relative |
+| --- | ---: | ---: | ---: |
+| Build | 2.84 ms/op; 2.49 MB/op; 60,472 allocs/op | 5.86 ms/op; 5.44 MB/op; 67,010 allocs/op | 2.06x slower; 2.19x bytes; 1.11x allocs |
+| Lookup | 121.0 ns/op; 16 B/op; 1 alloc/op | 142.4 ns/op; 48 B/op; 1 alloc/op | 1.18x slower; 3x bytes; same allocs |
+
+Raw samples:
+
+```text
+BaselineMapOfSlicesBuild: 2810878; 2851659; 2773989; 2867315; 2843108 ns/op; 2489820; 2489760; 2489647; 2489616; 2489655 B/op; 60479; 60477; 60472; 60470; 60472 allocs/op
+TupleMultikeyIndexBuild: 5795789; 5858603; 5835384; 5857457; 5922138 ns/op; 5443049; 5443298; 5443090; 5443010; 5443216 B/op; 67008; 67018; 67010; 67006; 67015 allocs/op
+BaselineMapOfSlicesLookup: 120.8; 121.0; 120.7; 121.6; 121.2 ns/op; 16 B/op; 1 alloc/op
+TupleMultikeyIndexLookup: 142.8; 142.1; 139.1; 142.4; 142.6 ns/op; 48 B/op; 1 alloc/op
+```
+
+The candidate is deliberately opt-in: it pays for collision-safe
+length-prefixed tuple encoding, sorted postings, exact reverse state for
+update/delete, deduplication, atomic explosion limits, and concurrent access.
+It does not replace the existing flat string multikey index or alter default
+SQL behavior. See [TU23_TUPLE_MULTIKEY_INDEX.md](TU23_TUPLE_MULTIKEY_INDEX.md).
