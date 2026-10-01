@@ -22623,7 +22623,3 @@ format-config-watch-peer:
 	sh ./scripts/format-config-watch-peer.sh
 
 
-cleanup-delivery-round56:
-	sh ./scripts/cleanup-delivery-round56.sh
-commit-round56-cleanup:
-	@bash ./scripts/commit-round56-cleanup.sh
