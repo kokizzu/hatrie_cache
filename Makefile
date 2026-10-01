@@ -22476,3 +22476,35 @@ commit-t-u19:
 
 push-t-u19:
 	bash ./scripts/push-t-u19.sh
+
+.PHONY: format-t-u22 test-t-u22-red benchmark-t-u22-baseline test-t-u22 benchmark-t-u22 verify-t-u22 review-t-u22 stage-t-u22 commit-t-u22 push-t-u22
+
+format-t-u22:
+	bash ./scripts/format-t-u22.sh
+
+test-t-u22-red:
+	bash ./scripts/test-t-u22-red.sh
+
+benchmark-t-u22-baseline:
+	bash ./scripts/benchmark-t-u22-baseline.sh
+
+test-t-u22:
+	bash ./scripts/test-t-u22.sh
+
+benchmark-t-u22:
+	bash ./scripts/benchmark-t-u22.sh
+
+verify-t-u22:
+	bash ./scripts/verify-t-u22.sh
+
+review-t-u22:
+	bash ./scripts/review-t-u22.sh
+
+stage-t-u22:
+	bash ./scripts/deliver-t-u22.sh stage
+
+commit-t-u22:
+	bash ./scripts/deliver-t-u22.sh commit
+
+push-t-u22:
+	bash ./scripts/deliver-t-u22.sh push

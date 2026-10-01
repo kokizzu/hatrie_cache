@@ -32745,3 +32745,14 @@ that the journal beats an in-memory mutation; the default path remains the
 existing one. Focused tests, the full `hatDataStructure` package, race, and vet
 all pass. See [TU19_TUPLE_UPDATE_JOURNAL.md](TU19_TUPLE_UPDATE_JOURNAL.md) for
 the recovery and security boundaries.
+
+# T-U22 Cross-Index Unique Constraints
+
+The benchmark builds 256 rows with two alternate string keys and recreates the structure for each iteration. The baseline uses two separate unique `hatDataStructure.HashIndex` values; the candidate uses one `hatDataStructure.UniqueConstraintSet`. Results are five runs on the same host with `-benchmem`.
+
+| Implementation | Median time/op | Bytes/op | Allocs/op | Improvement vs baseline |
+| --- | ---: | ---: | ---: | --- |
+| Separate unique indexes | 42.4 us | 93,152 | 18 | baseline |
+| Atomic constraint set | 30.3 us | 49,576 | 17 | 1.40x faster, 46.8% less bytes, 1 fewer allocation |
+
+The new set also validates every alternate key before removing old ownership, which is the correctness feature being measured. It is an in-memory primitive; durable commit/rollback and persistence remain outside this package.

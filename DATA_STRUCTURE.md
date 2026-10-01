@@ -442,3 +442,7 @@ replication endpoints.
 See [BENCHMARK.md](BENCHMARK.md) for benchmark coverage,
 [DS_SPLIT_PROPOSAL.md](DS_SPLIT_PROPOSAL.md) for the shared-index rationale,
 and [INDEX_PROPOSAL.md](INDEX_PROPOSAL.md) for typed SQL index design.
+
+# UniqueConstraintSet
+
+`hatDataStructure.UniqueConstraintSet[T]` stores each row once while enforcing multiple named string-key uniqueness constraints atomically. Use it when a row has alternate identifiers such as email and username. `Upsert` checks every extractor before publishing any ownership; `Lookup`, `LookupByID`, `Delete`, `Clear`, `Len`, and `Contains` provide the lifecycle and read operations. See [TU22_CROSS_INDEX_UNIQUE_CONSTRAINTS.md](TU22_CROSS_INDEX_UNIQUE_CONSTRAINTS.md) for the complete example and benchmark.
