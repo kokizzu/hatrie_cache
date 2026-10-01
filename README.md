@@ -4765,3 +4765,12 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+### Selectable Memtx-Style Rows
+
+For scan-heavy fixed-width tuple workloads, `hatDataStructure.MemtxRowTable`
+provides an opt-in row-major in-memory engine with `GetInto` and
+`VisitBorrowed` allocation-free access paths. It is concurrency-safe and
+requires explicit `Compact` after deletes. It is not the default SQL or
+HAT-trie storage path; point lookups and updates can be slower than a raw map.
+See [T-U16_MEMTX_ROW_TABLE.md](T-U16_MEMTX_ROW_TABLE.md) and the
+[benchmark entry](BENCHMARK.md#t-u16-selectable-memtx-style-row-engine).

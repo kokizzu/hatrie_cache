@@ -734,3 +734,14 @@ Adopted as opt-in `hatStorage.CompactionDiagnostics`: bounded arrangement regist
 ## Materialize M-U41: Webhook Event Idempotency
 
 Adopted as opt-in `hatSql.WebhookEventDeduplicator`: bounded source/event-ID admission, payload-fingerprint conflict detection, expiry, deterministic CRC-protected HWE1 snapshots, and atomic restore. The caller owns application, durable storage, acknowledgement, and HTTP/webhook wiring; existing defaults remain unchanged. See [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md) and [BENCHMARK.md](BENCHMARK.md#m-u41-webhook-event-idempotency).
+## Tarantool T-U16: Selectable Memtx-Style Row Engine
+
+Adopted as the opt-in `hatDataStructure.MemtxRowTable`. Fixed-width tuples
+share one row-major value backing and one key index, with detached reads,
+allocation-free caller-buffer lookups, borrowed scans, explicit delete
+compaction, and concurrent reader/writer safety. Existing HAT-trie and typed
+table defaults remain unchanged because point lookup and full-row update are
+slower than a raw map; the five-sample 10,000-row comparison is 4.48x faster
+for scans, 1.16x faster to build, 11.2% lower build bytes, and 2.02x lower
+build allocations. See [T-U16_MEMTX_ROW_TABLE.md](T-U16_MEMTX_ROW_TABLE.md) and
+[BENCHMARK.md](BENCHMARK.md#t-u16-selectable-memtx-style-row-engine).

@@ -32580,3 +32580,34 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+## T-U16 Selectable Memtx-Style Row Engine
+
+Five `-benchmem` samples compared an opt-in `hatDataStructure.MemtxRowTable`
+with a controlled `map[string][]any` baseline using 10,000 rows and four values
+per row on the local AMD Ryzen 9 5950X Linux/amd64 host. `GetInto` and
+`VisitBorrowed` reuse caller-owned or borrowed buffers; both paths measured
+zero operation allocations.
+
+| Operation | Map baseline | Memtx row table | Improvement |
+| --- | ---: | ---: | ---: |
+| Build | 1,261,892 ns/op; 1,505,036 B/op; 19,777 allocs | 1,084,704 ns/op; 1,336,245 B/op; 9,782 allocs | 1.16x faster; 11.2% lower bytes; 2.02x fewer allocs |
+| Point lookup (`GetInto`) | 18.08 ns/op; 0 B/op; 0 allocs | 29.83 ns/op; 0 B/op; 0 allocs | 1.65x slower |
+| Full scan (`VisitBorrowed`) | 147,202 ns/op; 0 B/op; 0 allocs | 32,839 ns/op; 0 B/op; 0 allocs | 4.48x faster |
+| Full-row update | 28.28 ns/op; 0 B/op; 0 allocs | 34.96 ns/op; 0 B/op; 0 allocs | 1.24x slower |
+
+Raw ns/op samples (B/op and allocs/op are the stable reported values):
+
+```text
+MapBuild: 1,250,158; 1,264,562; 1,249,263; 1,278,726; 1,261,892 ns/op; 1,505,036 B/op; 19,777 allocs/op
+MemtxBuild: 1,066,190; 1,076,040; 1,084,704; 1,102,427; 1,106,425 ns/op; 1,336,245 B/op; 9,782 allocs/op
+MapGet: 18.08; 17.96; 17.50; 18.81; 18.22 ns/op; 0 B/op; 0 allocs/op
+MemtxGetInto: 29.62; 29.92; 29.37; 30.34; 29.83 ns/op; 0 B/op; 0 allocs/op
+MapScan: 149,439; 146,362; 147,202; 145,770; 147,295 ns/op; 0 B/op; 0 allocs/op
+MemtxScanBorrowed: 32,839; 32,790; 33,784; 32,539; 33,224 ns/op; 0 B/op; 0 allocs/op
+MapUpdate: 27.14; 28.57; 27.86; 28.28; 29.87 ns/op; 0 B/op; 0 allocs/op
+MemtxUpdate: 36.15; 35.75; 34.96; 34.32; 34.39 ns/op; 0 B/op; 0 allocs/op
+```
+
+The selectable engine is intentionally not a default replacement: it wins
+strongly for scans and reduces build allocation volume, while raw map lookup
+and updates remain faster. See [T-U16_MEMTX_ROW_TABLE.md](T-U16_MEMTX_ROW_TABLE.md).

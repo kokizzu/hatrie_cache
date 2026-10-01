@@ -22292,3 +22292,23 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: test-t-u16-memtx-row-table
+test-t-u16-memtx-row-table:
+	bash ./scripts/test-t-u16-memtx-row-table.sh
+.PHONY: benchmark-t-u16-memtx-row-table
+benchmark-t-u16-memtx-row-table:
+	bash ./scripts/benchmark-t-u16-memtx-row-table.sh
+.PHONY: format-t-u16-memtx-row-table
+format-t-u16-memtx-row-table:
+	bash ./scripts/format-t-u16-memtx-row-table.sh
+.PHONY: verify-t-u16-memtx-row-table
+verify-t-u16-memtx-row-table:
+	bash ./scripts/verify-t-u16-memtx-row-table.sh
+
+.PHONY: commit-t-u16-memtx-row-table
+commit-t-u16-memtx-row-table:
+	bash ./scripts/commit-t-u16-memtx-row-table.sh
+
+.PHONY: push-t-u16-memtx-row-table
+push-t-u16-memtx-row-table:
+	bash ./scripts/push-t-u16-memtx-row-table.sh

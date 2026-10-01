@@ -636,6 +636,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T014 Equality index iterators.
 - [x] T015 Ordered range iterators. `OrderedIndex.Range` returns an allocation-free iterator over inclusive bounds.
 - [x] T016 Partial-key search. Composite ordered keys can express a prefix range with smallest/largest suffix bounds; the iterator uses binary-searched bounds and a bounded immutable subslice.
+- [x] T-U16 Selectable memtx-style row engine. `hatDataStructure.MemtxRowTable` provides an opt-in fixed-width row-major tuple store with detached reads, borrowed allocation-free scans, explicit delete compaction, and concurrent reader/writer safety; point lookup and update tradeoffs are recorded in [T-U16_MEMTX_ROW_TABLE.md](T-U16_MEMTX_ROW_TABLE.md).
 - [x] T017 Explicit NULL index semantics.
 - [x] T018 Collation-aware string ordering.
 - [x] T019 Unique constraints and duplicate-key errors.
