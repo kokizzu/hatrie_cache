@@ -32759,3 +32759,35 @@ The paired feature-branch subtests are the primary comparison because they
 reduce host-noise sensitivity. The optimization is opt-in because Bloom and
 hash-map construction can cost more than materialization for small or
 non-selective joins. See [CHU14_RUNTIME_JOIN_FILTER.md](CHU14_RUNTIME_JOIN_FILTER.md).
+## T-U06 replica read-only gate
+
+Environment: Linux/amd64, AMD Ryzen 9 5950X 16-Core Processor. Five benchmark
+samples were run through `make benchmark-chg10-gate` after the final code
+change. The direct flag is a control only; the gate is a safety admission
+boundary, so this is an overhead measurement rather than an improvement claim.
+
+| Path | Median ns/op | Allocations | Bytes/op | Relative to direct flag |
+| --- | ---: | ---: | ---: | ---: |
+| Direct writable flag control | 0.2198 | 0 | 0 | 1.0x |
+| Writable gate lease | 31.26 | 1 | 24 | 142.2x slower |
+
+Raw successful samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+direct_writable_flag: 0.2250 0 0
+direct_writable_flag: 0.2184 0 0
+direct_writable_flag: 0.2172 0 0
+direct_writable_flag: 0.2201 0 0
+direct_writable_flag: 0.2198 0 0
+gate_writable_lease: 32.93 24 1
+gate_writable_lease: 30.85 24 1
+gate_writable_lease: 31.18 24 1
+gate_writable_lease: 31.97 24 1
+gate_writable_lease: 31.26 24 1
+```
+
+Interpretation: the optional gate costs about 31 ns and one small allocation per
+admission in the current pointer-lease API. It should surround mutation
+operations at a safety boundary, not be placed inside an already protected
+inner loop. The implementation was retained because its value is blocking
+drain semantics and explicit origin policy, not raw speed.

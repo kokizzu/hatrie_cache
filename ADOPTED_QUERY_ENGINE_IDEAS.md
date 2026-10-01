@@ -740,3 +740,15 @@ Adopted as opt-in `hatSql.WebhookEventDeduplicator`: bounded source/event-ID adm
 ## ClickHouse CH-U14: Streaming Runtime Join Filter
 
 Partially adopted as an opt-in direct inner equality optimization. `SQLQueryOptions.RuntimeJoinBloomFilter` now accepts streaming `CACHE` and `EXTERNAL` sources, builds exact right-side buckets plus a bounded Bloom filter, and preserves the materialized fallback for unsupported query shapes. General planner exchange and distributed propagation remain deferred. See [CHU14_RUNTIME_JOIN_FILTER.md](CHU14_RUNTIME_JOIN_FILTER.md) and [BENCHMARK.md](BENCHMARK.md#ch-u14-streaming-runtime-join-filter).
+## T-U06: Replica-wide read-only admission
+
+**Source:** Tarantool-style replica promotion and read-only control.
+
+**Adopted:** `hat/hatReplication.ReplicaReadOnlyGate` provides a bounded,
+generation-tracked state machine with blocking mutation leases and explicit
+local, replication, and operator origins. It is default writable/off and keeps
+direct mutation integration caller-owned so existing APIs are not silently
+changed.
+
+**Remaining:** Wire the gate into every selected mutation boundary and the live
+promotion/control-plane state before treating it as a global invariant.

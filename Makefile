@@ -22511,3 +22511,50 @@ commit-chg08-bootstrap:
 .PHONY: push-chg08-bootstrap
 push-chg08-bootstrap:
 	@sh ./scripts/deliver-chg08-bootstrap.sh push
+.PHONY: test-chg10-gate
+test-chg10-gate:
+	@sh ./scripts/test-chg10-gate.sh test
+
+.PHONY: format-chg10-gate
+format-chg10-gate:
+	@sh ./scripts/test-chg10-gate.sh format
+
+.PHONY: benchmark-chg10-gate
+benchmark-chg10-gate:
+	@sh ./scripts/test-chg10-gate.sh benchmark
+
+.PHONY: test-chg10-package
+test-chg10-package:
+	@bash ./scripts/verify-chg10-gate.sh package
+
+.PHONY: race-chg10-gate
+race-chg10-gate:
+	@bash ./scripts/verify-chg10-gate.sh race
+
+.PHONY: vet-chg10-gate
+vet-chg10-gate:
+	@bash ./scripts/verify-chg10-gate.sh vet
+
+.PHONY: test-chg10-all
+test-chg10-all:
+	@bash ./scripts/verify-chg10-gate.sh all
+
+.PHONY: check-chg10-gate
+check-chg10-gate:
+	@bash ./scripts/deliver-chg10-gate.sh check
+
+.PHONY: status-chg10-gate
+status-chg10-gate:
+	@bash ./scripts/deliver-chg10-gate.sh status
+
+.PHONY: stage-chg10-gate
+stage-chg10-gate:
+	@bash ./scripts/deliver-chg10-gate.sh stage
+
+.PHONY: commit-chg10-gate
+commit-chg10-gate:
+	@bash ./scripts/deliver-chg10-gate.sh commit
+
+.PHONY: push-chg10-gate
+push-chg10-gate:
+	@bash ./scripts/deliver-chg10-gate.sh push
