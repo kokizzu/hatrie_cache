@@ -22403,3 +22403,35 @@ commit-chu28-fastpath:
 
 push-chu28-fastpath:
 	bash ./scripts/push-chu28-fastpath.sh
+.PHONY: test-t-u38-baseline benchmark-t-u38-baseline benchmark-t-u38 format-t-u38 race-t-u38 vet-t-u38
+
+test-t-u38-baseline:
+	bash ./scripts/test-t-u38-baseline.sh
+
+benchmark-t-u38-baseline:
+	bash ./scripts/benchmark-t-u38-baseline.sh
+
+benchmark-t-u38:
+	bash ./scripts/benchmark-t-u38.sh
+
+format-t-u38:
+	bash ./scripts/format-t-u38.sh
+
+race-t-u38:
+	bash ./scripts/race-t-u38.sh
+
+vet-t-u38:
+	bash ./scripts/vet-t-u38.sh
+.PHONY: verify-t-u38 stage-t-u38 commit-t-u38 push-t-u38
+
+verify-t-u38:
+	bash ./scripts/verify-t-u38.sh
+
+stage-t-u38:
+	bash ./scripts/stage-t-u38.sh
+
+commit-t-u38:
+	bash ./scripts/commit-t-u38.sh
+
+push-t-u38:
+	bash ./scripts/push-t-u38.sh

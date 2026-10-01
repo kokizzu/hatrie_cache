@@ -47,6 +47,7 @@ type ConflictPolicyRegistry struct {
 	mu             sync.RWMutex
 	defaultPolicy  ConflictPolicy
 	spaceOverrides map[string]ConflictPolicy
+	eventLog       *ConflictEventLog
 }
 
 // NewConflictPolicyRegistry validates an explicit default policy. An empty
@@ -103,6 +104,27 @@ func (registry *ConflictPolicyRegistry) Delete(space string) bool {
 	return true
 }
 
+// SetEventLog enables or disables the opt-in redacted conflict observer.
+// Passing nil restores the zero-overhead default path.
+func (registry *ConflictPolicyRegistry) SetEventLog(log *ConflictEventLog) {
+	if registry == nil {
+		return
+	}
+	registry.mu.Lock()
+	registry.eventLog = log
+	registry.mu.Unlock()
+}
+
+// EventLog returns the currently configured observer, or nil when disabled.
+func (registry *ConflictPolicyRegistry) EventLog() *ConflictEventLog {
+	if registry == nil {
+		return nil
+	}
+	registry.mu.RLock()
+	defer registry.mu.RUnlock()
+	return registry.eventLog
+}
+
 // Resolve applies the configured policy for space to two conflict versions.
 func (registry *ConflictPolicyRegistry) Resolve(space string, left, right ConflictVersion) (ConflictVersion, error) {
 	if registry == nil {
@@ -117,8 +139,26 @@ func (registry *ConflictPolicyRegistry) Resolve(space string, left, right Confli
 	if !exists {
 		policy = registry.defaultPolicy
 	}
+	eventLog := registry.eventLog
 	registry.mu.RUnlock()
-	return resolveConflictWithPolicy(policy, left, right)
+	winner, err := resolveConflictWithPolicy(policy, left, right)
+	if eventLog != nil {
+		outcome := ConflictEventError
+		if err == nil {
+			outcome = ConflictEventResolved
+		} else if errors.Is(err, ErrConflictRejected) {
+			outcome = ConflictEventRejected
+		}
+		eventLog.append(ConflictEvent{
+			Space:   space,
+			Mode:    policy.Mode,
+			Outcome: outcome,
+			Left:    left,
+			Right:   right,
+			Winner:  winner,
+		})
+	}
+	return winner, err
 }
 
 func normalizeConflictPolicy(policy ConflictPolicy) (ConflictPolicy, error) {

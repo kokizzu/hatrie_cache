@@ -773,3 +773,13 @@ membership is slower than a dense bit test, but the measured 1% delete case
 reduces sidecar bytes by 92% with similar build CPU and about 3.2x lower decode
 payload allocation. See [CHU06_PERSISTENT_DELETE_BITMAP.md](CHU06_PERSISTENT_DELETE_BITMAP.md)
 and [BENCHMARK.md](BENCHMARK.md#ch-u06-persistent-delete-bitmap).
+
+## T-U38: Conflict Introspection Stream
+
+Adopted from Tarantool-style operational conflict visibility as the importable
+`hatReplication.ConflictEventLog`. It is a bounded, in-memory, cursor-readable
+observer attached to `ConflictPolicyRegistry`; events contain only redacted
+space, policy, version-coordinate, and outcome metadata. The default remains
+disabled, and callers own any durable export. See
+[TU038_CONFLICT_INTROSPECTION.md](TU038_CONFLICT_INTROSPECTION.md) and
+[BENCHMARK.md](BENCHMARK.md#t-u38-conflict-introspection-stream).

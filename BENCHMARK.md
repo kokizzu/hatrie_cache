@@ -32689,3 +32689,30 @@ an AMD Ryzen 9 5950X.
 The focused tests, race test, and vet test pass. The ordinary `hatStorage`
 package targets are currently blocked by unrelated missing `hatSql` baseline
 symbols (`MaxDataflowTextBytes`, `TypedTableDate`, and `TypedTableTimestamp`).
+
+## T-U38 Conflict Introspection Stream
+
+This feature adds an opt-in bounded redacted event ring to
+`hatReplication.ConflictPolicyRegistry`. It is disabled by default, so the
+ordinary registry path remains allocation-free. The enabled observer records
+one event per policy resolution without application keys, values, or payloads.
+
+The following raw five-sample results were captured with `-benchmem` on an AMD
+Ryzen 9 5950X. The baseline rows are from before the feature; the dedicated
+rows are from the same package after implementation.
+
+| Benchmark path | Raw samples | Median | Bytes/op | Allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| `ConflictPolicyResolution/registry-default` before | 17.68, 18.25, 17.81, 18.32, 17.56 ns/op | 17.81 ns/op | 0 | 0 |
+| `ConflictPolicyResolution/registry-default` after | 17.39, 18.02, 18.14, 17.73, 17.70 ns/op | 17.73 ns/op | 0 | 0 |
+| `TU38ConflictRegistry/disabled` | 11.68, 12.58, 12.63, 12.46, 12.36 ns/op | 12.46 ns/op | 0 | 0 |
+| `TU38ConflictRegistry/redacted-log` | 74.99, 76.61, 73.69, 76.77, 75.48 ns/op | 75.48 ns/op | 112 | 1 |
+
+This is an operational observability feature, not a speed optimization. The
+observer adds about 63 ns/op and 112 bytes per recorded event over its disabled
+path in this run. That cost is explicit and bounded: enabling the log creates
+the retained ring, while each recorded event allocates notification state. No
+background goroutine runs, and the normal default path has no event-log
+allocation. The focused tests, race test, and vet test pass; see
+[TU038_CONFLICT_INTROSPECTION.md](TU038_CONFLICT_INTROSPECTION.md) for the API,
+retention, cursor, and lifecycle details.
