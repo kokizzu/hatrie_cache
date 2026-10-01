@@ -22336,3 +22336,50 @@ commit-round38-tuple-journal:
 .PHONY: push-round38-tuple-journal
 push-round38-tuple-journal:
 	bash ./scripts/push-round38-tuple-journal.sh
+.PHONY: test-round39-replica-read-only-baseline
+test-round39-replica-read-only-baseline:
+	bash ./scripts/test-round39-replica-read-only.sh baseline
+
+.PHONY: benchmark-round39-replica-read-only-baseline
+benchmark-round39-replica-read-only-baseline:
+	bash ./scripts/test-round39-replica-read-only.sh benchmark-baseline
+
+.PHONY: test-round39-replica-read-only
+test-round39-replica-read-only:
+	bash ./scripts/test-round39-replica-read-only.sh feature
+
+.PHONY: race-round39-replica-read-only
+race-round39-replica-read-only:
+	bash ./scripts/test-round39-replica-read-only.sh race
+
+.PHONY: vet-round39-replica-read-only
+vet-round39-replica-read-only:
+	bash ./scripts/test-round39-replica-read-only.sh vet
+
+.PHONY: format-round39-replica-read-only
+format-round39-replica-read-only:
+	bash ./scripts/format-round39-replica-read-only.sh
+
+.PHONY: benchmark-round39-replica-read-only
+benchmark-round39-replica-read-only:
+	bash ./scripts/test-round39-replica-read-only.sh benchmark-feature
+
+.PHONY: verify-round39-replica-read-only
+verify-round39-replica-read-only:
+	bash ./scripts/verify-round39-replica-read-only.sh
+
+.PHONY: review-round39-replica-read-only
+review-round39-replica-read-only:
+	bash ./scripts/review-round39-replica-read-only.sh
+
+.PHONY: stage-round39-replica-read-only
+stage-round39-replica-read-only:
+	bash ./scripts/stage-round39-replica-read-only.sh
+
+.PHONY: commit-round39-replica-read-only
+commit-round39-replica-read-only:
+	bash ./scripts/commit-round39-replica-read-only.sh
+
+.PHONY: push-round39-replica-read-only
+push-round39-replica-read-only:
+	bash ./scripts/push-round39-replica-read-only.sh

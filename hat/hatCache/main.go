@@ -3714,6 +3714,9 @@ type HatTrie struct {
 	telemetryMu                        sync.Mutex
 	snapshotCaptureMu                  sync.Mutex
 	replicationReadOnlyScanMu          sync.Mutex
+	replicaReadOnlyState               *atomic.Bool
+	replicaReadOnlyFallback             atomic.Bool
+	replicaInternalWrite                bool
 	counterWriteStripes                []sync.RWMutex
 	counterWriteStripeMask             uint64
 	counterFastPathWrites              uint64
@@ -3838,6 +3841,7 @@ func createHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool, ensur
 		keyStatsCapacity: 0,
 		now:              fastime.Now,
 	}
+	ht.replicaReadOnlyState = &ht.replicaReadOnlyFallback
 	ht.stats.initialize()
 	runtime.SetFinalizer(ht, (*HatTrie).Destroy)
 	return ht, nil
@@ -4321,6 +4325,9 @@ func (ht *HatTrie) ExpireChecked(key string, ttl time.Duration) (bool, error) {
 	if ht == nil {
 		return false, ErrNilHatTrie
 	}
+	if err := ht.checkReplicaWrite(); err != nil {
+		return false, err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.ExpireChecked(key, ttl)
 	}
@@ -4361,6 +4368,9 @@ func (ht *HatTrie) ExpireAtChecked(key string, at time.Time) (bool, error) {
 	if ht == nil {
 		return false, ErrNilHatTrie
 	}
+	if err := ht.checkReplicaWrite(); err != nil {
+		return false, err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.ExpireAtChecked(key, at)
 	}
@@ -4392,6 +4402,9 @@ func (ht *HatTrie) Persist(key string) bool {
 func (ht *HatTrie) PersistChecked(key string) (bool, error) {
 	if ht == nil {
 		return false, ErrNilHatTrie
+	}
+	if err := ht.checkReplicaWrite(); err != nil {
+		return false, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.PersistChecked(key)
@@ -5428,6 +5441,9 @@ func (ht *HatTrie) upsertReplacementLocation(key string) (*C.value_t, HatValue, 
 	if err := validateKey(key); err != nil {
 		return nil, HatValue{}, err
 	}
+	if err := ht.checkReplicaWriteLocked(); err != nil {
+		return nil, HatValue{}, err
+	}
 	rawPtr := ht.upsertLocation(key)
 	hval := HatValue{}
 	hval.fromValue(*rawPtr)
@@ -5444,6 +5460,9 @@ func (ht *HatTrie) upsertReplacementLocation(key string) (*C.value_t, HatValue, 
 
 func (ht *HatTrie) freshLocationCheckedLocked(key string) (*C.value_t, HatValue, error) {
 	if err := validateKey(key); err != nil {
+		return nil, HatValue{}, err
+	}
+	if err := ht.checkReplicaWriteLocked(); err != nil {
 		return nil, HatValue{}, err
 	}
 	rawPtr := ht.tryLocation(key)
@@ -6353,6 +6372,9 @@ func (ht *HatTrie) DeleteChecked(key string) (bool, error) {
 	if ht == nil {
 		return false, ErrNilHatTrie
 	}
+	if err := ht.checkReplicaWrite(); err != nil {
+		return false, err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.DeleteChecked(key)
 	}
@@ -6389,6 +6411,9 @@ func (ht *HatTrie) UpsertCounterChecked(key string, val int32) error {
 		return partition.UpsertCounterChecked(key, val)
 	}
 	if err := validateKey(key); err != nil {
+		return err
+	}
+	if err := ht.checkReplicaWrite(); err != nil {
 		return err
 	}
 	if ht.tryUpsertCounterStriped(key, val) {
@@ -6429,6 +6454,9 @@ func (ht *HatTrie) incrementCounterChecked(key string, by int32, checkOverflow b
 		return partition.incrementCounterChecked(key, by, checkOverflow)
 	}
 	if err := validateKey(key); err != nil {
+		return 0, false, err
+	}
+	if err := ht.checkReplicaWrite(); err != nil {
 		return 0, false, err
 	}
 	if value, updated, handled := ht.tryIncrementCounterStriped(key, by, checkOverflow); handled {

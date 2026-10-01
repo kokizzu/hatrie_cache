@@ -142,6 +142,11 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 
 func (ht *HatTrie) executeCommand(request CacheCommandRequest) CacheCommandResponse {
 	request.Command = normalizedCommand(request.Command)
+	if commandShouldJournal(request) && !isReplicaInternalCommand(request.Command) {
+		if err := ht.checkReplicaWrite(); err != nil {
+			return commandError(err.Error())
+		}
+	}
 	if ht.localPartitionSet() != nil {
 		command := strings.ToUpper(strings.TrimSpace(request.Command))
 		if command == "BATCH" {
@@ -4031,6 +4036,9 @@ func (ht *HatTrie) commandInternalSetOperation(operation snapshotOperation) erro
 	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
+	previous := ht.replicaInternalWrite
+	ht.replicaInternalWrite = true
+	defer func() { ht.replicaInternalWrite = previous }()
 
 	_, err := ht.applySnapshotOperationLocked(operation)
 	if err == nil {
@@ -4053,7 +4061,7 @@ func executePreparedInternalReplicationCommand(trie *HatTrie, request CacheComma
 		}
 		return CacheCommandResponse{OK: true, Message: "internal value stored"}
 	case "INTERNALDEL":
-		if trie.Delete(strings.TrimSpace(request.Key)) {
+		if trie.commandInternalDelete(strings.TrimSpace(request.Key)) {
 			return CacheCommandResponse{OK: true, Message: "internal value deleted"}
 		}
 		return CacheCommandResponse{OK: true, Message: "key not found"}

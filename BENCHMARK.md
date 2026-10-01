@@ -1,5 +1,24 @@
 # Benchmark
 
+### T-U06 Replica-wide read-only enforcement
+
+The benchmark measured the checked string-write path with and without the
+replica read-only guard. It ran on Go 1.26.6 on an AMD Ryzen 9 5950X with
+`-benchtime=1s -count=5`; values below are medians from five samples.
+
+| Path | ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Baseline `UpsertStringChecked` | 114.1 | 0 | 0 |
+| Read-only state, normal write | 112.8 | 0 | 0 |
+| Read-only state, rejected write | 17.69 | 0 | 0 |
+
+The normal-path difference was -1.1%, within noise, so this feature is not
+claimed to speed up successful writes. It added no measured allocations.
+Rejected writes return before trie mutation work and were about 6.5x faster in
+this microbenchmark. Raw samples are produced by
+`make benchmark-round39-replica-read-only-baseline` and
+`make benchmark-round39-replica-read-only`.
+
 ## CH-U49 Skip-Index EXPLAIN Diagnostics
 
 This paired clean-worktree benchmark compares the pre-CH-U49 implementation

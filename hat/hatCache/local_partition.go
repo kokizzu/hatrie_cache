@@ -142,6 +142,7 @@ func (ht *HatTrie) ConfigureLocalPartitions(count int) error {
 			return err
 		}
 		child.now = func() time.Time { return ht.currentTime() }
+		child.replicaReadOnlyState = ht.replicaReadOnlyFlag()
 		child.persistentDirtyTracker = ht.persistentDirtyTracker
 		child.snapshotRestoreWorkers = ht.snapshotRestoreWorkers
 		if len(ht.counterWriteStripes) != 0 {

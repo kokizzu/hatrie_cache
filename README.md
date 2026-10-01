@@ -4658,6 +4658,13 @@ The opt-in T-U44 report exposes portable Go heap placement, reusable idle bytes,
 
 - Provider-neutral external snapshot ingestion for Kafka/PostgreSQL/CDC adapters with authentication, bounded page backpressure, offset cutover, atomic checkpoints, and restart recovery: [MU03_EXTERNAL_SNAPSHOT_INGESTION.md](MU03_EXTERNAL_SNAPSHOT_INGESTION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m-u03-external-snapshot-ingestion).
 
+## Replica-wide read-only guard
+
+`hatCache.HatTrie.SetReplicaReadOnly(true)` rejects local mutation APIs while
+leaving reads and scoped internal replication apply paths available. The
+default is writable. See [TU06_REPLICA_READ_ONLY.md](TU06_REPLICA_READ_ONLY.md)
+for the API, safety contract, verification commands, and measured overhead.
+
 ## Multi-Source Snapshot Coordination
 
 hatSql.SQLMultiSourceSnapshotCoordinator captures bounded, authenticated
