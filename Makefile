@@ -22435,3 +22435,44 @@ commit-t-u38:
 
 push-t-u38:
 	bash ./scripts/push-t-u38.sh
+.PHONY: test-t-u19 benchmark-t-u19-baseline
+
+test-t-u19:
+	bash ./scripts/test-t-u19.sh
+.PHONY: test-t-u19-package
+
+test-t-u19-package:
+	bash ./scripts/test-t-u19-package.sh
+
+benchmark-t-u19-baseline:
+	bash ./scripts/benchmark-t-u19-baseline.sh
+.PHONY: format-t-u19 benchmark-t-u19 race-t-u19 vet-t-u19
+
+format-t-u19:
+	bash ./scripts/format-t-u19.sh
+
+benchmark-t-u19:
+	bash ./scripts/benchmark-t-u19.sh
+
+race-t-u19:
+	bash ./scripts/race-t-u19.sh
+
+vet-t-u19:
+	bash ./scripts/vet-t-u19.sh
+.PHONY: benchmark-t-u19-replay
+
+benchmark-t-u19-replay:
+	bash ./scripts/benchmark-t-u19-replay.sh
+.PHONY: verify-t-u19 stage-t-u19 commit-t-u19 push-t-u19
+
+verify-t-u19:
+	bash ./scripts/verify-t-u19.sh
+
+stage-t-u19:
+	bash ./scripts/stage-t-u19.sh
+
+commit-t-u19:
+	bash ./scripts/commit-t-u19.sh
+
+push-t-u19:
+	bash ./scripts/push-t-u19.sh

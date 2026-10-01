@@ -32716,3 +32716,32 @@ background goroutine runs, and the normal default path has no event-log
 allocation. The focused tests, race test, and vet test pass; see
 [TU038_CONFLICT_INTROSPECTION.md](TU038_CONFLICT_INTROSPECTION.md) for the API,
 retention, cursor, and lifecycle details.
+
+## T-U19 Durable Tuple Field-Operation Journal
+
+T-U19 adds an opt-in `hatDataStructure.TupleFieldUpdateJournal` for durable
+set, splice, and int64-add batches. Records are bounded HTJ1 frames with a
+schema version, monotonic sequence, opaque tuple ID, and CRC32C. Existing tuple
+mutation behavior is unchanged unless a caller appends journal records.
+
+The baseline was captured before the feature. All rows below use five
+`-benchmem` samples on an AMD Ryzen 9 5950X.
+
+| Path | Raw samples | Median | Bytes/op | Allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Existing `ApplyUpdates`, before | 1392, 1365, 1377, 1407, 1422 ns/op | 1392 ns/op | 1408 | 1 |
+| Existing `ApplyUpdates`, after | 1416, 1388, 1386, 1389, 1397 ns/op | 1389 ns/op | 1408 | 1 |
+| Journal append, first implementation | 149.2, 148.4, 151.4, 147.8, 148.8 ns/op | 148.8 ns/op | 91 | 2 |
+| Journal append, final one-allocation frame | 127.3, 127.2, 124.6, 124.2, 125.5 ns/op | 125.5 ns/op | 48 | 1 |
+| Record marshal | 109.0, 106.9, 108.4, 105.5, 108.5 ns/op | 108.4 ns/op | 45 | 1 |
+| Replay 100 records, first implementation | 29504, 29592, 29684, 29393, 29410 ns/op | 29504 ns/op | 34448 | 502 |
+| Replay 100 records, final reusable frame | 27140, 27332, 27101, 27534, 26740 ns/op | 27140 ns/op | 31280 | 403 |
+
+The final append path is `1.19x` faster than the first implementation, with
+`47%` fewer allocated bytes and one allocation instead of two. Reusing the
+bounded replay frame is `1.09x` faster for 100 records, with `9%` fewer bytes
+and `99` fewer allocations. These are explicit journaling costs, not a claim
+that the journal beats an in-memory mutation; the default path remains the
+existing one. Focused tests, the full `hatDataStructure` package, race, and vet
+all pass. See [TU19_TUPLE_UPDATE_JOURNAL.md](TU19_TUPLE_UPDATE_JOURNAL.md) for
+the recovery and security boundaries.

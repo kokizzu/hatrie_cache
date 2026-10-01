@@ -783,3 +783,12 @@ space, policy, version-coordinate, and outcome metadata. The default remains
 disabled, and callers own any durable export. See
 [TU038_CONFLICT_INTROSPECTION.md](TU038_CONFLICT_INTROSPECTION.md) and
 [BENCHMARK.md](BENCHMARK.md#t-u38-conflict-introspection-stream).
+
+## T-U19: Durable Tuple Field-Operation Journal
+
+Adopted as the opt-in `hatDataStructure.TupleFieldUpdateJournal`. Existing
+copy-on-write tuple set, splice, and typed integer-add batches can now be
+encoded as bounded, schema-versioned, CRC32C-checked HTJ1 frames and replayed
+strictly from a caller-owned durable writer. See
+[TU19_TUPLE_UPDATE_JOURNAL.md](TU19_TUPLE_UPDATE_JOURNAL.md) and
+[BENCHMARK.md](BENCHMARK.md#t-u19-durable-tuple-field-operation-journal).

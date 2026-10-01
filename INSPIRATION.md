@@ -975,3 +975,8 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   decisions can be observed through an opt-in in-memory cursor ring without
   copying application keys or values; the default path remains allocation-free.
   See [TU038_CONFLICT_INTROSPECTION.md](TU038_CONFLICT_INTROSPECTION.md).
+- [x] T-U19 durable tuple field-operation journal. Existing atomic tuple
+  set/splice/int64-add batches now have bounded schema-versioned HTJ1 records,
+  CRC32C validation, strict checkpoint replay, and copy-on-write application;
+  the default tuple path remains unchanged. See
+  [TU19_TUPLE_UPDATE_JOURNAL.md](TU19_TUPLE_UPDATE_JOURNAL.md).
