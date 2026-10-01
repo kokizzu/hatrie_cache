@@ -26092,6 +26092,36 @@ The command object check is about 21% slower in isolation, while the source
 object check is about 5% slower. Both remain sub-0.1-microsecond checks and
 retain zero heap allocations. Endpoint behavior is covered by exact command,
 SQL-source, batch, and RowBinary fail-closed tests.
+
+## T-U33 Function Grants
+
+The focused benchmark ran five samples with `make benchmark-t-u33-function-grants`
+on the local AMD Ryzen 9 5950X host. All variants performed zero allocations.
+The parent row is the pre-feature `Policy.Authorize` path; the current legacy
+row verifies the default path after adding function selectors.
+
+| Path | Median ns/op | B/op | allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Parent legacy authorization | 83.55 | 0 | 0 | 1.00x |
+| Current legacy authorization | 83.37 | 0 | 0 | 1.00x |
+| Current function authorization | 68.30 | 0 | 0 | 1.22x faster* |
+
+`*` The function row uses fewer selector dimensions than the legacy comparison,
+so it is a capacity reference, not a like-for-like speedup claim. The important
+compatibility result is that the existing path remained allocation-free and did
+not regress measurably (about -0.1% at the median).
+
+Raw samples:
+
+```text
+Parent legacy: 83.94, 82.53, 83.34, 84.03, 83.55 ns/op
+Current legacy: 83.37, 82.35, 84.46, 83.90, 81.80 ns/op
+Current function: 67.72, 67.95, 68.30, 68.36, 68.56 ns/op
+```
+
+Correctness, malformed-selector rejection, race, and vet coverage are in
+`hat/hatAuth`; see [TU33_FUNCTION_GRANTS.md](TU33_FUNCTION_GRANTS.md).
+
 ## TR-048 Audit-Event Sampling And Export Sinks
 
 The focused benchmark ran five samples with `make benchmark-tr048-audit-sampling`

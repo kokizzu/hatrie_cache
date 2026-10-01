@@ -426,8 +426,8 @@ func (catalog *RoleCatalog) Grant(actor string, spec RoleGrantSpec) (RoleGrant, 
 	return cloneRoleGrant(grant), nil
 }
 
-// Authorize applies the catalog's default-deny role, grant, and namespace
-// hierarchy rules. An empty catalog denies every request.
+// Authorize applies the catalog's default-deny role, grant, namespace, and
+// function rules. An empty catalog denies every request.
 func (catalog *RoleCatalog) Authorize(principal string, request AuthorizationRequest) bool {
 	if catalog == nil {
 		return false
@@ -488,6 +488,15 @@ func (catalog *RoleCatalog) Authorize(principal string, request AuthorizationReq
 		}
 	}
 	return false
+}
+
+// AuthorizeFunction reports whether principal may invoke function within the
+// supplied namespace under the catalog's current role and grant state.
+func (catalog *RoleCatalog) AuthorizeFunction(principal, function, namespace string) bool {
+	return catalog.Authorize(principal, AuthorizationRequest{
+		Namespace: namespace,
+		Function:  function,
+	})
 }
 
 // CanManageRole reports whether principal owns the named role.
@@ -1093,11 +1102,15 @@ func normalizeRoleCatalogRule(rule Rule, limits roleCatalogLimits, namespaces ma
 	if err != nil {
 		return Rule{}, err
 	}
+	functions, err := normalizeRoleCatalogSelectors(rule.Functions, limits.maxSelectors, limits.maxNameBytes, false)
+	if err != nil {
+		return Rule{}, err
+	}
 	objects, err := normalizeRoleCatalogSelectors(rule.Objects, limits.maxSelectors, limits.maxNameBytes, false)
 	if err != nil {
 		return Rule{}, err
 	}
-	return Rule{Commands: commands, Namespaces: namespaceSelectors, Sources: sources, Objects: objects}, nil
+	return Rule{Commands: commands, Namespaces: namespaceSelectors, Sources: sources, Functions: functions, Objects: objects}, nil
 }
 
 func namespaceSelectorBase(selector string) string {
@@ -1131,6 +1144,7 @@ func roleCatalogRuleMatches(rule Rule, request AuthorizationRequest) bool {
 	return roleCatalogCommandMatches(rule.Commands, request.Command) &&
 		roleCatalogSelectorMatches(rule.Namespaces, request.Namespace, true) &&
 		roleCatalogSelectorMatches(rule.Sources, request.Source, false) &&
+		roleCatalogSelectorMatches(rule.Functions, request.Function, false) &&
 		roleCatalogSelectorMatches(rule.Objects, request.Object, false)
 }
 
@@ -1184,7 +1198,7 @@ func roleCatalogSelectorMatches(selectors []string, value string, namespace bool
 }
 
 func sameRoleCatalogRule(left, right Rule) bool {
-	return sameStringSlice(left.Commands, right.Commands) && sameStringSlice(left.Namespaces, right.Namespaces) && sameStringSlice(left.Sources, right.Sources) && sameStringSlice(left.Objects, right.Objects)
+	return sameStringSlice(left.Commands, right.Commands) && sameStringSlice(left.Namespaces, right.Namespaces) && sameStringSlice(left.Sources, right.Sources) && sameStringSlice(left.Functions, right.Functions) && sameStringSlice(left.Objects, right.Objects)
 }
 
 func sameStringSlice(left, right []string) bool {
@@ -1220,6 +1234,7 @@ func validRoleCatalogRequest(request AuthorizationRequest, maxBytes int) bool {
 	return validOptionalRoleCatalogText(request.Command, maxBytes) &&
 		validOptionalRoleCatalogText(request.Namespace, maxBytes) &&
 		validOptionalRoleCatalogText(request.Source, maxBytes) &&
+		validOptionalRoleCatalogText(request.Function, maxBytes) &&
 		validOptionalRoleCatalogText(request.Object, maxBytes)
 }
 
@@ -1252,6 +1267,7 @@ func cloneRule(rule Rule) Rule {
 		Commands:   append([]string(nil), rule.Commands...),
 		Namespaces: append([]string(nil), rule.Namespaces...),
 		Sources:    append([]string(nil), rule.Sources...),
+		Functions:  append([]string(nil), rule.Functions...),
 		Objects:    append([]string(nil), rule.Objects...),
 	}
 }

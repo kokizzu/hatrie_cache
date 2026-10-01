@@ -2229,6 +2229,14 @@ Rules without `Objects` keep the existing behavior. See
 [TR047_OBJECT_GRANTS.md](TR047_OBJECT_GRANTS.md) for policy examples,
 security semantics, and measured overhead.
 
+Function-scoped grants are opt-in through `hatAuth.Rule.Functions`. Use exact
+names or trailing-`*` prefixes with `hatAuth.Policy.AuthorizeFunction` or
+`hatAuth.RoleCatalog.AuthorizeFunction`; namespace selectors can be combined
+with the function selector. Legacy authorization calls fail closed when a rule
+requires a function, so a stored-function caller must pass the invoked name.
+See [TU33_FUNCTION_GRANTS.md](TU33_FUNCTION_GRANTS.md) for examples and
+measurements.
+
 ### Credential And Certificate Rotation
 
 Previous operator and replication tokens are opt-in and must have an absolute

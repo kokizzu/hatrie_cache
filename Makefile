@@ -22497,3 +22497,21 @@ commit-round42-peer-watch:
 
 push-round42-peer-watch:
 	bash ./scripts/push-round42-peer-watch.sh
+test-t-u33-function-grants:
+	bash ./scripts/test-t-u33-function-grants.sh
+
+format-t-u33-function-grants:
+	bash ./scripts/format-t-u33-function-grants.sh
+
+verify-t-u33-function-grants:
+	bash ./scripts/verify-t-u33-function-grants.sh
+
+benchmark-t-u33-function-grants:
+	bash ./scripts/benchmark-t-u33-function-grants.sh
+.PHONY: commit-t-u33-function-grants
+commit-t-u33-function-grants:
+	bash ./scripts/commit-t-u33-function-grants.sh
+
+.PHONY: push-t-u33-function-grants
+push-t-u33-function-grants:
+	bash ./scripts/push-t-u33-function-grants.sh

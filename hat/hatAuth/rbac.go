@@ -9,13 +9,14 @@ type Role struct {
 	Rules []Rule `json:"rules"`
 }
 
-// Rule matches cache commands, key namespaces, SQL sources, and optional
-// objects. An empty selector is unrestricted for that selector; a trailing *
-// is a prefix match.
+// Rule matches cache commands, key namespaces, SQL sources, functions, and
+// optional objects. An empty selector is unrestricted for that selector; a
+// trailing * is a prefix match.
 type Rule struct {
 	Commands   []string `json:"commands,omitempty"`
 	Namespaces []string `json:"namespaces,omitempty"`
 	Sources    []string `json:"sources,omitempty"`
+	Functions  []string `json:"functions,omitempty"`
 	Objects    []string `json:"objects,omitempty"`
 }
 
@@ -26,12 +27,13 @@ type Policy struct {
 }
 
 // AuthorizationRequest contains the dimensions used by a policy rule. Object
-// is optional for legacy callers but is required when a matching rule has an
-// object selector.
+// and Function are optional for legacy callers but are required when a
+// matching rule has the corresponding selector.
 type AuthorizationRequest struct {
 	Command   string
 	Namespace string
 	Source    string
+	Function  string
 	Object    string
 }
 
@@ -43,6 +45,16 @@ func (policy Policy) Authorize(principal, command, namespace, source string) boo
 		Command:   command,
 		Namespace: namespace,
 		Source:    source,
+	})
+}
+
+// AuthorizeFunction reports whether principal may invoke function within the
+// supplied namespace. Function-scoped rules fail closed for the legacy
+// Authorize method, so existing callers cannot bypass a function grant.
+func (policy Policy) AuthorizeFunction(principal, function, namespace string) bool {
+	return policy.AuthorizeRequest(principal, AuthorizationRequest{
+		Namespace: namespace,
+		Function:  function,
 	})
 }
 
@@ -77,7 +89,9 @@ func (policy Policy) AuthorizeRequest(principal string, request AuthorizationReq
 				selectorMatches(rule.Namespaces, request.Namespace) &&
 				selectorMatches(rule.Sources, request.Source) &&
 				requiredSelectorMatches(rule.Objects, request.Object) {
-				return true
+				if len(rule.Functions) == 0 || requiredSelectorMatches(rule.Functions, request.Function) {
+					return true
+				}
 			}
 		}
 	}
