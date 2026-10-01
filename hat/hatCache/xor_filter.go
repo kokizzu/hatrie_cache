@@ -935,6 +935,9 @@ func (ht *HatTrie) BuildXorFilter(key string) (XorFilterInfo, bool, error) {
 	if ht == nil {
 		return XorFilterInfo{}, false, ErrNilHatTrie
 	}
+	if err := ht.checkReplicaWritable(); err != nil {
+		return XorFilterInfo{}, false, err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.BuildXorFilter(key)
 	}

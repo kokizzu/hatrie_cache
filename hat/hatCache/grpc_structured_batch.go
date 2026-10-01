@@ -278,6 +278,14 @@ func (cursor *structuredBatchCursor) command(request *hatriecachev1.StructuredBa
 }
 
 func (ht *HatTrie) executeStructuredBatchDirect(ctx context.Context, request *hatriecachev1.StructuredBatchRequest) *hatriecachev1.StructuredBatchResponse {
+	if structuredBatchMutates(request.GetOperations()) {
+		if err := ht.checkReplicaWritable(); err != nil {
+			response := newStructuredBatchResponse(request.GetBatchId(), len(request.GetOperations()))
+			response.Ok = false
+			response.Error = err.Error()
+			return response
+		}
+	}
 	return ht.executeStructuredBatchDirectPrepared(ctx, request, "", "", "", false, false, false, 0)
 }
 

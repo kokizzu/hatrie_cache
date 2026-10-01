@@ -7,6 +7,9 @@ func (ht *HatTrie) CompareAndSwapString(key, expected, replacement string) (bool
 	if ht == nil {
 		return false, ErrNilHatTrie
 	}
+	if err := ht.checkReplicaWritable(); err != nil {
+		return false, err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.CompareAndSwapString(key, expected, replacement)
 	}

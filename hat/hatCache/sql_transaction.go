@@ -201,6 +201,9 @@ func (transaction *SQLTransaction) Commit() error {
 	if err := transaction.checkTimeoutLocked(); err != nil {
 		return err
 	}
+	if err := transaction.live.checkReplicaWritable(); err != nil {
+		return err
+	}
 	response := transaction.live.executeSQLTransactionBatch(transaction.epoch, transaction.staged)
 	transaction.closeLocked()
 	if !response.OK {

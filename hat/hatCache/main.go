@@ -3684,6 +3684,8 @@ type hatTrieAuxStorage struct {
 type HatTrie struct {
 	mu                                 sync.RWMutex
 	commandTransactionMu               sync.RWMutex
+	replicaReadOnly                    atomic.Bool
+	replicaReadOnlyBypass              atomic.Uint32
 	sqlIndexMu                         sync.RWMutex
 	sqlJSONIndexRebuildCheckpointMu    sync.Mutex
 	sqlColumnarLayouts                 sqlColumnarLayoutCache
@@ -4321,6 +4323,9 @@ func (ht *HatTrie) ExpireChecked(key string, ttl time.Duration) (bool, error) {
 	if ht == nil {
 		return false, ErrNilHatTrie
 	}
+	if err := ht.checkReplicaWritable(); err != nil {
+		return false, err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.ExpireChecked(key, ttl)
 	}
@@ -4361,6 +4366,9 @@ func (ht *HatTrie) ExpireAtChecked(key string, at time.Time) (bool, error) {
 	if ht == nil {
 		return false, ErrNilHatTrie
 	}
+	if err := ht.checkReplicaWritable(); err != nil {
+		return false, err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.ExpireAtChecked(key, at)
 	}
@@ -4392,6 +4400,9 @@ func (ht *HatTrie) Persist(key string) bool {
 func (ht *HatTrie) PersistChecked(key string) (bool, error) {
 	if ht == nil {
 		return false, ErrNilHatTrie
+	}
+	if err := ht.checkReplicaWritable(); err != nil {
+		return false, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.PersistChecked(key)
@@ -5425,6 +5436,9 @@ func (ht *HatTrie) returnStorage(hval HatValue) {
 }
 
 func (ht *HatTrie) upsertReplacementLocation(key string) (*C.value_t, HatValue, error) {
+	if err := ht.checkReplicaWritable(); err != nil {
+		return nil, HatValue{}, err
+	}
 	if err := validateKey(key); err != nil {
 		return nil, HatValue{}, err
 	}
@@ -5443,6 +5457,9 @@ func (ht *HatTrie) upsertReplacementLocation(key string) (*C.value_t, HatValue, 
 }
 
 func (ht *HatTrie) freshLocationCheckedLocked(key string) (*C.value_t, HatValue, error) {
+	if err := ht.checkReplicaWritable(); err != nil {
+		return nil, HatValue{}, err
+	}
 	if err := validateKey(key); err != nil {
 		return nil, HatValue{}, err
 	}
@@ -6353,6 +6370,9 @@ func (ht *HatTrie) DeleteChecked(key string) (bool, error) {
 	if ht == nil {
 		return false, ErrNilHatTrie
 	}
+	if err := ht.checkReplicaWritable(); err != nil {
+		return false, err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.DeleteChecked(key)
 	}
@@ -6384,6 +6404,9 @@ func (ht *HatTrie) UpsertCounter(key string, val int32) {
 func (ht *HatTrie) UpsertCounterChecked(key string, val int32) error {
 	if ht == nil {
 		return ErrNilHatTrie
+	}
+	if err := ht.checkReplicaWritable(); err != nil {
+		return err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.UpsertCounterChecked(key, val)
@@ -6424,6 +6447,9 @@ func (ht *HatTrie) IncrementCounterChecked(key string, by int32) (int32, error) 
 func (ht *HatTrie) incrementCounterChecked(key string, by int32, checkOverflow bool) (int32, bool, error) {
 	if ht == nil {
 		return 0, false, ErrNilHatTrie
+	}
+	if err := ht.checkReplicaWritable(); err != nil {
+		return 0, false, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.incrementCounterChecked(key, by, checkOverflow)
@@ -6697,6 +6723,9 @@ func (ht *HatTrie) UpsertBytes(key string, val []byte) {
 func (ht *HatTrie) UpsertBytesChecked(key string, val []byte) error {
 	if ht == nil {
 		return ErrNilHatTrie
+	}
+	if err := ht.checkReplicaWritable(); err != nil {
+		return err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.UpsertBytesChecked(key, val)
@@ -7251,6 +7280,9 @@ func (ht *HatTrie) PopSliceChecked(key string) (interface{}, bool, error) {
 	if ht == nil {
 		return nil, false, ErrNilHatTrie
 	}
+	if err := ht.checkReplicaWritable(); err != nil {
+		return nil, false, err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.PopSliceChecked(key)
 	}
@@ -7585,6 +7617,9 @@ func (ht *HatTrie) RemoveSet(key string, val interface{}, vals ...interface{}) i
 func (ht *HatTrie) RemoveSetChecked(key string, val interface{}, vals ...interface{}) (int, error) {
 	if ht == nil {
 		return 0, ErrNilHatTrie
+	}
+	if err := ht.checkReplicaWritable(); err != nil {
+		return 0, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.RemoveSetChecked(key, val, vals...)

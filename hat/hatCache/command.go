@@ -130,6 +130,9 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 	if ht == nil {
 		return commandError(ErrNilHatTrie.Error())
 	}
+	if err := ht.checkReplicaCommand(request); err != nil {
+		return commandError(err.Error())
+	}
 	if strings.EqualFold(strings.TrimSpace(request.Command), "BATCH") && request.Atomic {
 		ht.commandTransactionMu.Lock()
 		defer ht.commandTransactionMu.Unlock()
@@ -312,6 +315,9 @@ func (ht *HatTrie) executeCommand(request CacheCommandRequest) CacheCommandRespo
 		}
 		return CacheCommandResponse{OK: true, Message: "ttl updated"}
 	case "PERSIST":
+		if err := ht.checkReplicaWritable(); err != nil {
+			return commandError(err.Error())
+		}
 		ht.mu.Lock()
 		defer ht.mu.Unlock()
 		if !ht.persistLocked(key) {
@@ -1177,6 +1183,9 @@ func (ht *HatTrie) executeSQLTransactionBatch(epoch uint64, payloads []CacheComm
 	if len(payloads) == 0 {
 		return CacheCommandResponse{OK: true, Message: "committed"}
 	}
+	if err := ht.checkReplicaWritable(); err != nil {
+		return commandError(err.Error())
+	}
 	for index, payload := range payloads {
 		if err := validateAtomicScalarBatchPayload(payload, index); err != nil {
 			return commandError(err.Error())
@@ -1233,6 +1242,11 @@ func (ht *HatTrie) executePublicScalarBatchCommandWithExecutor(request CacheComm
 	payloads, err := publicCommandBatchRequests(request)
 	if err != nil {
 		return commandError(err.Error()), true
+	}
+	if commandBatchShouldJournal(request) {
+		if err := ht.checkReplicaWritable(); err != nil {
+			return commandError(err.Error()), true
+		}
 	}
 	for _, payload := range payloads {
 		if _, _, supported := publicScalarBatchCommandCode(payload.Command); !supported {
@@ -4026,6 +4040,9 @@ func (ht *HatTrie) commandInternalSet(key string, payload string) error {
 }
 
 func (ht *HatTrie) commandInternalSetOperation(operation snapshotOperation) error {
+	if err := ht.checkReplicaWritable(); err != nil {
+		return err
+	}
 	if partition := ht.localPartitionForKey(operation.entry.Key); partition != nil {
 		return partition.commandInternalSetOperation(operation)
 	}
@@ -4043,23 +4060,25 @@ func executePreparedInternalReplicationCommand(trie *HatTrie, request CacheComma
 	if trie == nil {
 		return commandError(ErrNilHatTrie.Error())
 	}
-	switch normalizedCommand(request.Command) {
-	case "INTERNALSET", replicationSetBinaryCommand, replicationSetCompactCommand:
-		if operation == nil {
-			return commandError("prepared internal set operation is required")
+	return trie.withReplicaReadOnlyBypass(func() CacheCommandResponse {
+		switch normalizedCommand(request.Command) {
+		case "INTERNALSET", replicationSetBinaryCommand, replicationSetCompactCommand:
+			if operation == nil {
+				return commandError("prepared internal set operation is required")
+			}
+			if err := trie.commandInternalSetOperation(*operation); err != nil {
+				return commandError(err.Error())
+			}
+			return CacheCommandResponse{OK: true, Message: "internal value stored"}
+		case "INTERNALDEL":
+			if trie.Delete(strings.TrimSpace(request.Key)) {
+				return CacheCommandResponse{OK: true, Message: "internal value deleted"}
+			}
+			return CacheCommandResponse{OK: true, Message: "key not found"}
+		default:
+			return commandError("prepared internal replication command must be INTERNALSET or INTERNALDEL")
 		}
-		if err := trie.commandInternalSetOperation(*operation); err != nil {
-			return commandError(err.Error())
-		}
-		return CacheCommandResponse{OK: true, Message: "internal value stored"}
-	case "INTERNALDEL":
-		if trie.Delete(strings.TrimSpace(request.Key)) {
-			return CacheCommandResponse{OK: true, Message: "internal value deleted"}
-		}
-		return CacheCommandResponse{OK: true, Message: "key not found"}
-	default:
-		return commandError("prepared internal replication command must be INTERNALSET or INTERNALDEL")
-	}
+	})
 }
 
 func commandSnapshotBinaryOperation(key string, payload []byte) (snapshotOperation, error) {

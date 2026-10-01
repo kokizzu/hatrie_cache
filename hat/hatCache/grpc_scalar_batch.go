@@ -128,6 +128,11 @@ func validateScalarBatchColumns(request *hatriecachev1.ScalarBatchRequest) error
 }
 
 func (ht *HatTrie) executeScalarBatchDirect(ctx context.Context, request *hatriecachev1.ScalarBatchRequest) *hatriecachev1.ScalarBatchResponse {
+	if scalarBatchMutates(request.GetOperations()) {
+		if err := ht.checkReplicaWritable(); err != nil {
+			return &hatriecachev1.ScalarBatchResponse{BatchId: request.GetBatchId(), Error: err.Error()}
+		}
+	}
 	if ht.localPartitionSet() != nil {
 		if err := ctx.Err(); err != nil {
 			return &hatriecachev1.ScalarBatchResponse{BatchId: request.GetBatchId(), Error: err.Error()}

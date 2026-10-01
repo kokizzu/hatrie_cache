@@ -22719,3 +22719,24 @@ vet-t-u05:
 
 deliver-t-u05:
 	@bash ./scripts/deliver-t-u05.sh
+
+format-t-u06:
+	@bash ./scripts/test-t-u06.sh format
+
+deliver-t-u06:
+	@bash ./scripts/deliver-t-u06.sh
+
+test-t-u06:
+	@bash ./scripts/test-t-u06.sh test
+
+benchmark-t-u06:
+	@bash ./scripts/test-t-u06.sh benchmark
+
+race-t-u06:
+	@bash ./scripts/test-t-u06.sh race
+
+vet-t-u06:
+	@bash ./scripts/test-t-u06.sh vet
+
+test-t-u06-package:
+	@bash ./scripts/test-t-u06.sh package

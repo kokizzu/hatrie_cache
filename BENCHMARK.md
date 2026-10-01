@@ -32996,3 +32996,31 @@ The session path adds a read lock but no allocations. This is a control-plane
 tradeoff for validated, race-safe per-session inheritance; the existing direct
 transaction APIs and transaction execution path are unchanged. See
 [TU005_SESSION_TRANSACTION_SETTINGS.md](TU005_SESSION_TRANSACTION_SETTINGS.md).
+
+<a id="t-u06-replica-wide-read-only-enforcement"></a>
+## T-U06 Replica-Wide Read-Only Enforcement
+
+This is a safety feature, so the useful comparison is the default-off hot path
+before and after the admission check. Five `-benchmem` samples were collected
+on Linux/amd64 with an AMD Ryzen 9 5950X. The baseline ran from the previous
+commit in an isolated worktree with the same benchmark source.
+
+| Path | Before median | After median | Relative result | Before/after B/op | Before/after allocs/op | Approx. seconds per 10k |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Default-off `UpsertStringChecked` | 120.7 ns | 123.9 ns | 1.027x, 2.7% slower | 0 / 0 | 0 / 0 | 0.001207 / 0.001239 |
+| Default-off `ExecuteCommand(SET)` | 235.9 ns | 232.1 ns | 0.984x, within noise | 0 / 0 | 0 / 0 | 0.002359 / 0.002321 |
+
+The default-off path adds a constant atomic check but no heap allocation or
+per-key memory. The measured direct write cost is small and accepted because
+the feature prevents accidental writes during replica promotion, backup, or
+recovery cutovers. Full semantics and the cutover boundary are documented in
+[TU006_REPLICA_READ_ONLY.md](TU006_REPLICA_READ_ONLY.md).
+
+Raw output from `make benchmark-t-u06` and the isolated baseline:
+
+```text
+baseline UpsertStringChecked: 116.7 0 0; 120.7 0 0; 128.6 0 0; 124.9 0 0; 117.1 0 0
+after    UpsertStringChecked: 116.3 0 0; 117.2 0 0; 125.0 0 0; 123.9 0 0; 125.0 0 0
+baseline ExecuteCommand SET: 223.0 0 0; 239.8 0 0; 235.9 0 0; 240.6 0 0; 232.6 0 0
+after    ExecuteCommand SET: 212.0 0 0; 230.8 0 0; 232.3 0 0; 232.1 0 0; 236.6 0 0
+```

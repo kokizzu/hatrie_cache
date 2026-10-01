@@ -48,6 +48,11 @@ func sqlMutationSourceNames(source string, parameters []interface{}) ([]string, 
 // are validated before one atomic command batch is applied, so an invalid
 // selected row cannot leave preceding writes behind.
 func ExecuteSQLMutation(ctx context.Context, trie *HatTrie, source string, parameters []interface{}, options SQLQueryOptions) (SQLMutationResult, error) {
+	if trie != nil {
+		if err := trie.checkReplicaWritable(); err != nil {
+			return SQLMutationResult{}, err
+		}
+	}
 	if options.MutationAdmission != nil {
 		if err := options.MutationAdmission.Wait(ctx); err != nil {
 			return SQLMutationResult{}, err
@@ -74,6 +79,9 @@ func ExecuteSQLMutationIdempotent(ctx context.Context, journal *CommandJournal, 
 	}
 	if trie == nil {
 		return SQLMutationResult{}, ErrNilHatTrie
+	}
+	if err := trie.checkReplicaWritable(); err != nil {
+		return SQLMutationResult{}, err
 	}
 	if !journal.idempotency.enabled() {
 		return SQLMutationResult{}, fmt.Errorf("SQL mutation idempotency requires a positive command journal IdempotencyCapacity")
@@ -173,6 +181,9 @@ func ExecuteSQLMutationIdempotent(ctx context.Context, journal *CommandJournal, 
 func executeSQLMutation(ctx context.Context, trie *HatTrie, source string, parameters []interface{}, options SQLQueryOptions) (SQLMutationResult, error) {
 	if trie == nil {
 		return SQLMutationResult{}, ErrNilHatTrie
+	}
+	if err := trie.checkReplicaWritable(); err != nil {
+		return SQLMutationResult{}, err
 	}
 	if err := ctx.Err(); err != nil {
 		return SQLMutationResult{}, err
