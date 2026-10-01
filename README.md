@@ -27,6 +27,7 @@ security guidance before exposing it on a network.
 - Opt-in background SQL index rebuild worker: [SQL_INDEX_REBUILD_PROGRESS.md](SQL_INDEX_REBUILD_PROGRESS.md)
 - Opt-in SQL multikey array membership indexes: [SQL_MULTIKEY_INDEX.md](SQL_MULTIKEY_INDEX.md)
 - Opt-in Tarantool-style automatic tuple multikey indexes with bounded nested-array expansion: [TU23_TUPLE_MULTIKEY_INDEX.md](TU23_TUPLE_MULTIKEY_INDEX.md), with measurements in [BENCHMARK.md](BENCHMARK.md#t-u23-automatic-tuple-multikey-indexes)
+- Opt-in Tarantool-style named-space changefeeds with schema-bound checkpoints and bounded backpressure: [TU039_SPACE_CHANGEFEED.md](TU039_SPACE_CHANGEFEED.md), with measurements in [BENCHMARK.md](BENCHMARK.md#t-u39-named-space-changefeed)
 - Opt-in SQL query cancellation and bounded operator history: [SQL_QUERY_MANAGER.md](SQL_QUERY_MANAGER.md)
 - Opt-in namespace SQL quotas, admission, and resource budgets: [SQL_RESOURCE_GOVERNANCE.md](SQL_RESOURCE_GOVERNANCE.md)
 - Opt-in typed-table logical memory budgets with atomic write admission: [CHU24_TYPED_TABLE_MEMORY_BUDGET.md](CHU24_TYPED_TABLE_MEMORY_BUDGET.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u24-typed-table-memory-budget)

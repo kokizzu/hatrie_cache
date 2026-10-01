@@ -32926,3 +32926,24 @@ This is an opt-in transport adapter. It does not start a listener, alter
 existing commands, or claim end-to-end network throughput; handshake, TLS,
 queueing, and snapshot recovery remain outside the codec measurement. See
 [TU27_PEER_CONFIG_WATCH.md](TU27_PEER_CONFIG_WATCH.md).
+
+## T-U39 Named-Space Changefeed
+
+This benchmark measures one publish, one consumer read, and one acknowledgement
+for a schema-bound `hatReplication.SpaceChangefeed`. Five `-benchmem` samples
+ran on an AMD Ryzen 9 5950X. The first implementation used the batch path for
+single events and eagerly rotated the notification channel; the final path
+uses a single-event fast path and lazy notifications.
+
+| Path | Raw samples | Median | Bytes/op | Allocs/op | Relative |
+| --- | --- | ---: | ---: | ---: | --- |
+| Initial publish/read/ack | 438.8, 433.2, 427.0, 427.7, 445.3 ns/op | 433.2 ns/op | 536 | 13 | baseline |
+| Final publish/read/ack | 232.4, 229.5, 231.2, 230.0, 228.4 ns/op | 230.0 ns/op | 160 | 7 | 1.88x faster; 70.1% fewer bytes; 46.2% fewer allocations |
+| Checkpoint decode | 23.89, 23.66, 24.10, 23.97, 24.03 ns/op | 23.97 ns/op | 8 | 1 | bounded validation |
+| Existing frontier-only advance | 2.413, 2.448, 2.433, 2.429, 2.456 ns/op | 2.433 ns/op | 0 | 0 | reference only |
+
+The frontier reference is not an equivalent feed: it has no payload copying,
+retention, subscriber state, checkpoint binding, or backpressure. The final
+feed deliberately copies input and output row bytes to prevent aliasing and
+rejects publication when an unacknowledged subscriber fills the configured
+event/byte budget. See [TU039_SPACE_CHANGEFEED.md](TU039_SPACE_CHANGEFEED.md).

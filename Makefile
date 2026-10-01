@@ -22622,4 +22622,26 @@ verify-config-watch-peer:
 format-config-watch-peer:
 	sh ./scripts/format-config-watch-peer.sh
 
+test-t-u39:
+	@bash ./scripts/test-t-u39.sh test
 
+format-t-u39:
+	@bash ./scripts/test-t-u39.sh format
+
+benchmark-t-u39:
+	@bash ./scripts/test-t-u39.sh benchmark
+
+test-t-u39-package:
+	@bash ./scripts/test-t-u39.sh package
+
+race-t-u39:
+	@bash ./scripts/test-t-u39.sh race
+
+vet-t-u39:
+	@bash ./scripts/test-t-u39.sh vet
+
+verify-t-u39:
+	@bash ./scripts/test-t-u39.sh verify
+
+deliver-t-u39:
+	@bash ./scripts/deliver-t-u39.sh
