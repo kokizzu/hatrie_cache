@@ -22335,3 +22335,42 @@ commit-tu13-membership:
 .PHONY: push-tu13-membership
 push-tu13-membership:
 	bash ./scripts/push-tu13-membership.sh
+.PHONY: test-ch-u06-delete-bitmap
+test-ch-u06-delete-bitmap:
+	bash ./scripts/test-ch-u06-delete-bitmap.sh
+.PHONY: format-ch-u06-delete-bitmap
+format-ch-u06-delete-bitmap:
+	bash ./scripts/format-ch-u06-delete-bitmap.sh
+
+.PHONY: test-ch-u06-delete-bitmap-standalone
+test-ch-u06-delete-bitmap-standalone:
+	bash ./scripts/test-ch-u06-delete-bitmap-standalone.sh
+.PHONY: format-ch-u06-delete-bitmap-benchmark
+format-ch-u06-delete-bitmap-benchmark:
+	bash ./scripts/format-ch-u06-delete-bitmap-benchmark.sh
+
+.PHONY: benchmark-ch-u06-delete-bitmap
+benchmark-ch-u06-delete-bitmap:
+	bash ./scripts/benchmark-ch-u06-delete-bitmap.sh
+.PHONY: race-ch-u06-delete-bitmap
+race-ch-u06-delete-bitmap:
+	bash ./scripts/race-ch-u06-delete-bitmap.sh
+
+.PHONY: vet-ch-u06-delete-bitmap
+vet-ch-u06-delete-bitmap:
+	bash ./scripts/vet-ch-u06-delete-bitmap.sh
+.PHONY: verify-ch-u06-delete-bitmap
+verify-ch-u06-delete-bitmap:
+	bash ./scripts/verify-ch-u06-delete-bitmap.sh
+
+.PHONY: stage-ch-u06-delete-bitmap
+stage-ch-u06-delete-bitmap:
+	bash ./scripts/stage-ch-u06-delete-bitmap.sh
+
+.PHONY: commit-ch-u06-delete-bitmap
+commit-ch-u06-delete-bitmap:
+	bash ./scripts/commit-ch-u06-delete-bitmap.sh
+
+.PHONY: push-ch-u06-delete-bitmap
+push-ch-u06-delete-bitmap:
+	bash ./scripts/push-ch-u06-delete-bitmap.sh

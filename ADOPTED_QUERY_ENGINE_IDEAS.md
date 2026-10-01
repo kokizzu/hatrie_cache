@@ -756,3 +756,20 @@ back in-memory state when persistence fails. This is control-plane state only:
 transport, consensus vote collection, and shard migration remain caller-owned.
 See [TU13_DURABLE_CLUSTER_MEMBERSHIP.md](TU13_DURABLE_CLUSTER_MEMBERSHIP.md)
 and [BENCHMARK.md](BENCHMARK.md#t-u13-durable-cluster-membership).
+
+## ClickHouse CH-U06: Persistent Lightweight Delete Bitmap
+
+Adopted as the importable `hatSql.SQLColumnarDeleteBitmap`. Stored-part
+adapters can persist deleted physical row positions as deterministic,
+CRC-protected `HDB1` sidecars. The constructor chooses delta-coded sparse row
+IDs for low delete density and dense words when the bitset is smaller; the
+decoder enforces bounded sizes, row ordering, padding bits, and count
+consistency. `AppendLiveRows`, `AppendDeletedRows`, and `FilterLiveRows` cover
+the read path without exposing representation details.
+
+The primitive is intentionally opt-in. It does not publish files, replace
+part checksums, or decide when compaction should merge deletes. Sparse point
+membership is slower than a dense bit test, but the measured 1% delete case
+reduces sidecar bytes by 92% with similar build CPU and about 3.2x lower decode
+payload allocation. See [CHU06_PERSISTENT_DELETE_BITMAP.md](CHU06_PERSISTENT_DELETE_BITMAP.md)
+and [BENCHMARK.md](BENCHMARK.md#ch-u06-persistent-delete-bitmap).

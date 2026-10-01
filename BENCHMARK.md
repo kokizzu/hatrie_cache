@@ -32635,3 +32635,40 @@ MembershipSnapshotMarshal: 32722; 32699; 32301; 32646; 33394 ns/op; 30,679; 30,6
 The overhead is acceptable for rare membership changes because the feature is
 opt-in and provides fencing, quorum evidence, bounded history, and crash-safe
 publication. See [TU13_DURABLE_CLUSTER_MEMBERSHIP.md](TU13_DURABLE_CLUSTER_MEMBERSHIP.md).
+
+## CH-U06 Persistent Lightweight Delete Bitmap
+
+This benchmark compares the adaptive `hatSql.SQLColumnarDeleteBitmap` sidecar
+with an always-dense bitmap using the same 20-byte header and 4-byte CRC. The
+adaptive constructor uses delta-coded sparse row IDs when that payload is
+smaller and dense words otherwise. Five samples were run with
+`make benchmark-ch-u06-delete-bitmap` on an AMD Ryzen 9 5950X.
+
+| Workload | Adaptive | Always dense | Adaptive / dense |
+| --- | ---: | ---: | ---: |
+| Build + marshal, 1M rows / 1% deletes | 53.5-60.0 us/op; 51,264 B/op; 3 allocs | 54.6-59.1 us/op; 262,144 B/op; 2 allocs | 92.0% fewer wire bytes; similar CPU; +1 alloc |
+| Build + marshal, 1M rows / 50% deletes | 0.87-0.90 ms/op; 262,208 B/op; 3 allocs | 0.87-0.88 ms/op; 262,145 B/op; 2 allocs | same wire size; about 1-3% slower; +1 alloc |
+| Unmarshal, 1M rows / 1% deletes | 32.1-33.0 us/op; 41,024 B/op; 2 allocs | 125,024-byte dense wire payload | about 3.2x lower decoded payload allocation |
+| Point lookup, 1M rows / 1% deletes | 7.7-10.8 ns/op; 0 B/op | 1.65-1.66 ns/op; 0 B/op | about 5-6x slower |
+| Point lookup, 1M rows / 50% deletes | 1.84-1.92 ns/op; 0 B/op | 1.64-1.65 ns/op; 0 B/op | within about 17% |
+
+Raw output summary:
+
+```text
+sparse 1%: adaptive 10,024 wire bytes; dense 125,024 wire bytes; ratio 0.08018
+dense 50%: adaptive 125,024 wire bytes; dense 125,024 wire bytes; ratio 1.000
+sparse build+marshal: adaptive 53.5-60.0 us/op; dense 54.6-59.1 us/op
+dense build+marshal: adaptive 0.87-0.90 ms/op; dense 0.87-0.88 ms/op
+sparse unmarshal: 32.1-33.0 us/op; 41,024 B/op; 2 allocs/op
+dense unmarshal: 31.4-32.6 us/op; 131,136 B/op; 2 allocs/op
+sparse lookup: adaptive 7.7-10.8 ns/op; dense 1.65-1.66 ns/op
+dense lookup: adaptive 1.84-1.92 ns/op; dense 1.64-1.65 ns/op
+```
+
+The result is a storage and transfer win for sparse deletes, with a known
+lookup cost. It does not make adaptive storage the universal replacement for a
+dense in-memory mask; a storage adapter should compact or choose dense when
+point membership dominates. The focused source-file, race, and vet targets
+pass. The ordinary package target is currently blocked by unrelated missing
+baseline symbols in this branch: `MaxDataflowTextBytes`, `TypedTableDate`, and
+`TypedTableTimestamp`.

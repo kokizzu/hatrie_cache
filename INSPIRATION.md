@@ -638,6 +638,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T016 Partial-key search. Composite ordered keys can express a prefix range with smallest/largest suffix bounds; the iterator uses binary-searched bounds and a bounded immutable subslice.
 - [x] T-U13 Durable cluster membership. `hatTopology.MembershipLog` binds join/leave proposals to quorum decisions, topology fingerprints, monotonic fencing generations, bounded audit records, and atomic snapshot persistence; shard migration remains separate. See [TU13_DURABLE_CLUSTER_MEMBERSHIP.md](TU13_DURABLE_CLUSTER_MEMBERSHIP.md).
 - [x] T-U16 Selectable memtx-style row engine. `hatDataStructure.MemtxRowTable` provides an opt-in fixed-width row-major tuple store with detached reads, borrowed allocation-free scans, explicit delete compaction, and concurrent reader/writer safety; point lookup and update tradeoffs are recorded in [T-U16_MEMTX_ROW_TABLE.md](T-U16_MEMTX_ROW_TABLE.md).
+- [x] CH-U06 Persistent lightweight delete bitmap. `hatSql.SQLColumnarDeleteBitmap` provides bounded CRC-protected sparse/dense sidecars for stored columnar parts, deterministic round trips, and live-row filtering; part publication and compaction remain adapter-owned. See [CHU06_PERSISTENT_DELETE_BITMAP.md](CHU06_PERSISTENT_DELETE_BITMAP.md).
 - [x] T017 Explicit NULL index semantics.
 - [x] T018 Collation-aware string ordering.
 - [x] T019 Unique constraints and duplicate-key errors.

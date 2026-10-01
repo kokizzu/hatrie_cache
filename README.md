@@ -4782,3 +4782,13 @@ proposals, fencing generations, shard-owner safety checks, bounded audit
 records, and atomic snapshot persistence. It does not automatically migrate
 partitions or enable sharding. See [TU13_DURABLE_CLUSTER_MEMBERSHIP.md](TU13_DURABLE_CLUSTER_MEMBERSHIP.md)
 and the [benchmark entry](BENCHMARK.md#t-u13-durable-cluster-membership).
+
+### Persistent Columnar Delete Bitmaps
+
+Storage adapters can persist low-density deletes separately from column data
+with `hatSql.SQLColumnarDeleteBitmap`. It automatically selects delta-coded
+sparse row IDs or dense words, validates bounded CRC-protected sidecars, and
+provides live-row filtering after restore. It is opt-in: the adapter remains
+responsible for row-count matching, atomic publication, and compaction. See
+[CHU06_PERSISTENT_DELETE_BITMAP.md](CHU06_PERSISTENT_DELETE_BITMAP.md) and the
+[benchmark entry](BENCHMARK.md#ch-u06-persistent-delete-bitmap).
