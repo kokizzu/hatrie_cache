@@ -1406,6 +1406,9 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 		return nil
 	}
 	if query.sample != nil {
+		if handled, err := executeSQLBernoulliSampleRows(ctx, query, resolver, control, visit); handled {
+			return err
+		}
 		result, err := executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
 		if err != nil {
 			return err

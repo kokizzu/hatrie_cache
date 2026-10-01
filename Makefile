@@ -22357,3 +22357,39 @@ commit-chg03-grouping-id:
 
 push-chg03-grouping-id:
 	bash scripts/deliver-chg03-grouping-id.sh push
+
+test-chg04-sample-stream:
+	bash scripts/test-chg04-sample-stream.sh
+
+format-chg04-sample-stream:
+	bash scripts/format-chg04-sample-stream.sh
+
+test-chg04-sample-stream-package:
+	bash scripts/test-chg04-sample-stream-package.sh
+
+race-chg04-sample-stream:
+	bash scripts/race-chg04-sample-stream.sh
+
+vet-chg04-sample-stream:
+	bash scripts/vet-chg04-sample-stream.sh
+
+benchmark-chg04-sample-stream-baseline:
+	bash scripts/benchmark-chg04-sample-stream-baseline.sh
+
+benchmark-chg04-sample-stream:
+	bash scripts/benchmark-chg04-sample-stream.sh
+
+check-chg04-sample-stream:
+	bash scripts/deliver-chg04-sample-stream.sh check
+
+review-chg04-sample-stream:
+	bash scripts/deliver-chg04-sample-stream.sh review
+
+stage-chg04-sample-stream:
+	bash scripts/deliver-chg04-sample-stream.sh stage
+
+commit-chg04-sample-stream:
+	bash scripts/deliver-chg04-sample-stream.sh commit
+
+push-chg04-sample-stream:
+	bash scripts/deliver-chg04-sample-stream.sh push

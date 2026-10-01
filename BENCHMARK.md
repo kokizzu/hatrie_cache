@@ -1526,11 +1526,51 @@ Five local samples on the AMD Ryzen 9 5950X produced:
 | `TABLESAMPLE BERNOULLI (10)` | 3.941 ms | 4,877,448 B | 44,079 | About 1,000 |
 | `TABLESAMPLE RESERVOIR (100)` | 2.103 ms | 3,593,224 B | 22,433 | 100 |
 
-The current implementation materializes the bounded source before selection to
-guarantee sampling-before-filter semantics and reproducible source order. It
-therefore does not claim an index or row-streaming acceleration; the output-row
-count is the bandwidth reduction available to the caller after sampling, while
-the table measures the CPU and memory cost before transport.
+`ExecuteSQLQuery` still materializes the bounded source, and reservoir sampling
+still materializes for both APIs. `ExecuteSQLQueryRows` now has a narrow
+Bernoulli streaming path for untyped direct `CACHE` sources with a
+`StreamSQLSource` resolver. It preserves sampling-before-filter semantics and
+the repeatable source order, but it still scans every source row; it is a
+memory/allocation optimization, not storage-level partition skipping.
+
+## CH-042b streaming `TABLESAMPLE BERNOULLI`
+
+This benchmark uses 10,000 source rows, a 10% repeatable Bernoulli sample, and
+`ExecuteSQLQueryRows` with a resolver that exposes both materialized and
+streaming source APIs. The baseline uses the dedicated materialized-resolver
+benchmark, while the post-change run uses `make benchmark-chg04-sample-stream`.
+Five samples ran on Linux/amd64 with an AMD Ryzen 9 5950X and `-benchmem`.
+
+| Workload | Baseline median | Streaming median | Improvement |
+| --- | ---: | ---: | ---: |
+| Time | 2,402,302 ns/op | 629,780 ns/op | 3.81x faster |
+| Timed heap | 4,085,160 B/op | 438,756 B/op | 9.31x lower |
+| Allocations | 26,051 allocs/op | 6,043 allocs/op | 4.31x fewer |
+
+Raw baseline samples:
+
+```text
+2440614 ns/op 4085261 B/op 26051 allocs/op
+2497216 ns/op 4085286 B/op 26051 allocs/op
+2402302 ns/op 4085160 B/op 26051 allocs/op
+2377534 ns/op 4085148 B/op 26051 allocs/op
+2393939 ns/op 4085131 B/op 26051 allocs/op
+```
+
+Raw streaming samples:
+
+```text
+659371 ns/op 438756 B/op 6043 allocs/op
+644666 ns/op 438757 B/op 6043 allocs/op
+624511 ns/op 438756 B/op 6043 allocs/op
+628494 ns/op 438754 B/op 6043 allocs/op
+629780 ns/op 438755 B/op 6043 allocs/op
+```
+
+The tradeoff is a resolver contract requirement: callers must provide a row
+stream, and the implementation cannot use partition pruning because skipping
+rows would alter the repeatable random sequence. Unsupported shapes continue
+to use the tested materialized executor.
 
 ## SQL LIMIT BY
 
