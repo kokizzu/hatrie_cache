@@ -189,3 +189,9 @@ generic `hat*` primitives are preferred when they provide a real reusable
 contract rather than an unintegrated placeholder. Large or irreversible ideas
 such as VShard migration, a new scripting runtime, or a consensus log remain
 proposal-only until their recovery and security contracts are complete.
+### T-U06 replica-wide read-only enforcement
+
+Partial opt-in support is implemented in `hatReplication.ReadOnlyGate` with
+atomic external admission and a gate-bound replication permit. Every public
+mutation boundary and the trusted applier still require caller integration.
+See [TU06_REPLICA_READ_ONLY_GATE.md](TU06_REPLICA_READ_ONLY_GATE.md).

@@ -32580,3 +32580,8 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+## T-U06 Replica Read-Only Gate
+
+The opt-in gate remains allocation-free: direct atomic baseline 0.481 ns/op,
+writable mutation check 0.457 ns/op, read-only check 0.489 ns/op, and trusted
+replication permit check 0.242 ns/op. See [TU06_REPLICA_READ_ONLY_GATE.md](TU06_REPLICA_READ_ONLY_GATE.md).

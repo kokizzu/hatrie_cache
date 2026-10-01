@@ -22292,3 +22292,42 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: test-round36-readonly
+test-round36-readonly:
+	bash scripts/test-round36-readonly.sh
+
+.PHONY: format-round36-readonly
+format-round36-readonly:
+	bash scripts/format-round36-readonly.sh
+
+.PHONY: benchmark-round36-readonly
+benchmark-round36-readonly:
+	bash scripts/benchmark-round36-readonly.sh
+
+.PHONY: race-round36-readonly
+race-round36-readonly:
+	bash scripts/race-round36-readonly.sh
+
+.PHONY: vet-round36-readonly
+vet-round36-readonly:
+	bash scripts/vet-round36-readonly.sh
+
+.PHONY: verify-round36-readonly-docs
+verify-round36-readonly-docs:
+	bash scripts/verify-round36-readonly-docs.sh
+
+.PHONY: review-round36-readonly
+review-round36-readonly:
+	bash scripts/review-round36-readonly.sh
+
+.PHONY: stage-round36-readonly
+stage-round36-readonly:
+	bash scripts/stage-round36-readonly.sh
+
+.PHONY: commit-round36-readonly
+commit-round36-readonly:
+	bash scripts/commit-round36-readonly.sh
+
+.PHONY: push-round36-readonly
+push-round36-readonly:
+	bash scripts/push-round36-readonly.sh
