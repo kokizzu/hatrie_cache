@@ -4671,6 +4671,11 @@ restores a committed view without contacting providers. See
 MU04_MULTI_SOURCE_SNAPSHOT_COORDINATOR.md for the API, recovery contract,
 security guidance, and measurements.
 
+Dependents that must wait for the first complete view can call
+`SQLMultiSourceSnapshotCoordinator.WaitReady(ctx)`. It is cancellable and
+does not change the existing fail-fast `View()` or `ResolveSQLSource` behavior;
+see [MU035_SNAPSHOT_READINESS.md](MU035_SNAPSHOT_READINESS.md).
+
 Run the focused checks and benchmarks with make test-m054,
 make benchmark-m054-baseline, and make benchmark-m054.
 

@@ -17079,6 +17079,28 @@ JSON field index or typed `INT64` index, and opt-in cross-partition ordered
 sources through `PartitionedOrderedSourceResolver`. See
 [KEYSET_PAGINATION.md](KEYSET_PAGINATION.md).
 
+## M-U35 Snapshot Readiness
+
+Command: `make benchmark-round55-readiness`.
+
+This benchmark compares the existing published-view check with the new
+`WaitReady(context.Background())` fast path after the coordinator is ready.
+Both paths use zero heap bytes and zero allocations. Five samples on
+Linux/amd64 with an AMD Ryzen 9 5950X:
+
+```text
+baseline_view:        3.726  3.757  3.746  3.756  3.773 ns/op; 0 B/op; 0 allocs/op
+wait_ready_fast_path: 3.948  3.849  3.723  3.715  3.706 ns/op; 0 B/op; 0 allocs/op
+```
+
+| Path | Median time | Heap | Allocations | Relative |
+| --- | ---: | ---: | ---: | ---: |
+| Existing `View()` readiness check | 3.756 ns | 0 B/op | 0 | 1.00x |
+| `WaitReady` fast path | 3.723 ns | 0 B/op | 0 | 1.01x, within noise |
+
+The measurable result is negligible steady-state overhead; the feature's
+benefit is cancellable admission until a complete atomic snapshot exists.
+
 ## SQL Runtime Join Bloom Filter
 
 Command: `make benchmark-sql-runtime-join-filter`.

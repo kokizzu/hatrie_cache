@@ -132,6 +132,8 @@ func (view *SQLMultiSourceSnapshotView) Generation() uint64 {
 type SQLMultiSourceSnapshotCoordinator struct {
 	mu          sync.RWMutex
 	captureMu   sync.Mutex
+	ready       chan struct{}
+	readyOnce   sync.Once
 	maxSources  int
 	maxRows     int
 	maxOffsets  int
@@ -177,6 +179,7 @@ func NewSQLMultiSourceSnapshotCoordinator(options SQLMultiSourceSnapshotCoordina
 		maxRows:     maxRows,
 		maxOffsets:  maxOffsets,
 		maxPageRows: maxPageRows,
+		ready:       make(chan struct{}),
 	}, nil
 }
 
@@ -219,6 +222,7 @@ func (coordinator *SQLMultiSourceSnapshotCoordinator) CaptureWithCheckpoint(ctx 
 		coordinator.generation = snapshot.Generation
 		coordinator.view = view
 		coordinator.mu.Unlock()
+		coordinator.signalReady()
 		return SQLMultiSourceSnapshotResult{
 			Snapshot:   cloneSQLMultiSourceSnapshot(snapshot),
 			View:       view,
@@ -288,6 +292,7 @@ func (coordinator *SQLMultiSourceSnapshotCoordinator) CaptureWithCheckpoint(ctx 
 	view := newSQLMultiSourceSnapshotView(snapshot)
 	coordinator.view = view
 	coordinator.mu.Unlock()
+	coordinator.signalReady()
 	return SQLMultiSourceSnapshotResult{
 		Snapshot:     cloneSQLMultiSourceSnapshot(snapshot),
 		View:         view,
@@ -318,6 +323,40 @@ func (coordinator *SQLMultiSourceSnapshotCoordinator) View() *SQLMultiSourceSnap
 	return view
 }
 
+// WaitReady blocks until the coordinator has published its first complete
+// snapshot. The returned view is immutable and can be shared by dependent
+// queries. Existing ResolveSQLSource calls remain fail-fast for callers that
+// prefer explicit readiness handling.
+func (coordinator *SQLMultiSourceSnapshotCoordinator) WaitReady(ctx context.Context) (*SQLMultiSourceSnapshotView, error) {
+	if coordinator == nil {
+		return nil, ErrSQLMultiSourceSnapshotNil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	coordinator.mu.RLock()
+	view, ready := coordinator.view, coordinator.ready
+	coordinator.mu.RUnlock()
+	if view != nil {
+		return view, nil
+	}
+	if ready == nil {
+		return nil, ErrSQLMultiSourceSnapshotIdentity
+	}
+	select {
+	case <-ready:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	coordinator.mu.RLock()
+	view = coordinator.view
+	coordinator.mu.RUnlock()
+	if view == nil {
+		return nil, ErrSQLMultiSourceSnapshotIdentity
+	}
+	return view, nil
+}
+
 // ResolveSQLSource resolves a source from the currently published view.
 func (coordinator *SQLMultiSourceSnapshotCoordinator) ResolveSQLSource(kind, key string) ([]Row, error) {
 	if coordinator == nil {
@@ -330,6 +369,18 @@ func (coordinator *SQLMultiSourceSnapshotCoordinator) ResolveSQLSource(kind, key
 		return nil, ErrSQLMultiSourceSnapshotIdentity
 	}
 	return view.ResolveSQLSource(kind, key)
+}
+
+func (coordinator *SQLMultiSourceSnapshotCoordinator) signalReady() {
+	if coordinator == nil {
+		return
+	}
+	coordinator.mu.RLock()
+	ready := coordinator.ready
+	coordinator.mu.RUnlock()
+	if ready != nil {
+		coordinator.readyOnce.Do(func() { close(ready) })
+	}
 }
 
 func (coordinator *SQLMultiSourceSnapshotCoordinator) normalizeRequests(requests []SQLMultiSourceSnapshotRequest) ([]SQLMultiSourceSnapshotRequest, error) {
