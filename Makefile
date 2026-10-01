@@ -22428,3 +22428,34 @@ check-chg06-diff:
 .PHONY: deliver-chg06-external-runtime-filter
 deliver-chg06-external-runtime-filter:
 	@bash scripts/deliver-chg06-external-runtime-filter.sh
+.PHONY: test-chg07-procedure
+test-chg07-procedure:
+	@bash scripts/test-chg07-procedure.sh
+
+.PHONY: format-chg07-procedure
+format-chg07-procedure:
+	@bash scripts/format-chg07-procedure.sh
+
+.PHONY: benchmark-chg07-procedure
+benchmark-chg07-procedure:
+	@bash scripts/benchmark-chg07-procedure.sh
+
+.PHONY: test-chg07-package
+test-chg07-package:
+	bash ./scripts/test-chg07-package.sh
+
+.PHONY: race-chg07-package
+race-chg07-package:
+	bash ./scripts/race-chg07-package.sh
+
+.PHONY: vet-chg07-package
+vet-chg07-package:
+	bash ./scripts/vet-chg07-package.sh
+
+.PHONY: check-chg07-diff
+check-chg07-diff:
+	bash ./scripts/check-chg07-diff.sh
+
+.PHONY: deliver-chg07-procedure
+deliver-chg07-procedure:
+	bash ./scripts/deliver-chg07-procedure.sh

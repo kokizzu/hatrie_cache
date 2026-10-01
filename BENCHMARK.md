@@ -1,5 +1,49 @@
 # Benchmark
 
+## T-U03: Read-Only SQL Procedure Registry
+
+This benchmark measures the opt-in `hatSql.SQLProcedureRegistry` against the
+same parameterized query compiled on every call. Registration happens outside
+the timed loop, so the registry case measures named lookup plus execution and
+the baseline measures compile plus execution. Both cases use the same three-row
+`VALUES` source and `$1` parameter, five `-benchmem` samples, and
+`-benchtime=100ms` on an AMD Ryzen 9 5950X Linux/amd64 host.
+
+Command:
+
+```text
+make benchmark-chg07-procedure
+```
+
+Raw output:
+
+```text
+BenchmarkTU03SQLProcedureRegistry/compile-each-call-32  6634 15404 ns/op 15873 B/op 76 allocs/op
+BenchmarkTU03SQLProcedureRegistry/compile-each-call-32  8187 14528 ns/op 15872 B/op 76 allocs/op
+BenchmarkTU03SQLProcedureRegistry/compile-each-call-32  6567 15281 ns/op 15872 B/op 76 allocs/op
+BenchmarkTU03SQLProcedureRegistry/compile-each-call-32  8850 14774 ns/op 15872 B/op 76 allocs/op
+BenchmarkTU03SQLProcedureRegistry/compile-each-call-32  8252 13459 ns/op 15872 B/op 76 allocs/op
+BenchmarkTU03SQLProcedureRegistry/registry-call-32     19783  6202 ns/op  6904 B/op 36 allocs/op
+BenchmarkTU03SQLProcedureRegistry/registry-call-32     18973  6328 ns/op  6904 B/op 36 allocs/op
+BenchmarkTU03SQLProcedureRegistry/registry-call-32     19586  5862 ns/op  6904 B/op 36 allocs/op
+BenchmarkTU03SQLProcedureRegistry/registry-call-32     19444  6072 ns/op  6904 B/op 36 allocs/op
+BenchmarkTU03SQLProcedureRegistry/registry-call-32     20168  5893 ns/op  6904 B/op 36 allocs/op
+```
+
+Median comparison (lower is better):
+
+| Path | Median ns/op | Approx. seconds / 10k calls | Median B/op | Allocs/op | Relative time | Relative bytes | Relative allocs |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Compile every call | 14,774 | 0.14774 | 15,872 | 76 | 1.00x | 1.00x | 1.00x |
+| Registry call | 6,072 | 0.06072 | 6,904 | 36 | 0.41x | 0.43x | 0.47x |
+| Registry improvement | - | 2.43x faster | 2.30x lower | 2.11x fewer | - | - | - |
+
+The measured win is limited to repeated in-process calls. The tradeoff is
+bounded retained memory for compiled plans and caller-managed lifecycle;
+registration cost, source resolver work, authorization, and network/storage
+latency are outside this benchmark. The default SQL path and all server and
+storage defaults are unchanged.
+
 ## CH-U49 Skip-Index EXPLAIN Diagnostics
 
 This paired clean-worktree benchmark compares the pre-CH-U49 implementation

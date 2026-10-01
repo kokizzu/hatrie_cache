@@ -194,6 +194,7 @@ security guidance before exposing it on a network.
 - Bounded authenticated versioned configuration watch: [CONFIG_WATCH.md](CONFIG_WATCH.md)
 - Opt-in adaptive per-peer circuit cooldowns: [ADAPTIVE_PEER_BREAKER.md](ADAPTIVE_PEER_BREAKER.md)
 - Authenticated bounded compact-peer listener: [COMPACT_PEER_LISTENER.md](COMPACT_PEER_LISTENER.md)
+- Tarantool-inspired bounded read-only SQL procedure registry: [TU03_STORED_PROCEDURE_REGISTRY.md](TU03_STORED_PROCEDURE_REGISTRY.md), with measurements in [BENCHMARK.md](BENCHMARK.md#t-u03-read-only-sql-procedure-registry)
 - Clock-independent bounded replica RPO status: [REPLICA_RPO_STATUS.md](REPLICA_RPO_STATUS.md)
 - Online snapshot manifest with exact journal coordinate: [SNAPSHOT_MANIFEST.md](SNAPSHOT_MANIFEST.md)
 - Per-space conflict policy registry: [CONFLICT_POLICY.md](CONFLICT_POLICY.md)
