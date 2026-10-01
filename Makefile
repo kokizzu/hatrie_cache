@@ -22698,3 +22698,24 @@ status-t-u33:
 
 deliver-t-u33:
 	@bash ./scripts/deliver-t-u33.sh
+
+test-t-u05:
+	@bash ./scripts/test-t-u05.sh test
+
+format-t-u05:
+	@bash ./scripts/test-t-u05.sh format
+
+benchmark-t-u05:
+	@bash ./scripts/test-t-u05.sh benchmark
+
+test-t-u05-package:
+	@bash ./scripts/test-t-u05.sh package
+
+race-t-u05:
+	@bash ./scripts/test-t-u05.sh race
+
+vet-t-u05:
+	@bash ./scripts/test-t-u05.sh vet
+
+deliver-t-u05:
+	@bash ./scripts/deliver-t-u05.sh

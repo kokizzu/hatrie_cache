@@ -4805,3 +4805,11 @@ provides live-row filtering after restore. It is opt-in: the adapter remains
 responsible for row-count matching, atomic publication, and compaction. See
 [CHU06_PERSISTENT_DELETE_BITMAP.md](CHU06_PERSISTENT_DELETE_BITMAP.md) and the
 [benchmark entry](BENCHMARK.md#ch-u06-persistent-delete-bitmap).
+
+### Session Transaction Settings
+
+`hatCache.SQLTransactionSession` provides opt-in per-session defaults for
+transaction isolation, read-only mode, and timeout. Defaults remain snapshot,
+writable, and no timeout; changing a session affects only future transactions.
+See [TU005_SESSION_TRANSACTION_SETTINGS.md](TU005_SESSION_TRANSACTION_SETTINGS.md)
+and the [benchmark entry](BENCHMARK.md#t-u05-session-transaction-settings).

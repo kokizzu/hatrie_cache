@@ -32979,3 +32979,20 @@ The adapter costs `1.24x` the post-change baseline, or `30.9 ns` and `24.1%`
 extra CPU per authorization, with no allocation or additional bytes. The
 overhead is opt-in and buys canonical operation/name validation plus immediate
 grant revocation; existing policy and registry paths are unchanged.
+
+## T-U05 Session Transaction Settings
+
+This benchmark isolates the policy-read cost of the new opt-in
+`hatCache.SQLTransactionSession`. The direct copy is a control for reading a
+`SQLTransactionOptions` value; it does not include transaction snapshot
+creation. Five `-benchmem` samples ran on the same AMD Ryzen 9 5950X host.
+
+| Path | Samples (ns/op) | Median | Bytes/op | Allocs/op | Relative |
+| --- | --- | ---: | ---: | ---: | --- |
+| Direct option copy control | 0.2559, 0.2481, 0.2514, 0.2525, 0.2469 | 0.251 | 0 | 0 | baseline |
+| `SQLTransactionSession.Options` | 4.780, 4.787, 4.794, 4.854, 4.799 | 4.794 | 0 | 0 | 19.1x slower; +4.543 ns |
+
+The session path adds a read lock but no allocations. This is a control-plane
+tradeoff for validated, race-safe per-session inheritance; the existing direct
+transaction APIs and transaction execution path are unchanged. See
+[TU005_SESSION_TRANSACTION_SETTINGS.md](TU005_SESSION_TRANSACTION_SETTINGS.md).
