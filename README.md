@@ -217,7 +217,7 @@ security guidance before exposing it on a network.
 - Read-only hypothetical SQL index/projection cost analysis: [SQL_WHATIF.md](SQL_WHATIF.md)
 - Deep ordered SQL pages without offset scans: [KEYSET_PAGINATION.md](KEYSET_PAGINATION.md)
 - JSON `LIKE 'prefix%'` scans through ordered indexes: [SQL LIKE prefix index](SQL_LIKE_PREFIX_INDEX.md)
-- Selective streaming joins with an opt-in runtime Bloom filter: [SQL runtime join filter](SQL_RUNTIME_JOIN_FILTER.md)
+- Selective streaming joins with an opt-in runtime Bloom filter and left-only `WHERE` pushdown: [SQL runtime join filter](SQL_RUNTIME_JOIN_FILTER.md)
 - ClickHouse-style compressed SQL bitmap aggregates and set operations: [SQL bitmap aggregates](SQL_BITMAP_AGGREGATES.md)
 - Automatic exact-to-approximate distinct counting: [SQL automatic distinct counting](SQL_AUTO_COUNT_DISTINCT.md)
 - Mergeable approximate distinct SQL states: [CH042_APPROX_DISTINCT_STATE.md](CH042_APPROX_DISTINCT_STATE.md)

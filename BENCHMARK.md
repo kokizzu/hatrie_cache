@@ -17113,6 +17113,29 @@ filter setup and callback cost. See
 [SQL_RUNTIME_JOIN_FILTER.md](SQL_RUNTIME_JOIN_FILTER.md) for the API, fallback
 rules, and correctness guarantees.
 
+### SQL Runtime Join Bloom Filter: Left-Only `WHERE` Pushdown
+
+The round-54 extension evaluates a deterministic predicate that references only
+the streamed left source before exact hash probing. The right-side predicate
+case remains on the established executor. Command: `make
+benchmark-sql-runtime-join-filter`.
+
+Raw five-sample output on Linux/amd64 with an AMD Ryzen 9 5950X:
+
+```text
+selective_where baseline:       32,841,731  33,629,771  32,011,638  32,670,508  31,706,490 ns/op; 46,551,063 46,548,621 46,548,765 46,548,763 46,548,609 B/op; 206,214 206,210 206,209 206,209 206,209 allocs/op
+selective_where runtime_filter: 16,602,205  16,695,200  17,127,066  16,958,095 17,607,051 ns/op;    940,514    940,524    940,447    940,505    940,536 B/op;   6,226   6,226   6,226   6,226   6,226 allocs/op
+```
+
+| Path | Median time | Median heap | Median allocations | Relative to baseline |
+| --- | ---: | ---: | ---: | ---: |
+| Established materialized executor | 32.671 ms | 46.549 MB | 206,209 | 1.00x |
+| Runtime filter with left-only `WHERE` | 16.958 ms | 0.941 MB | 6,226 | 1.93x faster, 49.49x lower heap, 33.13x fewer allocations |
+
+The improvement is workload-specific: it depends on a large streamed probe side
+and a selective left predicate. Unsupported and right-referencing predicates
+retain the exact established execution path.
+
 ## SQL Compact Hash Aggregation
 
 Command: `make benchmark-sql-hash-aggregate-all`.
