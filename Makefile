@@ -22558,3 +22558,54 @@ commit-chg10-gate:
 .PHONY: push-chg10-gate
 push-chg10-gate:
 	@bash ./scripts/deliver-chg10-gate.sh push
+.PHONY: test-chg11-quorum
+test-chg11-quorum:
+	@bash scripts/test-chg11-quorum.sh test
+
+.PHONY: format-chg11-quorum
+format-chg11-quorum:
+	@bash scripts/test-chg11-quorum.sh format
+
+.PHONY: benchmark-chg11-baseline
+benchmark-chg11-baseline:
+	@bash scripts/test-chg11-quorum.sh baseline
+
+.PHONY: benchmark-chg11-quorum
+benchmark-chg11-quorum:
+	@bash scripts/test-chg11-quorum.sh benchmark
+
+.PHONY: test-chg11-package
+test-chg11-package:
+	@bash scripts/test-chg11-quorum.sh package
+
+.PHONY: race-chg11-quorum
+race-chg11-quorum:
+	@bash scripts/test-chg11-quorum.sh race
+
+.PHONY: vet-chg11-quorum
+vet-chg11-quorum:
+	@bash scripts/test-chg11-quorum.sh vet
+
+.PHONY: test-chg11-all
+test-chg11-all:
+	@bash scripts/test-chg11-quorum.sh all
+
+.PHONY: check-chg11-quorum
+check-chg11-quorum:
+	@bash scripts/deliver-chg11-quorum.sh check
+
+.PHONY: status-chg11-quorum
+status-chg11-quorum:
+	@bash scripts/deliver-chg11-quorum.sh status
+
+.PHONY: stage-chg11-quorum
+stage-chg11-quorum:
+	@bash scripts/deliver-chg11-quorum.sh stage
+
+.PHONY: commit-chg11-quorum
+commit-chg11-quorum:
+	@bash scripts/deliver-chg11-quorum.sh commit
+
+.PHONY: push-chg11-quorum
+push-chg11-quorum:
+	@bash scripts/deliver-chg11-quorum.sh push

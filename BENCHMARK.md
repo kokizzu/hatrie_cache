@@ -1,5 +1,51 @@
 # Benchmark
 
+## T-U10 journal-wide synchronous write quorum
+
+Environment: Linux/amd64, AMD Ryzen 9 5950X 16-Core Processor. Five samples
+were collected with `-benchtime=100ms -benchmem`.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative time |
+| --- | ---: | ---: | ---: | ---: |
+| Existing `ExecuteWriteQuorum` three targets | 1,161 | 544 | 10 | 1.00x |
+| Disabled journal coordinator | 4.054 | 0 | 0 | 0.0035x |
+| Enabled exact journal coordinator | 1,176 | 672 | 9 | 1.01x slower, within noise |
+
+Raw baseline samples:
+
+```text
+ExecuteWriteQuorumThreeTargets: 1201 ns/op 544 B/op 10 allocs/op
+ExecuteWriteQuorumThreeTargets: 1161 ns/op 544 B/op 10 allocs/op
+ExecuteWriteQuorumThreeTargets: 1145 ns/op 544 B/op 10 allocs/op
+ExecuteWriteQuorumThreeTargets: 1147 ns/op 544 B/op 10 allocs/op
+ExecuteWriteQuorumThreeTargets: 1166 ns/op 544 B/op 10 allocs/op
+```
+
+Raw disabled coordinator samples:
+
+```text
+disabled_noop: 4.086 ns/op 0 B/op 0 allocs/op
+disabled_noop: 4.026 ns/op 0 B/op 0 allocs/op
+disabled_noop: 4.054 ns/op 0 B/op 0 allocs/op
+disabled_noop: 4.060 ns/op 0 B/op 0 allocs/op
+disabled_noop: 4.037 ns/op 0 B/op 0 allocs/op
+```
+
+Raw enabled exact coordinator samples:
+
+```text
+enabled_exact: 1128 ns/op 672 B/op 9 allocs/op
+enabled_exact: 1195 ns/op 672 B/op 9 allocs/op
+enabled_exact: 1176 ns/op 672 B/op 9 allocs/op
+enabled_exact: 1186 ns/op 672 B/op 9 allocs/op
+enabled_exact: 1146 ns/op 672 B/op 9 allocs/op
+```
+
+The feature is retained for exact acknowledgement safety, not as a claimed
+throughput win. Its default disabled path adds zero allocations; the enabled
+path is 1.01x slower in this run, retains 128 more bytes than the existing
+executor for sequence/digest attempt metadata, and uses one fewer allocation.
+
 ## T-U03: Read-Only SQL Procedure Registry
 
 This benchmark measures the opt-in `hatSql.SQLProcedureRegistry` against the

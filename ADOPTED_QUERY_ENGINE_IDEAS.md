@@ -752,3 +752,16 @@ changed.
 
 **Remaining:** Wire the gate into every selected mutation boundary and the live
 promotion/control-plane state before treating it as a global invariant.
+## T-U10: Journal-wide synchronous write quorum
+
+**Source:** Tarantool synchronous replication and database write-concern
+semantics.
+
+**Adopted:** `hatReplication.JournalWriteQuorumCoordinator` is an opt-in,
+disabled-by-default coordinator that requires exact journal sequence and digest
+acknowledgements from a configured threshold. It returns deterministic attempt
+details for repair and never silently counts stale or unapplied responses.
+
+**Remaining:** The embedding service still owns peer transport,
+authentication, retries, ordering, rollback, and wiring the coordinator into a
+real journal commit path.
