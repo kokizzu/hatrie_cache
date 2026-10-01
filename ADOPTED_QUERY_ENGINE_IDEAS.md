@@ -745,3 +745,14 @@ slower than a raw map; the five-sample 10,000-row comparison is 4.48x faster
 for scans, 1.16x faster to build, 11.2% lower build bytes, and 2.02x lower
 build allocations. See [T-U16_MEMTX_ROW_TABLE.md](T-U16_MEMTX_ROW_TABLE.md) and
 [BENCHMARK.md](BENCHMARK.md#t-u16-selectable-memtx-style-row-engine).
+
+## Tarantool T-U13: Durable Cluster Membership
+
+Adopted as opt-in `hatTopology.MembershipLog`. Join and leave proposals are
+bound to topology fingerprints and monotonic fencing generations, require a
+validated quorum decision, reject removal of active shard owners, and retain a
+bounded audit history. Configured logs use fsync plus atomic rename and roll
+back in-memory state when persistence fails. This is control-plane state only:
+transport, consensus vote collection, and shard migration remain caller-owned.
+See [TU13_DURABLE_CLUSTER_MEMBERSHIP.md](TU13_DURABLE_CLUSTER_MEMBERSHIP.md)
+and [BENCHMARK.md](BENCHMARK.md#t-u13-durable-cluster-membership).

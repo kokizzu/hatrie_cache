@@ -22312,3 +22312,26 @@ commit-t-u16-memtx-row-table:
 .PHONY: push-t-u16-memtx-row-table
 push-t-u16-memtx-row-table:
 	bash ./scripts/push-t-u16-memtx-row-table.sh
+.PHONY: test-tu13-membership
+test-tu13-membership:
+	bash ./scripts/test-tu13-membership.sh
+
+.PHONY: format-tu13-membership
+format-tu13-membership:
+	bash ./scripts/format-tu13-membership.sh
+
+.PHONY: benchmark-tu13-membership
+benchmark-tu13-membership:
+	bash ./scripts/benchmark-tu13-membership.sh
+
+.PHONY: verify-tu13-membership
+verify-tu13-membership:
+	bash ./scripts/verify-tu13-membership.sh
+
+.PHONY: commit-tu13-membership
+commit-tu13-membership:
+	bash ./scripts/commit-tu13-membership.sh
+
+.PHONY: push-tu13-membership
+push-tu13-membership:
+	bash ./scripts/push-tu13-membership.sh

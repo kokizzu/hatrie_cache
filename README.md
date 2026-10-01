@@ -4774,3 +4774,11 @@ requires explicit `Compact` after deletes. It is not the default SQL or
 HAT-trie storage path; point lookups and updates can be slower than a raw map.
 See [T-U16_MEMTX_ROW_TABLE.md](T-U16_MEMTX_ROW_TABLE.md) and the
 [benchmark entry](BENCHMARK.md#t-u16-selectable-memtx-style-row-engine).
+
+### Durable Cluster Membership
+
+The opt-in `hatTopology.MembershipLog` provides quorum-bound join/leave
+proposals, fencing generations, shard-owner safety checks, bounded audit
+records, and atomic snapshot persistence. It does not automatically migrate
+partitions or enable sharding. See [TU13_DURABLE_CLUSTER_MEMBERSHIP.md](TU13_DURABLE_CLUSTER_MEMBERSHIP.md)
+and the [benchmark entry](BENCHMARK.md#t-u13-durable-cluster-membership).

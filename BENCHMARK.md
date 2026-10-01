@@ -32611,3 +32611,27 @@ MemtxUpdate: 36.15; 35.75; 34.96; 34.32; 34.39 ns/op; 0 B/op; 0 allocs/op
 The selectable engine is intentionally not a default replacement: it wins
 strongly for scans and reduces build allocation volume, while raw map lookup
 and updates remain faster. See [T-U16_MEMTX_ROW_TABLE.md](T-U16_MEMTX_ROW_TABLE.md).
+
+## T-U13 Durable Cluster Membership
+
+This is a control-plane benchmark. The baseline directly appends a node and
+normalizes the topology; the membership path creates a proposal, validates one
+quorum decision, recomputes the candidate, and commits it. It is intentionally
+not used on ordinary data reads or writes.
+
+| Operation | Direct baseline | Membership log | Tradeoff |
+| --- | ---: | ---: | ---: |
+| Join proposal and commit | 609.1 ns/op; 1,064 B/op; 7 allocs/op | 8,407 ns/op; 6,576 B/op; 136 allocs/op | 13.80x latency; 6.18x bytes; 19.43x allocs |
+| 32-record snapshot marshal | N/A | 32,699 ns/op; 30,688 B/op; 69 allocs/op | bounded persistence serialization |
+
+Raw five-sample output:
+
+```text
+BaselineTopologyJoin: 609.1; 594.5; 613.3; 596.6; 609.5 ns/op; 1,064 B/op; 7 allocs/op
+MembershipJoinCommit: 8608; 8353; 8350; 8470; 8407 ns/op; 6,576 B/op; 136 allocs/op
+MembershipSnapshotMarshal: 32722; 32699; 32301; 32646; 33394 ns/op; 30,679; 30,698; 30,688; 30,688; 30,682 B/op; 69 allocs/op
+```
+
+The overhead is acceptable for rare membership changes because the feature is
+opt-in and provides fencing, quorum evidence, bounded history, and crash-safe
+publication. See [TU13_DURABLE_CLUSTER_MEMBERSHIP.md](TU13_DURABLE_CLUSTER_MEMBERSHIP.md).
