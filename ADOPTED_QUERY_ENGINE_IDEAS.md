@@ -731,6 +731,17 @@ resolution remains unchanged. See
 [TU38_CONFLICT_EVENT_LOG.md](TU38_CONFLICT_EVENT_LOG.md) and
 [BENCHMARK.md](BENCHMARK.md#tu38-conflict-introspection-stream).
 
+## T-U39: Named-Space Changefeed
+
+Added an opt-in `hatReplication.SpaceChangefeed` for one named space. It fixes
+the payload schema version, validates copy-safe insert/update/delete transitions
+atomically in batches, retains a bounded ordered history, reports retention
+gaps, binds replay to `ChangefeedCheckpoint`, and provides context-aware waiting
+without one goroutine per idle consumer. Storage-writer integration, transport,
+and durable payload storage remain caller-owned. See
+[TU39_SPACE_CHANGEFEED.md](TU39_SPACE_CHANGEFEED.md) and
+[BENCHMARK.md](BENCHMARK.md#tu39-named-space-changefeed).
+
 ## M033: Batched Logical Timestamp Oracle
 
 M033 is partially adopted through the opt-in

@@ -32176,6 +32176,32 @@ conflicts; the existing resolver has no event-log overhead. Full semantics and
 the security/retention tradeoff are documented in
 [TU38_CONFLICT_EVENT_LOG.md](TU38_CONFLICT_EVENT_LOG.md).
 
+<a id="tu39-named-space-changefeed"></a>
+## T-U39 Named-Space Changefeed
+
+Command: `make benchmark-chg16-space-changefeed`.
+
+The baseline is a fixed-size committed-write slot update with no payload
+ownership or replay. The final single-event path includes schema validation,
+payload copies, retention, notification, and a copy-safe returned event. The
+initial row is the same implementation before the single-event fast path was
+added.
+
+| Path | Median ns/op | B/op | allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Zero-copy committed-write baseline | 6.18 | 0 | 0 | 1.00x |
+| Single `Append` before fast path | 261.0 | 368 | 7 | 42.2x |
+| Single `Append` final fast path | 150.8 | 144 | 5 | 24.4x |
+| `AppendBatch` of 32 | 4,257 | 8,048 | 131 | n/a |
+| Replay 16 events | 895.1 | 2,048 | 33 | n/a |
+| Checkpoint read | 8.78 | 0 | 0 | n/a |
+
+The fast path is 1.73x faster than the initial implementation, with 2.56x
+less allocated heap and 1.4x fewer allocations. The feature is default-off;
+the absolute event-copy cost is paid only by callers that create and append to
+a feed. Full semantics and checkpoint/reconnect ownership are documented in
+[TU39_SPACE_CHANGEFEED.md](TU39_SPACE_CHANGEFEED.md).
+
 <a id="m033-batched-logical-timestamp-oracle"></a>
 ## M033: Batched Logical Timestamp Oracle
 

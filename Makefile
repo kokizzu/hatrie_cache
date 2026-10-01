@@ -22778,3 +22778,33 @@ commit-chg15-conflict-events:
 
 push-chg15-conflict-events:
 	bash ./scripts/push-chg15-conflict-events.sh
+
+test-chg16-space-changefeed:
+	bash ./scripts/test-chg16-space-changefeed.sh
+
+format-chg16-space-changefeed:
+	bash ./scripts/format-chg16-space-changefeed.sh
+
+benchmark-chg16-space-changefeed:
+	bash ./scripts/benchmark-chg16-space-changefeed.sh
+
+test-chg16-space-changefeed-package:
+	bash ./scripts/test-chg16-space-changefeed-package.sh
+
+race-chg16-space-changefeed:
+	bash ./scripts/race-chg16-space-changefeed.sh
+
+vet-chg16-space-changefeed:
+	bash ./scripts/vet-chg16-space-changefeed.sh
+
+status-chg16-space-changefeed:
+	bash ./scripts/status-chg16-space-changefeed.sh
+
+stage-chg16-space-changefeed:
+	bash ./scripts/stage-chg16-space-changefeed.sh
+
+commit-chg16-space-changefeed:
+	bash ./scripts/commit-chg16-space-changefeed.sh
+
+push-chg16-space-changefeed:
+	bash ./scripts/push-chg16-space-changefeed.sh
