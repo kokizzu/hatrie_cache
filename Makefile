@@ -22439,6 +22439,10 @@ format-round41-space-feed:
 benchmark-round41-space-feed:
 	bash ./scripts/benchmark-round41-space-feed.sh
 
+.PHONY: test-round42-peer-watch
+test-round42-peer-watch:
+	bash ./scripts/test-round42-peer-watch.sh
+
 .PHONY: race-round41-space-feed
 race-round41-space-feed:
 	bash ./scripts/race-round41-space-feed.sh
@@ -22470,3 +22474,26 @@ commit-round41-space-feed:
 .PHONY: push-round41-space-feed
 push-round41-space-feed:
 	bash ./scripts/push-round41-space-feed.sh
+format-round42-peer-watch:
+	bash ./scripts/format-round42-peer-watch.sh
+
+benchmark-round42-peer-watch:
+	bash ./scripts/benchmark-round42-peer-watch.sh
+
+race-round42-peer-watch:
+	bash ./scripts/race-round42-peer-watch.sh
+
+vet-round42-peer-watch:
+	bash ./scripts/vet-round42-peer-watch.sh
+
+check-round42-peer-watch:
+	bash ./scripts/check-round42-peer-watch.sh
+
+stage-round42-peer-watch:
+	bash ./scripts/stage-round42-peer-watch.sh
+
+commit-round42-peer-watch:
+	bash ./scripts/commit-round42-peer-watch.sh
+
+push-round42-peer-watch:
+	bash ./scripts/push-round42-peer-watch.sh

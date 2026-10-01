@@ -198,6 +198,7 @@ security guidance before exposing it on a network.
 - Per-space conflict policy registry: [CONFLICT_POLICY.md](CONFLICT_POLICY.md)
 - Opt-in redacted conflict introspection stream: [TU38_CONFLICT_INTROSPECTION.md](TU38_CONFLICT_INTROSPECTION.md)
 - Opt-in versioned, resumable named-space changefeed: [TU39_SPACE_CHANGEFEED.md](TU39_SPACE_CHANGEFEED.md)
+- Opt-in authenticated compact peer configuration watch with prefix filtering and reconnect recovery: [TU27_PEER_CONFIG_WATCH.md](TU27_PEER_CONFIG_WATCH.md)
 - Named versioned space catalog: [SPACE_CATALOG.md](SPACE_CATALOG.md)
 - Authenticated cursor-after pagination: [CURSOR_PAGINATION.md](CURSOR_PAGINATION.md)
 - Changefeed progress frontiers: [CHANGEFEED_PROGRESS.md](CHANGEFEED_PROGRESS.md)

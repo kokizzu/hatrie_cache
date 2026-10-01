@@ -133,6 +133,7 @@ type ConfigWatchRequest struct {
 	Principal    string
 	AfterVersion uint64
 	Limit        int
+	KeyPrefix    string
 }
 
 // ConfigWatchStats is a point-in-time retention snapshot.
@@ -333,6 +334,9 @@ func (log *ConfigWatchLog) Read(ctx context.Context, request ConfigWatchRequest)
 	if err != nil {
 		return nil, request.AfterVersion, err
 	}
+	if len(request.KeyPrefix) > log.maxKeyBytes {
+		return nil, request.AfterVersion, ErrConfigWatchKeyInvalid
+	}
 	log.mu.Lock()
 	defer log.mu.Unlock()
 	if log.historySize == 0 || request.AfterVersion >= log.current {
@@ -347,16 +351,17 @@ func (log *ConfigWatchLog) Read(ctx context.Context, request ConfigWatchRequest)
 		}
 	}
 	events := make([]ConfigWatchEvent, 0, min(limit, log.historySize))
+	next := request.AfterVersion
 	for offset := 0; offset < log.historySize && len(events) < limit; offset++ {
 		event := log.history[(log.historyStart+offset)%log.historyLimit]
 		if event.Version <= request.AfterVersion {
 			continue
 		}
+		next = event.Version
+		if request.KeyPrefix != "" && !strings.HasPrefix(event.Key, request.KeyPrefix) {
+			continue
+		}
 		events = append(events, cloneConfigWatchEvent(event))
-	}
-	next := request.AfterVersion
-	if len(events) > 0 {
-		next = events[len(events)-1].Version
 	}
 	return events, next, nil
 }
