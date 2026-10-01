@@ -32800,3 +32800,26 @@ aggregate fields. Plain, missing, malformed, unsupported, and NULL values
 retain the established semantics. An unordered simple `GROUP BY` can be
 handled by the earlier vector-group executor and is outside this measurement.
 See [CHU66_GROUPED_NUMERIC_AGGREGATE.md](CHU66_GROUPED_NUMERIC_AGGREGATE.md).
+
+## M-G07: Bounded Source Health Records
+
+`hatMetrics.SourceHealthRegistry` is an opt-in Materialize-inspired diagnostic
+registry for source status, failure streaks, and frontiers. It is not attached
+to ordinary cache writes, and a nil registry leaves the monitoring path
+unchanged. The matched comparison uses 1,024 sources and five `-benchmem`
+samples on Linux/amd64, AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | CPU vs frontier | Bytes vs frontier |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Source frontier snapshot | 125,685 | 59,392 | 2 | 1.00x | 1.00x |
+| Source health snapshot | 139,013 | 108,544 | 2 | 1.11x | 1.83x |
+| Source frontier advance | 27.94 | 0 | 0 | 1.00x | 1.00x |
+| Source health record | 78.34 | 0 | 0 | 2.80x | 1.00x |
+
+The extra cost is the deliberate diagnostic state: status, failure streak,
+bounded error text, and update timestamp. It is paid only when the caller
+constructs and records health state. The 1,024-source metrics formatter had a
+median of 1,714,557 ns/op, 2,298,267 B/op, and 14,130 allocations/op.
+
+Raw output and reproduction targets are in
+[M-G07_SOURCE_HEALTH.md](M-G07_SOURCE_HEALTH.md).

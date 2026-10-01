@@ -22534,3 +22534,46 @@ review-chu66-grouped-numeric-aggregate:
 .PHONY: ship-chu66-grouped-numeric-aggregate
 ship-chu66-grouped-numeric-aggregate:
 	bash scripts/ship-chu66-grouped-numeric-aggregate.sh ship
+.PHONY: format-mg07-source-health
+format-mg07-source-health:
+	bash scripts/format-mg07-source-health.sh
+
+.PHONY: test-mg07-source-health
+test-mg07-source-health:
+	bash scripts/run-mg07-source-health.sh test
+
+test-mg07-source-health-cache:
+	bash scripts/run-mg07-source-health-cache.sh test
+
+test-mg07-source-health-packages:
+	bash scripts/test-mg07-source-health-packages.sh
+
+benchmark-mg07-source-health-cache:
+	bash scripts/run-mg07-source-health-cache.sh benchmark
+
+race-mg07-source-health-cache:
+	bash scripts/run-mg07-source-health-cache.sh race
+
+vet-mg07-source-health-cache:
+	bash scripts/run-mg07-source-health-cache.sh vet
+
+review-mg07-source-health:
+	bash scripts/review-mg07-source-health.sh
+
+ship-mg07-source-health:
+	bash scripts/ship-mg07-source-health.sh
+
+.PHONY: benchmark-mg07-source-health
+benchmark-mg07-source-health:
+	bash scripts/run-mg07-source-health.sh benchmark
+
+benchmark-mg07-source-health-compare:
+	bash scripts/benchmark-mg07-source-health-compare.sh
+
+.PHONY: race-mg07-source-health
+race-mg07-source-health:
+	bash scripts/run-mg07-source-health.sh race
+
+.PHONY: vet-mg07-source-health
+vet-mg07-source-health:
+	bash scripts/run-mg07-source-health.sh vet

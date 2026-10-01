@@ -800,3 +800,13 @@ multi-branch, and mixed plans on the general executor. The measured fixture
 was 2.30x faster, with 2.43x less allocated heap and 1.36x fewer allocations.
 See [CHU63_CASE_PROJECTION.md](CHU63_CASE_PROJECTION.md) and
 [BENCHMARK.md](BENCHMARK.md#chu63-columnar-case-projection).
+
+## M-G07: Source Health And Lag Records
+
+Partially adopted as an importable, bounded, opt-in source health registry.
+`hatMetrics.SourceHealthRegistry` records `unknown`, `healthy`, `degraded`, and
+`failed` state with monotone source frontiers, failure streaks, bounded error
+text, and Prometheus gauges through `hatCache.MonitoringOptions`. Nil remains
+the default, health is not persisted or replicated, and error text is never a
+metric label. See [M-G07_SOURCE_HEALTH.md](M-G07_SOURCE_HEALTH.md) and
+[BENCHMARK.md](BENCHMARK.md#m-g07-bounded-source-health-records).

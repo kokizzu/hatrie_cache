@@ -106,6 +106,12 @@ type MonitoringOptions struct {
 	// SourceFrontierObserved returns the global observed frontier used to
 	// calculate source lag. Without it, only source frontier gauges are emitted.
 	SourceFrontierObserved func() uint64
+	// SourceHealth optionally exposes bounded per-source health state in
+	// /metrics. It is disabled when nil for backward compatibility.
+	SourceHealth *hatMetrics.SourceHealthRegistry
+	// SourceHealthObserved returns the global observed frontier used to
+	// calculate health-record lag. When nil, SourceFrontierObserved is reused.
+	SourceHealthObserved func() uint64
 	// OperatorFrontier optionally exposes per-operator progress in /metrics. It
 	// is disabled when nil for backward compatibility.
 	OperatorFrontier *hatMetrics.OperatorFrontierRegistry
@@ -1076,6 +1082,7 @@ func (handler *MonitoringHandler) prometheusMetrics() string {
 	writePrometheusGauge(&builder, "hatrie_cache_maintenance_read_only_enabled", "Whether public cache writes are blocked by maintenance read-only mode.", node, boolGauge(handler.options.MaintenanceReadOnly))
 	writePrometheusGauge(&builder, "hatrie_cache_rate_limit_per_second", "Configured dangerous API action rate limit per caller per second; zero means disabled.", node, uint64(handler.options.RateLimiter.Limit()))
 	handler.writePrometheusSourceFrontierMetrics(&builder, node)
+	handler.writePrometheusSourceHealthMetrics(&builder, node)
 	handler.writePrometheusOperatorFrontierMetrics(&builder, node)
 	handler.writePrometheusOperatorMemoryMetrics(&builder, node)
 
