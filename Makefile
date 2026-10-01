@@ -22475,3 +22475,34 @@ review-chu64-count-field:
 .PHONY: ship-chu64-count-field
 ship-chu64-count-field:
 	bash scripts/ship-chu64-count-field.sh ship
+.PHONY: format-chu65-typed-numeric-aggregate
+format-chu65-typed-numeric-aggregate:
+	bash scripts/run-chu65-typed-numeric-aggregate.sh format
+
+.PHONY: test-chu65-typed-numeric-aggregate
+test-chu65-typed-numeric-aggregate:
+	bash scripts/run-chu65-typed-numeric-aggregate.sh test
+
+.PHONY: test-chu65-sql-package
+test-chu65-sql-package:
+	bash scripts/run-chu65-typed-numeric-aggregate.sh package
+
+.PHONY: benchmark-chu65-typed-numeric-aggregate
+benchmark-chu65-typed-numeric-aggregate:
+	bash scripts/run-chu65-typed-numeric-aggregate.sh benchmark
+
+.PHONY: race-chu65-typed-numeric-aggregate
+race-chu65-typed-numeric-aggregate:
+	bash scripts/run-chu65-typed-numeric-aggregate.sh race
+
+.PHONY: vet-chu65-typed-numeric-aggregate
+vet-chu65-typed-numeric-aggregate:
+	bash scripts/run-chu65-typed-numeric-aggregate.sh vet
+
+.PHONY: review-chu65-typed-numeric-aggregate
+review-chu65-typed-numeric-aggregate:
+	bash scripts/ship-chu65-typed-numeric-aggregate.sh review
+
+.PHONY: ship-chu65-typed-numeric-aggregate
+ship-chu65-typed-numeric-aggregate:
+	bash scripts/ship-chu65-typed-numeric-aggregate.sh ship

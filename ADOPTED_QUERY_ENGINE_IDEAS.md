@@ -176,6 +176,12 @@ explicitly opt-in operational control.
 
 | Source | Idea | Status | Evidence |
 |---|---|---|---|
+| ClickHouse | Typed numeric aggregate kernels | Adopted automatically for validated packed columns | Direct `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` aggregate state reads packed `int64`/`float64` words and validity bits without generic value boxing. Plain, dictionary, missing, and malformed layouts fall back. The 100,000-row four-aggregate benchmark measured 2.55x lower latency, 244.55x lower heap, and 9,698.03x fewer allocations. See [CHU65_TYPED_NUMERIC_AGGREGATE.md](CHU65_TYPED_NUMERIC_AGGREGATE.md) and [BENCHMARK.md](BENCHMARK.md#chu65-typed-numeric-aggregate-kernel). |
+
+## Latest Adoption
+
+| Source | Idea | Status | Evidence |
+|---|---|---|---|
 | ClickHouse | Null-aware columnar `COUNT(field)` | Adopted automatically for validated packed columns | Direct unfiltered `COUNT(field)` counts numeric, boolean, and dense nullable validity metadata without per-row value decoding. Filtered, plain, dictionary, missing, and malformed layouts retain the established path. The 100,000-row packed benchmark measured 433.17x lower latency, 133.56x lower heap, and 3,990.85x fewer allocations. See [CHU64_COLUMNAR_COUNT_FIELD.md](CHU64_COLUMNAR_COUNT_FIELD.md) and [BENCHMARK.md](BENCHMARK.md#chu64-columnar-countfield-metadata). |
 | ClickHouse | Constant folding | Adopted for deterministic row-independent scalar expressions | `CAST`, scalar functions, `CASE`, `IN`, `BETWEEN`, null checks, comparisons, and arithmetic are evaluated during execution-local rewrite. Row-dependent, aggregate, custom, unknown, or erroring expressions retain the established evaluator. See `CONSTANT_FOLDING.md`. |
 | ClickHouse/Materialize | Grouped Top-N over aggregate results | Adopted as an opt-in native SQL dataflow path | Grouped `COUNT`/`SUM` output aliases can use mixed-direction ordered `LIMIT`/`OFFSET`; compact grouped state is followed by the existing bounded Top-N heap, with stable ties and NULL semantics. Unsupported qualified source-field order, function order expressions, and `WITH TIES` remain on the ordinary path. [BENCHMARK.md](BENCHMARK.md#native-sql-dataflow-grouped-ordered-limit) |

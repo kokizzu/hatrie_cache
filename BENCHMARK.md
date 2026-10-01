@@ -32748,3 +32748,24 @@ The fast path is automatic only for direct unfiltered `COUNT(field)` over
 validated numeric, boolean, or dense nullable packed columns. Filtered and
 unsupported layouts retain the existing evaluator; no extra memory is
 retained by the optimization. See [CHU64_COLUMNAR_COUNT_FIELD.md](CHU64_COLUMNAR_COUNT_FIELD.md).
+## CHU65: Typed Numeric Aggregate Kernel
+
+Workload: `SELECT SUM(value), AVG(value), MIN(value), MAX(value) FROM
+CACHE('items')` over 100,000 validated packed `float64` rows with 20% NULL
+values. Lower is better.
+
+| Version | ns/op | B/op | allocs/op | CPU improvement | Heap improvement | Allocation improvement |
+|---|---:|---:|---:|---:|---:|---:|
+| Before | 19,108,396 | 2,570,263 | 320,035 | 1.00x | 1.00x | 1.00x |
+| After | 7,497,930 | 10,510 | 33 | 2.55x | 244.55x | 9,698.03x |
+
+Raw five-run values:
+
+```text
+before: 20,081,627  19,108,396  19,085,368  19,352,525  18,777,893 ns/op
+after:   8,177,806   8,109,897   7,089,845   7,426,704   7,497,930 ns/op
+```
+
+Only validated packed numeric aggregate fields use the raw-word kernel.
+Filtered queries keep predicate evaluation and NULL semantics; unsupported
+physical layouts use the established generic accessor. See [CHU65_TYPED_NUMERIC_AGGREGATE.md](CHU65_TYPED_NUMERIC_AGGREGATE.md).

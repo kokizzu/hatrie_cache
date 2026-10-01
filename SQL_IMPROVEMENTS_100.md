@@ -19,7 +19,7 @@ measurement; `P1` needs a workload gate; `P2` is useful only after profiling.
 4. `P0` Fuse conjunctions of direct numeric predicates into one scan.
 5. `P0` Fuse direct numeric predicates with projection and `LIMIT` stopping.
 6. `P0` Add direct columnar `COUNT(field)` null-aware aggregation (adopted as CHU64; see [CHU64_COLUMNAR_COUNT_FIELD.md](CHU64_COLUMNAR_COUNT_FIELD.md)).
-7. `P0` Add direct columnar `SUM`/`AVG` grouped by one dictionary field.
+7. `P0` Add direct columnar `SUM`/`AVG` grouped by one dictionary field. The direct packed numeric aggregate kernel for ungrouped and mixed aggregate state is adopted as CHU65; dictionary-group specialization remains a separate candidate.
 8. `P0` Add direct columnar `MIN`/`MAX` grouped by one dictionary field.
 9. `P0` Add direct dictionary `IN` filtering without materialized rows.
 10. `P0` Add direct dictionary prefix filtering when binary collation permits.

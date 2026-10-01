@@ -10223,6 +10223,8 @@ type sqlColumnarNumericAggregate struct {
 	value         float64
 	seen          bool
 	countMetadata bool
+	numericColumn ColumnarNumericColumn
+	numericPacked bool
 }
 
 type sqlColumnarDictionaryGroupProjection struct {
@@ -10518,6 +10520,14 @@ func (aggregate *sqlColumnarNumericAggregate) add(batch ColumnarBatch, rowIndex 
 	if !ok {
 		return
 	}
+	aggregate.addNumber(number)
+}
+
+func (aggregate *sqlColumnarNumericAggregate) addNumber(number float64) {
+	if aggregate.name == "COUNT" {
+		aggregate.count++
+		return
+	}
 	if !aggregate.seen {
 		aggregate.count, aggregate.sum, aggregate.value, aggregate.seen = 1, number, number, true
 		return
@@ -10593,6 +10603,7 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 	metadataAggregates := sqlColumnarMetadataAggregates(aggregates, q.where, segments, batch.Rows)
 	dictionaryCount, dictionaryCountMetadata := sqlColumnarDictionaryCountMetadata(aggregates, q.where.kind, q.where.op, batch.Rows, dictionaryFilter, filterDictionary.codesTrusted, filterOperator, filterFound, dictionaryINFilter, filterDictionaryIN.codesTrusted, filterDictionaryINCodes)
 	countFieldMetadata := sqlColumnarPrepareCountMetadata(aggregates, batch, q.where)
+	sqlColumnarPrepareNumericAggregateColumns(aggregates, batch)
 	if metrics != nil {
 		node := "COLUMNAR SCAN"
 		if countOnlyMetadata {
@@ -10664,7 +10675,11 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 				}
 				matched++
 				for index := range aggregates {
-					aggregates[index].add(batch, rowIndex)
+					if aggregates[index].numericPacked {
+						aggregates[index].addPackedNumeric(aggregates[index].numericColumn, rowIndex)
+					} else {
+						aggregates[index].add(batch, rowIndex)
+					}
 				}
 			}
 			return nil
