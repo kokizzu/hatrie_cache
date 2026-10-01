@@ -32658,3 +32658,28 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## CH-U14: Streaming Runtime Join Filter
+
+Commands:
+
+```sh
+make benchmark-chg06-external-runtime-filter
+```
+
+Five `-count=5` samples with `-benchtime=100ms` on Linux/amd64, AMD Ryzen 9
+5950X. The fixture joins 100,000 left-side external rows to 512 right-side
+rows, with 512 matching keys. The option is `RuntimeJoinBloomFilter: true`;
+the materialized subtest uses the default `false` value.
+
+| Path | Median ns/op | B/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: |
+| Materialized fallback | 34,714,388 | 48,936,818 | 305,695 | baseline |
+| Streaming runtime Bloom filter | 10,563,858 | 3,466,027 | 107,235 | 3.29x faster, 14.12x lower bytes, 2.85x fewer allocations |
+
+Parent-branch raw control (`codex/chg04-aggregate-combinators`) measured
+39,253,903 ns/op, 48,936,824 B/op, and 305,696 allocs/op in five samples.
+The paired feature-branch subtests are the primary comparison because they
+reduce host-noise sensitivity. The optimization is opt-in because Bloom and
+hash-map construction can cost more than materialization for small or
+non-selective joins. See [CHU14_RUNTIME_JOIN_FILTER.md](CHU14_RUNTIME_JOIN_FILTER.md).

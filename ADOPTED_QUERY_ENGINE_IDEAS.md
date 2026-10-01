@@ -734,3 +734,7 @@ Adopted as opt-in `hatStorage.CompactionDiagnostics`: bounded arrangement regist
 ## Materialize M-U41: Webhook Event Idempotency
 
 Adopted as opt-in `hatSql.WebhookEventDeduplicator`: bounded source/event-ID admission, payload-fingerprint conflict detection, expiry, deterministic CRC-protected HWE1 snapshots, and atomic restore. The caller owns application, durable storage, acknowledgement, and HTTP/webhook wiring; existing defaults remain unchanged. See [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md) and [BENCHMARK.md](BENCHMARK.md#m-u41-webhook-event-idempotency).
+
+## ClickHouse CH-U14: Streaming Runtime Join Filter
+
+Partially adopted as an opt-in direct inner equality optimization. `SQLQueryOptions.RuntimeJoinBloomFilter` now accepts streaming `CACHE` and `EXTERNAL` sources, builds exact right-side buckets plus a bounded Bloom filter, and preserves the materialized fallback for unsupported query shapes. General planner exchange and distributed propagation remain deferred. See [CHU14_RUNTIME_JOIN_FILTER.md](CHU14_RUNTIME_JOIN_FILTER.md) and [BENCHMARK.md](BENCHMARK.md#ch-u14-streaming-runtime-join-filter).

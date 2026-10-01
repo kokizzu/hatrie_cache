@@ -22393,3 +22393,38 @@ commit-chg04-sample-stream:
 
 push-chg04-sample-stream:
 	bash scripts/deliver-chg04-sample-stream.sh push
+.PHONY: test-chg06-external-runtime-filter
+test-chg06-external-runtime-filter:
+	@bash scripts/test-chg06-external-runtime-filter.sh
+
+.PHONY: format-chg06-external-runtime-filter
+format-chg06-external-runtime-filter:
+	@bash scripts/format-chg06-external-runtime-filter.sh
+
+.PHONY: benchmark-chg06-external-runtime-filter
+benchmark-chg06-external-runtime-filter:
+	@bash scripts/benchmark-chg06-external-runtime-filter.sh
+
+.PHONY: test-chg06-package
+test-chg06-package:
+	@bash scripts/test-chg06-package.sh
+
+.PHONY: test-chg06-related
+test-chg06-related:
+	@bash scripts/test-chg06-related.sh
+
+.PHONY: race-chg06-package
+race-chg06-package:
+	@bash scripts/race-chg06-package.sh
+
+.PHONY: vet-chg06-package
+vet-chg06-package:
+	@bash scripts/vet-chg06-package.sh
+
+.PHONY: check-chg06-diff
+check-chg06-diff:
+	@bash scripts/check-chg06-diff.sh
+
+.PHONY: deliver-chg06-external-runtime-filter
+deliver-chg06-external-runtime-filter:
+	@bash scripts/deliver-chg06-external-runtime-filter.sh

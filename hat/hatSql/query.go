@@ -5093,7 +5093,10 @@ func sqlRuntimeJoinFilterStreamable(query *sqlQuery, resolver SQLSourceResolver,
 		return false, nil
 	}
 	join := query.joins[0]
-	if join.kind != "INNER" || join.source.lateral || query.from.kind != "CACHE" || join.source.kind != "CACHE" || len(query.from.fieldTypes) != 0 || len(join.source.fieldTypes) != 0 || len(query.selects) == 0 {
+	if join.kind != "INNER" || join.source.lateral || len(query.from.fieldTypes) != 0 || len(join.source.fieldTypes) != 0 || len(query.selects) == 0 {
+		return false, nil
+	}
+	if !sqlRuntimeJoinFilterSourceStreamable(*query.from, resolver) || !sqlRuntimeJoinFilterSourceStreamable(join.source, resolver) {
 		return false, nil
 	}
 	for _, selectItem := range query.selects {
@@ -5103,9 +5106,6 @@ func sqlRuntimeJoinFilterStreamable(query *sqlQuery, resolver SQLSourceResolver,
 	}
 	_, _, rightField, ok := sqlHashJoinFields(join.on, []string{query.from.alias}, join.source.alias)
 	if !ok {
-		return false, nil
-	}
-	if _, ok := resolver.(SQLStreamSourceResolver); !ok {
 		return false, nil
 	}
 	if indexed, ok := resolver.(BorrowedIndexedSourceResolver); ok {
@@ -5126,6 +5126,22 @@ func sqlRuntimeJoinFilterStreamable(query *sqlQuery, resolver SQLSourceResolver,
 		}
 	}
 	return true, nil
+}
+
+func sqlRuntimeJoinFilterSourceStreamable(source sqlSource, resolver SQLSourceResolver) bool {
+	if resolver == nil {
+		return false
+	}
+	switch source.kind {
+	case "CACHE":
+		_, ok := resolver.(SQLStreamSourceResolver)
+		return ok
+	case "EXTERNAL":
+		_, ok := resolver.(ExternalStreamSourceResolver)
+		return ok
+	default:
+		return false
+	}
 }
 
 // executeSQLRuntimeJoinFilter builds the smaller right-side hash table from a

@@ -17,6 +17,40 @@ type nonStreamingRuntimeJoinFilterResolver struct {
 	sources map[string][]hatSql.SQLRow
 }
 
+type runtimeExternalJoinFilterResolver struct {
+	sources     map[string][]hatSql.SQLRow
+	streamCalls int
+}
+
+func (resolver *runtimeExternalJoinFilterResolver) ResolveSQLSource(_ string, key string) ([]hatSql.SQLRow, error) {
+	rows, ok := resolver.sources[key]
+	if !ok {
+		return nil, fmt.Errorf("unknown external source %q", key)
+	}
+	return rows, nil
+}
+
+func (resolver *runtimeExternalJoinFilterResolver) ResolveSQLExternalSource(key string) ([]hatSql.SQLRow, error) {
+	return resolver.ResolveSQLSource("EXTERNAL", key)
+}
+
+func (resolver *runtimeExternalJoinFilterResolver) StreamSQLExternalSource(ctx context.Context, key string, visit func(hatSql.SQLRow) error) error {
+	rows, ok := resolver.sources[key]
+	if !ok {
+		return fmt.Errorf("unknown external source %q", key)
+	}
+	resolver.streamCalls++
+	for _, row := range rows {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := visit(row); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (resolver *runtimeJoinFilterResolver) ResolveSQLSource(name, key string) ([]hatSql.SQLRow, error) {
 	if name != "CACHE" {
 		return nil, fmt.Errorf("unexpected source type %q", name)
@@ -190,6 +224,47 @@ func TestRuntimeJoinBloomFilterFallsBackWithoutStreamingResolver(t *testing.T) {
 	}
 	if hasRuntimeJoinFilterStep(filtered.Plan) {
 		t.Fatalf("fallback plan = %#v, runtime filter must require streaming", filtered.Plan)
+	}
+}
+
+func TestRuntimeJoinBloomFilterStreamsExternalSources(t *testing.T) {
+	left := make([]hatSql.SQLRow, 0, 128)
+	for index := 0; index < 128; index++ {
+		left = append(left, hatSql.SQLRow{"id": index, "k": fmt.Sprintf("key-%03d", index)})
+	}
+	right := make([]hatSql.SQLRow, 0, 16)
+	for index := 0; index < 16; index++ {
+		right = append(right, hatSql.SQLRow{"id": 1000 + index, "k": fmt.Sprintf("key-%03d", index)})
+	}
+	resolver := &runtimeExternalJoinFilterResolver{sources: map[string][]hatSql.SQLRow{
+		"left":  left,
+		"right": right,
+	}}
+	query := "FROM EXTERNAL('left') AS l JOIN EXTERNAL('right') AS r ON l.k = r.k SELECT l.id, r.id AS right_id"
+
+	baseline, err := hatSql.ExecuteSQLQuery(query, resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filtered, err := hatSql.ExecuteSQLQueryContext(context.Background(), query, resolver, hatSql.QueryOptions{RuntimeJoinBloomFilter: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprintf("%#v", filtered.Rows) != fmt.Sprintf("%#v", baseline.Rows) {
+		t.Fatalf("filtered rows = %#v, baseline = %#v", filtered.Rows, baseline.Rows)
+	}
+	filteredPlan, err := hatSql.ExecuteSQLQueryContext(context.Background(), "EXPLAIN ANALYZE "+query, resolver, hatSql.QueryOptions{RuntimeJoinBloomFilter: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolver.streamCalls == 0 {
+		t.Fatalf("external filtered execution did not use the streaming source path: plan=%#v explain=%#v", filtered.Plan, filteredPlan.Plan)
+	}
+	if len(filtered.Rows) != 16 {
+		t.Fatalf("filtered rows = %d, want 16", len(filtered.Rows))
+	}
+	if !hasRuntimeJoinFilterStep(filteredPlan.Plan) {
+		t.Fatalf("filtered plan = %#v, want runtime join filter", filteredPlan.Plan)
 	}
 }
 
