@@ -158,19 +158,41 @@ func sqlRewriteGroupingIdentifierExpr(expr *sqlExpr, groupingSet, dimensions []s
 	if expr == nil {
 		return nil
 	}
-	if expr.kind == "func" && strings.EqualFold(expr.name, "GROUPING") {
-		if len(expr.args) != 1 {
-			return fmt.Errorf("GROUPING expects exactly one grouping expression")
+	if expr.kind == "func" {
+		switch strings.ToUpper(expr.name) {
+		case "GROUPING":
+			if len(expr.args) != 1 {
+				return fmt.Errorf("GROUPING expects exactly one grouping expression")
+			}
+			if !sqlGroupingSetContains(dimensions, expr.args[0]) {
+				return fmt.Errorf("GROUPING argument must be a grouping expression")
+			}
+			value := int64(0)
+			if !sqlGroupingSetContains(groupingSet, expr.args[0]) {
+				value = 1
+			}
+			*expr = sqlExpr{kind: "literal", value: value}
+			return nil
+		case "GROUPING_ID":
+			if len(expr.args) == 0 {
+				return fmt.Errorf("GROUPING_ID expects at least one grouping expression")
+			}
+			if len(expr.args) > 63 {
+				return fmt.Errorf("GROUPING_ID supports at most 63 grouping expressions")
+			}
+			value := int64(0)
+			for index, argument := range expr.args {
+				if !sqlGroupingSetContains(dimensions, argument) {
+					return fmt.Errorf("GROUPING_ID argument must be a grouping expression")
+				}
+				if !sqlGroupingSetContains(groupingSet, argument) {
+					bit := len(expr.args) - index - 1
+					value |= int64(1) << uint(bit)
+				}
+			}
+			*expr = sqlExpr{kind: "literal", value: value}
+			return nil
 		}
-		if !sqlGroupingSetContains(dimensions, expr.args[0]) {
-			return fmt.Errorf("GROUPING argument must be a grouping expression")
-		}
-		value := int64(0)
-		if !sqlGroupingSetContains(groupingSet, expr.args[0]) {
-			value = 1
-		}
-		*expr = sqlExpr{kind: "literal", value: value}
-		return nil
 	}
 	if err := sqlRewriteGroupingIdentifierExpr(expr.left, groupingSet, dimensions); err != nil {
 		return err
@@ -210,7 +232,7 @@ func sqlRewriteGroupingIdentifierExpr(expr *sqlExpr, groupingSet, dimensions []s
 }
 
 func sqlExprHasGroupingIdentifier(expr sqlExpr) bool {
-	if expr.kind == "func" && strings.EqualFold(expr.name, "GROUPING") {
+	if expr.kind == "func" && (strings.EqualFold(expr.name, "GROUPING") || strings.EqualFold(expr.name, "GROUPING_ID")) {
 		return true
 	}
 	if expr.left != nil && sqlExprHasGroupingIdentifier(*expr.left) || expr.right != nil && sqlExprHasGroupingIdentifier(*expr.right) {

@@ -21984,6 +21984,44 @@ Raw output after the change, grouping identifiers:
 31033 ns/op 29502 B/op 286 allocs/op
 31342 ns/op 29502 B/op 286 allocs/op
 ```
+
+## CH-041b multi-argument `GROUPING_ID`
+
+The follow-up workload uses the same three input rows and the same three
+grouping sets as the existing CH-041 measurement. The baseline was collected
+before the feature on the parent `6f927d7c` checkout; the post-change run uses
+`make benchmark-chg03-grouping-id` with five samples and `-benchmem`.
+
+The ordinary grouping-set median stayed effectively unchanged: `31,379`
+ns/op, `27,531` B/op, and `242` allocs/op before versus `30,446` ns/op,
+`27,530` B/op, and `242` allocs/op after. The existing two-column
+`GROUPING(...)` query also stayed flat: `37,597` ns/op, `32,813` B/op, and
+`286` allocs/op before versus `37,527` ns/op, `32,810` B/op, and `286`
+allocs/op after. This is within benchmark noise and shows no default-path
+regression.
+
+The new `GROUPING_ID(region, product)` query measured `33,785` ns/op,
+`29,664` B/op, and `264` allocs/op. Relative to the same ordinary grouping
+query, that is `1.110x` the time, `1.078x` the bytes, and `1.091x` the
+allocations for one combined identifier column. The rewrite folds the value
+to a literal before aggregation, so the extra cost is result construction and
+the additional identifier column, not per-input-row grouping state.
+
+Raw output before the feature, from the parent checkout:
+
+```text
+grouping_sets: 31351, 32821, 32118, 31339, 31379 ns/op
+grouping_identifiers: 39795, 39396, 37033, 37597, 35994 ns/op
+```
+
+Raw output after the feature:
+
+```text
+grouping_sets: 29898, 32043, 31118, 29668, 30446 ns/op
+grouping_identifiers: 37270, 38125, 37527, 38360, 37175 ns/op
+grouping_id: 35165, 33785, 33403, 34064, 32640 ns/op
+```
+
 ## TT-050 SQL Planner Statistics
 
 The explicit source-versioned statistics cache was measured against the

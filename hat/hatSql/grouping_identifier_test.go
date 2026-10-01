@@ -55,6 +55,53 @@ GROUP BY GROUPING SETS ((src.region, src.product), (src.region), ())`, nil)
 	}
 }
 
+func TestSQLGroupingIDCombinesGroupingIdentifiers(t *testing.T) {
+	result, err := ExecuteSQLQuery(`
+FROM VALUES
+  ('east', 'a', 10),
+  ('east', 'b', 20),
+  ('west', 'a', 30)
+AS src(region, product, amount)
+SELECT src.region AS region,
+       src.product AS product,
+       GROUPING_ID(src.region, src.product) AS grouping_id,
+       SUM(src.amount) AS total
+GROUP BY GROUPING SETS ((src.region, src.product), (src.region), (src.product), ())`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[string]int64{
+		"east/a":      0,
+		"east/b":      0,
+		"west/a":      0,
+		"east/<nil>":  1,
+		"west/<nil>":  1,
+		"<nil>/a":     2,
+		"<nil>/b":     2,
+		"<nil>/<nil>": 3,
+	}
+	if len(result.Rows) != len(want) {
+		t.Fatalf("rows = %d, want %d: %#v", len(result.Rows), len(want), result.Rows)
+	}
+	for _, row := range result.Rows {
+		key := fmt.Sprintf("%v/%v", row["region"], row["product"])
+		got, ok := sqlGroupingIdentifierInteger(row["grouping_id"])
+		if !ok || !okGroupingIDValue(want, key, got) {
+			t.Fatalf("row %q = %#v, want grouping_id=%d", key, row, want[key])
+		}
+		delete(want, key)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing grouping rows: %#v", want)
+	}
+}
+
+func okGroupingIDValue(want map[string]int64, key string, got int64) bool {
+	wantValue, ok := want[key]
+	return ok && got == wantValue
+}
+
 func TestSQLRollupAndCubeGroupingIdentifiers(t *testing.T) {
 	queries := []struct {
 		name  string
@@ -133,6 +180,8 @@ GROUP BY ROLLUP (src.region)`, nil)
 	for _, query := range []string{
 		`FROM VALUES ('east', 1) AS src(region, amount) SELECT GROUPING(src.missing) GROUP BY GROUPING SETS ((src.region), ())`,
 		`FROM VALUES ('east', 1) AS src(region, amount) SELECT GROUPING(src.region, src.amount) GROUP BY GROUPING SETS ((src.region), ())`,
+		`FROM VALUES ('east', 1) AS src(region, amount) SELECT GROUPING_ID(src.region, src.amount) GROUP BY GROUPING SETS ((src.region), ())`,
+		`FROM VALUES ('east', 1) AS src(region, amount) SELECT GROUPING(src.region) WHERE GROUPING_ID(src.region) = 0 GROUP BY GROUPING SETS ((src.region), ())`,
 	} {
 		_, err := ExecuteSQLQuery(query, nil)
 		if err == nil || !strings.Contains(err.Error(), "GROUPING") {
@@ -144,7 +193,7 @@ GROUP BY ROLLUP (src.region)`, nil)
 func TestSQLGroupingIdentifierOrdinaryGroupDefaultsToZero(t *testing.T) {
 	result, err := ExecuteSQLQuery(`
 FROM VALUES ('east', 1), ('east', 2) AS src(region, amount)
-SELECT src.region AS region, GROUPING(src.region) AS grouped, SUM(src.amount) AS total
+SELECT src.region AS region, GROUPING(src.region) AS grouped, GROUPING_ID(src.region) AS grouping_id, SUM(src.amount) AS total
 GROUP BY src.region`, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -154,6 +203,9 @@ GROUP BY src.region`, nil)
 	}
 	if value, ok := sqlGroupingIdentifierInteger(result.Rows[0]["grouped"]); !ok || value != 0 {
 		t.Fatalf("grouped value = %#v, want 0", result.Rows[0]["grouped"])
+	}
+	if value, ok := sqlGroupingIdentifierInteger(result.Rows[0]["grouping_id"]); !ok || value != 0 {
+		t.Fatalf("grouping_id value = %#v, want 0", result.Rows[0]["grouping_id"])
 	}
 }
 

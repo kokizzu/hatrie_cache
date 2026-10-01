@@ -22330,3 +22330,30 @@ commit-chg02-star-spill:
 
 push-chg02-star-spill:
 	bash scripts/deliver-chg02-star-spill.sh push
+
+benchmark-chg03-grouping-id:
+	bash scripts/benchmark-chg03-grouping-id.sh
+
+format-chg03-grouping-id:
+	bash scripts/format-chg03-grouping-id.sh
+
+test-chg03-grouping-id:
+	bash scripts/test-chg03-grouping-id.sh
+
+race-chg03-grouping-id:
+	bash scripts/race-chg03-grouping-id.sh
+
+vet-chg03-grouping-id:
+	bash scripts/vet-chg03-grouping-id.sh
+
+check-chg03-grouping-id:
+	bash scripts/deliver-chg03-grouping-id.sh check
+
+stage-chg03-grouping-id:
+	bash scripts/deliver-chg03-grouping-id.sh stage
+
+commit-chg03-grouping-id:
+	bash scripts/deliver-chg03-grouping-id.sh commit-feature
+
+push-chg03-grouping-id:
+	bash scripts/deliver-chg03-grouping-id.sh push
