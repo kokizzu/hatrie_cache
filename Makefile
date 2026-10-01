@@ -22378,3 +22378,38 @@ review-chu61-nullable-predicate:
 
 ship-chu61-nullable-predicate:
 	bash scripts/ship-chu61-nullable-predicate.sh
+.PHONY: format-chu62-arithmetic-projection
+format-chu62-arithmetic-projection:
+	bash scripts/format-chu62-arithmetic-projection.sh
+
+.PHONY: test-chu62-arithmetic-projection
+test-chu62-arithmetic-projection:
+	bash scripts/test-chu62-arithmetic-projection.sh
+
+.PHONY: benchmark-chu62-arithmetic-projection
+benchmark-chu62-arithmetic-projection:
+	bash scripts/benchmark-chu62-arithmetic-projection.sh
+
+.PHONY: race-chu62-arithmetic-projection
+race-chu62-arithmetic-projection:
+	bash scripts/race-chu62-arithmetic-projection.sh
+
+.PHONY: vet-chu62-arithmetic-projection
+vet-chu62-arithmetic-projection:
+	bash scripts/vet-chu62-arithmetic-projection.sh
+
+.PHONY: test-chu62-sql-package
+test-chu62-sql-package:
+	bash scripts/test-chu62-sql-package.sh
+
+.PHONY: test-chu62-all
+test-chu62-all:
+	bash scripts/test-chu62-all.sh
+
+.PHONY: review-chu62-arithmetic-projection
+review-chu62-arithmetic-projection:
+	bash scripts/review-chu62-arithmetic-projection.sh
+
+.PHONY: ship-chu62-arithmetic-projection
+ship-chu62-arithmetic-projection:
+	bash scripts/ship-chu62-arithmetic-projection.sh

@@ -764,3 +764,15 @@ layouts retain the general evaluator. On the measured fixture, `IS NULL` was
 4.61x faster with 6.84x less allocated heap; `IS NOT NULL` was 1.53x faster
 with 1.82x less allocated heap. See [CHU61_NULLABLE_PREDICATE.md](CHU61_NULLABLE_PREDICATE.md)
 and [BENCHMARK.md](BENCHMARK.md#chu61-nullable-predicate-bitmaps).
+
+## CHU62: Columnar Arithmetic Projection
+
+Adopted as a conservative columnar fast path for direct numeric field/literal
+arithmetic in `SELECT` projections. It supports `+`, `-`, `*`, `/`, and `%` in
+either operand order for materialized and streaming query APIs, while reusing
+the existing arithmetic evaluator to preserve type and `NULL` semantics.
+Field-to-field, nested, dynamic, and mixed execution plans retain the general
+executor. The measured fixture was 2.36x faster, with 2.40x less allocated
+heap and 1.26x fewer allocations. See
+[CHU62_ARITHMETIC_PROJECTION.md](CHU62_ARITHMETIC_PROJECTION.md) and
+[BENCHMARK.md](BENCHMARK.md#chu62-columnar-arithmetic-projection).

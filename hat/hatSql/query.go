@@ -1112,10 +1112,13 @@ func ExecuteQueryRows(ctx context.Context, source string, resolver SourceResolve
 	return ExecuteSQLQueryRows(ctx, source, resolver, parameters, options, visit)
 }
 
-// executeSQLColumnarQueryRows streams the same narrow field-only scan accepted
+// executeSQLColumnarQueryRows streams the same narrow columnar scans accepted
 // by the materialized columnar executor. It retains the row callback contract
 // while avoiding source-row map construction and result-slice retention.
 func executeSQLColumnarQueryRows(query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func(columns []string, row SQLRow) error) (bool, error) {
+	if handled, err := executeSQLColumnarArithmeticProjectionQueryRows(query, resolver, control, visit); handled {
+		return true, err
+	}
 	columnar, ok := resolver.(SQLColumnarSourceResolver)
 	if !ok || !sqlCanColumnarScan(query, nil) {
 		return false, nil
@@ -8732,6 +8735,9 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		return result, true, err
 	}
 	if result, handled, err := executeSQLColumnarDictionaryDistinct(q, columnar, control, metrics, outer); handled {
+		return result, true, err
+	}
+	if result, handled, err := executeSQLColumnarArithmeticProjection(q, resolver, control, metrics, outer); handled {
 		return result, true, err
 	}
 	if !sqlCanColumnarScan(q, outer) {

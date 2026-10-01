@@ -23,7 +23,8 @@ measurement; `P1` needs a workload gate; `P2` is useful only after profiling.
 8. `P0` Add direct columnar `MIN`/`MAX` grouped by one dictionary field.
 9. `P0` Add direct dictionary `IN` filtering without materialized rows.
 10. `P0` Add direct dictionary prefix filtering when binary collation permits.
-11. `P1` Evaluate simple arithmetic projection from numeric columns.
+11. `P1` Evaluate simple arithmetic projection from numeric columns (adopted as
+    CHU62; see [CHU62_ARITHMETIC_PROJECTION.md](CHU62_ARITHMETIC_PROJECTION.md)).
 12. `P1` Evaluate `CASE` on a direct numeric predicate in the column scan.
 13. `P1` Add a columnar boolean representation instead of interface values.
 14. `P1` Add typed int64, float64, timestamp, and date column vectors.

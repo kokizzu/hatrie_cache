@@ -32673,3 +32673,30 @@ The fast path is limited to direct field predicates with validated packed
 numeric, boolean, or dense nullable validity metadata. Legacy plain columns,
 malformed layouts, and wider expressions retain the general evaluator. See
 [CHU61_NULLABLE_PREDICATE.md](CHU61_NULLABLE_PREDICATE.md).
+
+## CHU62 Columnar Arithmetic Projection
+
+Command:
+
+```sh
+make benchmark-chu62-arithmetic-projection
+```
+
+Five samples on Linux/amd64, AMD Ryzen 9 5950X. The fixture has 16,384 packed
+`int64` values and runs `SELECT value + 1 AS incremented FROM CACHE('items')`.
+
+| Workload | Before median ns/op | After median ns/op | CPU improvement | Before B/op | After B/op | Memory improvement | Before allocs/op | After allocs/op | Allocation improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Numeric arithmetic projection | 7,872,228 | 3,333,242 | 2.36x faster | 14,159,275 | 5,898,958 | 2.40x less | 81,694 | 65,044 | 1.26x fewer |
+
+Raw samples (`ns/op / B/op / allocs/op`):
+
+```text
+before: 7872228/14160073/81694, 8082407/14159260/81693, 8190199/14159285/81694, 7558430/14159275/81693, 7428357/14159271/81693
+after:  3403258/5899126/65044,   3419159/5899142/65044,   3101181/5898956/65043,   3189964/5898958/65043,   3333242/5898956/65043
+```
+
+CHU62 applies to direct numeric field/literal `+`, `-`, `*`, `/`, and `%`
+projections in both materialized and streaming APIs. Unsupported expression
+shapes retain the general SQL evaluator. See
+[CHU62_ARITHMETIC_PROJECTION.md](CHU62_ARITHMETIC_PROJECTION.md).
