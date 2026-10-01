@@ -31,13 +31,17 @@ const (
 )
 
 // IndexDefinition describes one named-space index. Columns are ordered and
-// refer to fields in SpaceDefinition.Source.
+// refer to fields in SpaceDefinition.Source. Predicate and PredicateColumns
+// make an index conditional for planner metadata; predicate evaluation and
+// runtime index maintenance remain owned by the execution layer.
 type IndexDefinition struct {
-	Name       string    `json:"name"`
-	Kind       IndexKind `json:"kind"`
-	Columns    []string  `json:"columns,omitempty"`
-	Expression string    `json:"expression,omitempty"`
-	Unique     bool      `json:"unique,omitempty"`
+	Name             string    `json:"name"`
+	Kind             IndexKind `json:"kind"`
+	Columns          []string  `json:"columns,omitempty"`
+	Expression       string    `json:"expression,omitempty"`
+	Predicate        string    `json:"predicate,omitempty"`
+	PredicateColumns []string  `json:"predicate_columns,omitempty"`
+	Unique           bool      `json:"unique,omitempty"`
 }
 
 // SpaceDefinition combines a versioned source schema, constraints, and named
@@ -113,6 +117,33 @@ func (catalog *SpaceCatalog) Lookup(name string) (SpaceDefinition, bool) {
 		return SpaceDefinition{}, false
 	}
 	return cloneSpaceDefinition(definition), true
+}
+
+// ConditionalIndexes returns clone-safe conditional index metadata for one
+// named space. The boolean reports whether the space exists, so an existing
+// space with no conditional indexes is distinguishable from an unknown space.
+func (catalog *SpaceCatalog) ConditionalIndexes(name string) ([]IndexDefinition, bool) {
+	if catalog == nil {
+		return nil, false
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, false
+	}
+	catalog.mu.RLock()
+	definition, ok := catalog.spaces[name]
+	if !ok {
+		catalog.mu.RUnlock()
+		return nil, false
+	}
+	indexes := make([]IndexDefinition, 0, len(definition.Indexes))
+	for _, index := range definition.Indexes {
+		if index.Predicate != "" {
+			indexes = append(indexes, cloneIndexDefinition(index))
+		}
+	}
+	catalog.mu.RUnlock()
+	return indexes, true
 }
 
 // List returns independent definitions sorted by normalized space name.
@@ -196,6 +227,8 @@ func normalizeSpaceDefinition(definition SpaceDefinition) (SpaceDefinition, erro
 	for index, declared := range definition.Indexes {
 		declared.Name = strings.TrimSpace(declared.Name)
 		declared.Kind = IndexKind(strings.ToLower(strings.TrimSpace(string(declared.Kind))))
+		declared.Predicate = strings.TrimSpace(declared.Predicate)
+		declared.PredicateColumns = normalizeIndexColumns(declared.PredicateColumns)
 		if declared.Name == "" || !validIndexKind(declared.Kind) {
 			return SpaceDefinition{}, fmt.Errorf("%w: space %q has an invalid index", ErrSpaceCatalogInvalid, definition.Name)
 		}
@@ -208,6 +241,12 @@ func normalizeSpaceDefinition(definition SpaceDefinition) (SpaceDefinition, erro
 			if declared.Expression == "" {
 				return SpaceDefinition{}, fmt.Errorf("%w: functional index %q requires an expression", ErrSpaceCatalogInvalid, declared.Name)
 			}
+		}
+		if declared.Predicate == "" && len(declared.PredicateColumns) > 0 {
+			return SpaceDefinition{}, fmt.Errorf("%w: index %q predicate columns require a predicate", ErrSpaceCatalogInvalid, declared.Name)
+		}
+		if declared.Predicate != "" && len(declared.PredicateColumns) == 0 {
+			return SpaceDefinition{}, fmt.Errorf("%w: conditional index %q requires predicate columns", ErrSpaceCatalogInvalid, declared.Name)
 		}
 		declared.Columns = normalizeIndexColumns(declared.Columns)
 		if declared.Kind != IndexKindFunctional && len(declared.Columns) == 0 {
@@ -222,6 +261,16 @@ func normalizeSpaceDefinition(definition SpaceDefinition) (SpaceDefinition, erro
 				return SpaceDefinition{}, fmt.Errorf("%w: index %q duplicates column %q", ErrSpaceCatalogInvalid, declared.Name, column)
 			}
 			seenColumns[column] = struct{}{}
+		}
+		seenPredicateColumns := make(map[string]struct{}, len(declared.PredicateColumns))
+		for _, column := range declared.PredicateColumns {
+			if _, exists := columnNames[column]; !exists {
+				return SpaceDefinition{}, fmt.Errorf("%w: index %q predicate references unknown column %q", ErrSpaceCatalogInvalid, declared.Name, column)
+			}
+			if _, exists := seenPredicateColumns[column]; exists {
+				return SpaceDefinition{}, fmt.Errorf("%w: index %q duplicates predicate column %q", ErrSpaceCatalogInvalid, declared.Name, column)
+			}
+			seenPredicateColumns[column] = struct{}{}
 		}
 		indexes[index] = declared
 	}
@@ -254,9 +303,14 @@ func cloneSpaceDefinition(definition SpaceDefinition) SpaceDefinition {
 	definition.Source = cloneSource(definition.Source)
 	indexes := make([]IndexDefinition, len(definition.Indexes))
 	for index, declared := range definition.Indexes {
-		declared.Columns = append([]string(nil), declared.Columns...)
-		indexes[index] = declared
+		indexes[index] = cloneIndexDefinition(declared)
 	}
 	definition.Indexes = indexes
+	return definition
+}
+
+func cloneIndexDefinition(definition IndexDefinition) IndexDefinition {
+	definition.Columns = append([]string(nil), definition.Columns...)
+	definition.PredicateColumns = append([]string(nil), definition.PredicateColumns...)
 	return definition
 }

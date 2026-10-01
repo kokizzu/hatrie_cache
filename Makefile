@@ -22573,3 +22573,30 @@ review-t-u23:
 
 deliver-t-u23:
 	bash ./scripts/deliver-t-u23.sh
+
+inspect-round53-targets:
+	bash ./scripts/inspect-round53-targets.sh
+
+format-t-u24:
+	bash ./scripts/format-t-u24.sh
+
+benchmark-t-u24:
+	bash ./scripts/benchmark-t-u24.sh
+
+test-t-u24:
+	bash ./scripts/test-t-u24.sh
+
+test-t-u24-package:
+	bash ./scripts/test-t-u24-package.sh
+
+race-t-u24:
+	bash ./scripts/race-t-u24.sh
+
+vet-t-u24:
+	bash ./scripts/vet-t-u24.sh
+
+review-t-u24:
+	bash ./scripts/review-t-u24.sh
+
+deliver-t-u24:
+	bash ./scripts/deliver-t-u24.sh

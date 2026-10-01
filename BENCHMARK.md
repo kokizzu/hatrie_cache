@@ -32823,3 +32823,29 @@ length-prefixed tuple encoding, sorted postings, exact reverse state for
 update/delete, deduplication, atomic explosion limits, and concurrent access.
 It does not replace the existing flat string multikey index or alter default
 SQL behavior. See [TU23_TUPLE_MULTIKEY_INDEX.md](TU23_TUPLE_MULTIKEY_INDEX.md).
+
+## T-U24 Conditional Index Metadata
+
+This benchmark compares the old planner pattern of cloning the complete
+`SpaceDefinition` with `Lookup` and filtering its indexes against the new
+`SpaceCatalog.ConditionalIndexes` view. The catalog contains 32 tree indexes,
+four conditional indexes, and a 35-column source. Five `-benchmem` samples ran
+on an AMD Ryzen 9 5950X.
+
+| Planner metadata path | Median | Bytes/op | Allocs/op | Relative |
+| --- | ---: | ---: | ---: | ---: |
+| Manual `Lookup` then filter | 3,001 ns | 7,360 | 38 | baseline |
+| `ConditionalIndexes` | 1,105 ns | 4,224 | 9 | 2.72x faster; 42.6% fewer bytes; 4.22x fewer allocs |
+
+Raw samples:
+
+```text
+ManualLookupFilter: 3203; 3001; 2907; 2912; 3066 ns/op; 7360 B/op; 38 allocs/op
+ConditionalIndexView: 1184; 1105; 1115; 1078; 1104 ns/op; 4224 B/op; 9 allocs/op
+```
+
+This is a planner metadata optimization and contract, not automatic predicate
+execution. The catalog validates dependency shape and returns clone-safe
+definitions; callers still own deterministic predicate evaluation, index
+maintenance, persistence, and rebuilds. See
+[TU24_CONDITIONAL_INDEX_METADATA.md](TU24_CONDITIONAL_INDEX_METADATA.md).
