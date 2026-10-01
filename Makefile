@@ -22624,3 +22624,6 @@ format-config-watch-peer:
 
 deliver-config-watch-peer:
 	sh ./scripts/deliver-config-watch-peer.sh
+
+cleanup-delivery-round56:
+	sh ./scripts/cleanup-delivery-round56.sh
