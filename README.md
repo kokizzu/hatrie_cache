@@ -2821,6 +2821,15 @@ optional fencing-token equality before a caller commits through its promotion
 barrier. See [TU12_AUTOMATIC_FAILOVER_PLANNER.md](TU12_AUTOMATIC_FAILOVER_PLANNER.md)
 and the [T-U12 benchmark](BENCHMARK.md#t-u12-quorum-backed-failover-planner).
 
+For durable join/leave state, import `hat/hatTopology` and open
+`OpenDurableMembershipStore`. It persists a generation-checked membership
+history with monotone fencing tokens, exact change-ID retries, atomic fsync and
+replay fingerprint validation. The API is opt-in and process-safe, but it does
+not provide transport, authentication, distributed consensus, or automatic
+shard migration; callers should collect quorum votes before `Apply`. See
+[TU13_DURABLE_MEMBERSHIP.md](TU13_DURABLE_MEMBERSHIP.md) and the
+[T-U13 benchmark](BENCHMARK.md#t-u13-durable-cluster-membership).
+
 The optional `-require-healthy-replica-reads` flag defaults to `false` for
 backward compatibility. When enabled, HTTP and native gRPC read commands and
 read-only typed batches return an explicit health-gate error instead of serving

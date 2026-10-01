@@ -189,6 +189,73 @@ correctness-preserving fallback.
 See [TU12_AUTOMATIC_FAILOVER_PLANNER.md](TU12_AUTOMATIC_FAILOVER_PLANNER.md)
 for API semantics and verification commands.
 
+## T-U13: Durable Cluster Membership
+
+Environment: Linux/amd64, AMD Ryzen 9 5950X 16-Core Processor. Five samples
+were collected with `make benchmark-chg14`, `-benchmem`, and
+`-benchtime=100ms`. The paired final control and membership benchmarks both
+persist an initial file outside the timed region, then measure one subsequent
+atomic update. This avoids charging the control path for benchmark setup.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative time | Relative bytes | Relative allocs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Pre-change `SaveTopology` control, original harness | 1,799,226 | 5,817 | 22 | 1.00x | 1.00x | 1.00x |
+| Final `SaveTopology` paired control | 1,618,567 | 5,902 | 22 | 1.00x | 1.00x | 1.00x |
+| Final durable `MembershipApply` | 1,505,811 | 7,731 | 51 | 0.93x vs final control | 1.31x | 2.32x |
+| Final `MembershipSnapshot` | 123.8 | 288 | 1 | control-plane read | control-plane read | control-plane read |
+
+The measured apply time is lower in this paired run, but this is not claimed
+as a performance optimization: both paths are filesystem-sync-bound and the
+five control samples varied from 1.42 ms to 2.20 ms. The durable membership
+record pays the expected safety cost of a larger history and fingerprint work:
+about 31% more allocated bytes and 2.32x the allocations than the final
+`SaveTopology` control. This is acceptable because membership changes are rare
+control-plane operations; the hot cache and ordinary topology read paths are
+unchanged. `Snapshot` is cheap enough for status and admission checks.
+
+Raw pre-change control samples:
+
+```text
+SaveTopology: 2402959 ns/op 5817 B/op 22 allocs/op
+SaveTopology: 1736400 ns/op 5816 B/op 22 allocs/op
+SaveTopology: 1799226 ns/op 5824 B/op 22 allocs/op
+SaveTopology: 2052458 ns/op 5806 B/op 22 allocs/op
+SaveTopology: 1517471 ns/op 5821 B/op 22 allocs/op
+```
+
+Raw final paired control samples:
+
+```text
+BenchmarkSaveTopologyExistingControl: 1618567 ns/op 5910 B/op 22 allocs/op
+BenchmarkSaveTopologyExistingControl: 1418712 ns/op 5876 B/op 22 allocs/op
+BenchmarkSaveTopologyExistingControl: 2202701 ns/op 5902 B/op 22 allocs/op
+BenchmarkSaveTopologyExistingControl: 2060934 ns/op 5922 B/op 22 allocs/op
+BenchmarkSaveTopologyExistingControl: 1618385 ns/op 5872 B/op 22 allocs/op
+```
+
+Raw final durable apply samples:
+
+```text
+BenchmarkDurableMembershipApply: 1408748 ns/op 7753 B/op 51 allocs/op
+BenchmarkDurableMembershipApply: 1535857 ns/op 7705 B/op 51 allocs/op
+BenchmarkDurableMembershipApply: 1584493 ns/op 7731 B/op 51 allocs/op
+BenchmarkDurableMembershipApply: 1505811 ns/op 7753 B/op 51 allocs/op
+BenchmarkDurableMembershipApply: 1473811 ns/op 7722 B/op 51 allocs/op
+```
+
+Raw final snapshot samples:
+
+```text
+BenchmarkDurableMembershipSnapshot: 127.0 ns/op 288 B/op 1 alloc/op
+BenchmarkDurableMembershipSnapshot: 126.5 ns/op 288 B/op 1 alloc/op
+BenchmarkDurableMembershipSnapshot: 123.8 ns/op 288 B/op 1 alloc/op
+BenchmarkDurableMembershipSnapshot: 123.5 ns/op 288 B/op 1 alloc/op
+BenchmarkDurableMembershipSnapshot: 122.1 ns/op 288 B/op 1 alloc/op
+```
+
+See [TU13_DURABLE_MEMBERSHIP.md](TU13_DURABLE_MEMBERSHIP.md) for API
+semantics, recovery requirements, and the caller-owned consensus boundary.
+
 ## T-U03: Read-Only SQL Procedure Registry
 
 This benchmark measures the opt-in `hatSql.SQLProcedureRegistry` against the

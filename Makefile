@@ -22710,3 +22710,41 @@ test-chg13:
 
 test-chg13-package:
 	bash ./scripts/test-chg13-package.sh
+test-chg14:
+	bash ./scripts/test-chg14.sh
+
+test-full-chg14:
+	bash ./scripts/test-full-chg14.sh
+
+format-chg14:
+	bash ./scripts/format-chg14.sh
+
+benchmark-chg14:
+	bash ./scripts/benchmark-chg14.sh
+
+race-chg14:
+	bash ./scripts/race-chg14.sh
+
+vet-chg14:
+	bash ./scripts/vet-chg14.sh
+
+check-chg14:
+	bash ./scripts/check-chg14.sh
+
+status-chg14:
+	bash ./scripts/status-chg14.sh
+
+stage-chg14:
+	bash ./scripts/stage-chg14.sh
+
+commit-chg14:
+	bash ./scripts/commit-chg14.sh
+
+push-chg14:
+	bash ./scripts/push-chg14.sh
+
+cleanup-chg14-preview:
+	bash ./scripts/cleanup-chg14-preview.sh
+
+cleanup-chg14:
+	bash ./scripts/cleanup-chg14.sh

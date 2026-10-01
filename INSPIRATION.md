@@ -699,6 +699,12 @@ explicit regional partitioning and simple backups over automatic sharding.
   existing election remains primary-first routing; the opt-in
   `hatTopology.PlanFailover` adds quorum, catch-up, optional fencing, operator
   approval, and failure-domain admission without changing that route.
+- [x] T057a Durable cluster membership. `hatTopology.OpenDurableMembershipStore`
+  provides atomic generation-checked join/leave records, monotone fencing
+  tokens, exact change-ID retries, and replay fingerprint validation. It is an
+  importable control-plane primitive; peer transport, authentication,
+  consensus voting, shard migration, and history compaction remain caller-owned.
+  See [TU13_DURABLE_MEMBERSHIP.md](TU13_DURABLE_MEMBERSHIP.md).
 - [x] T058 Quorum reads and writes - `hatReplication.ExecuteReadQuorum` groups successful replica values against an explicit threshold, while `ExecuteWriteQuorum` gates named writes with the same explicit policy; both are opt-in caller-supplied transport primitives and leave normal asynchronous replication unchanged. See [READ_QUORUM.md](READ_QUORUM.md) and [WRITE_QUORUM.md](WRITE_QUORUM.md).
 - [x] T058a Validated read/write quorum policy decisions with majority defaults (see QUORUM_POLICY.md).
 - [x] T059 Read-only mode during failover.
