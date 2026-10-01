@@ -9,6 +9,7 @@ security guidance before exposing it on a network.
 ## Start Here
 
 - Opt-in journal-wide synchronous write quorum with exact sequence and digest acknowledgements: [TU10_JOURNAL_WRITE_QUORUM.md](TU10_JOURNAL_WRITE_QUORUM.md)
+- Per-space conflict-policy snapshots with copy-safe generation metadata: [TU11_CONFLICT_POLICY_SNAPSHOTS.md](TU11_CONFLICT_POLICY_SNAPSHOTS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#t-u11-conflict-policy-snapshots)
 - Optional replica read-only admission around caller-owned mutation paths: [TU06_REPLICA_READ_ONLY_GATE.md](TU06_REPLICA_READ_ONLY_GATE.md)
 - New to the cache commands and value types: [DATA_STRUCTURE.md](DATA_STRUCTURE.md)
 - ClickHouse-style SQL RowBinary streaming export and bounded bulk import: [CH050_SQL_ROW_BINARY_STREAM.md](CH050_SQL_ROW_BINARY_STREAM.md)

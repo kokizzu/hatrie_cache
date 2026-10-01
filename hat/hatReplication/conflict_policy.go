@@ -40,6 +40,16 @@ type ConflictPolicy struct {
 	SourcePriority []string
 }
 
+// ConflictPolicySnapshot is a point-in-time effective policy for one space.
+// Generation increases after each successful per-space mutation. Policy and
+// SourcePriority are copied for callers.
+type ConflictPolicySnapshot struct {
+	Space      string
+	Policy     ConflictPolicy
+	Generation uint64
+	Overridden bool
+}
+
 // ConflictPolicyRegistry stores an optional default and per-space overrides.
 // It is independent of transport and can be used by replication or application
 // code before applying a conflicting write.
@@ -47,6 +57,7 @@ type ConflictPolicyRegistry struct {
 	mu             sync.RWMutex
 	defaultPolicy  ConflictPolicy
 	spaceOverrides map[string]ConflictPolicy
+	generation     uint64
 }
 
 // NewConflictPolicyRegistry validates an explicit default policy. An empty
@@ -82,6 +93,7 @@ func (registry *ConflictPolicyRegistry) Set(space string, policy ConflictPolicy)
 		return fmt.Errorf("%w: maximum spaces %d exceeded", ErrConflictPolicyInvalid, MaxConflictPolicySpaces)
 	}
 	registry.spaceOverrides[space] = normalized
+	registry.generation++
 	return nil
 }
 
@@ -100,6 +112,7 @@ func (registry *ConflictPolicyRegistry) Delete(space string) bool {
 		return false
 	}
 	delete(registry.spaceOverrides, space)
+	registry.generation++
 	return true
 }
 
@@ -119,6 +132,41 @@ func (registry *ConflictPolicyRegistry) Resolve(space string, left, right Confli
 	}
 	registry.mu.RUnlock()
 	return resolveConflictWithPolicy(policy, left, right)
+}
+
+// Snapshot returns the effective policy and generation for space. The returned
+// policy is safe to modify.
+func (registry *ConflictPolicyRegistry) Snapshot(space string) (ConflictPolicySnapshot, error) {
+	if registry == nil {
+		return ConflictPolicySnapshot{}, ErrConflictPolicyRegistryNil
+	}
+	space = strings.TrimSpace(space)
+	if space == "" {
+		return ConflictPolicySnapshot{}, ErrConflictPolicySpaceRequired
+	}
+	registry.mu.RLock()
+	policy, overridden := registry.spaceOverrides[space]
+	if !overridden {
+		policy = registry.defaultPolicy
+	}
+	snapshot := ConflictPolicySnapshot{
+		Space:      space,
+		Policy:     copyConflictPolicy(policy),
+		Generation: registry.generation,
+		Overridden: overridden,
+	}
+	registry.mu.RUnlock()
+	return snapshot, nil
+}
+
+func copyConflictPolicy(policy ConflictPolicy) ConflictPolicy {
+	if len(policy.SourcePriority) == 0 {
+		return ConflictPolicy{Mode: policy.Mode}
+	}
+	return ConflictPolicy{
+		Mode:           policy.Mode,
+		SourcePriority: append([]string(nil), policy.SourcePriority...),
+	}
 }
 
 func normalizeConflictPolicy(policy ConflictPolicy) (ConflictPolicy, error) {

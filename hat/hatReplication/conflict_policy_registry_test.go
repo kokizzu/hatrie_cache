@@ -2,6 +2,7 @@ package hatReplication
 
 import (
 	"errors"
+	"sync"
 	"testing"
 )
 
@@ -73,4 +74,94 @@ func TestConflictPolicyRegistryValidatesAndCopiesPriority(t *testing.T) {
 	if err := registry.Set("", ConflictPolicy{Mode: ConflictPolicyLastWriteWins}); !errors.Is(err, ErrConflictPolicySpaceRequired) {
 		t.Fatalf("Set(empty) error = %v, want ErrConflictPolicySpaceRequired", err)
 	}
+}
+
+func TestConflictPolicyRegistrySnapshotTracksGenerationAndCopiesPolicy(t *testing.T) {
+	registry, err := NewConflictPolicyRegistry(ConflictPolicy{Mode: ConflictPolicyLastWriteWins})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	initial, err := registry.Snapshot("payments")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if initial.Space != "payments" || initial.Policy.Mode != ConflictPolicyLastWriteWins || initial.Overridden || initial.Generation != 0 {
+		t.Fatalf("initial Snapshot() = %#v, want default policy without override at generation 0", initial)
+	}
+
+	if err := registry.Set("payments", ConflictPolicy{
+		Mode:           ConflictPolicySourcePriority,
+		SourcePriority: []string{"node-a", "node-b"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	installed, err := registry.Snapshot("payments")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if installed.Space != "payments" || installed.Policy.Mode != ConflictPolicySourcePriority || !installed.Overridden || installed.Generation <= initial.Generation {
+		t.Fatalf("installed Snapshot() = %#v, want updated override generation", installed)
+	}
+	installed.Policy.SourcePriority[0] = "mutated"
+
+	unchanged, err := registry.Snapshot("payments")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unchanged.Policy.SourcePriority[0] != "node-a" {
+		t.Fatalf("Snapshot() exposed mutable policy storage: %#v", unchanged.Policy.SourcePriority)
+	}
+
+	if !registry.Delete("payments") {
+		t.Fatal("Delete(payments) = false, want true")
+	}
+	removed, err := registry.Snapshot("payments")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed.Overridden || removed.Policy.Mode != ConflictPolicyLastWriteWins || removed.Generation <= unchanged.Generation {
+		t.Fatalf("removed Snapshot() = %#v, want default policy at a newer generation", removed)
+	}
+}
+
+func TestConflictPolicyRegistryConcurrentReadersAndWriters(t *testing.T) {
+	registry, err := NewConflictPolicyRegistry(ConflictPolicy{Mode: ConflictPolicyLastWriteWins})
+	if err != nil {
+		t.Fatal(err)
+	}
+	left := ConflictVersion{Timestamp: 1, NodeID: "node-a", Sequence: 1}
+	right := ConflictVersion{Timestamp: 2, NodeID: "node-b", Sequence: 1}
+
+	var group sync.WaitGroup
+	for reader := 0; reader < 8; reader++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			for iteration := 0; iteration < 200; iteration++ {
+				if _, err := registry.Resolve("payments", left, right); err != nil {
+					t.Errorf("Resolve() error = %v", err)
+				}
+				if snapshot, err := registry.Snapshot("payments"); err != nil || snapshot.Space != "payments" {
+					t.Errorf("Snapshot() = %#v/%v", snapshot, err)
+				}
+			}
+		}()
+	}
+	group.Add(1)
+	go func() {
+		defer group.Done()
+		for iteration := 0; iteration < 200; iteration++ {
+			if err := registry.Set("payments", ConflictPolicy{
+				Mode:           ConflictPolicySourcePriority,
+				SourcePriority: []string{"node-a", "node-b"},
+			}); err != nil {
+				t.Errorf("Set() error = %v", err)
+			}
+			if !registry.Delete("payments") {
+				t.Errorf("Delete() = false, want true")
+			}
+		}
+	}()
+	group.Wait()
 }

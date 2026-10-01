@@ -37,4 +37,20 @@ func BenchmarkConflictPolicyResolution(b *testing.B) {
 			}
 		}
 	})
+	b.Run("snapshot-default", func(b *testing.B) {
+		b.ReportAllocs()
+		for index := 0; index < b.N; index++ {
+			if _, err := registry.Snapshot("default"); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("snapshot-priority", func(b *testing.B) {
+		b.ReportAllocs()
+		for index := 0; index < b.N; index++ {
+			if _, err := registry.Snapshot("priority"); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }

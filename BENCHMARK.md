@@ -46,6 +46,101 @@ throughput win. Its default disabled path adds zero allocations; the enabled
 path is 1.01x slower in this run, retains 128 more bytes than the existing
 executor for sequence/digest attempt metadata, and uses one fewer allocation.
 
+## T-U11 conflict-policy snapshots
+
+Environment: Linux/amd64, AMD Ryzen 9 5950X 16-Core Processor. Five samples
+were collected with the existing `-benchmem` harness. The pre-change control
+was measured before adding `ConflictPolicySnapshot`; the final run includes
+the snapshot API and generation bookkeeping while retaining the existing
+resolver lock path.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative time |
+| --- | ---: | ---: | ---: | ---: |
+| Baseline registry default resolve | 16.79 | 0 | 0 | 1.00x |
+| Final registry default resolve | 17.32 | 0 | 0 | 1.03x, no material change |
+| Baseline registry priority resolve | 21.47 | 0 | 0 | 1.00x |
+| Final registry priority resolve | 21.94 | 0 | 0 | 1.02x, no material change |
+| Final snapshot default | 19.11 | 0 | 0 | control-plane API |
+| Final snapshot priority | 46.20 | 32 | 1 | control-plane API |
+| Rejected atomic snapshot priority resolve | 21.69 | 0 | 0 | no material win |
+
+Raw baseline default samples:
+
+```text
+registry-default: 17.33 ns/op 0 B/op 0 allocs/op
+registry-default: 15.96 ns/op 0 B/op 0 allocs/op
+registry-default: 15.94 ns/op 0 B/op 0 allocs/op
+registry-default: 16.79 ns/op 0 B/op 0 allocs/op
+registry-default: 17.42 ns/op 0 B/op 0 allocs/op
+```
+
+Raw final default samples:
+
+```text
+registry-default: 17.55 ns/op 0 B/op 0 allocs/op
+registry-default: 17.46 ns/op 0 B/op 0 allocs/op
+registry-default: 17.32 ns/op 0 B/op 0 allocs/op
+registry-default: 17.23 ns/op 0 B/op 0 allocs/op
+registry-default: 16.94 ns/op 0 B/op 0 allocs/op
+```
+
+Raw baseline priority samples:
+
+```text
+registry-priority: 21.47 ns/op 0 B/op 0 allocs/op
+registry-priority: 21.95 ns/op 0 B/op 0 allocs/op
+registry-priority: 21.87 ns/op 0 B/op 0 allocs/op
+registry-priority: 21.37 ns/op 0 B/op 0 allocs/op
+registry-priority: 21.11 ns/op 0 B/op 0 allocs/op
+```
+
+Raw final priority samples:
+
+```text
+registry-priority: 22.16 ns/op 0 B/op 0 allocs/op
+registry-priority: 22.12 ns/op 0 B/op 0 allocs/op
+registry-priority: 21.94 ns/op 0 B/op 0 allocs/op
+registry-priority: 20.76 ns/op 0 B/op 0 allocs/op
+registry-priority: 21.85 ns/op 0 B/op 0 allocs/op
+```
+
+Raw snapshot samples:
+
+```text
+snapshot-default: 20.38 ns/op 0 B/op 0 allocs/op
+snapshot-default: 19.29 ns/op 0 B/op 0 allocs/op
+snapshot-default: 18.68 ns/op 0 B/op 0 allocs/op
+snapshot-default: 18.62 ns/op 0 B/op 0 allocs/op
+snapshot-default: 19.11 ns/op 0 B/op 0 allocs/op
+snapshot-priority: 45.39 ns/op 32 B/op 1 alloc/op
+snapshot-priority: 45.60 ns/op 32 B/op 1 alloc/op
+snapshot-priority: 46.24 ns/op 32 B/op 1 alloc/op
+snapshot-priority: 46.20 ns/op 32 B/op 1 alloc/op
+snapshot-priority: 47.16 ns/op 32 B/op 1 alloc/op
+```
+
+Raw rejected atomic priority samples:
+
+```text
+registry-priority: 21.65 ns/op 0 B/op 0 allocs/op
+registry-priority: 21.83 ns/op 0 B/op 0 allocs/op
+registry-priority: 21.57 ns/op 0 B/op 0 allocs/op
+registry-priority: 21.22 ns/op 0 B/op 0 allocs/op
+registry-priority: 21.37 ns/op 0 B/op 0 allocs/op
+registry-priority: 21.88 ns/op 0 B/op 0 allocs/op
+registry-priority: 21.40 ns/op 0 B/op 0 allocs/op
+registry-priority: 22.19 ns/op 0 B/op 0 allocs/op
+registry-priority: 21.81 ns/op 0 B/op 0 allocs/op
+registry-priority: 22.39 ns/op 0 B/op 0 allocs/op
+```
+
+The shipped `Resolve` path remains zero-allocation. `Snapshot` is a control
+plane/audit operation: default-policy snapshots are allocation-free in the
+benchmark, while priority snapshots copy their source slice. The atomic
+copy-on-write resolver was rolled back because it had no material hot-path
+win and added unnecessary write-side complexity; the final implementation
+keeps the existing lock-based resolver semantics.
+
 ## T-U03: Read-Only SQL Procedure Registry
 
 This benchmark measures the opt-in `hatSql.SQLProcedureRegistry` against the

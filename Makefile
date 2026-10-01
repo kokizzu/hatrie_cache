@@ -22609,3 +22609,70 @@ commit-chg11-quorum:
 .PHONY: push-chg11-quorum
 push-chg11-quorum:
 	@bash scripts/deliver-chg11-quorum.sh push
+.PHONY: benchmark-chg12
+benchmark-chg12:
+	@bash scripts/benchmark-chg12.sh $(COUNT)
+
+.PHONY: benchmark-chg12-five
+benchmark-chg12-five:
+	@bash scripts/benchmark-chg12.sh 5
+
+.PHONY: benchmark-chg12-default-five
+benchmark-chg12-default-five:
+	@bash scripts/benchmark-chg12.sh 5 '^BenchmarkConflictPolicyResolution/registry-default$$'
+
+.PHONY: benchmark-chg12-priority-five
+benchmark-chg12-priority-five:
+	@bash scripts/benchmark-chg12.sh 5 '^BenchmarkConflictPolicyResolution/registry-priority$$'
+
+.PHONY: benchmark-chg12-snapshot-default-five
+benchmark-chg12-snapshot-default-five:
+	@bash scripts/benchmark-chg12.sh 5 '^BenchmarkConflictPolicyResolution/snapshot-default$$'
+
+.PHONY: benchmark-chg12-snapshot-priority-five
+benchmark-chg12-snapshot-priority-five:
+	@bash scripts/benchmark-chg12.sh 5 '^BenchmarkConflictPolicyResolution/snapshot-priority$$'
+
+.PHONY: test-chg12
+test-chg12:
+	@bash scripts/test-chg12.sh test
+
+.PHONY: test-chg12-package
+test-chg12-package:
+	@bash scripts/test-chg12.sh package
+
+.PHONY: race-chg12
+race-chg12:
+	@bash scripts/test-chg12.sh race
+
+.PHONY: vet-chg12
+vet-chg12:
+	@bash scripts/test-chg12.sh vet
+
+.PHONY: test-chg12-all
+test-chg12-all:
+	@bash scripts/test-chg12.sh all
+
+.PHONY: format-chg12
+format-chg12:
+	@bash scripts/format-chg12.sh
+
+.PHONY: check-chg12
+check-chg12:
+	@bash scripts/check-chg12.sh
+
+.PHONY: status-chg12
+status-chg12:
+	@bash scripts/deliver-chg12.sh status
+
+.PHONY: stage-chg12
+stage-chg12:
+	@bash scripts/deliver-chg12.sh stage
+
+.PHONY: commit-chg12
+commit-chg12:
+	@bash scripts/deliver-chg12.sh commit
+
+.PHONY: push-chg12
+push-chg12:
+	@bash scripts/deliver-chg12.sh push
