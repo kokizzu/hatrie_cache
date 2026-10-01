@@ -22292,3 +22292,40 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: test-tu39
+test-tu39:
+	bash scripts/run-tu39-focused.sh
+
+.PHONY: format-tu39
+format-tu39:
+	bash scripts/format-tu39.sh
+
+.PHONY: verify-tu39-focused
+verify-tu39-focused:
+	bash scripts/verify-tu39-focused.sh
+
+.PHONY: benchmark-tu39
+benchmark-tu39:
+	bash scripts/benchmark-tu39.sh
+
+.PHONY: memory-tu39
+memory-tu39:
+	bash scripts/memory-tu39.sh
+
+.PHONY: verify-tu39-docs
+verify-tu39-docs:
+	bash scripts/verify-tu39-docs.sh
+
+.PHONY: status-tu39
+status-tu39:
+	bash scripts/status-tu39.sh
+
+.PHONY: deliver-tu39-stage deliver-tu39-commit deliver-tu39-push
+deliver-tu39-stage:
+	bash scripts/deliver-tu39.sh stage
+
+deliver-tu39-commit:
+	bash scripts/deliver-tu39.sh commit
+
+deliver-tu39-push:
+	bash scripts/deliver-tu39.sh push

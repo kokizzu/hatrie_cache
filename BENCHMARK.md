@@ -32580,3 +32580,23 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+## T-U39 bounded named-space changefeed
+
+Command: `make benchmark-tu39` (Go `-benchmem -count=5`, AMD Ryzen 9 5950X, Linux).
+
+Raw final runs:
+
+```text
+BenchmarkSpaceChangefeedPublishAndNext-32    5110064  241.9 ns/op  128 B/op  3 allocs/op
+BenchmarkSpaceChangefeedPublishAndNext-32    4932147  229.4 ns/op  128 B/op  3 allocs/op
+BenchmarkSpaceChangefeedPublishAndNext-32    5320930  221.1 ns/op  128 B/op  3 allocs/op
+BenchmarkSpaceChangefeedPublishAndNext-32    5478633  223.1 ns/op  128 B/op  3 allocs/op
+BenchmarkSpaceChangefeedPublishAndNext-32    5375503  220.0 ns/op  128 B/op  3 allocs/op
+BenchmarkSpaceChangefeedDirectControl-32    1000000000  1.184 ns/op  0 B/op  0 allocs/op
+BenchmarkSpaceChangefeedDirectControl-32    993970244   1.202 ns/op  0 B/op  0 allocs/op
+BenchmarkSpaceChangefeedDirectControl-32    997689790   1.260 ns/op  0 B/op  0 allocs/op
+BenchmarkSpaceChangefeedDirectControl-32    963789999   1.185 ns/op  0 B/op  0 allocs/op
+BenchmarkSpaceChangefeedDirectControl-32    1000000000  1.209 ns/op  0 B/op  0 allocs/op
+```
+
+Median replay cost is `223.1 ns/op`, `128 B/op`, and `3 allocs/op`; direct assignment is a semantic control at `1.202 ns/op`, `0 B/op`, and `0 allocs/op`. Retained-memory test output at 1024 small events was `200472 B`, or `195.8 B/event`. The final path is opt-in and bounded; it does not replace a zero-cost direct mutation path.
