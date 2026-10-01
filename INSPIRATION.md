@@ -695,7 +695,10 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T055 Idempotent journal replay.
 - [x] T056 Deterministic conflict resolution for concurrent writers. `ConflictVersion` orders timestamp, node ID, and sequence deterministically; `ResolveConflictVersion` is covered by focused tests and remains separate from quorum/consensus transport. See [CONFLICT_RESOLUTION.md](CONFLICT_RESOLUTION.md).
 - [x] T056a Deterministic conflict-version ordering with stable node and sequence tie-breaks.
-- [x] T057 Election and failover behavior for supported topologies.
+- [x] T057 Election and failover behavior for supported topologies. The
+  existing election remains primary-first routing; the opt-in
+  `hatTopology.PlanFailover` adds quorum, catch-up, optional fencing, operator
+  approval, and failure-domain admission without changing that route.
 - [x] T058 Quorum reads and writes - `hatReplication.ExecuteReadQuorum` groups successful replica values against an explicit threshold, while `ExecuteWriteQuorum` gates named writes with the same explicit policy; both are opt-in caller-supplied transport primitives and leave normal asynchronous replication unchanged. See [READ_QUORUM.md](READ_QUORUM.md) and [WRITE_QUORUM.md](WRITE_QUORUM.md).
 - [x] T058a Validated read/write quorum policy decisions with majority defaults (see QUORUM_POLICY.md).
 - [x] T059 Read-only mode during failover.

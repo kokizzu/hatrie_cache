@@ -2812,6 +2812,15 @@ The current shard primary stays leader while healthy; when it is marked offline
 or its heartbeat times out, the first healthy replica becomes leader. A running
 monitoring server refreshes its own node heartbeat periodically while it is up:
 
+For an explicit quorum-backed promotion admission check, import
+`hat/hatTopology` and call `PlanFailover` with `FailoverModeAutomatic` or
+`FailoverModeOperatorApproved`. Its zero-value policy is disabled, and it does
+not replace the existing election route or mutate topology. The planner checks
+healthy-owner quorum, optional failure-domain diversity, replica catch-up, and
+optional fencing-token equality before a caller commits through its promotion
+barrier. See [TU12_AUTOMATIC_FAILOVER_PLANNER.md](TU12_AUTOMATIC_FAILOVER_PLANNER.md)
+and the [T-U12 benchmark](BENCHMARK.md#t-u12-quorum-backed-failover-planner).
+
 The optional `-require-healthy-replica-reads` flag defaults to `false` for
 backward compatibility. When enabled, HTTP and native gRPC read commands and
 read-only typed batches return an explicit health-gate error instead of serving

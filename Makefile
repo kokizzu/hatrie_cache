@@ -22676,3 +22676,37 @@ commit-chg12:
 .PHONY: push-chg12
 push-chg12:
 	@bash scripts/deliver-chg12.sh push
+
+.PHONY: benchmark-chg13
+benchmark-chg13:
+	@bash scripts/benchmark-chg13.sh
+
+format-chg13:
+	bash ./scripts/format-chg13.sh
+
+status-chg13:
+	bash ./scripts/status-chg13.sh
+
+stage-chg13:
+	bash ./scripts/stage-chg13.sh
+
+commit-chg13:
+	bash ./scripts/commit-chg13.sh
+
+push-chg13:
+	bash ./scripts/push-chg13.sh
+
+race-chg13:
+	bash ./scripts/race-chg13.sh
+
+vet-chg13:
+	bash ./scripts/vet-chg13.sh
+
+check-chg13:
+	bash ./scripts/check-chg13.sh
+
+test-chg13:
+	bash ./scripts/test-chg13.sh
+
+test-chg13-package:
+	bash ./scripts/test-chg13-package.sh

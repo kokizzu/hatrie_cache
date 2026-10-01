@@ -141,6 +141,54 @@ copy-on-write resolver was rolled back because it had no material hot-path
 win and added unnecessary write-side complexity; the final implementation
 keeps the existing lock-based resolver semantics.
 
+## T-U12: Quorum-Backed Failover Planner
+
+Environment: Linux/amd64, AMD Ryzen 9 5950X 16-Core Processor. Five samples
+were collected with the `benchmark-chg13` target and `-benchmem`.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative time |
+| --- | ---: | ---: | ---: | ---: |
+| Pre-change `ElectShardLeader` control | 49.10 | 48 | 1 | 1.00x |
+| Final existing election control | 50.63 | 48 | 1 | 1.03x vs pre-change |
+| Disabled `PlanFailover` | 33.53 | 0 | 0 | 0.68x vs pre-change |
+| Enabled automatic `PlanFailover` | 144.1 | 0 | 0 | 2.94x vs pre-change |
+
+This is a safety/control-plane comparison, not a claim that the planner should
+replace hot-path election routing. The enabled planner adds quorum, applied
+sequence, fencing, and failure-domain checks while retaining zero common-path
+heap allocation. The zero-value policy is disabled and existing routing is
+unchanged.
+
+Raw final samples:
+
+```text
+BenchmarkFailoverExistingElectionControl: 50.63 ns/op 48 B/op 1 allocs/op
+BenchmarkFailoverExistingElectionControl: 51.20 ns/op 48 B/op 1 allocs/op
+BenchmarkFailoverExistingElectionControl: 50.47 ns/op 48 B/op 1 allocs/op
+BenchmarkFailoverExistingElectionControl: 50.02 ns/op 48 B/op 1 allocs/op
+BenchmarkFailoverExistingElectionControl: 52.37 ns/op 48 B/op 1 allocs/op
+BenchmarkPlanFailoverAutomatic: 145.1 ns/op 0 B/op 0 allocs/op
+BenchmarkPlanFailoverAutomatic: 129.3 ns/op 0 B/op 0 allocs/op
+BenchmarkPlanFailoverAutomatic: 131.4 ns/op 0 B/op 0 allocs/op
+BenchmarkPlanFailoverAutomatic: 147.0 ns/op 0 B/op 0 allocs/op
+BenchmarkPlanFailoverAutomatic: 144.1 ns/op 0 B/op 0 allocs/op
+BenchmarkPlanFailoverDisabled: 32.09 ns/op 0 B/op 0 allocs/op
+BenchmarkPlanFailoverDisabled: 31.39 ns/op 0 B/op 0 allocs/op
+BenchmarkPlanFailoverDisabled: 33.53 ns/op 0 B/op 0 allocs/op
+BenchmarkPlanFailoverDisabled: 34.10 ns/op 0 B/op 0 allocs/op
+BenchmarkPlanFailoverDisabled: 35.75 ns/op 0 B/op 0 allocs/op
+```
+
+The initial planner version measured about `185 ns/op`, `96 B/op`, and two
+allocations. A nested-scan allocation removal measured about `199 ns/op`,
+`48 B/op`, and one allocation, so it was not retained. The final bounded
+stack-backed owner/domain path measured about `144 ns/op`, `0 B/op`, and zero
+allocations for the common small replica set; larger owner sets retain a
+correctness-preserving fallback.
+
+See [TU12_AUTOMATIC_FAILOVER_PLANNER.md](TU12_AUTOMATIC_FAILOVER_PLANNER.md)
+for API semantics and verification commands.
+
 ## T-U03: Read-Only SQL Procedure Registry
 
 This benchmark measures the opt-in `hatSql.SQLProcedureRegistry` against the
