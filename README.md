@@ -4765,3 +4765,10 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+# Durable membership journal
+
+The opt-in `hatTopology.DurableMembershipLog` persists generation-fenced
+cluster join/leave records and replays them on restart. It uses `fsync` by
+default; `UnsafeNoSync: true` is an explicit unsafe escape hatch. The journal
+does not replace consensus or automatically reconfigure peers. See
+[TU13_DURABLE_MEMBERSHIP.md](TU13_DURABLE_MEMBERSHIP.md).

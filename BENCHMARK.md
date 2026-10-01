@@ -32580,3 +32580,19 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+## T-U13 Durable Membership
+
+Measured with `make benchmark-round37-topology` using
+`-benchtime=10x -count=5` on the repository's AMD64 host. The baseline is the
+pre-feature in-memory membership map benchmark.
+
+| Path | Median observed | Memory | Allocations | Relative cost vs map baseline |
+|---|---:|---:|---:|---:|
+| In-memory map update | 23 ns/op | 0 B/op | 0 | 1.0x |
+| Durable journal, `UnsafeNoSync` | 5.3 us/op | 1,008 B/op | 5 | ~230x slower |
+| Durable journal, default fsync | ~0.70 ms/op (0.66-0.93 measured) | 1,008 B/op | 5 | ~30,000x slower |
+
+The added cost is expected control-plane durability overhead, not a regression
+to an existing hot path. The default remains fsync because losing membership
+generations can create stale-node admission risk; the unsafe mode is explicit
+and documented.

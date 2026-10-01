@@ -22292,3 +22292,50 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: test-round37-topology-baseline test-round37-topology
+
+test-round37-topology-baseline:
+	bash scripts/test-round37-topology.sh baseline
+
+test-round37-topology:
+	bash scripts/test-round37-topology.sh feature
+
+.PHONY: benchmark-round37-topology-baseline
+
+benchmark-round37-topology-baseline:
+	bash scripts/test-round37-topology.sh benchmark-baseline
+
+.PHONY: benchmark-round37-topology
+
+benchmark-round37-topology:
+	bash scripts/test-round37-topology.sh benchmark-feature
+
+.PHONY: format-round37-topology
+
+format-round37-topology:
+	bash scripts/format-round37-topology.sh
+
+.PHONY: race-round37-topology vet-round37-topology
+
+race-round37-topology:
+	bash scripts/test-round37-topology.sh race
+
+vet-round37-topology:
+	bash scripts/test-round37-topology.sh vet
+
+.PHONY: verify-round37-topology-docs review-round37-topology stage-round37-topology commit-round37-topology push-round37-topology
+
+verify-round37-topology-docs:
+	bash scripts/verify-round37-topology-docs.sh
+
+review-round37-topology:
+	bash scripts/review-round37-topology.sh
+
+stage-round37-topology:
+	bash scripts/stage-round37-topology.sh
+
+commit-round37-topology:
+	bash scripts/commit-round37-topology.sh
+
+push-round37-topology:
+	bash scripts/push-round37-topology.sh
