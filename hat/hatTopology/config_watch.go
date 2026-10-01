@@ -29,6 +29,8 @@ var (
 	ErrConfigWatchPrincipalInvalid = errors.New("hatTopology: config watch principal is invalid")
 	// ErrConfigWatchKeyInvalid indicates a missing or oversized key.
 	ErrConfigWatchKeyInvalid = errors.New("hatTopology: config watch key is invalid")
+	// ErrConfigWatchPrefixInvalid indicates an oversized key prefix.
+	ErrConfigWatchPrefixInvalid = errors.New("hatTopology: config watch prefix is invalid")
 	// ErrConfigWatchSourceInvalid indicates a missing or oversized source node.
 	ErrConfigWatchSourceInvalid = errors.New("hatTopology: config watch source is invalid")
 	// ErrConfigWatchValueInvalid indicates an oversized configuration value.
@@ -93,9 +95,8 @@ func (action ConfigWatchAction) String() string {
 }
 
 // ConfigWatchAuthorization is passed to the configured authorizer. Read
-// authorization receives the requested key as empty because a read returns
-// the whole ordered change stream; a transport may add a key-scoped log when
-// that is required by its policy.
+// authorization receives the requested prefix as Key; an empty prefix means
+// the whole ordered change stream.
 type ConfigWatchAuthorization struct {
 	Principal string
 	Action    ConfigWatchAction
@@ -131,6 +132,7 @@ type ConfigWatchEvent struct {
 // ConfigWatchRequest selects a replay or wait cursor.
 type ConfigWatchRequest struct {
 	Principal    string
+	Prefix       string
 	AfterVersion uint64
 	Limit        int
 }
@@ -324,7 +326,14 @@ func (log *ConfigWatchLog) readLimit(limit int) (int, error) {
 // cursor is the last delivered version, so callers can safely use it when a
 // response is smaller than the current history.
 func (log *ConfigWatchLog) Read(ctx context.Context, request ConfigWatchRequest) ([]ConfigWatchEvent, uint64, error) {
-	principal, err := log.authorize(ctx, request.Principal, ConfigWatchRead, "")
+	if log == nil {
+		return nil, request.AfterVersion, ErrConfigWatchNil
+	}
+	prefix := strings.TrimSpace(request.Prefix)
+	if len(prefix) > log.maxKeyBytes {
+		return nil, request.AfterVersion, ErrConfigWatchPrefixInvalid
+	}
+	principal, err := log.authorize(ctx, request.Principal, ConfigWatchRead, prefix)
 	if err != nil {
 		return nil, request.AfterVersion, err
 	}
@@ -352,6 +361,9 @@ func (log *ConfigWatchLog) Read(ctx context.Context, request ConfigWatchRequest)
 		if event.Version <= request.AfterVersion {
 			continue
 		}
+		if prefix != "" && !strings.HasPrefix(event.Key, prefix) {
+			continue
+		}
 		events = append(events, cloneConfigWatchEvent(event))
 	}
 	next := request.AfterVersion
@@ -365,6 +377,7 @@ func (log *ConfigWatchLog) Read(ctx context.Context, request ConfigWatchRequest)
 // newer event is published or ctx is canceled. It uses one shared notification
 // channel per log, so idle clients do not reserve one goroutine each.
 func (log *ConfigWatchLog) Wait(ctx context.Context, request ConfigWatchRequest) ([]ConfigWatchEvent, uint64, error) {
+	prefix := strings.TrimSpace(request.Prefix)
 	for {
 		events, cursor, err := log.Read(ctx, request)
 		if err != nil || len(events) > 0 {
@@ -372,6 +385,10 @@ func (log *ConfigWatchLog) Wait(ctx context.Context, request ConfigWatchRequest)
 		}
 		request.AfterVersion = cursor
 		log.mu.Lock()
+		if log.hasConfigWatchEventAfterLocked(request.AfterVersion, prefix) {
+			log.mu.Unlock()
+			continue
+		}
 		notify := log.notify
 		log.mu.Unlock()
 		select {
@@ -380,6 +397,16 @@ func (log *ConfigWatchLog) Wait(ctx context.Context, request ConfigWatchRequest)
 		case <-notify:
 		}
 	}
+}
+
+func (log *ConfigWatchLog) hasConfigWatchEventAfterLocked(afterVersion uint64, prefix string) bool {
+	for offset := 0; offset < log.historySize; offset++ {
+		event := log.history[(log.historyStart+offset)%log.historyLimit]
+		if event.Version > afterVersion && (prefix == "" || strings.HasPrefix(event.Key, prefix)) {
+			return true
+		}
+	}
+	return false
 }
 
 // Stats returns current retention bounds.

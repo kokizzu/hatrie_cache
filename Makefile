@@ -4035,6 +4035,7 @@ test-sql-runtime-join-filter:
 benchmark-sql-runtime-join-filter:
 	sh ./scripts/benchmark-sql-runtime-join-filter.sh
 
+
 format-sql-runtime-join-filter:
 	sh ./scripts/format-sql-runtime-join-filter.sh
 
@@ -22600,3 +22601,26 @@ review-t-u24:
 
 deliver-t-u24:
 	bash ./scripts/deliver-t-u24.sh
+test-config-watch-peer:
+	sh ./scripts/test-config-watch-peer.sh test
+
+test-config-watch-peer-package:
+	sh ./scripts/test-config-watch-peer.sh package
+
+race-config-watch-peer:
+	sh ./scripts/test-config-watch-peer.sh race
+
+vet-config-watch-peer:
+	sh ./scripts/test-config-watch-peer.sh vet
+
+benchmark-config-watch-peer:
+	sh ./scripts/test-config-watch-peer.sh benchmark
+
+verify-config-watch-peer:
+	sh ./scripts/test-config-watch-peer.sh verify
+
+format-config-watch-peer:
+	sh ./scripts/format-config-watch-peer.sh
+
+deliver-config-watch-peer:
+	sh ./scripts/deliver-config-watch-peer.sh

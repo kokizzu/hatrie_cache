@@ -32894,3 +32894,35 @@ execution. The catalog validates dependency shape and returns clone-safe
 definitions; callers still own deterministic predicate evaluation, index
 maintenance, persistence, and rebuilds. See
 [TU24_CONDITIONAL_INDEX_METADATA.md](TU24_CONDITIONAL_INDEX_METADATA.md).
+
+## T-U27 Peer Configuration Watch
+
+This benchmark compares the version-1 bounded binary peer payload with a JSON
+envelope carrying the same cursor, prefix-capable request shape, and four
+configuration events. It measures request/response codec round trips, not
+socket or TLS latency. Five `-benchmem` samples ran on an AMD Ryzen 9 5950X.
+
+| Codec | Median time/op | Request bytes | Response bytes | Bytes/op | Allocs/op | Relative |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Binary config-watch payload | 0.56 us | 18 B | 118 B | 528 | 23 | baseline |
+| JSON envelope baseline | 5.77 us | 88 B | 318 B | 1,248 | 31 | binary is 10.3x faster, 2.36x lower heap, 25.8% fewer allocations |
+
+The prefix-bearing binary request is 4.9x smaller and the response is 2.7x
+smaller. The
+binary format is therefore the default for this peer feature; JSON is only a
+comparison baseline and is not a supported fallback. The handler benchmark
+was 0.44-0.47 us/op, 568 B/op, and 8 allocations/op for a four-event replay.
+
+Raw samples:
+
+```text
+Binary: 568.0, 573.3, 559.6, 561.8, 549.9 ns/op; 528 B/op; 23 allocs/op
+JSON:   5713, 5745, 5774, 5960, 5870 ns/op; 1248 B/op; 31 allocs/op
+Binary wire: 18 request bytes; 118 response bytes
+JSON wire:   88 request bytes; 318 response bytes
+```
+
+This is an opt-in transport adapter. It does not start a listener, alter
+existing commands, or claim end-to-end network throughput; handshake, TLS,
+queueing, and snapshot recovery remain outside the codec measurement. See
+[TU27_PEER_CONFIG_WATCH.md](TU27_PEER_CONFIG_WATCH.md).

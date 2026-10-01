@@ -35,6 +35,7 @@ if err := log.Publish(ctx, principal, hatTopology.ConfigWatchEvent{
 
 events, nextVersion, err := log.Wait(ctx, hatTopology.ConfigWatchRequest{
 	Principal:    principal,
+	Prefix:       "limits/",
 	AfterVersion: lastVersion,
 	Limit:        64,
 })
@@ -49,10 +50,11 @@ _ = events
 _ = nextVersion
 ```
 
-The authorizer is mandatory. Use separate logs or an equivalent scoped
-authorization boundary when different principals must not see the same
-configuration keys: a `Read` request consumes the log's ordered stream, so it
-does not provide per-key filtering.
+The authorizer is mandatory. `ConfigWatchRequest.Prefix` optionally filters
+events by key prefix while retaining the global version cursor; unrelated
+publishes do not complete a prefix `Wait`. Use separate logs or an equivalent
+scoped authorization boundary when different principals must not see the same
+configuration keys.
 
 ## Semantics
 
@@ -68,6 +70,9 @@ does not provide per-key filtering.
   stale or duplicate versions are rejected.
 - `Read` returns events after `AfterVersion` up to `Limit`. Its cursor is the
   last delivered version, which makes small batches safe to resume.
+- An empty `Prefix` reads the whole ordered stream. A non-empty prefix returns
+  only keys beginning with that prefix; history gaps remain conservative and
+  still require snapshot recovery.
 - `Wait` returns immediately when events are available, otherwise sleeps on one
   shared notification channel until a publish or context cancellation. Idle
   clients do not create one goroutine or unbounded queue each.
@@ -109,3 +114,6 @@ make benchmark-t-u50
 make test-t-u50
 make verify-t-u50
 ```
+
+For the opt-in compact-peer binary adapter, see
+[TU27_PEER_CONFIG_WATCH.md](TU27_PEER_CONFIG_WATCH.md).
