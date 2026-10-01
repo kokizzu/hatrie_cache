@@ -2973,7 +2973,13 @@ func sqlExternalSortStreamable(query *sqlQuery, resolver SQLSourceResolver, cont
 		return false
 	}
 	for _, selectItem := range query.selects {
-		if selectItem.expr.kind == "star" || sqlExprHasAggregate(selectItem.expr) || sqlExprHasWindow(selectItem.expr) {
+		if selectItem.expr.kind == "star" {
+			if len(query.selects) != 1 {
+				return false
+			}
+			continue
+		}
+		if sqlExprHasAggregate(selectItem.expr) || sqlExprHasWindow(selectItem.expr) {
 			return false
 		}
 	}
@@ -2985,13 +2991,26 @@ func sqlExternalSortStreamable(query *sqlQuery, resolver SQLSourceResolver, cont
 	return true
 }
 
+func sqlExternalSortStarColumns(row SQLRow) []string {
+	columns := make([]string, 0, len(row))
+	for column := range row {
+		columns = append(columns, column)
+	}
+	sort.Strings(columns)
+	return columns
+}
+
 // executeSQLExternalSortStream keeps only one bounded input run in memory and
 // emits the final merge directly to the row callback. It supports the same
 // scalar projection/filter expressions as the ordinary stream, including
 // registered scalar functions evaluated one row at a time. Custom ORDER BY
 // keys remain excluded until alias/order evaluation has the same proof.
 func executeSQLExternalSortStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func([]string, SQLRow) error) error {
+	starProjection := len(query.selects) == 1 && query.selects[0].expr.kind == "star"
 	columns := sqlColumns(query.selects)
+	if starProjection {
+		columns = nil
+	}
 	functions, _ := resolver.(SQLFunctionResolver)
 	available := int64(control.options.MaxSpillBytes)
 	allPaths := map[string]struct{}{}
@@ -3037,13 +3056,22 @@ func executeSQLExternalSortStream(ctx context.Context, query *sqlQuery, resolver
 				return nil
 			}
 		}
+		if starProjection && columns == nil {
+			columns = sqlExternalSortStarColumns(sourceRow)
+		}
 		row := make(SQLRow, len(columns))
-		for index, item := range query.selects {
-			value, err := evalSQLStreamExpr(item.expr, execRow, functions)
-			if err != nil {
-				return err
+		if starProjection {
+			for _, column := range columns {
+				row[column] = sourceRow[column]
 			}
-			row[columns[index]] = value
+		} else {
+			for index, item := range query.selects {
+				value, err := evalSQLStreamExpr(item.expr, execRow, functions)
+				if err != nil {
+					return err
+				}
+				row[columns[index]] = value
+			}
 		}
 		record := sqlSpillOutput{Row: row, Keys: make([]interface{}, len(query.orderBy)), Ordinal: ordinal}
 		ordinal++

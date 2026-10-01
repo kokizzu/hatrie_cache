@@ -22292,3 +22292,41 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+format-chg02-star-spill:
+	bash scripts/format-chg02-star-spill.sh
+
+test-chg02-star-spill:
+	bash scripts/test-chg02-star-spill.sh
+
+benchmark-chg02-star-spill:
+	bash scripts/benchmark-chg02-star-spill.sh
+
+race-chg02-star-spill:
+	bash scripts/race-chg02-star-spill.sh
+
+vet-chg02-star-spill:
+	bash scripts/vet-chg02-star-spill.sh
+
+test-chg02-star-spill-package:
+	bash scripts/test-chg02-star-spill-package.sh
+
+deliver-chg02-star-spill:
+	bash scripts/deliver-chg02-star-spill.sh $(MODE)
+
+check-chg02-star-spill:
+	bash scripts/deliver-chg02-star-spill.sh check
+
+stage-chg02-star-spill-fix:
+	bash scripts/deliver-chg02-star-spill.sh stage-fix
+
+commit-chg02-star-spill-fix:
+	bash scripts/deliver-chg02-star-spill.sh commit-fix
+
+stage-chg02-star-spill:
+	bash scripts/deliver-chg02-star-spill.sh stage-feature
+
+commit-chg02-star-spill:
+	bash scripts/deliver-chg02-star-spill.sh commit-feature
+
+push-chg02-star-spill:
+	bash scripts/deliver-chg02-star-spill.sh push
