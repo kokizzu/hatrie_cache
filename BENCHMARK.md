@@ -23249,6 +23249,24 @@ the existing network path yet; transport authentication, snapshot transfer,
 and atomic topology publication remain caller-owned. Raw runs are produced by
 `make benchmark-t-u09`.
 
+## T-U10: Journal write-quorum state
+
+Seven local runs compare the existing quorum decision helper with the new
+per-journal-sequence state object:
+
+| Path | Median ns/op | B/op | allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Existing `EvaluateWriteQuorum` | 2.186 | 0 | 0 | 1.00x |
+| `JournalWriteQuorumState.Decision` | 7.453 | 0 | 0 | 3.41x |
+| `JournalWriteQuorumState.Acknowledge` | 6.282 | 0 | 0 | 2.87x |
+
+The state uses a fixed 64-bit acknowledgement mask, so duplicate acknowledgements
+do not allocate or grow per-write maps. The state decision is 3.41x the direct
+helper because it validates the persisted sequence and mask on every call;
+this is control-plane overhead, not a per-key data-path cost. The state object
+itself does not perform network I/O or change journal latency;
+caller-owned transport and journal integration remain the open part of T-U10.
+
 ## T-U11: Per-space conflict policy
 
 The existing direct resolver remains unchanged. Five local runs compare it with

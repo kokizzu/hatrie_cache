@@ -22769,6 +22769,52 @@ benchmark-t-u09-stable:
 test-t-u09-package:
 	bash scripts/test-t-u09-package.sh
 
+
+.PHONY: test-t-u10-state
+test-t-u10-state:
+	bash scripts/test-t-u10-state.sh
+
+.PHONY: format-t-u10-state
+format-t-u10-state:
+	bash scripts/format-t-u10-state.sh
+
+.PHONY: benchmark-t-u10-state
+benchmark-t-u10-state:
+	bash scripts/benchmark-t-u10-state.sh
+
+.PHONY: test-t-u10-package
+test-t-u10-package:
+	bash scripts/test-t-u10-package.sh
+
+.PHONY: race-t-u10-state
+race-t-u10-state:
+	bash scripts/race-t-u10-state.sh
+
+.PHONY: vet-t-u10-state
+vet-t-u10-state:
+	bash scripts/vet-t-u10-state.sh
+
+.PHONY: review-t-u10-state
+review-t-u10-state:
+	bash scripts/review-t-u10-state.sh
+
+.PHONY: stage-t-u10-state
+stage-t-u10-state:
+	bash scripts/stage-t-u10-state.sh
+
+.PHONY: commit-t-u10-state
+commit-t-u10-state:
+	bash scripts/commit-t-u10-state.sh
+
+.PHONY: push-t-u10-state
+push-t-u10-state:
+	bash scripts/push-t-u10-state.sh
+
+
+.PHONY: inspect-make-round33
+inspect-make-round33:
+	bash scripts/inspect-make-round33.sh
+
 .PHONY: race-t-u09
 race-t-u09:
 	bash scripts/race-t-u09.sh
