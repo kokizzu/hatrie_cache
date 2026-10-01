@@ -19,6 +19,40 @@ this microbenchmark. Raw samples are produced by
 `make benchmark-round39-replica-read-only-baseline` and
 `make benchmark-round39-replica-read-only`.
 
+### T-U38 Conflict introspection stream
+
+Command: `make benchmark-round40-conflict` (`-benchmem -count=5`), Linux/amd64,
+AMD Ryzen 9 5950X. This is a new opt-in diagnostic path, so the meaningful
+comparison is the bounded operation cost rather than a claimed speedup over a
+no-op. The append benchmark uses a 1,024-event ring; read requests 64 detached
+events; snapshot marshaling retains 1,024 events.
+
+| Operation | Median ns/op | B/op | Allocs/op | Notes |
+| --- | ---: | ---: | ---: | --- |
+| Append | 283.2 | 240 | 3 | SHA-256 key digest plus fixed-ring insertion |
+| Read 64 events | 2,489 | 14,336 | 1 | Detached caller-owned batch |
+| Marshal 1,024 events | 227,286 | 655,360 | 1,027 | HCI1 encoding, copy, and CRC32C |
+
+Raw samples:
+
+```text
+append ns/op: 286.7 283.2 285.1 282.5 279.6
+append B/op:   240   240   240   240   240
+append allocs: 3     3     3     3     3
+read ns/op:    2481  2499  2522  2116  2489
+read B/op:     14336 14336 14336 14336 14336
+read allocs:   1     1     1     1     1
+snapshot ns/op: 246621 233726 227286 225719 226135
+snapshot B/op:  655360 655360 655360 655360 655360
+snapshot allocs: 1027 1027 1027 1027 1027
+```
+
+The fixed ring retains only the configured event count. Read and snapshot
+allocations are intentional detached-copy costs, and ordinary conflict
+resolution is unchanged until a caller constructs the log and appends events.
+The security and recovery contract is in
+[TU38_CONFLICT_INTROSPECTION.md](TU38_CONFLICT_INTROSPECTION.md).
+
 ## CH-U49 Skip-Index EXPLAIN Diagnostics
 
 This paired clean-worktree benchmark compares the pre-CH-U49 implementation

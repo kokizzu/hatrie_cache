@@ -22383,3 +22383,47 @@ commit-round39-replica-read-only:
 .PHONY: push-round39-replica-read-only
 push-round39-replica-read-only:
 	bash ./scripts/push-round39-replica-read-only.sh
+
+.PHONY: format-round40-conflict
+format-round40-conflict:
+	gofmt -w hat/hatReplication/conflict_introspection.go hat/hatReplication/conflict_introspection_test.go hat/hatReplication/conflict_introspection_benchmark_test.go
+
+.PHONY: test-round40-conflict
+test-round40-conflict:
+	bash ./scripts/test-round40-conflict.sh
+
+.PHONY: benchmark-round40-conflict
+benchmark-round40-conflict:
+	bash ./scripts/benchmark-round40-conflict.sh
+
+.PHONY: race-round40-conflict
+race-round40-conflict:
+	bash ./scripts/race-round40-conflict.sh
+
+.PHONY: test-round40-conflict-package
+test-round40-conflict-package:
+	bash ./scripts/test-round40-conflict-package.sh
+
+.PHONY: race-round40-conflict-package
+race-round40-conflict-package:
+	bash ./scripts/race-round40-conflict-package.sh
+
+.PHONY: vet-round40-conflict
+vet-round40-conflict:
+	bash ./scripts/vet-round40-conflict.sh
+
+.PHONY: verify-round40-conflict-docs
+verify-round40-conflict-docs:
+	bash ./scripts/verify-round40-conflict-docs.sh
+
+.PHONY: stage-round40-conflict
+stage-round40-conflict:
+	bash ./scripts/stage-round40-conflict.sh
+
+.PHONY: commit-round40-conflict
+commit-round40-conflict:
+	bash ./scripts/commit-round40-conflict.sh
+
+.PHONY: push-round40-conflict
+push-round40-conflict:
+	bash ./scripts/push-round40-conflict.sh
