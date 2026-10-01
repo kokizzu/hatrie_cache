@@ -4765,3 +4765,11 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+### Durable tuple operation journal (opt-in)
+
+`hatDataStructure.TupleFieldOperationJournal` replays atomic tuple set,
+splice, and checked int64-add operations from a bounded, checksummed `HTJ1`
+binary journal. It defaults to `fsync` per record for durability; set
+`UnsafeNoSync: true` only when losing recent records is acceptable. The API,
+recovery rules, frame layout, benchmark, and tradeoffs are in
+[TU19_TUPLE_OPERATION_JOURNAL.md](TU19_TUPLE_OPERATION_JOURNAL.md).

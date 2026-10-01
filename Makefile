@@ -22292,3 +22292,47 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: test-round38-tuple-journal-baseline benchmark-round38-tuple-journal-baseline test-round38-tuple-journal benchmark-round38-tuple-journal
+
+test-round38-tuple-journal-baseline:
+	bash scripts/test-round38-tuple-journal.sh baseline
+
+benchmark-round38-tuple-journal-baseline:
+	bash scripts/test-round38-tuple-journal.sh benchmark-baseline
+
+test-round38-tuple-journal:
+	bash scripts/test-round38-tuple-journal.sh feature
+
+benchmark-round38-tuple-journal:
+	bash scripts/test-round38-tuple-journal.sh benchmark-feature
+.PHONY: format-round38-tuple-journal
+format-round38-tuple-journal:
+	bash ./scripts/format-round38-tuple-journal.sh
+
+.PHONY: race-round38-tuple-journal
+race-round38-tuple-journal:
+	bash ./scripts/race-round38-tuple-journal.sh
+
+.PHONY: vet-round38-tuple-journal
+vet-round38-tuple-journal:
+	bash ./scripts/vet-round38-tuple-journal.sh
+
+.PHONY: verify-round38-tuple-journal-docs
+verify-round38-tuple-journal-docs:
+	bash ./scripts/verify-round38-tuple-journal-docs.sh
+
+.PHONY: review-round38-tuple-journal
+review-round38-tuple-journal:
+	bash ./scripts/review-round38-tuple-journal.sh
+
+.PHONY: stage-round38-tuple-journal
+stage-round38-tuple-journal:
+	bash ./scripts/stage-round38-tuple-journal.sh
+
+.PHONY: commit-round38-tuple-journal
+commit-round38-tuple-journal:
+	bash ./scripts/commit-round38-tuple-journal.sh
+
+.PHONY: push-round38-tuple-journal
+push-round38-tuple-journal:
+	bash ./scripts/push-round38-tuple-journal.sh

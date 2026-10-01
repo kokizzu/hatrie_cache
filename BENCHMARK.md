@@ -32580,3 +32580,19 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+## T-U19 durable tuple operation journal
+
+Command: `make benchmark-round38-tuple-journal` (`-benchtime=10x -count=5`),
+AMD Ryzen 9 5950X, Linux/amd64. The first three rows use the same two-field
+fixed-width update; raw samples are retained so storage variance is visible.
+
+| Case | Raw ns/op samples | Median | B/op | allocs/op | Relative to memory-only |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Memory-only `ApplyUpdates` | 810, 633.1, 594.1, 637, 680 | 637 ns | 16 | 1 | 1.00x |
+| Journal, `UnsafeNoSync` | 3491, 3088, 3993, 3018, 3156 | 3156 ns | 104 | 3 | 4.95x slower |
+| Journal, default fsync | 1137479, 1153483, 1036780, 2282185, 1005099 | 1.137 ms | 104 | 3 | 1,786x slower (median) |
+
+The fsync samples range from 1.005 ms to 2.282 ms in this run, and still depend
+on the storage device. The feature is opt-in; see
+[TU19_TUPLE_OPERATION_JOURNAL.md](TU19_TUPLE_OPERATION_JOURNAL.md)
+for frame format, recovery behavior, and the non-comparable legacy benchmark.
