@@ -22292,3 +22292,42 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: test-round34-journal
+test-round34-journal:
+	bash scripts/test-round34-journal.sh
+
+.PHONY: format-round34-journal
+format-round34-journal:
+	bash scripts/format-round34-journal.sh
+
+.PHONY: benchmark-round34-journal
+benchmark-round34-journal:
+	bash scripts/benchmark-round34-journal.sh
+
+.PHONY: race-round34-journal
+race-round34-journal:
+	bash scripts/race-round34-journal.sh
+
+.PHONY: vet-round34-journal
+vet-round34-journal:
+	bash scripts/vet-round34-journal.sh
+
+.PHONY: verify-round34-journal-docs
+verify-round34-journal-docs:
+	bash scripts/verify-round34-journal-docs.sh
+
+.PHONY: review-round34-journal
+review-round34-journal:
+	bash scripts/review-round34-journal.sh
+
+.PHONY: stage-round34-journal
+stage-round34-journal:
+	bash scripts/stage-round34-journal.sh
+
+.PHONY: commit-round34-journal
+commit-round34-journal:
+	bash scripts/commit-round34-journal.sh
+
+.PHONY: push-round34-journal
+push-round34-journal:
+	bash scripts/push-round34-journal.sh

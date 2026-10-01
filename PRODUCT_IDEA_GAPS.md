@@ -189,3 +189,11 @@ generic `hat*` primitives are preferred when they provide a real reusable
 contract rather than an unintegrated placeholder. Large or irreversible ideas
 such as VShard migration, a new scripting runtime, or a consensus log remain
 proposal-only until their recovery and security contracts are complete.
+
+### T042 recovery-time parallel replay
+
+Partial opt-in support is implemented in `hatJournal.ParallelReplay`. It
+preserves per-partition sequence order with bounded workers, but normal
+recovery integration remains caller-owned until command conflict keys are
+available in the parent cache package. See
+[T042_RECOVERY_PARALLEL_REPLAY.md](T042_RECOVERY_PARALLEL_REPLAY.md).

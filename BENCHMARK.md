@@ -32580,3 +32580,12 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## T042 Recovery-Time Parallel Replay
+
+The opt-in scheduler is 3.10x faster for 4,096 CPU-heavy mutations across 64
+independent partitions (9.854 ms serial versus 3.180 ms with four workers),
+at 42.8 KB and 90 allocations per batch. The one-partition fastpath remains
+allocation-free. Tiny callbacks are a known non-target: four workers took
+226.832 us versus 11.137 us serial, so the feature remains disabled by
+default. Full details: [T042_RECOVERY_PARALLEL_REPLAY.md](T042_RECOVERY_PARALLEL_REPLAY.md).
