@@ -23232,6 +23232,23 @@ The opt-in path measured about 6.5% higher latency, 336 extra bytes, and five
 extra allocations in this workload. The default writer path has no manifest
 hashing cost and snapshot bytes remain unchanged.
 
+## T-U09: Snapshot-plus-WAL join bootstrap
+
+Five local runs measured the transport-neutral coordinator over one complete
+planned -> catch-up -> ready -> activated lifecycle:
+
+| Path | Median ns/op | B/op | allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Direct field updates without validation | 0.67 | 0 | 0 | 1.00x |
+| `JoinBootstrapState` validated transitions | 111.2 | 0 | 0 | 165.2x slower |
+
+The coordinator adds about 28 ns per validated transition and no heap
+allocation. This is control-plane work performed once per bootstrap phase, not
+per cache read, write, or journal record. It is intentionally not wired into
+the existing network path yet; transport authentication, snapshot transfer,
+and atomic topology publication remain caller-owned. Raw runs are produced by
+`make benchmark-t-u09`.
+
 ## T-U11: Per-space conflict policy
 
 The existing direct resolver remains unchanged. Five local runs compare it with

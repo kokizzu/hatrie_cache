@@ -22742,5 +22742,53 @@ commit-tu07-replica-rpo:
 push-tu07-replica-rpo:
 	bash scripts/ship-tu07.sh push
 
+inspect-round32-t-u08:
+	bash scripts/inspect-round32-t-u08.sh
+
 verify-tu07-replica-rpo:
 	bash scripts/ship-tu07.sh verify
+.PHONY: baseline-t-u09
+baseline-t-u09:
+	bash scripts/baseline-t-u09.sh
+.PHONY: test-t-u09
+test-t-u09:
+	bash scripts/test-t-u09.sh
+.PHONY: format-t-u09
+format-t-u09:
+	bash scripts/format-t-u09.sh
+
+.PHONY: benchmark-t-u09
+benchmark-t-u09:
+	bash scripts/benchmark-t-u09.sh
+
+.PHONY: benchmark-t-u09-stable
+benchmark-t-u09-stable:
+	BENCHTIME=1s COUNT=7 bash scripts/benchmark-t-u09.sh
+
+.PHONY: test-t-u09-package
+test-t-u09-package:
+	bash scripts/test-t-u09-package.sh
+
+.PHONY: race-t-u09
+race-t-u09:
+	bash scripts/race-t-u09.sh
+
+.PHONY: vet-t-u09
+vet-t-u09:
+	bash scripts/vet-t-u09.sh
+
+.PHONY: review-t-u09
+review-t-u09:
+	bash scripts/review-t-u09.sh
+
+.PHONY: stage-t-u09
+stage-t-u09:
+	bash scripts/stage-t-u09.sh
+
+.PHONY: commit-t-u09
+commit-t-u09:
+	bash scripts/commit-t-u09.sh
+
+.PHONY: push-t-u09
+push-t-u09:
+	bash scripts/push-t-u09.sh
