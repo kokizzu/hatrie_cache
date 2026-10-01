@@ -22618,3 +22618,32 @@ commit-t-u14:
 
 push-t-u14:
 	bash scripts/ship-t-u14.sh push
+format-tu19-tuple-journal:
+	bash scripts/run-tu19-tuple-journal.sh format
+
+verify-tu19-ship:
+	bash scripts/verify-tu19-ship.sh
+
+review-tu19:
+	bash scripts/ship-tu19.sh review
+
+commit-tu19:
+	bash scripts/ship-tu19.sh commit
+
+push-tu19:
+	bash scripts/ship-tu19.sh push
+
+benchmark-tu19-before:
+	bash scripts/run-tu19-tuple-journal.sh benchmark-baseline
+
+benchmark-tu19-tuple-journal:
+	bash scripts/run-tu19-tuple-journal.sh benchmark
+
+test-tu19-tuple-journal:
+	bash scripts/run-tu19-tuple-journal.sh test
+
+race-tu19-tuple-journal:
+	bash scripts/run-tu19-tuple-journal.sh race
+
+vet-tu19-tuple-journal:
+	bash scripts/run-tu19-tuple-journal.sh vet

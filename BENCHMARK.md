@@ -32849,3 +32849,29 @@ after control:  1002/1341/10, 1051/1389/10, 1050/1369/10, 1029/1386/10, 997.1/13
 Generated-column tables intentionally reject this narrow path so generated
 dependencies cannot become stale; `Upsert` remains the complete-row path.
 See [T-U14_TYPED_TABLE_FIELD_UPDATES.md](T-U14_TYPED_TABLE_FIELD_UPDATES.md).
+
+## T-U19: Durable tuple field-operation journal record
+
+The existing tuple update operations now have an opt-in HTFJ1 binary record
+with deterministic varints, CRC32C, bounded decode, and replay through the
+existing atomic validator. The matched control is a JSON-shaped record with
+the same four operations. Five `go test -benchmem` samples on Linux/amd64,
+AMD Ryzen 9 5950X. Lower is better.
+
+| Operation | Before JSON median | HTFJ1 median | CPU improvement | Before wire | HTFJ1 wire | Wire reduction | Before B/op | HTFJ1 B/op | Before allocs | HTFJ1 allocs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Marshal | 520.2 ns | 104.6 ns | 4.97x faster | 393 B | 64 B | 6.14x smaller | 464 | 64 | 2 | 1 |
+| Unmarshal | 1,262 ns | 299.8 ns | 4.21x faster | 393 B | 64 B | 6.14x smaller | 1,231 | 416 | 10 | 6 |
+
+Raw samples (`ns/op / B/op / allocs/op / wire_bytes/op`):
+
+```text
+before JSON marshal:   527.7/464/2/393, 520.2/464/2/393, 520.3/464/2/393, 502.2/464/2/393, 468.9/464/2/393
+after HTFJ1 marshal:   104.6/64/1/64, 104.5/64/1/64, 106.8/64/1/64, 105.0/64/1/64, 104.3/64/1/64
+before JSON unmarshal: 1283/1231/10/393, 1256/1231/10/393, 1264/1231/10/393, 1239/1231/10/393, 1262/1231/10/393
+after HTFJ1 unmarshal: 305.3/416/6/64, 302.5/416/6/64, 299.8/416/6/64, 296.8/416/6/64, 298.4/416/6/64
+```
+
+This is an importable partial adoption; existing journal command formats and
+automatic dispatch remain unchanged. See
+[TU19_DURABLE_TUPLE_FIELD_JOURNAL.md](TU19_DURABLE_TUPLE_FIELD_JOURNAL.md).

@@ -812,6 +812,17 @@ row replacement remain on `Upsert`. See
 [T-U14_TYPED_TABLE_FIELD_UPDATES.md](T-U14_TYPED_TABLE_FIELD_UPDATES.md) and
 [BENCHMARK.md](BENCHMARK.md#t-u14-typed-table-field-updates).
 
+## T-U19: Durable tuple field-operation journal records
+
+Partially adopted as importable HTFJ1 binary records for existing tuple
+`SET`, `SPLICE`, and `ADD_INT64` batches. Records use deterministic varints,
+CRC32C, bounded decoding, copied payload fields, and replay through the
+existing atomic tuple validator. Existing command-journal formats and
+automatic SQL/Cache dispatch remain unchanged; callers own durable placement
+and activation. See
+[TU19_DURABLE_TUPLE_FIELD_JOURNAL.md](TU19_DURABLE_TUPLE_FIELD_JOURNAL.md) and
+[BENCHMARK.md](BENCHMARK.md#t-u19-durable-tuple-field-operation-journal-record).
+
 ## M-G07: Source Health And Lag Records
 
 Partially adopted as an importable, bounded, opt-in source health registry.
