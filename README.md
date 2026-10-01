@@ -9,6 +9,7 @@ security guidance before exposing it on a network.
 ## Start Here
 
 - New to the cache commands and value types: [DATA_STRUCTURE.md](DATA_STRUCTURE.md)
+- Optional loader-agnostic native extension ABI boundary: [T103_NATIVE_FFI_BOUNDARY.md](T103_NATIVE_FFI_BOUNDARY.md)
 - ClickHouse-style SQL RowBinary streaming export and bounded bulk import: [CH050_SQL_ROW_BINARY_STREAM.md](CH050_SQL_ROW_BINARY_STREAM.md)
 - New to the SQL interface: [SQL.md](SQL.md)
 - Opt-in Materialize-style SQL result subscriptions with automatic `CACHE(...)` dependency discovery: [MZ010_SQL_SUBSCRIPTIONS.md](MZ010_SQL_SUBSCRIPTIONS.md), with registration cost measurements in [BENCHMARK.md#mz-010-sql-result-subscription-entrypoints](BENCHMARK.md#mz-010-sql-result-subscription-entrypoints)

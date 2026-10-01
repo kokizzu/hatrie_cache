@@ -32580,3 +32580,38 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## T103 Native Extension Boundary
+
+Commands:
+
+```sh
+make t103-native-benchmark-baseline
+make t103-native-benchmark-after
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is a
+direct map lookup representing the existing in-process dispatch shape. The
+registry is opt-in and is not on the default SQL/cache path.
+
+| Workload | Direct map median ns/op | Registry median ns/op | Registry B/op | Registry allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Active extension lookup | 7.816 | 19.52 | 0 | 0 | 2.50x slower |
+| Metadata copy | n/a | 71.42 | 32 | 1 | diagnostic path |
+| Manifest normalization | n/a | 406.4 | 152 | 5 | registration path |
+
+Raw samples were `18.39, 19.52, 19.57, 19.59, 19.51 ns/op` for lookup,
+`71.42, 70.51, 80.65, 70.61, 71.54 ns/op` for metadata, and
+`406.4, 404.3, 406.3, 410.1, 408.4 ns/op` for normalization. The direct-map
+control samples were `7.366, 7.431, 8.019, 7.816, 7.997 ns/op`. The registry's
+lookup is intentionally a correctness/lifecycle boundary, not a replacement
+for a hot data map. `Resolve` remains allocation-free; metadata is copied to
+prevent callers from mutating registry state. The earlier immutable
+atomic-snapshot experiment measured 17.47--18.38 ns/op, effectively unchanged,
+but made every write copy the whole registry (`O(n)`), so it was rejected and
+is not part of the implementation.
+
+The native boundary has no default-path CPU, memory, or security cost because
+the package is only constructed by callers that opt in. Actual native loading,
+artifact verification policy, isolation, and invocation remain caller-owned;
+the contract is documented in [T103_NATIVE_FFI_BOUNDARY.md](T103_NATIVE_FFI_BOUNDARY.md).

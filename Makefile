@@ -22292,3 +22292,38 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+t103-native-test-red:
+	bash scripts/test-t103-native.sh test-red
+
+t103-native-benchmark-baseline:
+	bash scripts/test-t103-native.sh benchmark-baseline
+
+t103-native-benchmark-after:
+	bash scripts/test-t103-native.sh benchmark-after
+
+t103-native-test:
+	bash scripts/test-t103-native.sh test
+
+t103-native-race:
+	bash scripts/test-t103-native.sh race
+
+t103-native-vet:
+	bash scripts/test-t103-native.sh vet
+
+t103-native-delivery-status:
+	bash scripts/deliver-t103-native.sh status
+
+t103-native-delivery-review:
+	bash scripts/deliver-t103-native.sh review
+
+t103-native-stage:
+	bash scripts/deliver-t103-native.sh stage
+
+t103-native-commit:
+	bash scripts/deliver-t103-native.sh commit
+
+t103-native-push:
+	bash scripts/deliver-t103-native.sh push
+
+t103-native-format:
+	bash scripts/format-t103-native.sh

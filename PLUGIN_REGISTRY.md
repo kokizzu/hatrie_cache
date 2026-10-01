@@ -30,7 +30,10 @@ The registry swaps interface values atomically under a read/write lock; it does
 not load native shared objects, execute untrusted code, or unload Go packages.
 The application remains responsible for constructing and validating plugin
 implementations, draining work before replacement, and choosing compatible
-versions. Native FFI remains a separate security-sensitive design boundary.
+versions. For an importable, loader-agnostic ABI manifest and lifecycle
+boundary, see [T103_NATIVE_FFI_BOUNDARY.md](T103_NATIVE_FFI_BOUNDARY.md) and
+`hat/hatExtension`. Native code remains a separate security-sensitive design
+boundary.
 
 ## Verification
 

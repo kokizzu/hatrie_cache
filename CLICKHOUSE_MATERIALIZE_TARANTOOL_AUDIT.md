@@ -205,7 +205,10 @@ records a separate implementation boundary.
 - [ ] M090 Independent compute and storage scaling.
 - [ ] T042 Recovery-time parallel replay. A bounded single-key parallel replay
 - [ ] T047 Synchronous replication with an explicit quorum. The public single-command path is now opt-in through `MonitoringOptions.WriteQuorum` / `CacheGRPCOptions.WriteQuorum`; atomic `BATCH` quorum semantics and rollback-free cluster-wide commit remain open.
-- [ ] T103 Native FFI extension boundary.
+- [x] T103 Native FFI extension boundary. Added the importable `hat/hatExtension`
+  manifest, ABI validation, checksum/platform/capability checks, caller-owned
+  loader handshake, and optimistic version-fenced registry. The package does
+  not load or execute native code; see [T103_NATIVE_FFI_BOUNDARY.md](T103_NATIVE_FFI_BOUNDARY.md).
 - [ ] T150 Language-neutral client SDK coverage.
 
 ### M051c: Immutable Compiled SQL Template Reuse
