@@ -21636,6 +21636,29 @@ push-cleanup-tooling:
 test:
 	bash ./scripts/test-all.sh
 
+.PHONY: test-t-u09
+test-t-u09:
+	@bash scripts/test-t-u09.sh
+
+.PHONY: format-t-u09 benchmark-t-u09
+format-t-u09:
+	@bash scripts/format-t-u09.sh
+
+benchmark-t-u09:
+	@bash scripts/benchmark-t-u09.sh
+
+.PHONY: verify-t-u09
+verify-t-u09:
+	@bash scripts/verify-t-u09.sh
+
+.PHONY: verify-t-u09-focused
+verify-t-u09-focused:
+	@bash scripts/verify-t-u09-focused.sh
+
+.PHONY: deliver-t-u09
+deliver-t-u09:
+	@bash scripts/deliver-t-u09.sh
+
 .PHONY: format-m049 test-m049 benchmark-m049-baseline benchmark-m049
 format-m049:
 	bash ./scripts/format-m049.sh

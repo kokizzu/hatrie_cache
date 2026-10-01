@@ -32580,3 +32580,31 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## T-U09 Snapshot-plus-WAL Join Gate
+
+Commands:
+
+```sh
+make benchmark-t-u09
+```
+
+Ten `-count=10` samples at `-benchtime=10000x -cpu=1` on Linux/amd64,
+AMD Ryzen 9 5950X. The legacy column is the prior implicit sequence of three
+booleans and counters; the validated column is the importable
+`hatReplication.JoinBootstrap` contract.
+
+| Workflow | Legacy median ns/op | Validated median ns/op | CPU ratio | Legacy B/op | Validated B/op | Legacy allocs/op | Validated allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Snapshot, catch-up, activate | 0.47 | 65.9 | 140x overhead | 0 | 96 | 0 | 1 |
+
+Raw samples (`ns/op`): legacy `0.474, 0.471, 0.469, 0.4701, 0.469, 0.470,
+0.469, 0.469, 0.470, 0.470`; validated `115.7, 76.47, 66.08, 61.48,
+65.71, 60.66, 66.06, 61.32, 66.22, 61.10`.
+
+This is a control-plane safety feature, not a hot-path optimization. The
+measured cost is one 96-byte state object and roughly 66 ns for a complete
+local transition sequence; network transfer, checkpoint I/O, and WAL replay
+remain several orders of magnitude larger. The benchmark intentionally keeps
+the legacy implicit sequence so future changes can detect accidental growth in
+join-control overhead.
