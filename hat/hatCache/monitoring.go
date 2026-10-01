@@ -1120,10 +1120,25 @@ func (handler *MonitoringHandler) prometheusMetrics() string {
 			writePrometheusGaugeInt64(&builder, "hatrie_cache_replication_last_retry_age_millis", "Age of the last async replication retry scheduling event in milliseconds.", node, result.Queue.LastRetryAgeMillis)
 			writePrometheusReplicationLag(&builder, node, *result.Queue)
 		}
+		if handler.options.Replicator.regionalReplicationConfigured() {
+			writePrometheusReplicationRegionStatus(&builder, node, handler.options.Replicator.regionalReplicationMetrics(result.Queue))
+		}
 		writePrometheusReplicationCircuitBreakers(&builder, node, result.CircuitBreakers)
 		writePrometheusReplicationMetrics(&builder, node, handler.options.Replicator.MetricsSnapshot())
 	}
 	return builder.String()
+}
+
+func writePrometheusReplicationRegionStatus(builder *strings.Builder, node string, metrics replicationRegionMetrics) {
+	writePrometheusGauge(builder, "hatrie_cache_replication_rpo_configured", "Whether regional replication RPO monitoring is configured.", node, boolGauge(metrics.configured))
+	writePrometheusGauge(builder, "hatrie_cache_replication_rpo_configuration_error", "Whether the configured regional replication RPO policy is invalid.", node, boolGauge(metrics.configurationError))
+	writePrometheusGauge(builder, "hatrie_cache_replication_rpo_within_budget", "Whether configured remote-region coverage and sequence lag are within the RPO budget.", node, boolGauge(metrics.rpoWithinBudget))
+	writePrometheusGauge(builder, "hatrie_cache_replication_rpo_current_max_lag_sequences", "Current maximum asynchronous replication lag among selected remote targets, in source sequences.", node, metrics.currentMaxRPOLagSequences)
+	writePrometheusGauge(builder, "hatrie_cache_replication_rpo_max_lag_sequences", "Configured maximum asynchronous replication lag budget, in source sequences; zero disables the limit.", node, metrics.maxRPOLagSequences)
+	writePrometheusGauge(builder, "hatrie_cache_replication_rpo_required_remote_regions", "Number of configured required remote regions.", node, metrics.requiredRemoteRegions)
+	writePrometheusGauge(builder, "hatrie_cache_replication_rpo_available_remote_regions", "Number of remote regions currently represented in the topology.", node, metrics.availableRemoteRegions)
+	writePrometheusGauge(builder, "hatrie_cache_replication_rpo_missing_remote_regions", "Number of configured remote regions missing from the topology.", node, metrics.missingRemoteRegions)
+	writePrometheusGaugeInt64(builder, "hatrie_cache_replication_rto_max_millis", "Configured maximum recovery-time objective in milliseconds; zero disables the limit.", node, metrics.maxRTOMillis)
 }
 
 func writePrometheusReplicationLag(builder *strings.Builder, node string, queue ReplicationQueueStats) {

@@ -852,3 +852,13 @@ configuration enables the shared trie gate. Low-level typed mutation methods
 remain caller-owned, so this is not claimed as a universal no-bypass lock.
 See [TU06_REPLICA_READ_ONLY.md](TU06_REPLICA_READ_ONLY.md) and the
 [benchmark entry](BENCHMARK.md#t-u06-replica-wide-read-only-admission).
+
+## T-U07: Live Regional RPO Metrics
+
+Partially adopted as opt-in Prometheus gauges emitted by `hatCache` when
+`HTTPReplicatorOptions.ReplicationRegionPolicy` is configured. The metrics
+report policy validity, regional coverage counts, current and maximum sequence
+lag, RPO budget state, and the configured RTO in milliseconds using only a
+node label. The default policy remains off, target/region detail remains
+available through `RegionReplicationStatus`, and failover policy remains
+caller-owned. See the [benchmark entry](BENCHMARK.md#t-u07-live-regional-rpo-prometheus-metrics).

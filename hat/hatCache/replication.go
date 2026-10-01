@@ -111,6 +111,9 @@ type HTTPReplicator struct {
 	topology                 *TopologyStore
 	replicationSchema        ReplicationSchemaContract
 	regionPolicy             ReplicationRegionPolicy
+	regionPolicyNormalized   ReplicationRegionPolicy
+	regionPolicyError        string
+	regionPolicyConfigured   bool
 	keyPrefixes              []string
 	election                 *ElectionStore
 	client                   *http.Client
@@ -431,11 +434,15 @@ func NewHTTPReplicator(options HTTPReplicatorOptions) *HTTPReplicator {
 	if err != nil {
 		transport = ReplicationTransportHTTP
 	}
+	normalizedRegionPolicy, regionPolicyError, regionPolicyConfigured := prepareReplicationRegionPolicy(options.ReplicationRegionPolicy)
 	replicator := &HTTPReplicator{
 		self:                     strings.TrimSpace(options.Self),
 		topology:                 options.Topology,
 		replicationSchema:        options.ReplicationSchema,
 		regionPolicy:             options.ReplicationRegionPolicy,
+		regionPolicyNormalized:   normalizedRegionPolicy,
+		regionPolicyError:        regionPolicyError,
+		regionPolicyConfigured:   regionPolicyConfigured,
 		keyPrefixes:              normalizeReplicationKeyPrefixes(options.ReplicationKeyPrefixes),
 		election:                 options.Election,
 		client:                   client,

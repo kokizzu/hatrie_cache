@@ -23195,6 +23195,28 @@ Median: **1,208 ns/op**, **4,096 B/op**, **1 alloc/op**. The helper does not
 use a map, sorting, or wall-clock reads; the single allocation is the result
 slice for the requested batch.
 
+## T-U07: Live regional RPO Prometheus metrics
+
+This scrape benchmark uses a two-node topology, one required remote region,
+and a configured sequence-lag budget. The pre-change path emitted the existing
+replication health and target metrics but did not calculate regional RPO
+gauges. The shipped path emits aggregate, node-labelled gauges only when a
+regional replication policy is configured; the default path remains covered by
+`TestTU07PrometheusReplicationRegionStatusDisabledByDefault`.
+
+| Path | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Before: existing regional scrape | 50,596 | 38,794 | 196 |
+| After: scalar regional RPO gauges | 54,159 | 39,520 | 241 |
+| Ratio after/before | 1.07x | 1.02x | 1.23x |
+
+The added metrics cost about **3.6 microseconds**, **726 bytes**, and **45
+allocations** per configured scrape in this workload. A first implementation
+that reused the detailed `RegionReplicationStatus` API measured 77,219 ns/op,
+41,602 B/op, and 257 allocs/op; it was discarded in favor of the scalar path.
+The detailed API remains available for callers that need target and region
+lists, while monitoring avoids its topology/map/sort work.
+
 ## T-U08: Online snapshot manifest
 
 The existing snapshot writer stays unchanged; the opt-in manifest writer adds

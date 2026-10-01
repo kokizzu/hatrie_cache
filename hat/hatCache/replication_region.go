@@ -48,6 +48,21 @@ func (policy ReplicationRegionPolicy) Configured() bool {
 		policy.MaxRTO > 0
 }
 
+func prepareReplicationRegionPolicy(policy ReplicationRegionPolicy) (ReplicationRegionPolicy, string, bool) {
+	if !policy.Configured() {
+		return ReplicationRegionPolicy{}, "", false
+	}
+	normalized, err := normalizeReplicationRegionPolicy(policy)
+	if err != nil {
+		return ReplicationRegionPolicy{}, err.Error(), true
+	}
+	return normalized, "", true
+}
+
+func (replicator *HTTPReplicator) regionalReplicationConfigured() bool {
+	return replicator != nil && replicator.regionPolicyConfigured
+}
+
 // ValidateRecoveryDuration checks an observed recovery duration against the
 // configured RTO budget. A zero MaxRTO disables the check.
 func (policy ReplicationRegionPolicy) ValidateRecoveryDuration(duration time.Duration) error {
@@ -102,15 +117,15 @@ func (replicator *HTTPReplicator) RegionReplicationStatus() ReplicationRegionSta
 	if replicator == nil {
 		return status
 	}
-	policy, err := normalizeReplicationRegionPolicy(replicator.regionPolicy)
-	if err != nil {
-		status.ConfigurationError = err.Error()
+	if replicator.regionPolicyError != "" {
+		status.ConfigurationError = replicator.regionPolicyError
 		status.RPOWithinBudget = false
 		return status
 	}
-	if !policy.Configured() {
+	if !replicator.regionPolicyConfigured {
 		return status
 	}
+	policy := replicator.regionPolicyNormalized
 	status.Configured = true
 	status.LocalRegion = policy.LocalRegion
 	status.RequiredRemoteRegions = append([]string(nil), policy.RequiredRemoteRegions...)
@@ -190,4 +205,104 @@ func (replicator *HTTPReplicator) RegionReplicationStatus() ReplicationRegionSta
 	status.RPOWithinBudget = len(status.MissingRemoteRegions) == 0 &&
 		(policy.MaxRPOLagSequences == 0 || status.CurrentMaxRPOLagSequences <= policy.MaxRPOLagSequences)
 	return status
+}
+
+type replicationRegionMetrics struct {
+	configured                bool
+	configurationError        bool
+	rpoWithinBudget           bool
+	currentMaxRPOLagSequences uint64
+	maxRPOLagSequences        uint64
+	requiredRemoteRegions     uint64
+	availableRemoteRegions    uint64
+	missingRemoteRegions      uint64
+	maxRTOMillis              int64
+}
+
+func (replicator *HTTPReplicator) regionalReplicationMetrics(queue *ReplicationQueueStats) replicationRegionMetrics {
+	if replicator == nil {
+		return replicationRegionMetrics{rpoWithinBudget: true}
+	}
+	var topology ClusterTopology
+	if replicator.topology != nil {
+		topology, _ = replicator.topology.replicationRoutingGeneration()
+	}
+	if queue != nil {
+		return replicator.regionalReplicationMetricsLocked(queue, topology)
+	}
+	replicator.mu.RLock()
+	defer replicator.mu.RUnlock()
+	return replicator.regionalReplicationMetricsLocked(&replicator.queueStats, topology)
+}
+
+func (replicator *HTTPReplicator) regionalReplicationMetricsLocked(queue *ReplicationQueueStats, topology ClusterTopology) replicationRegionMetrics {
+	metrics := replicationRegionMetrics{rpoWithinBudget: true}
+	if replicator == nil || !replicator.regionPolicyConfigured {
+		return metrics
+	}
+	if replicator.regionPolicyError != "" {
+		metrics.configurationError = true
+		metrics.rpoWithinBudget = false
+		return metrics
+	}
+	policy := replicator.regionPolicyNormalized
+	metrics.configured = true
+	metrics.maxRPOLagSequences = policy.MaxRPOLagSequences
+	metrics.requiredRemoteRegions = uint64(len(policy.RequiredRemoteRegions))
+	if policy.MaxRTO > 0 {
+		metrics.maxRTOMillis = policy.MaxRTO.Milliseconds()
+	}
+
+	availableRegions := make(map[string]struct{}, len(topology.Nodes))
+	self := strings.TrimSpace(replicator.self)
+	for _, node := range topology.Nodes {
+		nodeID := strings.TrimSpace(node.ID)
+		if nodeID != "" && nodeID == self {
+			continue
+		}
+		region := strings.TrimSpace(node.Region)
+		if region == "" || region == policy.LocalRegion {
+			continue
+		}
+		target := nodeID
+		if target == "" {
+			target = strings.TrimSpace(node.Address)
+		}
+		if target == "" {
+			continue
+		}
+		availableRegions[region] = struct{}{}
+		if len(policy.RequiredRemoteRegions) > 0 && !replicationRegionListContains(policy.RequiredRemoteRegions, region) {
+			continue
+		}
+		acknowledged := uint64(0)
+		if queue != nil {
+			acknowledged = queue.LastAcknowledgedSequenceByTarget[target]
+		}
+		lag := uint64(0)
+		if queue != nil && queue.SourceSequence > acknowledged {
+			lag = queue.SourceSequence - acknowledged
+		}
+		if lag > metrics.currentMaxRPOLagSequences {
+			metrics.currentMaxRPOLagSequences = lag
+		}
+	}
+	metrics.availableRemoteRegions = uint64(len(availableRegions))
+	for _, region := range policy.RequiredRemoteRegions {
+		if _, ok := availableRegions[region]; !ok {
+			metrics.missingRemoteRegions++
+		}
+	}
+	metrics.rpoWithinBudget = metrics.missingRemoteRegions == 0 &&
+		(policy.MaxRPOLagSequences == 0 || metrics.currentMaxRPOLagSequences <= policy.MaxRPOLagSequences)
+	return metrics
+}
+
+func replicationRegionListContains(regions []string, wanted string) bool {
+	for _, region := range regions {
+		if region == wanted {
+			return true
+		}
+	}
+	return false
 }

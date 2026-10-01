@@ -22711,3 +22711,36 @@ commit-tu06:
 
 push-tu06:
 	bash scripts/ship-tu06.sh push
+
+test-tu07-replica-rpo:
+	bash scripts/run-tu07-replica-rpo.sh test
+
+benchmark-tu07-replica-rpo:
+	bash scripts/run-tu07-replica-rpo.sh benchmark
+
+format-tu07-replica-rpo:
+	bash scripts/format-tu07-replica-rpo.sh
+
+test-tu07-package:
+	bash scripts/run-tu07-replica-rpo.sh package
+
+race-tu07-replica-rpo:
+	bash scripts/run-tu07-replica-rpo.sh race
+
+vet-tu07-replica-rpo:
+	bash scripts/run-tu07-replica-rpo.sh vet
+
+review-tu07-replica-rpo:
+	bash scripts/ship-tu07.sh review
+
+stage-tu07-replica-rpo:
+	bash scripts/ship-tu07.sh stage
+
+commit-tu07-replica-rpo:
+	bash scripts/ship-tu07.sh commit
+
+push-tu07-replica-rpo:
+	bash scripts/ship-tu07.sh push
+
+verify-tu07-replica-rpo:
+	bash scripts/ship-tu07.sh verify
