@@ -137,6 +137,9 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 		ht.commandTransactionMu.RLock()
 		defer ht.commandTransactionMu.RUnlock()
 	}
+	if err := ht.checkMaintenanceReadOnlyCommand(request); err != nil {
+		return commandError(err.Error())
+	}
 	return ht.executeCommand(request)
 }
 
@@ -1176,6 +1179,9 @@ func (ht *HatTrie) executeAtomicPublicBatchCommand(request CacheCommandRequest) 
 func (ht *HatTrie) executeSQLTransactionBatch(epoch uint64, payloads []CacheCommandRequest) CacheCommandResponse {
 	if len(payloads) == 0 {
 		return CacheCommandResponse{OK: true, Message: "committed"}
+	}
+	if err := ht.checkMaintenanceReadOnlyCommand(CacheCommandRequest{Command: "BATCH", Atomic: true, Batch: payloads}); err != nil {
+		return commandError(err.Error())
 	}
 	for index, payload := range payloads {
 		if err := validateAtomicScalarBatchPayload(payload, index); err != nil {

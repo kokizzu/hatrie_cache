@@ -841,3 +841,14 @@ a concurrency-safe scope lifecycle. Existing executors, authorization, and WAL
 enforcement remain caller-owned so the default SQL behavior is unchanged. See
 [TU05_SESSION_TRANSACTION_SETTINGS.md](TU05_SESSION_TRANSACTION_SETTINGS.md)
 and the [benchmark entry](BENCHMARK.md#t-u05-session-transaction-settings).
+
+## T-U06: Replica-Wide Read-Only Admission
+
+Partially adopted as the importable `HatTrie.SetMaintenanceReadOnly` gate.
+Public command, SQL, RowBinary, and SQL transaction commit paths reject writes
+while reads and trusted internal replication remain available. The zero value
+is writable, and existing monitoring/gRPC `MaintenanceReadOnly: true`
+configuration enables the shared trie gate. Low-level typed mutation methods
+remain caller-owned, so this is not claimed as a universal no-bypass lock.
+See [TU06_REPLICA_READ_ONLY.md](TU06_REPLICA_READ_ONLY.md) and the
+[benchmark entry](BENCHMARK.md#t-u06-replica-wide-read-only-admission).

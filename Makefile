@@ -22679,3 +22679,35 @@ benchmark-tu05-session-settings:
 
 test-tu05-package:
 	bash scripts/run-tu05-session-settings.sh package
+format-tu06-replica-read-only:
+	bash scripts/run-tu06-replica-read-only.sh format
+
+benchmark-tu06-before:
+	bash scripts/run-tu06-replica-read-only.sh benchmark-before
+
+test-tu06-replica-read-only:
+	bash scripts/run-tu06-replica-read-only.sh test
+
+race-tu06-replica-read-only:
+	bash scripts/run-tu06-replica-read-only.sh race
+
+vet-tu06-replica-read-only:
+	bash scripts/run-tu06-replica-read-only.sh vet
+
+benchmark-tu06-replica-read-only:
+	bash scripts/run-tu06-replica-read-only.sh benchmark
+
+test-tu06-package:
+	bash scripts/run-tu06-replica-read-only.sh package
+
+verify-tu06-ship:
+	bash scripts/ship-tu06.sh verify
+
+review-tu06:
+	bash scripts/ship-tu06.sh review
+
+commit-tu06:
+	bash scripts/ship-tu06.sh commit
+
+push-tu06:
+	bash scripts/ship-tu06.sh push

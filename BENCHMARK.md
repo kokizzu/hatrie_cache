@@ -32893,3 +32893,21 @@ Raw samples: before `140.5, 137.7, 142.3, 144.3, 145.9 ns/op`; resolve
 `9.827, 10.46, 10.49, 10.88, 10.63 ns/op`; begin/rollback
 `47.18, 44.98, 45.15, 45.25, 45.45 ns/op`. Reproduce with
 `make benchmark-tu05-before` and `make benchmark-tu05-session-settings`.
+
+## T-U06: Replica-Wide Read-Only Admission
+
+The Tarantool-inspired trie-level gate rejects public `SET` mutations while
+the default remains writable. The workload repeatedly executes
+`HatTrie.ExecuteCommand` with the gate disabled. Linux/amd64, AMD Ryzen 9
+5950X, `-benchmem`. Lower is better.
+
+| Path | Median ns/op | B/op | Allocs/op | CPU vs pre-change |
+|---|---:|---:|---:|---:|
+| Before gate, pre-change sample | 210.7 | 0 | 0 | 1.00x |
+| After gate, five-run median | 213.5 | 0 | 0 | 1.01x (1.3% slower) |
+
+Raw after samples: `213.5, 212.7, 220.0, 230.6, 209.7 ns/op`.
+The single pre-change sample is a baseline, not a statistically strong claim
+of improvement. The feature is retained for its safety behavior; the
+default-off path measured no allocation or heap cost. See
+[TU06_REPLICA_READ_ONLY.md](TU06_REPLICA_READ_ONLY.md).

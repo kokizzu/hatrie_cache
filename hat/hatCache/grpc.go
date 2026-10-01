@@ -38,7 +38,8 @@ type CacheGRPCOptions struct {
 	AuditLog                         *AuditLogger
 	WriteProtected                   bool
 	// MaintenanceReadOnly rejects public cache writes while preserving reads,
-	// snapshots, and backup operations. It is disabled by default.
+	// snapshots, and backup operations. It is disabled by default. When true,
+	// constructing the server also enables the trie-level mutation gate.
 	MaintenanceReadOnly bool
 	RateLimiter         *RateLimiter
 	Metrics             *APIMetrics
@@ -83,6 +84,9 @@ type CacheGRPCServer struct {
 }
 
 func NewCacheGRPCServer(trie *HatTrie, options CacheGRPCOptions) *CacheGRPCServer {
+	if options.MaintenanceReadOnly && trie != nil {
+		trie.SetMaintenanceReadOnly(true)
+	}
 	options.AuthToken = hatAuth.Normalize(options.AuthToken)
 	options.AuthPreviousToken = hatAuth.Normalize(options.AuthPreviousToken)
 	options.ReplicationAuthToken = hatAuth.Normalize(options.ReplicationAuthToken)

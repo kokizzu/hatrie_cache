@@ -87,7 +87,8 @@ type MonitoringOptions struct {
 	AuditLog                         *AuditLogger
 	WriteProtected                   bool
 	// MaintenanceReadOnly rejects public cache writes while preserving reads,
-	// snapshots, and backup operations. It is disabled by default.
+	// snapshots, and backup operations. It is disabled by default. When true,
+	// constructing the handler also enables the trie-level mutation gate.
 	MaintenanceReadOnly bool
 	RateLimiter         *RateLimiter
 	// SQLRateLimiter limits read-only SQL requests per authenticated caller (or
@@ -459,6 +460,9 @@ type storageOperationStatus struct {
 }
 
 func NewMonitoringHandler(trie *HatTrie, options MonitoringOptions) *MonitoringHandler {
+	if options.MaintenanceReadOnly && trie != nil {
+		trie.SetMaintenanceReadOnly(true)
+	}
 	options.SQLCatalog = cloneSQLCatalog(options.SQLCatalog)
 	if options.ProtocolVersions.Min == 0 && options.ProtocolVersions.Max == 0 {
 		options.ProtocolVersions = hatCommand.SupportedProtocolVersions
