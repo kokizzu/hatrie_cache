@@ -10216,12 +10216,13 @@ func sqlColumnarConditionMatches(query *sqlQuery, batch ColumnarBatch, resolver 
 }
 
 type sqlColumnarNumericAggregate struct {
-	name  string
-	field string
-	count int64
-	sum   float64
-	value float64
-	seen  bool
+	name          string
+	field         string
+	count         int64
+	sum           float64
+	value         float64
+	seen          bool
+	countMetadata bool
 }
 
 type sqlColumnarDictionaryGroupProjection struct {
@@ -10499,6 +10500,9 @@ func sqlColumnarDictionaryGroupAggregatePlan(q *sqlQuery, outer *sqlExecRow) (gr
 }
 
 func (aggregate *sqlColumnarNumericAggregate) add(batch ColumnarBatch, rowIndex int) {
+	if aggregate.name == "COUNT" && aggregate.countMetadata {
+		return
+	}
 	if aggregate.name == "COUNT" && aggregate.field == "" {
 		aggregate.count++
 		return
@@ -10588,10 +10592,13 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 	countOnlyMetadata := sqlColumnarCountOnlyMetadata(aggregates, q.where)
 	metadataAggregates := sqlColumnarMetadataAggregates(aggregates, q.where, segments, batch.Rows)
 	dictionaryCount, dictionaryCountMetadata := sqlColumnarDictionaryCountMetadata(aggregates, q.where.kind, q.where.op, batch.Rows, dictionaryFilter, filterDictionary.codesTrusted, filterOperator, filterFound, dictionaryINFilter, filterDictionaryIN.codesTrusted, filterDictionaryINCodes)
+	countFieldMetadata := sqlColumnarPrepareCountMetadata(aggregates, batch, q.where)
 	if metrics != nil {
 		node := "COLUMNAR SCAN"
 		if countOnlyMetadata {
 			node = "COLUMNAR COUNT METADATA"
+		} else if countFieldMetadata {
+			node = "COLUMNAR COUNT FIELD METADATA"
 		} else if metadataAggregates {
 			node = "COLUMNAR AGGREGATE METADATA"
 		} else if dictionaryCountMetadata {
@@ -10604,14 +10611,16 @@ func executeSQLColumnarNumericAggregate(q *sqlQuery, columnar SQLColumnarSourceR
 	matched := 0
 	scannedRows := 0
 	sparsePrimary := false
-	if metadataAggregates || dictionaryCountMetadata {
+	if countFieldMetadata || metadataAggregates || dictionaryCountMetadata {
 		if control != nil {
 			if err := control.check(); err != nil {
 				return SQLQueryResult{}, true, err
 			}
 		}
 	}
-	if dictionaryCountMetadata {
+	if countFieldMetadata {
+		matched = batch.Rows
+	} else if dictionaryCountMetadata {
 		for index := range aggregates {
 			aggregates[index].count = int64(dictionaryCount)
 		}

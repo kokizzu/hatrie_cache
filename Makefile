@@ -22444,3 +22444,34 @@ review-chu63-case-projection:
 .PHONY: ship-chu63-case-projection
 ship-chu63-case-projection:
 	bash scripts/ship-chu63-case-projection.sh
+.PHONY: format-chu64-count-field
+format-chu64-count-field:
+	bash scripts/run-chu64-count-field.sh format
+
+.PHONY: test-chu64-count-field
+test-chu64-count-field:
+	bash scripts/run-chu64-count-field.sh test
+
+.PHONY: test-chu64-sql-package
+test-chu64-sql-package:
+	bash scripts/run-chu64-count-field.sh package
+
+.PHONY: benchmark-chu64-count-field
+benchmark-chu64-count-field:
+	bash scripts/run-chu64-count-field.sh benchmark
+
+.PHONY: race-chu64-count-field
+race-chu64-count-field:
+	bash scripts/run-chu64-count-field.sh race
+
+.PHONY: vet-chu64-count-field
+vet-chu64-count-field:
+	bash scripts/run-chu64-count-field.sh vet
+
+.PHONY: review-chu64-count-field
+review-chu64-count-field:
+	bash scripts/ship-chu64-count-field.sh review
+
+.PHONY: ship-chu64-count-field
+ship-chu64-count-field:
+	bash scripts/ship-chu64-count-field.sh ship

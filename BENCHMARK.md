@@ -32727,3 +32727,24 @@ after:  3364901/5765200/48149,   3325073/5765202/48149,   3119660/5765343/48149,
 The fast path admits one direct numeric predicate and literal branch results
 for both materialized and streaming APIs. Unsupported CASE shapes retain the
 general SQL evaluator. See [CHU63_CASE_PROJECTION.md](CHU63_CASE_PROJECTION.md).
+## CHU64: Columnar `COUNT(field)` Metadata
+
+Workload: `SELECT COUNT(value) AS total FROM CACHE('items')` over 100,000
+validated packed `int64` rows with 20% NULL values. Lower is better.
+
+| Version | ns/op | B/op | allocs/op | CPU improvement | Heap improvement | Allocation improvement |
+|---|---:|---:|---:|---:|---:|---:|
+| Before | 5,125,712 | 643,212 | 79,817 | 1.00x | 1.00x | 1.00x |
+| After | 11,833 | 4,816 | 20 | 433.17x | 133.56x | 3,990.85x |
+
+Raw five-run medians source values:
+
+```text
+before: 5,016,074  5,033,377  5,184,494  5,125,712  5,134,833 ns/op
+after:     11,691     11,414     11,833     12,105     12,024 ns/op
+```
+
+The fast path is automatic only for direct unfiltered `COUNT(field)` over
+validated numeric, boolean, or dense nullable packed columns. Filtered and
+unsupported layouts retain the existing evaluator; no extra memory is
+retained by the optimization. See [CHU64_COLUMNAR_COUNT_FIELD.md](CHU64_COLUMNAR_COUNT_FIELD.md).
