@@ -32963,3 +32963,19 @@ The registry cost is the authorization check, version lookup, synchronization,
 and two ownership copies. This is an explicit opt-in security/control-plane
 tradeoff; ordinary cache and SQL command paths are unchanged. See
 [TU003_STORED_FUNCTION_REGISTRY.md](TU003_STORED_FUNCTION_REGISTRY.md).
+## T-U33 Role-Based Function Grants
+
+The benchmark compares direct role-catalog authorization with the
+`RoleCatalogStoredFunctionAuthorizer` adapter used by the stored-function
+registry. Five `-benchmem` samples ran on the same AMD Ryzen 9 5950X host.
+
+| Path | Samples (ns/op) | Median | Bytes/op | Allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Direct `RoleCatalog.Authorize` baseline (before) | 131.3, 129.9, 128.6, 127.4, 136.2 | 129.9 | 0 | 0 |
+| Direct `RoleCatalog.Authorize` baseline (after) | 128.2, 127.3, 127.4, 129.8, 128.3 | 128.2 | 0 | 0 |
+| `RoleCatalogStoredFunctionAuthorizer` | 159.5, 158.2, 158.4, 160.5, 159.1 | 159.1 | 0 | 0 |
+
+The adapter costs `1.24x` the post-change baseline, or `30.9 ns` and `24.1%`
+extra CPU per authorization, with no allocation or additional bytes. The
+overhead is opt-in and buys canonical operation/name validation plus immediate
+grant revocation; existing policy and registry paths are unchanged.

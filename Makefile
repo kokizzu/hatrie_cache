@@ -22671,3 +22671,30 @@ status-t-u03:
 
 deliver-t-u03:
 	@bash ./scripts/deliver-t-u03.sh
+
+test-t-u33:
+	@bash ./scripts/test-t-u33.sh test
+
+format-t-u33:
+	@bash ./scripts/test-t-u33.sh format
+
+benchmark-t-u33:
+	@bash ./scripts/test-t-u33.sh benchmark
+
+test-t-u33-package:
+	@bash ./scripts/test-t-u33.sh package
+
+race-t-u33:
+	@bash ./scripts/test-t-u33.sh race
+
+vet-t-u33:
+	@bash ./scripts/test-t-u33.sh vet
+
+verify-t-u33:
+	@bash ./scripts/test-t-u33.sh verify
+
+status-t-u33:
+	@bash ./scripts/test-t-u33.sh status
+
+deliver-t-u33:
+	@bash ./scripts/deliver-t-u33.sh
