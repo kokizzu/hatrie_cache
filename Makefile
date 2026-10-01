@@ -22292,3 +22292,20 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: benchmark-c153-collector format-c153-collector test-c153-collector race-c153-collector vet-c153-collector review-c153-collector commit-c153-collector push-c153-collector
+benchmark-c153-collector:
+	bash ./scripts/benchmark-c153-collector.sh
+format-c153-collector:
+	bash ./scripts/format-c153-collector.sh
+test-c153-collector:
+	bash ./scripts/test-c153-collector.sh
+race-c153-collector:
+	bash ./scripts/race-c153-collector.sh
+vet-c153-collector:
+	bash ./scripts/vet-c153-collector.sh
+review-c153-collector:
+	bash ./scripts/review-c153-collector.sh
+commit-c153-collector:
+	bash ./scripts/commit-c153-collector.sh
+push-c153-collector:
+	bash ./scripts/push-c153-collector.sh

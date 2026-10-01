@@ -185,7 +185,7 @@ These are the unchecked items from the complete source catalog;
 sub-items with the same numeric ID are retained where the catalog
 records a separate implementation boundary.
 
-- [ ] C153 Metadata consensus for partition ownership.
+- [x] C153 Metadata consensus for partition ownership. The existing transport-neutral metadata evaluator is now complemented by a reusable incremental quorum collector; transport, authentication, and topology publication remain caller-owned. See [PARTITION_OWNERSHIP_CONSENSUS.md](PARTITION_OWNERSHIP_CONSENSUS.md).
 - [ ] C154 Rolling schema changes across replicas.
 - [ ] M032 Strong consistency across all independent source partitions.
 - [x] M032a Opt-in SQL snapshot provider pins every source read in one query to a caller-owned immutable view; full distributed frontier coordination remains open. See [SQL_SNAPSHOT_PROVIDER.md](SQL_SNAPSHOT_PROVIDER.md).

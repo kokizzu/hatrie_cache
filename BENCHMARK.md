@@ -20796,6 +20796,48 @@ BenchmarkPartitionOwnershipConsensus/ownership_metadata 1840557 652.0 ns/op 480 
 BenchmarkPartitionOwnershipConsensus/ownership_metadata 1842994 652.0 ns/op 480 B/op 6 allocs/op
 ```
 
+## Incremental partition ownership consensus collector
+
+This benchmark compares the existing batch metadata evaluator with a
+reusable `hatTopology.PartitionOwnershipConsensusCollector` on four voters,
+three required acknowledgements, and one two-replica partition. The collector
+is reset and reused for each round; its fresh-construction path is measured
+separately because it is intentionally not the default one-shot replacement.
+Five samples were collected with `-benchmem -benchtime=200ms -count=5` on an
+AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative to batch |
+| --- | ---: | ---: | ---: | ---: |
+| Existing batch metadata evaluator | 738.7 | 480 | 6 | 1.00x |
+| Reused collector round | 385.3 | 160 | 4 | 1.92x faster |
+| Reused collector vote loop, no decision snapshot | 171.2 | 0 | 0 | 4.31x faster |
+| Fresh collector round | 982.9 | 1,012 | 13 | 1.33x slower |
+
+Raw output from `make benchmark-c153`:
+
+```text
+BenchmarkPartitionOwnershipConsensus/ownership_metadata-32 276121 754.8 ns/op 480 B/op 6 allocs/op
+BenchmarkPartitionOwnershipConsensus/ownership_metadata-32 321762 738.7 ns/op 480 B/op 6 allocs/op
+BenchmarkPartitionOwnershipConsensus/ownership_metadata-32 315906 782.9 ns/op 480 B/op 6 allocs/op
+BenchmarkPartitionOwnershipConsensus/ownership_metadata-32 310797 738.5 ns/op 480 B/op 6 allocs/op
+BenchmarkPartitionOwnershipConsensus/ownership_metadata-32 344972 710.5 ns/op 480 B/op 6 allocs/op
+BenchmarkPartitionOwnershipConsensus/ownership_collector_vote_loop-32 1366113 166.2 ns/op 0 B/op 0 allocs/op
+BenchmarkPartitionOwnershipConsensus/ownership_collector_vote_loop-32 1402244 176.8 ns/op 0 B/op 0 allocs/op
+BenchmarkPartitionOwnershipConsensus/ownership_collector_vote_loop-32 1379348 171.2 ns/op 0 B/op 0 allocs/op
+BenchmarkPartitionOwnershipConsensus/ownership_collector_vote_loop-32 1409616 171.6 ns/op 0 B/op 0 allocs/op
+BenchmarkPartitionOwnershipConsensus/ownership_collector_vote_loop-32 1393492 170.3 ns/op 0 B/op 0 allocs/op
+BenchmarkPartitionOwnershipConsensus/ownership_collector_round-32 580567 395.4 ns/op 160 B/op 4 allocs/op
+BenchmarkPartitionOwnershipConsensus/ownership_collector_round-32 572066 380.1 ns/op 160 B/op 4 allocs/op
+BenchmarkPartitionOwnershipConsensus/ownership_collector_round-32 569046 383.1 ns/op 160 B/op 4 allocs/op
+BenchmarkPartitionOwnershipConsensus/ownership_collector_round-32 526488 385.3 ns/op 160 B/op 4 allocs/op
+BenchmarkPartitionOwnershipConsensus/ownership_collector_round-32 631785 388.0 ns/op 160 B/op 4 allocs/op
+BenchmarkPartitionOwnershipConsensus/ownership_collector_fresh_round-32 225801 982.9 ns/op 1012 B/op 13 allocs/op
+BenchmarkPartitionOwnershipConsensus/ownership_collector_fresh_round-32 250543 967.9 ns/op 1012 B/op 13 allocs/op
+BenchmarkPartitionOwnershipConsensus/ownership_collector_fresh_round-32 231068 960.4 ns/op 1012 B/op 13 allocs/op
+BenchmarkPartitionOwnershipConsensus/ownership_collector_fresh_round-32 217149 1000 ns/op 1012 B/op 13 allocs/op
+BenchmarkPartitionOwnershipConsensus/ownership_collector_fresh_round-32 219544 1001 ns/op 1012 B/op 13 allocs/op
+```
+
 ## Differential grouped `MIN`/`MAX`
 
 This benchmark compares a naive per-update endpoint rebuild with

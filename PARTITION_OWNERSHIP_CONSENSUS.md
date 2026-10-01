@@ -35,6 +35,36 @@ apply a satisfied decision through the existing topology commit path. The
 normal topology and replication paths remain unchanged unless this evaluator
 is explicitly used.
 
+## Incremental Collector
+
+`NewPartitionOwnershipConsensusCollector` is the reusable form for live vote
+streams. It validates the proposal once, indexes voters once, and accepts
+votes with `AddVote`. The collector becomes terminal as soon as quorum is
+reached or mathematically impossible. `Decision` returns the same deterministic
+decision shape as the batch evaluator; `Finalize` closes a round when a vote
+deadline expires, and `Reset` reuses the same proposal for another round.
+
+The collector is safe for concurrent vote producers and stores only one state
+byte per voter after construction. It is intentionally not the default
+replacement for `EvaluatePartitionOwnershipConsensus`: constructing a fresh
+collector for one vote round costs more than the existing batch evaluator.
+Reuse it when votes arrive incrementally or when the same proposal is checked
+for repeated membership rounds.
+
+On the four-voter, three-acknowledgement fixture, the latest five-sample
+benchmark measured:
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Existing batch metadata evaluator | 738.7 | 480 | 6 | 1.00x |
+| Reused collector round | 385.3 | 160 | 4 | 1.92x faster |
+| Reused collector vote loop only | 171.2 | 0 | 0 | 4.31x faster |
+| Fresh collector round | 982.9 | 1,012 | 13 | 1.33x slower |
+
+The collector's gain is therefore a steady-state/repeated-round result, not a
+claim that one-shot construction is cheaper. Raw samples are recorded in
+[`BENCHMARK.md`](BENCHMARK.md#incremental-partition-ownership-consensus-collector).
+
 ## Measured Cost
 
 On an AMD Ryzen 9 5950X with four voters and five samples, the existing
