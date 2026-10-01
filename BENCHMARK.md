@@ -1,5 +1,44 @@
 # Benchmark
 
+## M-U34 Historical Subscription Checkpoints
+
+Five `-benchmem` samples compared the existing subscription replay path with
+the opt-in checkpointed path over 100 records on an AMD Ryzen 9 5950X Linux
+amd64 host. The in-memory store performs no durable I/O; the file-store row
+acknowledges once after all 100 records and includes one atomic fsync-backed
+checkpoint.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Existing replay | 98,139 | 81,220 | 520 | baseline |
+| In-memory checkpoint + per-record ack | 100,286 | 81,222 | 520 | 1.02x slower, within noise |
+| File checkpoint + one batch ack | 1,951,357 | 83,435 | 543 | 19.46x slower than in-memory; +2,213 B and +23 allocs |
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+existing:  98086 81223 520
+existing:  98719 81205 520
+existing:  98139 81222 520
+existing: 101381 81220 520
+existing:  95940 81220 520
+memory:    98174 81221 520
+memory:   101430 81222 520
+memory:   100286 81222 520
+memory:   102915 81221 520
+memory:    96880 81222 520
+file:    1807142 83432 543
+file:    1750650 83435 543
+file:    5178996 83452 543
+file:    2282542 83437 543
+file:    1951357 83434 543
+```
+
+The file-store 5.18 ms sample is a cold filesystem outlier; the median still
+shows the expected durability cost. Batch acknowledgements are the intended
+file-store usage pattern. Existing non-checkpointed subscriptions remain on
+the allocation-free legacy path.
+
 ## CH-U49 Skip-Index EXPLAIN Diagnostics
 
 This paired clean-worktree benchmark compares the pre-CH-U49 implementation

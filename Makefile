@@ -22508,3 +22508,42 @@ commit-t-u22:
 
 push-t-u22:
 	bash ./scripts/deliver-t-u22.sh push
+.PHONY: benchmark-m-u34-baseline
+benchmark-m-u34-baseline:
+	bash ./scripts/benchmark-m-u34-baseline.sh
+.PHONY: format-m-u34
+format-m-u34:
+	bash ./scripts/format-m-u34.sh
+.PHONY: benchmark-m-u34
+benchmark-m-u34:
+	bash ./scripts/benchmark-m-u34.sh
+.PHONY: test-m-u34
+test-m-u34:
+	bash ./scripts/test-m-u34.sh
+
+.PHONY: test-m-u34-package
+test-m-u34-package:
+	bash ./scripts/test-m-u34-package.sh
+
+.PHONY: race-m-u34
+race-m-u34:
+	bash ./scripts/race-m-u34.sh
+
+.PHONY: vet-m-u34
+vet-m-u34:
+	bash ./scripts/vet-m-u34.sh
+.PHONY: test-journal-subscription
+test-journal-subscription:
+	bash ./scripts/test-journal-subscription.sh
+.PHONY: review-m-u34
+review-m-u34:
+	bash ./scripts/review-m-u34.sh
+.PHONY: stage-m-u34
+stage-m-u34:
+	bash ./scripts/deliver-m-u34.sh stage
+.PHONY: commit-m-u34
+commit-m-u34:
+	bash ./scripts/deliver-m-u34.sh commit
+.PHONY: push-m-u34
+push-m-u34:
+	bash ./scripts/deliver-m-u34.sh push

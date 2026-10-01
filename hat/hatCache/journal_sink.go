@@ -35,12 +35,10 @@ func (sink CommandJournalSinkFunc) Write(ctx context.Context, records []CommandJ
 	return sink(ctx, records)
 }
 
-// CommandJournalSinkCheckpointStore persists the last sequence acknowledged
-// by a sink. Save is called only after the sink accepts the complete batch.
-type CommandJournalSinkCheckpointStore interface {
-	Load(context.Context) (uint64, error)
-	Save(context.Context, uint64) error
-}
+// CommandJournalSinkCheckpointStore is retained as a compatibility name for
+// the generic journal checkpoint contract. Save is called only after the sink
+// accepts the complete batch.
+type CommandJournalSinkCheckpointStore = CommandJournalCheckpointStore
 
 // CommandJournalSinkOptions configures a bounded command-journal sink runner.
 // The subscription fields have the same defaults and limits as

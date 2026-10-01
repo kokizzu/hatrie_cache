@@ -17,10 +17,13 @@ const (
 )
 
 var (
-	ErrCommandJournalSubscriptionReplayLimit   = errors.New("hatriecache: journal subscription replay limit exceeded")
-	ErrCommandJournalSubscriptionOverflow      = errors.New("hatriecache: journal subscription buffer overflowed")
-	ErrCommandJournalSubscriptionSpaceRequired = errors.New("hatriecache: journal subscription space is required")
-	ErrCommandJournalSubscriptionRange         = errors.New("hatriecache: journal subscription upper sequence must be greater than after sequence")
+	ErrCommandJournalSubscriptionReplayLimit        = errors.New("hatriecache: journal subscription replay limit exceeded")
+	ErrCommandJournalSubscriptionOverflow           = errors.New("hatriecache: journal subscription buffer overflowed")
+	ErrCommandJournalSubscriptionSpaceRequired      = errors.New("hatriecache: journal subscription space is required")
+	ErrCommandJournalSubscriptionRange              = errors.New("hatriecache: journal subscription upper sequence must be greater than after sequence")
+	ErrCommandJournalSubscriptionCheckpointDisabled = errors.New("hatriecache: journal subscription checkpointing is disabled")
+	ErrCommandJournalSubscriptionCheckpointSequence = errors.New("hatriecache: journal subscription checkpoint sequence was not delivered")
+	ErrCommandJournalSubscriptionCheckpointAhead    = errors.New("hatriecache: journal subscription checkpoint is ahead of the journal")
 )
 
 const commandJournalSubscriptionEventBuffer = 1
@@ -73,6 +76,11 @@ type CommandJournalSubscription struct {
 	upToSequence uint64
 	coalesce     *commandJournalSubscriptionCoalesceState
 
+	checkpointStore  CommandJournalCheckpointStore
+	checkpointMu     sync.Mutex
+	lastDelivered    uint64
+	lastAcknowledged uint64
+
 	stopOnce sync.Once
 	errMu    sync.RWMutex
 	err      error
@@ -85,7 +93,36 @@ type CommandJournalSubscription struct {
 // disk work. A replay larger than ReplayLimit is rejected so a caller never
 // silently starts after an unobserved gap.
 func (journal *CommandJournal) Subscribe(ctx context.Context, options CommandJournalSubscribeOptions) (*CommandJournalSubscription, error) {
-	return journal.subscribe(ctx, options, "")
+	return journal.subscribe(ctx, options, "", nil, 0)
+}
+
+// SubscribeWithCheckpoint resumes after the sequence loaded from store. A
+// record is replayed again until the consumer explicitly acknowledges it.
+// Save is called only by Acknowledge, so cancellation after delivery is
+// intentionally at-least-once.
+func (journal *CommandJournal) SubscribeWithCheckpoint(ctx context.Context, store CommandJournalCheckpointStore, options CommandJournalSubscribeOptions) (*CommandJournalSubscription, error) {
+	if journal == nil {
+		return nil, ErrNilCommandJournal
+	}
+	if store == nil {
+		return nil, ErrNilCommandJournalCheckpointStore
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	sequence, err := store.Load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	currentSequence := journal.Sequence()
+	if sequence > currentSequence {
+		return nil, fmt.Errorf("%w: checkpoint %d exceeds journal sequence %d", ErrCommandJournalSubscriptionCheckpointAhead, sequence, currentSequence)
+	}
+	options.AfterSequence = sequence
+	return journal.subscribe(ctx, options, "", store, sequence)
 }
 
 // SubscribeSpace replays and follows only records whose command key exactly
@@ -99,10 +136,39 @@ func (journal *CommandJournal) SubscribeSpace(ctx context.Context, space string,
 	if space == "" {
 		return nil, ErrCommandJournalSubscriptionSpaceRequired
 	}
-	return journal.subscribe(ctx, options, space)
+	return journal.subscribe(ctx, options, space, nil, 0)
 }
 
-func (journal *CommandJournal) subscribe(ctx context.Context, options CommandJournalSubscribeOptions, spaceKey string) (*CommandJournalSubscription, error) {
+// SubscribeSpaceWithCheckpoint is the checkpointed form of SubscribeSpace.
+func (journal *CommandJournal) SubscribeSpaceWithCheckpoint(ctx context.Context, store CommandJournalCheckpointStore, space string, options CommandJournalSubscribeOptions) (*CommandJournalSubscription, error) {
+	if journal == nil {
+		return nil, ErrNilCommandJournal
+	}
+	if space == "" {
+		return nil, ErrCommandJournalSubscriptionSpaceRequired
+	}
+	if store == nil {
+		return nil, ErrNilCommandJournalCheckpointStore
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	sequence, err := store.Load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	currentSequence := journal.Sequence()
+	if sequence > currentSequence {
+		return nil, fmt.Errorf("%w: checkpoint %d exceeds journal sequence %d", ErrCommandJournalSubscriptionCheckpointAhead, sequence, currentSequence)
+	}
+	options.AfterSequence = sequence
+	return journal.subscribe(ctx, options, space, store, sequence)
+}
+
+func (journal *CommandJournal) subscribe(ctx context.Context, options CommandJournalSubscribeOptions, spaceKey string, checkpointStore CommandJournalCheckpointStore, checkpoint uint64) (*CommandJournalSubscription, error) {
 	if journal == nil {
 		return nil, ErrNilCommandJournal
 	}
@@ -118,13 +184,16 @@ func (journal *CommandJournal) subscribe(ctx context.Context, options CommandJou
 		return nil, err
 	}
 	subscription := &CommandJournalSubscription{
-		records:      make(chan CommandJournalRecord, buffer),
-		events:       make(chan CommandJournalRecord, commandJournalSubscriptionEventBuffer),
-		stop:         make(chan struct{}),
-		done:         make(chan struct{}),
-		spaceKey:     spaceKey,
-		keyPrefix:    options.KeyPrefix,
-		upToSequence: options.UpToSequence,
+		records:          make(chan CommandJournalRecord, buffer),
+		events:           make(chan CommandJournalRecord, commandJournalSubscriptionEventBuffer),
+		stop:             make(chan struct{}),
+		done:             make(chan struct{}),
+		spaceKey:         spaceKey,
+		keyPrefix:        options.KeyPrefix,
+		upToSequence:     options.UpToSequence,
+		checkpointStore:  checkpointStore,
+		lastDelivered:    checkpoint,
+		lastAcknowledged: checkpoint,
 	}
 	if options.Coalesce {
 		subscription.coalesce = &commandJournalSubscriptionCoalesceState{
@@ -263,6 +332,47 @@ func (subscription *CommandJournalSubscription) Err() error {
 	subscription.errMu.RLock()
 	defer subscription.errMu.RUnlock()
 	return subscription.err
+}
+
+// Acknowledge durably advances the restart position after the consumer has
+// processed sequence. It is monotonic and idempotent for already acknowledged
+// sequences. A sequence must have been handed to Records first.
+func (subscription *CommandJournalSubscription) Acknowledge(ctx context.Context, sequence uint64) error {
+	if subscription == nil {
+		return ErrCommandJournalSubscriptionCheckpointDisabled
+	}
+	subscription.checkpointMu.Lock()
+	defer subscription.checkpointMu.Unlock()
+	if subscription.checkpointStore == nil {
+		return ErrCommandJournalSubscriptionCheckpointDisabled
+	}
+	if sequence <= subscription.lastAcknowledged {
+		return nil
+	}
+	if sequence > subscription.lastDelivered {
+		return fmt.Errorf("%w: sequence %d is ahead of delivered sequence %d", ErrCommandJournalSubscriptionCheckpointSequence, sequence, subscription.lastDelivered)
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := subscription.checkpointStore.Save(ctx, sequence); err != nil {
+		return err
+	}
+	subscription.lastAcknowledged = sequence
+	return nil
+}
+
+// Checkpoint returns the last successfully persisted acknowledgement.
+func (subscription *CommandJournalSubscription) Checkpoint() uint64 {
+	if subscription == nil {
+		return 0
+	}
+	subscription.checkpointMu.Lock()
+	defer subscription.checkpointMu.Unlock()
+	return subscription.lastAcknowledged
 }
 
 // Close stops the subscription and waits until Records has been closed.
@@ -439,12 +549,8 @@ func (subscription *CommandJournalSubscription) replayRecords(ctx context.Contex
 			if !subscription.matches(record) {
 				continue
 			}
-			select {
-			case subscription.records <- record:
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-subscription.stop:
-				return nil
+			if err := subscription.deliverReplay(ctx, record); err != nil {
+				return err
 			}
 		}
 		return nil
@@ -474,12 +580,8 @@ func (subscription *CommandJournalSubscription) replayRecords(ctx context.Contex
 		latest[key] = record
 	}
 	for _, key := range order {
-		select {
-		case subscription.records <- latest[key]:
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-subscription.stop:
-			return nil
+		if err := subscription.deliverReplay(ctx, latest[key]); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -651,8 +753,13 @@ func (subscription *CommandJournalSubscription) prefix() string {
 }
 
 func (subscription *CommandJournalSubscription) deliverLive(ctx context.Context, record CommandJournalRecord) error {
+	if subscription.checkpointStore != nil {
+		subscription.checkpointMu.Lock()
+		defer subscription.checkpointMu.Unlock()
+	}
 	select {
 	case subscription.records <- record:
+		subscription.markDeliveredLocked(record.Sequence)
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -660,6 +767,22 @@ func (subscription *CommandJournalSubscription) deliverLive(ctx context.Context,
 		return nil
 	default:
 		return ErrCommandJournalSubscriptionOverflow
+	}
+}
+
+func (subscription *CommandJournalSubscription) deliverReplay(ctx context.Context, record CommandJournalRecord) error {
+	if subscription.checkpointStore != nil {
+		subscription.checkpointMu.Lock()
+		defer subscription.checkpointMu.Unlock()
+	}
+	select {
+	case subscription.records <- record:
+		subscription.markDeliveredLocked(record.Sequence)
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-subscription.stop:
+		return nil
 	}
 }
 
@@ -709,16 +832,12 @@ func (subscription *CommandJournalSubscription) poll(ctx context.Context, journa
 				}
 				continue
 			}
-			select {
-			case subscription.records <- record:
-				nextSequence = record.Sequence
-				if subscription.reachedUpperBound(nextSequence) {
-					return nextSequence, nil
-				}
-			case <-subscription.stop:
+			if err := subscription.deliverLive(ctx, record); err != nil {
+				return nextSequence, err
+			}
+			nextSequence = record.Sequence
+			if subscription.reachedUpperBound(nextSequence) {
 				return nextSequence, nil
-			default:
-				return nextSequence, ErrCommandJournalSubscriptionOverflow
 			}
 		}
 		if subscription.coalescing() {
@@ -737,6 +856,15 @@ func (subscription *CommandJournalSubscription) poll(ctx context.Context, journa
 		if len(tail.Entries) == 0 {
 			return nextSequence, errors.New("hatriecache: journal subscription tail made no progress")
 		}
+	}
+}
+
+func (subscription *CommandJournalSubscription) markDeliveredLocked(sequence uint64) {
+	if subscription == nil || subscription.checkpointStore == nil {
+		return
+	}
+	if sequence > subscription.lastDelivered {
+		subscription.lastDelivered = sequence
 	}
 }
 
