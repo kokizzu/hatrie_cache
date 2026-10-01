@@ -22647,3 +22647,35 @@ race-tu19-tuple-journal:
 
 vet-tu19-tuple-journal:
 	bash scripts/run-tu19-tuple-journal.sh vet
+format-tu05-session-settings:
+	bash scripts/run-tu05-session-settings.sh format
+
+verify-tu05-ship:
+	bash scripts/verify-tu05-ship.sh
+
+review-tu05:
+	bash scripts/ship-tu05.sh review
+
+commit-tu05:
+	bash scripts/ship-tu05.sh commit
+
+push-tu05:
+	bash scripts/ship-tu05.sh push
+
+benchmark-tu05-before:
+	bash scripts/run-tu05-session-settings.sh benchmark-before
+
+test-tu05-session-settings:
+	bash scripts/run-tu05-session-settings.sh test
+
+race-tu05-session-settings:
+	bash scripts/run-tu05-session-settings.sh race
+
+vet-tu05-session-settings:
+	bash scripts/run-tu05-session-settings.sh vet
+
+benchmark-tu05-session-settings:
+	bash scripts/run-tu05-session-settings.sh benchmark
+
+test-tu05-package:
+	bash scripts/run-tu05-session-settings.sh package

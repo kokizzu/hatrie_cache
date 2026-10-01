@@ -832,3 +832,12 @@ text, and Prometheus gauges through `hatCache.MonitoringOptions`. Nil remains
 the default, health is not persisted or replicated, and error text is never a
 metric label. See [M-G07_SOURCE_HEALTH.md](M-G07_SOURCE_HEALTH.md) and
 [BENCHMARK.md](BENCHMARK.md#m-g07-bounded-source-health-records).
+## T-U05: Session Transaction Settings
+
+Partially adopted as the importable `hatSql.SQLTransactionSettingsSession`.
+It provides normalized session defaults, explicit per-transaction patches,
+read-only and timeout inheritance, durable/relaxed/volatile policy labels, and
+a concurrency-safe scope lifecycle. Existing executors, authorization, and WAL
+enforcement remain caller-owned so the default SQL behavior is unchanged. See
+[TU05_SESSION_TRANSACTION_SETTINGS.md](TU05_SESSION_TRANSACTION_SETTINGS.md)
+and the [benchmark entry](BENCHMARK.md#t-u05-session-transaction-settings).

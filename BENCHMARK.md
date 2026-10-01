@@ -32875,3 +32875,21 @@ after HTFJ1 unmarshal: 305.3/416/6/64, 302.5/416/6/64, 299.8/416/6/64, 296.8/416
 This is an importable partial adoption; existing journal command formats and
 automatic dispatch remain unchanged. See
 [TU19_DURABLE_TUPLE_FIELD_JOURNAL.md](TU19_DURABLE_TUPLE_FIELD_JOURNAL.md).
+## T-U05: Session Transaction Settings
+
+The before control built an ad-hoc four-field settings map per request. The
+after path uses an immutable session snapshot and explicit patch resolution.
+`Resolve` is 13.56x faster with zero allocation; the complete `Begin` plus
+`Rollback` scope is 3.15x faster, 5.25x lower in bytes, and uses half the
+allocations. The API is opt-in and does not silently enforce storage behavior.
+
+| Path | Median ns/op | B/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: |
+| Before ad-hoc map | 142.3 | 336 | 2 | 1.00x |
+| After `Resolve` | 10.49 | 0 | 0 | 13.56x CPU, 336 B eliminated |
+| After `Begin` + `Rollback` | 45.25 | 64 | 1 | 3.15x CPU, 5.25x lower bytes, 2x fewer allocs |
+
+Raw samples: before `140.5, 137.7, 142.3, 144.3, 145.9 ns/op`; resolve
+`9.827, 10.46, 10.49, 10.88, 10.63 ns/op`; begin/rollback
+`47.18, 44.98, 45.15, 45.25, 45.45 ns/op`. Reproduce with
+`make benchmark-tu05-before` and `make benchmark-tu05-session-settings`.
