@@ -63,7 +63,7 @@ type CommandJournalSpaceFeedOptions struct {
 	Checkpoint   CommandJournalSpaceFeedCheckpoint
 	ReplayLimit  int
 	Buffer       int
-	PollInterval Duration
+	PollInterval time.Duration
 	Backpressure CommandJournalSpaceFeedBackpressurePolicy
 }
 
