@@ -787,6 +787,9 @@ func (ht *HatTrie) DeleteRadixTreeChecked(key string, subkey string) (bool, erro
 	if ht == nil {
 		return false, ErrNilHatTrie
 	}
+	if err := ht.checkReplicaWritable(); err != nil {
+		return false, err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.DeleteRadixTreeChecked(key, subkey)
 	}

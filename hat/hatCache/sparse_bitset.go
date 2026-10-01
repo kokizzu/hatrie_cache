@@ -165,6 +165,9 @@ func (ht *HatTrie) RemoveSparseBitsetChecked(key string, value uint64, values ..
 	if ht == nil {
 		return 0, ErrNilHatTrie
 	}
+	if err := ht.checkReplicaWritable(); err != nil {
+		return 0, err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.RemoveSparseBitsetChecked(key, value, values...)
 	}

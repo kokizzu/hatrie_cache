@@ -188,6 +188,9 @@ func (ht *HatTrie) RemoveRoaringBitmapChecked(key string, value uint32, values .
 	if ht == nil {
 		return 0, ErrNilHatTrie
 	}
+	if err := ht.checkReplicaWritable(); err != nil {
+		return 0, err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.RemoveRoaringBitmapChecked(key, value, values...)
 	}

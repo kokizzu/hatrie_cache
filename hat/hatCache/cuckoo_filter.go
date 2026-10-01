@@ -811,6 +811,9 @@ func (ht *HatTrie) DeleteCuckooFilterChecked(key string, val interface{}, vals .
 	if ht == nil {
 		return 0, ErrNilHatTrie
 	}
+	if err := ht.checkReplicaWritable(); err != nil {
+		return 0, err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.DeleteCuckooFilterChecked(key, val, vals...)
 	}

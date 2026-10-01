@@ -616,6 +616,9 @@ func (ht *HatTrie) PopPriorityQueueChecked(key string) (PriorityItem, bool, erro
 	if ht == nil {
 		return PriorityItem{}, false, ErrNilHatTrie
 	}
+	if err := ht.checkReplicaWritable(); err != nil {
+		return PriorityItem{}, false, err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.PopPriorityQueueChecked(key)
 	}
