@@ -32700,3 +32700,30 @@ CHU62 applies to direct numeric field/literal `+`, `-`, `*`, `/`, and `%`
 projections in both materialized and streaming APIs. Unsupported expression
 shapes retain the general SQL evaluator. See
 [CHU62_ARITHMETIC_PROJECTION.md](CHU62_ARITHMETIC_PROJECTION.md).
+
+## CHU63 Columnar CASE Projection
+
+Command:
+
+```sh
+make benchmark-chu63-case-projection
+```
+
+Five samples on Linux/amd64, AMD Ryzen 9 5950X. The fixture has 16,384 packed
+`int64` values (`row % 4096`) and runs
+`SELECT CASE WHEN value >= 2048 THEN 'high' ELSE 'low' END AS band FROM CACHE('items')`.
+
+| Workload | Before median ns/op | After median ns/op | CPU improvement | Before B/op | After B/op | Memory improvement | Before allocs/op | After allocs/op | Allocation improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| One-branch numeric `CASE` projection | 7,658,097 | 3,325,073 | 2.30x faster | 14,032,071 | 5,765,200 | 2.43x less | 65,570 | 48,149 | 1.36x fewer |
+
+Raw samples (`ns/op / B/op / allocs/op`):
+
+```text
+before: 8061686/14032134/65570, 7753079/14032104/65570, 7658097/14032071/65570, 7945419/14031685/65569, 7813812/14031712/65569
+after:  3364901/5765200/48149,   3325073/5765202/48149,   3119660/5765343/48149,   3465421/5765197/48149,   3276927/5765200/48149
+```
+
+The fast path admits one direct numeric predicate and literal branch results
+for both materialized and streaming APIs. Unsupported CASE shapes retain the
+general SQL evaluator. See [CHU63_CASE_PROJECTION.md](CHU63_CASE_PROJECTION.md).

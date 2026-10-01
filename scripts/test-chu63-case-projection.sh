@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cache="$PWD/.gocache-chu63"
+trap 'rm -rf "$cache"' EXIT
+GOCACHE="$cache" go test ./hat/hatSql -run 'TestCHU63' -count=1

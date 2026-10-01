@@ -25,7 +25,8 @@ measurement; `P1` needs a workload gate; `P2` is useful only after profiling.
 10. `P0` Add direct dictionary prefix filtering when binary collation permits.
 11. `P1` Evaluate simple arithmetic projection from numeric columns (adopted as
     CHU62; see [CHU62_ARITHMETIC_PROJECTION.md](CHU62_ARITHMETIC_PROJECTION.md)).
-12. `P1` Evaluate `CASE` on a direct numeric predicate in the column scan.
+12. `P1` Evaluate `CASE` on a direct numeric predicate in the column scan
+    (adopted as CHU63; see [CHU63_CASE_PROJECTION.md](CHU63_CASE_PROJECTION.md)).
 13. `P1` Add a columnar boolean representation instead of interface values.
 14. `P1` Add typed int64, float64, timestamp, and date column vectors.
 15. `P1` Store nullable vectors as values plus a null bitmap.

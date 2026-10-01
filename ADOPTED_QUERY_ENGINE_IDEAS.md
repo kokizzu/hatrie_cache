@@ -776,3 +776,14 @@ executor. The measured fixture was 2.36x faster, with 2.40x less allocated
 heap and 1.26x fewer allocations. See
 [CHU62_ARITHMETIC_PROJECTION.md](CHU62_ARITHMETIC_PROJECTION.md) and
 [BENCHMARK.md](BENCHMARK.md#chu62-columnar-arithmetic-projection).
+
+## CHU63: Columnar CASE Projection
+
+Adopted as a conservative columnar fast path for one-branch searched `CASE`
+projections whose predicate is a direct numeric field/literal comparison and
+whose branch results are literals. It supports materialized and streaming
+query APIs, preserves `NULL` as the non-match path, and leaves dynamic,
+multi-branch, and mixed plans on the general executor. The measured fixture
+was 2.30x faster, with 2.43x less allocated heap and 1.36x fewer allocations.
+See [CHU63_CASE_PROJECTION.md](CHU63_CASE_PROJECTION.md) and
+[BENCHMARK.md](BENCHMARK.md#chu63-columnar-case-projection).

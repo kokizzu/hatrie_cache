@@ -1116,6 +1116,9 @@ func ExecuteQueryRows(ctx context.Context, source string, resolver SourceResolve
 // by the materialized columnar executor. It retains the row callback contract
 // while avoiding source-row map construction and result-slice retention.
 func executeSQLColumnarQueryRows(query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func(columns []string, row SQLRow) error) (bool, error) {
+	if handled, err := executeSQLColumnarCaseProjectionQueryRows(query, resolver, control, visit); handled {
+		return true, err
+	}
 	if handled, err := executeSQLColumnarArithmeticProjectionQueryRows(query, resolver, control, visit); handled {
 		return true, err
 	}
@@ -8735,6 +8738,9 @@ func executeSQLColumnarScan(q *sqlQuery, resolver SQLSourceResolver, control *sq
 		return result, true, err
 	}
 	if result, handled, err := executeSQLColumnarDictionaryDistinct(q, columnar, control, metrics, outer); handled {
+		return result, true, err
+	}
+	if result, handled, err := executeSQLColumnarCaseProjection(q, resolver, control, metrics, outer); handled {
 		return result, true, err
 	}
 	if result, handled, err := executeSQLColumnarArithmeticProjection(q, resolver, control, metrics, outer); handled {

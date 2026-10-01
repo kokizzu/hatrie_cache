@@ -22413,3 +22413,34 @@ review-chu62-arithmetic-projection:
 .PHONY: ship-chu62-arithmetic-projection
 ship-chu62-arithmetic-projection:
 	bash scripts/ship-chu62-arithmetic-projection.sh
+.PHONY: format-chu63-case-projection
+format-chu63-case-projection:
+	bash scripts/format-chu63-case-projection.sh
+
+.PHONY: test-chu63-case-projection
+test-chu63-case-projection:
+	bash scripts/test-chu63-case-projection.sh
+
+.PHONY: benchmark-chu63-case-projection
+benchmark-chu63-case-projection:
+	bash scripts/benchmark-chu63-case-projection.sh
+
+.PHONY: race-chu63-case-projection
+race-chu63-case-projection:
+	bash scripts/race-chu63-case-projection.sh
+
+.PHONY: vet-chu63-case-projection
+vet-chu63-case-projection:
+	bash scripts/vet-chu63-case-projection.sh
+
+.PHONY: test-chu63-sql-package
+test-chu63-sql-package:
+	bash scripts/test-chu63-sql-package.sh
+
+.PHONY: review-chu63-case-projection
+review-chu63-case-projection:
+	bash scripts/review-chu63-case-projection.sh
+
+.PHONY: ship-chu63-case-projection
+ship-chu63-case-projection:
+	bash scripts/ship-chu63-case-projection.sh
