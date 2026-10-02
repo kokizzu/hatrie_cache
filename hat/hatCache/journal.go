@@ -53,6 +53,22 @@ type CommandJournalRecord = hatJournal.Record
 // import hat/hatJournal directly.
 type CommandJournalFormat = hatJournal.Format
 
+// CommandJournalSyncMode controls when a logical key-prefix space is synced.
+type CommandJournalSyncMode = hatJournal.SyncMode
+
+const (
+	CommandJournalSyncSynchronous = hatJournal.SyncModeSynchronous
+	CommandJournalSyncPeriodic    = hatJournal.SyncModePeriodic
+	CommandJournalSyncDisabled    = hatJournal.SyncModeDisabled
+)
+
+// CommandJournalSyncPolicyRule maps a key-prefix space to a sync mode.
+type CommandJournalSyncPolicyRule = hatJournal.SyncPolicyRule
+
+// CommandJournalSyncPolicy configures the journal's per-space durability
+// behavior. Its zero value preserves synchronous writes.
+type CommandJournalSyncPolicy = hatJournal.SyncPolicy
+
 const (
 	CommandJournalFormatJSON    = hatJournal.FormatJSON
 	CommandJournalFormatBinary  = hatJournal.FormatBinary
@@ -222,6 +238,10 @@ type CommandJournal struct {
 	groupCommitWindow     time.Duration
 	groupCommitMaxBatch   int
 	adaptiveGroupCommit   bool
+	syncPolicy            hatJournal.SyncPolicy
+	lastSyncedSequence    uint64
+	lastSyncAt            time.Time
+	lastSyncError         string
 	segmentMaxBytes       int64
 	segmentCompression    CommandJournalSegmentCompression
 	retainedSegments      int
@@ -347,6 +367,9 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 		groupCommitWindow:     options.GroupCommitWindow,
 		groupCommitMaxBatch:   options.GroupCommitMaxBatch,
 		adaptiveGroupCommit:   options.AdaptiveGroupCommit,
+		syncPolicy:            options.SyncPolicy,
+		lastSyncedSequence:    maxSequence,
+		lastSyncAt:            time.Now(),
 		segmentMaxBytes:       options.SegmentMaxBytes,
 		segmentCompression:    options.SegmentCompression,
 		retainedSegments:      options.RetainedSegments,
@@ -400,8 +423,12 @@ func (journal *CommandJournal) Close() error {
 		}
 
 		journal.mu.Lock()
+		var syncErr error
+		if journal.syncPolicy.HasPeriodicMode() && journal.lastSyncedSequence < journal.lastSequenceLocked() {
+			syncErr = journal.syncLocked()
+		}
 		journal.closed = true
-		journal.closeErr = journal.closeAppendFileLocked()
+		journal.closeErr = errors.Join(syncErr, journal.closeAppendFileLocked())
 		journal.mu.Unlock()
 		close(journal.closeDone)
 	})
@@ -625,7 +652,7 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 			failCommandJournalJobs(pending, err)
 			return
 		}
-		if err := journal.syncLocked(); err != nil {
+		if err := journal.syncForModeLocked(journal.syncModeForJobs(pending)); err != nil {
 			err = journal.rollbackPreparedBatchLocked(batchState, err)
 			failCommandJournalJobs(pending, err)
 			return
@@ -763,7 +790,7 @@ func (journal *CommandJournal) processIdempotentGroupCommitLocked(batch []*comma
 			failCommandJournalIdempotentGroupEntries(entries, err)
 			return
 		}
-		if err := journal.syncLocked(); err != nil {
+		if err := journal.syncForModeLocked(journal.syncModeForIdempotentEntries(entries)); err != nil {
 			err = journal.rollbackPreparedBatchLocked(batchState, err)
 			failCommandJournalIdempotentGroupEntries(entries, err)
 			return
@@ -987,7 +1014,7 @@ func (journal *CommandJournal) executeJournalRecordsBatchWithScalarBatch(trie *H
 	if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
 		return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 	}
-	if err := journal.syncLocked(); err != nil {
+	if err := journal.syncForModeLocked(journal.syncModeForJournalRecords(records)); err != nil {
 		return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 	}
 	rollbackOffset := batchState.offset
@@ -1109,7 +1136,7 @@ func (journal *CommandJournal) executeCompactJournalRecordsBatch(trie *HatTrie, 
 	if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
 		return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 	}
-	if err := journal.syncLocked(); err != nil {
+	if err := journal.syncForModeLocked(journal.syncModeForCompactRecords(records)); err != nil {
 		return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 	}
 
@@ -1747,7 +1774,7 @@ func (journal *CommandJournal) appendLockedWithIdempotency(request CacheCommandR
 	if err != nil {
 		return commandJournalAppendState{}, journal.rollbackFailedAppendLocked(appendState, err)
 	}
-	if err := journal.syncLocked(); err != nil {
+	if err := journal.syncForModeLocked(journal.syncModeForRequest(request)); err != nil {
 		return commandJournalAppendState{}, journal.rollbackFailedAppendLocked(appendState, err)
 	}
 	return appendState, nil
@@ -1912,13 +1939,22 @@ func resolveJournalReplicationJobs(journal *CommandJournal, jobs []replicationJo
 }
 
 func (journal *CommandJournal) syncLocked() error {
+	var err error
 	if journal.syncHook != nil {
-		return journal.syncHook()
+		err = journal.syncHook()
+	} else if journal.file == nil {
+		err = ErrCommandJournalClosed
+	} else {
+		err = journal.file.Sync()
 	}
-	if journal.file == nil {
-		return ErrCommandJournalClosed
+	if err != nil {
+		journal.lastSyncError = err.Error()
+		return err
 	}
-	return journal.file.Sync()
+	journal.lastSyncedSequence = journal.lastSequenceLocked()
+	journal.lastSyncAt = time.Now()
+	journal.lastSyncError = ""
+	return nil
 }
 
 func (journal *CommandJournal) rollbackFailedAppendLocked(state commandJournalAppendState, cause error) error {

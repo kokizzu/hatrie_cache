@@ -95,6 +95,7 @@ type Options struct {
 	SegmentCompression  SegmentCompression
 	GroupCommitWindow   time.Duration
 	GroupCommitMaxBatch int
+	SyncPolicy          SyncPolicy
 	// AdaptiveGroupCommit shortens the collection window when queued writers
 	// indicate pressure. It is disabled by default for compatibility.
 	AdaptiveGroupCommit bool
@@ -153,9 +154,14 @@ func ValidateOptions(options Options) (Options, error) {
 	if err != nil {
 		return Options{}, err
 	}
+	syncPolicy, err := options.SyncPolicy.normalized()
+	if err != nil {
+		return Options{}, err
+	}
 	options.Format = format
 	options.SegmentCompression = segmentCompression
 	options.Encryption = encryption
+	options.SyncPolicy = syncPolicy
 	return options, nil
 }
 

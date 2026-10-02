@@ -8,6 +8,7 @@ security guidance before exposing it on a network.
 
 ## Start Here
 
+- Opt-in per-space WAL sync policy with synchronous, periodic, disabled, and explicit flush/reporting modes: [TU34_PER_SPACE_WAL_SYNC.md](TU34_PER_SPACE_WAL_SYNC.md)
 - Opt-in journal-wide synchronous write quorum with exact sequence and digest acknowledgements: [TU10_JOURNAL_WRITE_QUORUM.md](TU10_JOURNAL_WRITE_QUORUM.md)
 - Per-space conflict-policy snapshots with copy-safe generation metadata: [TU11_CONFLICT_POLICY_SNAPSHOTS.md](TU11_CONFLICT_POLICY_SNAPSHOTS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#t-u11-conflict-policy-snapshots)
 - Optional replica read-only admission around caller-owned mutation paths: [TU06_REPLICA_READ_ONLY_GATE.md](TU06_REPLICA_READ_ONLY_GATE.md)

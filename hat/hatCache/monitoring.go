@@ -2401,6 +2401,7 @@ type publicCommandBatchEffects struct {
 	journalIdempotency []int
 	idempotencyPending []commandIdempotencyPending
 	journalJob         replicationJob
+	syncMode           CommandJournalSyncMode
 	batch              bool
 	atomic             bool
 	infrastructureErr  error
@@ -2414,6 +2415,7 @@ func newPublicCommandBatchEffects(options commandExecutionOptions) *publicComman
 		nodeName:      options.NodeName,
 		election:      options.Election,
 		enforceLeader: options.EnforceLeaderWrites,
+		syncMode:      CommandJournalSyncSynchronous,
 		batch:         true,
 	}
 	effects.deferJournal = effects.replicator.usesJournalOutbox(effects.journal)
@@ -2429,6 +2431,9 @@ func (effects *publicCommandBatchEffects) execute(ctx context.Context, trie *Hat
 	}
 
 	journaled := effects.journal != nil && commandShouldJournal(request)
+	if journaled {
+		effects.syncMode = strongerCommandJournalSyncMode(effects.syncMode, effects.journal.syncModeForRequest(request))
+	}
 	deferredJournal := journaled && effects.deferJournal
 	var appendState commandJournalAppendState
 	var journalRequest CacheCommandRequest
@@ -2567,7 +2572,7 @@ func (effects *publicCommandBatchEffects) commitLocked(trie *HatTrie) error {
 			return effects.rollbackLocked(trie, err)
 		}
 	}
-	if err := effects.journal.syncLocked(); err != nil {
+	if err := effects.journal.syncForModeLocked(effects.syncMode); err != nil {
 		return effects.rollbackLocked(trie, err)
 	}
 	for _, pending := range effects.idempotencyPending {

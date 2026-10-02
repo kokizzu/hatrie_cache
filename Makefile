@@ -22835,3 +22835,44 @@ commit-chg18-session-settings:
 	bash scripts/deliver-chg18-session-settings.sh commit
 push-chg18-session-settings:
 	bash scripts/deliver-chg18-session-settings.sh push
+
+.PHONY: test-chg19-wal format-chg19-wal race-chg19-wal vet-chg19-wal test-chg19-wal-package test-chg19-wal-package-skip-baseline benchmark-chg19-wal benchmark-chg19-wal-disk status-chg19-wal verify-chg19-wal stage-chg19-wal commit-chg19-wal push-chg19-wal
+
+test-chg19-wal:
+	bash scripts/test-chg19-wal.sh unit
+
+format-chg19-wal:
+	bash scripts/test-chg19-wal.sh format
+
+race-chg19-wal:
+	bash scripts/test-chg19-wal.sh race
+
+vet-chg19-wal:
+	bash scripts/test-chg19-wal.sh vet
+
+test-chg19-wal-package:
+	bash scripts/test-chg19-wal.sh package
+
+test-chg19-wal-package-skip-baseline:
+	bash scripts/test-chg19-wal.sh package-skip-baseline
+
+benchmark-chg19-wal:
+	bash scripts/test-chg19-wal.sh benchmark
+
+benchmark-chg19-wal-disk:
+	bash scripts/test-chg19-wal.sh benchmark-disk
+
+status-chg19-wal:
+	bash scripts/deliver-chg19-wal.sh status
+
+verify-chg19-wal:
+	bash scripts/deliver-chg19-wal.sh verify
+
+stage-chg19-wal:
+	bash scripts/deliver-chg19-wal.sh stage
+
+commit-chg19-wal:
+	bash scripts/deliver-chg19-wal.sh commit
+
+push-chg19-wal:
+	bash scripts/deliver-chg19-wal.sh push
