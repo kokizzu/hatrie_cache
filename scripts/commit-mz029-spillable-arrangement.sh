@@ -11,6 +11,7 @@ feature_paths=(
   hat/hatDataStructure/spillable_arrangement.go
   hat/hatDataStructure/spillable_arrangement_test.go
   hat/hatDataStructure/spillable_arrangement_benchmark_test.go
+  hat/hatDataStructure/spillable_arrangement_compaction_benchmark_test.go
   scripts/test-mz029-spillable-arrangement.sh
   scripts/benchmark-mz029-spillable-arrangement.sh
   scripts/format-mz029-spillable-arrangement.sh

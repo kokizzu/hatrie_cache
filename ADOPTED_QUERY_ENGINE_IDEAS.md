@@ -445,7 +445,8 @@ Implemented as the imported `hatSql.IncrementalIntervalJoin` API. It maintains
 exact signed equi-inner join deltas over half-open validity intervals using
 equality buckets and interval pruning, with atomic validation, replacement,
 overflow checks, row cloning, and deterministic snapshots. The separate
-`ENGINE_IDEAS.md` MZ-029 entry is spillable arrangements and remains open.
+`ENGINE_IDEAS.md` MZ-029 entry is spillable arrangements and is tracked
+separately.
 See [MZ029_INCREMENTAL_INTERVAL_JOIN.md](MZ029_INCREMENTAL_INTERVAL_JOIN.md)
 for the API and measured tradeoffs.
 ### Materialize MZ-005: Immutable Sealed Upsert Runs
@@ -473,10 +474,12 @@ and [BENCHMARK.md#ch-045-global-in-global-join-broadcast-planning](BENCHMARK.md#
 Implemented as the imported `hatDataStructure.SpillableArrangement` opt-in
 local tier. It bounds retained value payloads, keeps O(1) key metadata in RAM,
 uses CRC-protected binary records, enforces optional disk limits, supports
-exact cold reads, and compacts stale records explicitly. The measured cost is
-10.4x slower cold reads and 12.5% more transient bytes than an equivalent
-copy-on-read in-memory lookup; existing defaults are unchanged. Fully
-disk-resident indexes and reopen/restore are intentionally still open.
+exact cold reads and explicit reopen after restart, and reports stale bytes for
+thresholded compaction. The measured cost is 10.4x slower cold reads and
+12.5% more transient bytes than an equivalent copy-on-read in-memory lookup;
+the clean compaction gate avoids about 191,200x of unnecessary rewrite CPU in
+the measured workload with zero allocations. Existing defaults are unchanged.
+Fully disk-resident indexes remain open.
 See [MZ029_SPILLABLE_ARRANGEMENT.md](MZ029_SPILLABLE_ARRANGEMENT.md).
 ### Materialize MZ-031: Skew-Aware Join Exchange
 

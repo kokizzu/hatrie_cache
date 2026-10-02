@@ -214,3 +214,110 @@ func spillableArrangementKeys(rows []hatDataStructure.SpillableArrangementEntry)
 	sort.Strings(keys)
 	return keys
 }
+
+func TestSpillableArrangementCompactionPolicyTracksStaleBytes(t *testing.T) {
+	arrangement, err := hatDataStructure.NewSpillableArrangement(hatDataStructure.SpillableArrangementOptions{
+		Directory:        t.TempDir(),
+		MemoryLimitBytes: 1,
+		MaxDiskBytes:     1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("create arrangement: %v", err)
+	}
+	defer arrangement.Close()
+	if err := arrangement.Set("a", []byte("a")); err != nil {
+		t.Fatalf("Set(a): %v", err)
+	}
+	if err := arrangement.Set("b", []byte("b")); err != nil {
+		t.Fatalf("Set(b): %v", err)
+	}
+	if stats := arrangement.Stats(); stats.StaleDiskBytes != 0 {
+		t.Fatalf("fresh spill stale bytes = %d, want zero", stats.StaleDiskBytes)
+	}
+	if !arrangement.Delete("a") {
+		t.Fatal("Delete(a) = false")
+	}
+	stale := arrangement.Stats().StaleDiskBytes
+	if stale <= 0 {
+		t.Fatalf("stale bytes after delete = %d, want positive", stale)
+	}
+	diskBefore := arrangement.Stats().DiskBytes
+	compacted, err := arrangement.CompactIfNeeded(stale + 1)
+	if err != nil {
+		t.Fatalf("CompactIfNeeded(above threshold): %v", err)
+	}
+	if compacted || arrangement.Stats().DiskBytes != diskBefore {
+		t.Fatalf("above-threshold compaction = compacted=%t stats=%+v, want no-op", compacted, arrangement.Stats())
+	}
+	compacted, err = arrangement.CompactIfNeeded(stale)
+	if err != nil {
+		t.Fatalf("CompactIfNeeded(at threshold): %v", err)
+	}
+	if !compacted {
+		t.Fatal("CompactIfNeeded(at threshold) = false, want compaction")
+	}
+	if stats := arrangement.Stats(); stats.StaleDiskBytes != 0 || stats.DiskBytes >= diskBefore {
+		t.Fatalf("after threshold compaction stats = %+v, want reclaimed disk and zero stale bytes", stats)
+	}
+	if _, err := arrangement.CompactIfNeeded(-1); !errors.Is(err, hatDataStructure.ErrSpillableArrangementLimitInvalid) {
+		t.Fatalf("negative compaction threshold error = %v, want limit error", err)
+	}
+}
+
+func TestSpillableArrangementCompactionPolicySurvivesReopen(t *testing.T) {
+	directory := t.TempDir()
+	arrangement, err := hatDataStructure.NewSpillableArrangement(hatDataStructure.SpillableArrangementOptions{
+		Directory:        directory,
+		MemoryLimitBytes: 1,
+		MaxDiskBytes:     1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("create arrangement: %v", err)
+	}
+	if err := arrangement.Set("a", []byte("old")); err != nil {
+		t.Fatalf("Set(old a): %v", err)
+	}
+	if err := arrangement.Set("b", []byte("b")); err != nil {
+		t.Fatalf("Set(b): %v", err)
+	}
+	if err := arrangement.Flush(); err != nil {
+		t.Fatalf("Flush(initial): %v", err)
+	}
+	if err := arrangement.Set("a", []byte("new")); err != nil {
+		t.Fatalf("Set(new a): %v", err)
+	}
+	if err := arrangement.Flush(); err != nil {
+		t.Fatalf("Flush(replacement): %v", err)
+	}
+	spillPath := arrangement.SpillPath()
+	staleBefore := arrangement.Stats().StaleDiskBytes
+	if staleBefore <= 0 {
+		t.Fatalf("stale bytes before reopen = %d, want positive", staleBefore)
+	}
+	if err := arrangement.Close(); err != nil {
+		t.Fatalf("Close(initial): %v", err)
+	}
+
+	reopened, err := hatDataStructure.OpenSpillableArrangement(spillPath, hatDataStructure.SpillableArrangementOptions{
+		MemoryLimitBytes: 1,
+		MaxDiskBytes:     1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("reopen arrangement: %v", err)
+	}
+	defer reopened.Close()
+	if stats := reopened.Stats(); stats.StaleDiskBytes != staleBefore {
+		t.Fatalf("reopened stale bytes = %d, want %d", stats.StaleDiskBytes, staleBefore)
+	}
+	value, found, err := reopened.Get("a")
+	if err != nil || !found || string(value) != "new" {
+		t.Fatalf("Get(reopened a) = %q found=%t err=%v, want new/true/nil", value, found, err)
+	}
+	compacted, err := reopened.CompactIfNeeded(0)
+	if err != nil || !compacted {
+		t.Fatalf("CompactIfNeeded(reopened) = compacted=%t err=%v, want true/nil", compacted, err)
+	}
+	if value, found, err := reopened.Get("b"); err != nil || !found || string(value) != "b" {
+		t.Fatalf("Get(reopened b after compaction) = %q found=%t err=%v, want b/true/nil", value, found, err)
+	}
+}

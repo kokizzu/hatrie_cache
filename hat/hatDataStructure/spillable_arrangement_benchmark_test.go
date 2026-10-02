@@ -78,3 +78,42 @@ func spillableArrangementBenchmarkKeys() []string {
 	}
 	return keys
 }
+
+func newRound60SpillableCompactionArrangement(b *testing.B) *hatDataStructure.SpillableArrangement {
+	b.Helper()
+	arrangement, err := hatDataStructure.NewSpillableArrangement(hatDataStructure.SpillableArrangementOptions{
+		MemoryLimitBytes: 1,
+		MaxDiskBytes:     128 << 20,
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	value := bytes.Repeat([]byte{'v'}, 128)
+	for index := 0; index < 512; index++ {
+		if err := arrangement.Set(fmt.Sprintf("key-%04d", index), value); err != nil {
+			_ = arrangement.Close()
+			b.Fatal(err)
+		}
+	}
+	if err := arrangement.Flush(); err != nil {
+		_ = arrangement.Close()
+		b.Fatal(err)
+	}
+	if stats := arrangement.Stats(); stats.ColdEntries != 512 {
+		_ = arrangement.Close()
+		b.Fatalf("cold entries = %d, want 512", stats.ColdEntries)
+	}
+	b.Cleanup(func() { _ = arrangement.Close() })
+	return arrangement
+}
+
+func BenchmarkMZ028SpillableCompactFreshSegment(b *testing.B) {
+	arrangement := newRound60SpillableCompactionArrangement(b)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		if err := arrangement.Compact(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

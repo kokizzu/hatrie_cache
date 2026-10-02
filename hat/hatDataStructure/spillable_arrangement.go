@@ -61,11 +61,12 @@ type SpillableArrangementEntry struct {
 // HotBytes counts value payload bytes only; key and index metadata remain in
 // memory so point lookups do not require a full segment scan.
 type SpillableArrangementStats struct {
-	Entries      int
-	ColdEntries  int
-	HotBytes     int64
-	DiskBytes    int64
-	SpillRecords uint64
+	Entries        int
+	ColdEntries    int
+	HotBytes       int64
+	DiskBytes      int64
+	StaleDiskBytes int64
+	SpillRecords   uint64
 }
 
 // SpillableArrangement keeps keyed byte values in memory until the configured
@@ -85,6 +86,7 @@ type SpillableArrangement struct {
 	maxValueBytes  int64
 	hotBytes       int64
 	diskBytes      int64
+	staleDiskBytes int64
 	spillRecords   uint64
 	coldEntries    int
 	generation     uint64
@@ -278,8 +280,9 @@ func (arrangement *SpillableArrangement) recoverSegment(size int64) error {
 			return ErrSpillableArrangementCorrupt
 		}
 		key := string(keyBuffer)
-		if _, exists := arrangement.entries[key]; exists {
+		if previous, exists := arrangement.entries[key]; exists {
 			arrangement.coldEntries--
+			arrangement.staleDiskBytes += previous.ref.total
 		}
 		arrangement.generation++
 		arrangement.entries[key] = &spillableArrangementEntry{
@@ -320,11 +323,13 @@ func (arrangement *SpillableArrangement) Set(key string, value []byte) error {
 	previous, existed := arrangement.entries[key]
 	previousHotBytes := arrangement.hotBytes
 	previousColdEntries := arrangement.coldEntries
+	previousStaleDiskBytes := arrangement.staleDiskBytes
 	previousQueueLength := len(arrangement.queue)
 	if existed && previous.valueHot {
 		arrangement.hotBytes -= int64(len(previous.value))
 	} else if existed {
 		arrangement.coldEntries--
+		arrangement.staleDiskBytes += previous.ref.total
 	}
 	arrangement.generation++
 	entry := &spillableArrangementEntry{key: key, value: append([]byte(nil), value...), gen: arrangement.generation, valueHot: true}
@@ -339,6 +344,7 @@ func (arrangement *SpillableArrangement) Set(key string, value []byte) error {
 		}
 		arrangement.hotBytes = previousHotBytes
 		arrangement.coldEntries = previousColdEntries
+		arrangement.staleDiskBytes = previousStaleDiskBytes
 		arrangement.queue = arrangement.queue[:previousQueueLength]
 		return err
 	}
@@ -388,6 +394,7 @@ func (arrangement *SpillableArrangement) Delete(key string) bool {
 		arrangement.hotBytes -= int64(len(entry.value))
 	} else {
 		arrangement.coldEntries--
+		arrangement.staleDiskBytes += entry.ref.total
 	}
 	delete(arrangement.entries, key)
 	arrangement.maybeCompactQueueLocked()
@@ -432,7 +439,8 @@ func (arrangement *SpillableArrangement) Sync() error {
 }
 
 // Compact rewrites live cold values into a fresh segment and discards stale
-// records left by deletes and replacements. Hot residency is preserved.
+// records left by deletes and replacements. It is a no-op when there are no
+// stale bytes. Hot residency is preserved.
 func (arrangement *SpillableArrangement) Compact() error {
 	if arrangement == nil {
 		return ErrSpillableArrangementNil
@@ -442,9 +450,40 @@ func (arrangement *SpillableArrangement) Compact() error {
 	if err := arrangement.ensureOpenLocked(); err != nil {
 		return err
 	}
+	return arrangement.compactLocked()
+}
+
+// CompactIfNeeded rewrites the segment only when at least minStaleBytes are
+// reclaimable. It returns true when a rewrite was performed. A zero threshold
+// means any stale bytes are enough; a negative threshold is invalid.
+func (arrangement *SpillableArrangement) CompactIfNeeded(minStaleBytes int64) (bool, error) {
+	if arrangement == nil {
+		return false, ErrSpillableArrangementNil
+	}
+	if minStaleBytes < 0 {
+		return false, ErrSpillableArrangementLimitInvalid
+	}
+	arrangement.mu.Lock()
+	defer arrangement.mu.Unlock()
+	if err := arrangement.ensureOpenLocked(); err != nil {
+		return false, err
+	}
+	if arrangement.staleDiskBytes == 0 || arrangement.staleDiskBytes < minStaleBytes {
+		return false, nil
+	}
+	if err := arrangement.compactLocked(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (arrangement *SpillableArrangement) compactLocked() error {
+	if arrangement.staleDiskBytes == 0 {
+		return nil
+	}
 	cold := arrangement.coldEntriesLocked()
 	if len(cold) == 0 && arrangement.diskBytes == 0 {
-		return arrangement.file.Sync()
+		return nil
 	}
 	sort.Slice(cold, func(left, right int) bool { return cold[left].key < cold[right].key })
 	temporary, err := os.CreateTemp(arrangement.directory, ".hatrie-arrangement-compact-*")
@@ -502,6 +541,7 @@ func (arrangement *SpillableArrangement) Compact() error {
 	arrangement.file = file
 	removeTemporary = false
 	arrangement.diskBytes = offset
+	arrangement.staleDiskBytes = 0
 	for _, entry := range cold {
 		entry.ref = pending[entry.key]
 	}
@@ -550,11 +590,12 @@ func (arrangement *SpillableArrangement) Stats() SpillableArrangementStats {
 	arrangement.mu.RLock()
 	defer arrangement.mu.RUnlock()
 	return SpillableArrangementStats{
-		Entries:      len(arrangement.entries),
-		ColdEntries:  arrangement.coldEntries,
-		HotBytes:     arrangement.hotBytes,
-		DiskBytes:    arrangement.diskBytes,
-		SpillRecords: arrangement.spillRecords,
+		Entries:        len(arrangement.entries),
+		ColdEntries:    arrangement.coldEntries,
+		HotBytes:       arrangement.hotBytes,
+		DiskBytes:      arrangement.diskBytes,
+		StaleDiskBytes: arrangement.staleDiskBytes,
+		SpillRecords:   arrangement.spillRecords,
 	}
 }
 

@@ -32635,3 +32635,56 @@ The cache is opt-in and bounded. It trades resident memory for repeated-read
 latency while retaining copy-on-read semantics. See
 [DISK_READ_CACHE.md](DISK_READ_CACHE.md) for configuration, invalidation, and
 the full tradeoff.
+
+## Materialize MZ-028: Adaptive spill compaction admission
+
+Command:
+
+```sh
+make benchmark-mz028-adaptive-compaction
+```
+
+Workload: a 512-entry `SpillableArrangement` with 128-byte values, all cold
+after setup, and repeated compaction calls on a segment with no stale bytes.
+Five `-benchtime=50x` samples were run on Linux/amd64 with an AMD Ryzen 9
+5950X. Each sample performs exactly 50 compaction calls. The before row was
+run from the clean-base commit; the after rows use the same fixture and code
+path.
+
+| Path | Median ns/op | B/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Before: unconditional clean-segment rewrite | 2,714,393 | 210,688 | 1,043 | baseline |
+| After: `Compact` with zero stale bytes | 14.2 | 0 | 0 | 191,200x faster; 210.7 KB and 1,043 allocations avoided |
+| After: `CompactIfNeeded(1)` with zero stale bytes | 16.4 | 0 | 0 | 165,500x faster; 210.7 KB and 1,043 allocations avoided |
+
+Raw samples:
+
+```text
+Before: BenchmarkMZ028SpillableCompactFreshSegment-32
+2451022 ns/op  210689 B/op  1043 allocs/op
+2497892 ns/op  210687 B/op  1043 allocs/op
+6034590 ns/op  210688 B/op  1043 allocs/op
+2904088 ns/op  210688 B/op  1043 allocs/op
+2714393 ns/op  210687 B/op  1043 allocs/op
+
+After: BenchmarkMZ028SpillableCompactFreshSegment-32
+20.80 ns/op  0 B/op  0 allocs/op
+14.60 ns/op  0 B/op  0 allocs/op
+13.20 ns/op  0 B/op  0 allocs/op
+14.20 ns/op  0 B/op  0 allocs/op
+13.00 ns/op  0 B/op  0 allocs/op
+
+After: BenchmarkMZ028SpillableCompactIfNeededWithoutStale-32
+16.40 ns/op  0 B/op  0 allocs/op
+20.60 ns/op  0 B/op  0 allocs/op
+20.00 ns/op  0 B/op  0 allocs/op
+13.20 ns/op  0 B/op  0 allocs/op
+16.20 ns/op  0 B/op  0 allocs/op
+```
+
+The change adds one fixed `int64` counter per arrangement and constant-time
+updates on delete, replacement, spill, and reopen. It does not change hot or
+cold read defaults. The clean `Compact` path deliberately does not call
+`Sync`; use `Sync` or `Flush` when the caller needs an fsync even when no
+compaction is needed. Stale segments still take the existing full rewrite
+path once the configured threshold is reached.

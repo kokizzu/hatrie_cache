@@ -7,11 +7,11 @@ payloads to a private binary segment. This bounds the large value allocation
 that can otherwise contribute to process-memory exhaustion.
 
 It is a storage tier, not a durability or replication protocol. The segment is
-created fresh for each arrangement, is CRC-protected, and is not reopened as a
-restored arrangement. Call `Sync` or `Flush` when local filesystem persistence
-of already-written spill records matters. Spilled values are plaintext; use an
-encrypted filesystem or an application-level encryption layer for sensitive
-data.
+created fresh for each arrangement, is CRC-protected, and can be reopened
+explicitly after restart with `OpenSpillableArrangement`. Call `Sync` or
+`Flush` when local filesystem persistence of already-written spill records
+matters. Spilled values are plaintext; use an encrypted filesystem or an
+application-level encryption layer for sensitive data.
 
 ## Behavior
 
@@ -23,10 +23,14 @@ data.
 - Automatic eviction is FIFO by write generation, which is deterministic and
   avoids a per-entry linked-list allocation.
 - `Flush` spills all hot values and syncs the segment.
-- `Delete` removes the live key immediately; stale segment bytes remain until
-  `Compact`.
+- `Delete` removes the live key immediately; `Stats().StaleDiskBytes` reports
+  the reclaimable segment bytes.
 - `Compact` rewrites only live cold values into a fresh segment and atomically
-  publishes it.
+  publishes it. It returns immediately without an fsync when there are no
+  stale bytes; call `Sync` or `Flush` when durability is required.
+- `CompactIfNeeded(minStaleBytes)` lets maintenance callers skip a rewrite
+  until a configured number of stale bytes is available. A zero threshold
+  means any stale bytes; it returns whether a rewrite occurred.
 - `MaxDiskBytes` is an optional hard bound. Deletes and replacements can leave
   stale bytes, so compact before retrying a disk-limited workload.
 - Segment records contain a magic header, bounded lengths, the key, value, and
@@ -99,11 +103,32 @@ The feature is therefore useful when avoiding retained-memory failure is more
 important than hot-read latency. Existing in-memory behavior is unchanged;
 callers must explicitly construct this type to accept the I/O tradeoff.
 
+### Adaptive compaction gate
+
+The clean-segment workload used 512 cold entries with 128-byte values and five
+fixed-50-call samples on Linux/amd64 with an AMD Ryzen 9 5950X. Before
+stale-byte accounting, repeatedly calling `Compact` rewrote the same live
+records even though no bytes could be reclaimed. After the change, the clean
+path returns without allocation or filesystem sync:
+
+| Path | Median ns/op | B/op | Allocs/op | Result |
+| --- | ---: | ---: | ---: | --- |
+| Before: unconditional clean-segment rewrite | 2,714,393 | 210,688 | 1,043 | baseline |
+| After: `Compact` with zero stale bytes | 14.2 | 0 | 0 | about 191,200x faster |
+| After: `CompactIfNeeded(1)` with zero stale bytes | 16.4 | 0 | 0 | about 165,500x faster |
+
+The fixed cost is one `int64` stale-byte counter per arrangement. Stale-byte
+accounting adds constant-time updates to delete, replacement, spill, and
+recovery paths; the clean compaction path intentionally does not call `Sync`.
+Use the existing `Sync`/`Flush` API when a maintenance cycle must also force
+filesystem durability.
+
 ## Verification
 
 Tests cover hot/cold round trips, caller ownership, sorted snapshots, deletes,
-stale-byte compaction, disk-limit atomicity, CRC corruption, invalid limits,
-close behavior, private-directory cleanup, and the memory-bound accounting.
+stale-byte accounting and threshold compaction, replacement recovery after
+reopen, disk-limit atomicity, CRC corruption, invalid limits, close behavior,
+private-directory cleanup, and memory-bound accounting.
 
 ```text
 make verify-mz029-spillable-arrangement

@@ -14849,6 +14849,17 @@ commit-mz029-incremental-interval-join:
 push-mz029-incremental-interval-join:
 	@bash scripts/push-mz029-incremental-interval-join.sh
 
+.PHONY: benchmark-mz028-adaptive-compaction
+benchmark-mz028-adaptive-compaction:
+	@bash scripts/benchmark-mz028-adaptive-compaction.sh
+
+.PHONY: commit-mz028-adaptive-compaction push-mz028-adaptive-compaction
+commit-mz028-adaptive-compaction:
+	@bash scripts/commit-mz028-adaptive-compaction.sh
+
+push-mz028-adaptive-compaction:
+	@bash scripts/push-mz028-adaptive-compaction.sh
+
 .PHONY: test-mz029-spillable-arrangement benchmark-mz029-spillable-arrangement format-mz029-spillable-arrangement race-mz029-spillable-arrangement vet-mz029-spillable-arrangement review-mz029-spillable-arrangement verify-mz029-spillable-arrangement commit-mz029-spillable-arrangement push-mz029-spillable-arrangement
 test-mz029-spillable-arrangement:
 	@bash scripts/test-mz029-spillable-arrangement.sh
