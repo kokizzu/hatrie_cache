@@ -32637,6 +32637,27 @@ normal tuple reads, writes, and packing do not call the manager. See
 [T-G16_VERSIONED_TUPLE_MIGRATION.md](T-G16_VERSIONED_TUPLE_MIGRATION.md) for
 the raw samples, rollback contract, and verification commands.
 
+## Tarantool Automatic Multikey Index
+
+`hatDataStructure.MultikeyIndex[K]` and its extractor-backed
+`TypedMultikeyIndex[T, K]` maintain bounded typed array/multikey postings
+without converting keys to strings. Five `-count=5` samples on Linux/amd64,
+AMD Ryzen 9 5950X, using `-benchtime=1s -benchmem`:
+
+| Workload | Manual baseline | Typed multikey index | Relative result |
+|---|---:|---:|---|
+| Same-key `Set` | 39.61 ns/op, 32 B/op, 1 alloc | 24.57 ns/op, 0 B/op, 0 alloc | 1.61x faster; allocation-free |
+| Changed-key `Set` | 1,069 ns/op, 130 B/op, 1 alloc | 311.7 ns/op, 130 B/op, 1 alloc | 3.43x faster; same heap |
+| Lookup with reusable dst | 65.91 ns/op, 0 B/op, 0 alloc | 72.24 ns/op, 0 B/op, 0 alloc | 1.10x slower; same heap |
+
+The compact posting list materially reduces reindexing work while preserving
+typed keys and bounded state. Lookup is modestly slower in this dense posting
+workload because it traverses the compact representation; it remains
+allocation-free and memory-neutral. The feature is opt-in and does not change
+the existing string multikey index. See
+[T-U23_AUTOMATIC_MULTIKEY_INDEX.md](T-U23_AUTOMATIC_MULTIKEY_INDEX.md) for
+semantics and raw benchmark samples.
+
 ## Tarantool Cross-Index Unique Constraints
 
 `hatDataStructure.CrossIndexUnique[T]` atomically validates and updates
