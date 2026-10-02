@@ -22292,3 +22292,42 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: format-chg20-tuple-journal red-chg20-tuple-journal test-chg20-tuple-journal race-chg20-tuple-journal vet-chg20-tuple-journal package-chg20-tuple-journal benchmark-chg20-tuple-journal
+
+format-chg20-tuple-journal:
+	bash scripts/test-chg20-tuple-journal.sh format
+
+red-chg20-tuple-journal:
+	bash scripts/test-chg20-tuple-journal.sh red
+
+test-chg20-tuple-journal:
+	bash scripts/test-chg20-tuple-journal.sh unit
+
+race-chg20-tuple-journal:
+	bash scripts/test-chg20-tuple-journal.sh race
+
+vet-chg20-tuple-journal:
+	bash scripts/test-chg20-tuple-journal.sh vet
+
+package-chg20-tuple-journal:
+	bash scripts/test-chg20-tuple-journal.sh package
+
+benchmark-chg20-tuple-journal:
+	bash scripts/test-chg20-tuple-journal.sh benchmark
+
+.PHONY: status-chg20-tuple-journal verify-chg20-tuple-journal stage-chg20-tuple-journal commit-chg20-tuple-journal push-chg20-tuple-journal
+
+status-chg20-tuple-journal:
+	bash scripts/deliver-chg20-tuple-journal.sh status
+
+verify-chg20-tuple-journal:
+	bash scripts/deliver-chg20-tuple-journal.sh verify
+
+stage-chg20-tuple-journal:
+	bash scripts/deliver-chg20-tuple-journal.sh stage
+
+commit-chg20-tuple-journal:
+	bash scripts/deliver-chg20-tuple-journal.sh commit
+
+push-chg20-tuple-journal:
+	bash scripts/deliver-chg20-tuple-journal.sh push
