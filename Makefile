@@ -22331,3 +22331,43 @@ commit-chg20-tuple-journal:
 
 push-chg20-tuple-journal:
 	bash scripts/deliver-chg20-tuple-journal.sh push
+
+.PHONY: format-chg21-conflict red-chg21-conflict test-chg21-conflict race-chg21-conflict vet-chg21-conflict package-chg21-conflict benchmark-chg21-conflict
+
+format-chg21-conflict:
+	bash scripts/test-chg21-conflict.sh format
+
+red-chg21-conflict:
+	bash scripts/test-chg21-conflict.sh red
+
+test-chg21-conflict:
+	bash scripts/test-chg21-conflict.sh unit
+
+race-chg21-conflict:
+	bash scripts/test-chg21-conflict.sh race
+
+vet-chg21-conflict:
+	bash scripts/test-chg21-conflict.sh vet
+
+package-chg21-conflict:
+	bash scripts/test-chg21-conflict.sh package
+
+benchmark-chg21-conflict:
+	bash scripts/test-chg21-conflict.sh benchmark
+
+.PHONY: status-chg21-conflict verify-chg21-conflict stage-chg21-conflict commit-chg21-conflict push-chg21-conflict
+
+status-chg21-conflict:
+	bash scripts/deliver-chg21-conflict.sh status
+
+verify-chg21-conflict:
+	bash scripts/deliver-chg21-conflict.sh verify
+
+stage-chg21-conflict:
+	bash scripts/deliver-chg21-conflict.sh stage
+
+commit-chg21-conflict:
+	bash scripts/deliver-chg21-conflict.sh commit
+
+push-chg21-conflict:
+	bash scripts/deliver-chg21-conflict.sh push
