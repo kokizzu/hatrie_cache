@@ -32580,3 +32580,22 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+### T-U19 durable tuple update journal
+
+The opt-in HTU1 tuple-update journal was measured with
+`make benchmark-chg23-tuple-journal` on AMD Ryzen 9 5950X:
+
+| Path | ns/op | B/op | allocs/op | wire bytes/op |
+| --- | ---: | ---: | ---: | ---: |
+| HTU1 encode | 126.3 | 192 | 2 | 72 |
+| JSON baseline | 625.8 | 240 | 2 | 192 |
+| HTU1 decode | 292.7 | 440 | 6 | 72 |
+| Buffered append | 5,562 | 336 | 3 | n/a |
+| Sync per append | 12,994,965 | 336 | 3 | n/a |
+| Sync per 16-record batch | 10,892,712 per batch | 2,768 per batch | 35 per batch | n/a |
+
+HTU1 is about `4.95x` faster and `2.67x` smaller than the JSON baseline for
+this fixture. A 16-record durable batch is about `19.1x` faster per record than
+one filesystem sync per record. The durability and crash-window tradeoff is
+documented in [TU19_DURABLE_TUPLE_UPDATE_JOURNAL.md](TU19_DURABLE_TUPLE_UPDATE_JOURNAL.md).

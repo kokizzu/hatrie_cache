@@ -22292,3 +22292,47 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+
+.PHONY: test-chg23-tuple-journal
+test-chg23-tuple-journal:
+	bash scripts/test-chg23-tuple-journal.sh
+
+.PHONY: all-chg23-tuple-journal
+all-chg23-tuple-journal:
+	bash scripts/test-chg23-tuple-journal.sh all
+
+.PHONY: format-chg23-tuple-journal
+format-chg23-tuple-journal:
+	bash scripts/test-chg23-tuple-journal.sh format
+
+.PHONY: race-chg23-tuple-journal
+race-chg23-tuple-journal:
+	bash scripts/test-chg23-tuple-journal.sh race
+
+.PHONY: vet-chg23-tuple-journal
+vet-chg23-tuple-journal:
+	bash scripts/test-chg23-tuple-journal.sh vet
+
+.PHONY: package-chg23-tuple-journal
+package-chg23-tuple-journal:
+	bash scripts/test-chg23-tuple-journal.sh package
+
+.PHONY: benchmark-chg23-tuple-journal
+benchmark-chg23-tuple-journal:
+	bash scripts/test-chg23-tuple-journal.sh benchmark
+
+.PHONY: status-chg23-tuple-journal
+status-chg23-tuple-journal:
+	bash scripts/deliver-chg23-tuple-journal.sh status
+
+.PHONY: stage-chg23-tuple-journal
+stage-chg23-tuple-journal:
+	bash scripts/deliver-chg23-tuple-journal.sh stage
+
+.PHONY: commit-chg23-tuple-journal
+commit-chg23-tuple-journal:
+	bash scripts/deliver-chg23-tuple-journal.sh commit
+
+.PHONY: push-chg23-tuple-journal
+push-chg23-tuple-journal:
+	bash scripts/deliver-chg23-tuple-journal.sh push

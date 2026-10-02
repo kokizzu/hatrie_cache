@@ -442,3 +442,10 @@ replication endpoints.
 See [BENCHMARK.md](BENCHMARK.md) for benchmark coverage,
 [DS_SPLIT_PROPOSAL.md](DS_SPLIT_PROPOSAL.md) for the shared-index rationale,
 and [INDEX_PROPOSAL.md](INDEX_PROPOSAL.md) for typed SQL index design.
+
+### Durable tuple update journal
+
+`hatDataStructure.TupleFieldUpdateJournal` persists schema-versioned tuple
+field set, splice, and int64-add operations in bounded CRC32C HTU1 frames.
+See [TU19_DURABLE_TUPLE_UPDATE_JOURNAL.md](TU19_DURABLE_TUPLE_UPDATE_JOURNAL.md)
+for replay, recovery, and benchmark details.
