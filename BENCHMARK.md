@@ -32617,3 +32617,22 @@ This is a deliberate memory/CPU tradeoff for sparse data, not a default
 replacement for dense columns. See
 [CHG27_DEFAULT_VALUE_COLUMN.md](CHG27_DEFAULT_VALUE_COLUMN.md) for raw
 commands and semantics.
+
+## Tarantool Versioned Tuple Migration
+
+`hatDataStructure.TupleMigrationPlan` is an opt-in schema migration manager
+for `VersionedTuple`. It validates each source and destination format and
+rolls back completed steps when a later step fails. Five `-count=5` samples on
+Linux/amd64, AMD Ryzen 9 5950X, using `-benchtime=300ms -benchmem`:
+
+| Workload | Median ns/op | B/op | Allocs/op | Comparison |
+|---|---:|---:|---:|---|
+| Baseline manual two-format packing | 605.0 | 896 | 6 | reference |
+| Adoption manual two-format packing | 587.4 | 896 | 6 | measurement noise; same path |
+| Adoption migration plan | 901.4 | 896 | 6 | 1.49x baseline CPU, same heap |
+
+The migration manager adds about 296 ns to this two-step example without
+adding allocations. That cost is paid only during explicit schema migration;
+normal tuple reads, writes, and packing do not call the manager. See
+[T-G16_VERSIONED_TUPLE_MIGRATION.md](T-G16_VERSIONED_TUPLE_MIGRATION.md) for
+the raw samples, rollback contract, and verification commands.
