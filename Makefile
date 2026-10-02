@@ -22331,3 +22331,42 @@ commit-ch051-columnar-radix-order:
 .PHONY: push-ch051-columnar-radix-order
 push-ch051-columnar-radix-order:
 	bash scripts/run-ch051-columnar-radix-order.sh push
+.PHONY: format-tt013-range-cache
+format-tt013-range-cache:
+	bash scripts/run-tt013-range-cache.sh format
+
+.PHONY: test-tt013-range-cache
+test-tt013-range-cache:
+	bash scripts/run-tt013-range-cache.sh test
+
+.PHONY: test-package-tt013-range-cache
+test-package-tt013-range-cache:
+	bash scripts/run-tt013-range-cache.sh test-package
+
+.PHONY: race-tt013-range-cache
+race-tt013-range-cache:
+	bash scripts/run-tt013-range-cache.sh race
+
+.PHONY: benchmark-tt013-range-cache
+benchmark-tt013-range-cache:
+	bash scripts/run-tt013-range-cache.sh benchmark
+
+.PHONY: vet-tt013-range-cache
+vet-tt013-range-cache:
+	bash scripts/run-tt013-range-cache.sh vet
+
+.PHONY: review-tt013-range-cache
+review-tt013-range-cache:
+	bash scripts/run-tt013-range-cache.sh review
+
+.PHONY: stage-tt013-range-cache
+stage-tt013-range-cache:
+	bash scripts/run-tt013-range-cache.sh stage
+
+.PHONY: commit-tt013-range-cache
+commit-tt013-range-cache:
+	bash scripts/run-tt013-range-cache.sh commit
+
+.PHONY: push-tt013-range-cache
+push-tt013-range-cache:
+	bash scripts/run-tt013-range-cache.sh push

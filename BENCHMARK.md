@@ -32607,3 +32607,28 @@ race, and vet checks passed in the isolated harness. The full `hat/hatSql`
 package remains blocked by unrelated missing symbols on the clean base; see
 [CH051_COLUMNAR_RADIX_ORDER.md](CH051_COLUMNAR_RADIX_ORDER.md) for the exact
 scope and tradeoff.
+
+## TT-013: Bounded ordered range tuple cache
+
+This compares the existing allocation-free `OrderedIndex.Range` iterator with
+the opt-in bounded range cache on the same 10,000-entry index and 1,000-entry
+inclusive range.
+
+| Workload | CPU | Heap | Allocations | Result |
+| --- | ---: | ---: | ---: | --- |
+| Direct range scan before feature | 2,691 ns/op | 0 B/op | 0 | Baseline |
+| Direct range scan after feature | 2,526 ns/op | 0 B/op | 0 | Existing path unchanged |
+| Repeated cached hit | 596.1 ns/op | 0 B/op | 0 | 4.51x faster than pre-change direct scan |
+| Rotating cold miss | 3,943 ns/op | 24,576 B/op | 1 | 1.47x slower; opt-in only |
+
+Raw samples:
+
+```text
+Before direct: 2691, 2663, 2515, 2731, 2694 ns/op; 0 B/op; 0 allocs/op
+After direct:  2631, 2526, 2526, 2291, 2289 ns/op; 0 B/op; 0 allocs/op
+Cached hit:    592.9, 596.1, 608.7, 596.3, 540.4 ns/op; 0 B/op; 0 allocs/op
+Cold miss:     3943, 3358, 4169, 3836, 4130 ns/op; 24576 B/op; 1 alloc/op
+```
+
+Generation invalidation, cache capacity, reusable destinations, and inverted
+bounds are covered by focused tests; see [TT013_RANGE_TUPLE_CACHE.md](TT013_RANGE_TUPLE_CACHE.md).
