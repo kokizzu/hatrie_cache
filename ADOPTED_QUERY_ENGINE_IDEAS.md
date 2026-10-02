@@ -473,10 +473,11 @@ and [BENCHMARK.md#ch-045-global-in-global-join-broadcast-planning](BENCHMARK.md#
 Implemented as the imported `hatDataStructure.SpillableArrangement` opt-in
 local tier. It bounds retained value payloads, keeps O(1) key metadata in RAM,
 uses CRC-protected binary records, enforces optional disk limits, supports
-exact cold reads, and compacts stale records explicitly. The measured cost is
-10.4x slower cold reads and 12.5% more transient bytes than an equivalent
-copy-on-read in-memory lookup; existing defaults are unchanged. Fully
-disk-resident indexes and reopen/restore are intentionally still open.
+exact cold reads, and reports stale bytes for thresholded compaction. The
+clean `Compact` path preserves its sync-only durability behavior, while
+explicit `CompactIfNeeded` avoids unnecessary rewrite CPU with zero
+allocations. Existing defaults are unchanged. Fully disk-resident indexes and
+reopen/restore are intentionally still open.
 See [MZ029_SPILLABLE_ARRANGEMENT.md](MZ029_SPILLABLE_ARRANGEMENT.md).
 ### Materialize MZ-031: Skew-Aware Join Exchange
 

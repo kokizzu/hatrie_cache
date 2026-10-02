@@ -31894,6 +31894,31 @@ write path with no allocation increase. It does not account for Go map
 capacity, indexes, query working memory, or allocator fragmentation; see
 [CHU24_TYPED_TABLE_MEMORY_BUDGET.md](CHU24_TYPED_TABLE_MEMORY_BUDGET.md).
 
+## MZ-028: Adaptive spill compaction admission
+
+Five standalone `-benchtime=50x` samples compare the existing clean-segment
+rewrite with the stale-byte gate on an AMD Ryzen 9 5950X. The baseline worktree
+used the same benchmark fixture with the pre-change `Compact` implementation.
+
+| Path | Median ns/op | B/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Before: unconditional clean-segment rewrite | 2,297,573 | 210,688 | 1,043 | baseline |
+| After: `Compact` clean segment, sync preserved | 64,451 | 0 | 0 | 35.65x faster; 210.7 KB and 1,043 allocations avoided |
+| After: `CompactIfNeeded(1)` clean segment | 17.0 | 0 | 0 | 135,000x faster; 210.7 KB and 1,043 allocations avoided |
+
+Raw samples:
+
+```text
+Before: 4694352, 2297573, 2246263, 2476686, 2275772 ns/op; 210683-210692 B/op; 1043 allocs/op
+After Compact: 62975, 65735, 64451, 67903, 64440 ns/op; 0 B/op; 0 allocs/op
+After CompactIfNeeded: 17.00, 17.00, 25.60, 23.00, 15.20 ns/op; 0 B/op; 0 allocs/op
+```
+
+The new `int64` stale-byte counter is fixed per arrangement. `Compact` retains
+the previous sync-only behavior when no stale bytes exist. `CompactIfNeeded`
+is the explicit maintenance fast path: a false result performs no rewrite or
+sync, so callers that need filesystem durability must call `Sync` or `Flush`.
+
 ## CH-U28 Disk-I/O Merge Throttling
 
 Five `-benchmem` samples measured the scheduler before and after adding the

@@ -99,6 +99,34 @@ The feature is therefore useful when avoiding retained-memory failure is more
 important than hot-read latency. Existing in-memory behavior is unchanged;
 callers must explicitly construct this type to accept the I/O tradeoff.
 
+### Adaptive compaction gate
+
+The clean-segment workload used 512 cold entries with 128-byte values and five
+fixed-50-call samples on Linux/amd64 with an AMD Ryzen 9 5950X. Before
+stale-byte accounting, repeatedly calling `Compact` rewrote the same live
+records even though no bytes could be reclaimed. After the change, `Compact`
+keeps its existing sync-only behavior, while `CompactIfNeeded` can skip both
+the rewrite and sync when a maintenance caller only needs a threshold check:
+
+| Path | Median ns/op | B/op | Allocs/op | Result |
+| --- | ---: | ---: | ---: | --- |
+| Before: unconditional clean-segment rewrite | 2,297,573 | 210,688 | 1,043 | baseline |
+| After: `Compact` clean segment, sync preserved | 64,451 | 0 | 0 | 35.65x faster |
+| After: `CompactIfNeeded(1)` clean segment | 17.0 | 0 | 0 | 135,000x faster |
+
+The fixed cost is one `int64` stale-byte counter per arrangement. Stale-byte
+accounting adds constant-time updates to delete, replacement, spill, and
+recovery paths. `CompactIfNeeded` does not sync when it returns false; call
+`Sync` or `Flush` when a maintenance cycle must force filesystem durability.
+
+Raw samples:
+
+```text
+Before: 4694352, 2297573, 2246263, 2476686, 2275772 ns/op; 210683-210692 B/op; 1043 allocs/op
+After Compact: 62975, 65735, 64451, 67903, 64440 ns/op; 0 B/op; 0 allocs/op
+After CompactIfNeeded: 17.00, 17.00, 25.60, 23.00, 15.20 ns/op; 0 B/op; 0 allocs/op
+```
+
 ## Verification
 
 Tests cover hot/cold round trips, caller ownership, sorted snapshots, deletes,

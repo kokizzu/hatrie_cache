@@ -22292,3 +22292,25 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+
+.PHONY: format-mz028-adaptive-compaction test-mz028-adaptive-compaction benchmark-mz028-adaptive-compaction race-mz028-adaptive-compaction vet-mz028-adaptive-compaction review-mz028-adaptive-compaction
+format-mz028-adaptive-compaction:
+	bash scripts/format-mz028-adaptive-compaction.sh
+test-mz028-adaptive-compaction:
+	bash scripts/test-mz028-adaptive-compaction.sh
+benchmark-mz028-adaptive-compaction:
+	bash scripts/benchmark-mz028-adaptive-compaction.sh
+race-mz028-adaptive-compaction:
+	bash scripts/race-mz028-adaptive-compaction.sh
+vet-mz028-adaptive-compaction:
+	bash scripts/vet-mz028-adaptive-compaction.sh
+review-mz028-adaptive-compaction:
+	bash scripts/review-mz028-adaptive-compaction.sh
+
+.PHONY: stage-mz028-adaptive-compaction commit-mz028-adaptive-compaction push-mz028-adaptive-compaction
+stage-mz028-adaptive-compaction:
+	bash scripts/stage-mz028-adaptive-compaction.sh
+commit-mz028-adaptive-compaction:
+	bash scripts/commit-mz028-adaptive-compaction.sh
+push-mz028-adaptive-compaction:
+	bash scripts/push-mz028-adaptive-compaction.sh
