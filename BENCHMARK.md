@@ -32580,3 +32580,30 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## CH-051: Typed int64 columnar radix order
+
+This measurement compares the established generic typed-columnar ordering path
+with the CH-051 stable radix fast path for a 100,000-row homogeneous `int64`
+batch. The benchmark uses the same isolated harness and five samples for each
+case.
+
+| Case | CPU | Heap bytes | Allocations | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Generic columnar order | 14,545,159 ns/op | 3,604,536 B/op | 4 allocs/op | Baseline |
+| Typed `int64` radix order | 4,169,117 ns/op | 1,605,632 B/op | 3 allocs/op | 3.49x faster; 2.24x lower heap; one fewer allocation |
+
+Raw samples:
+
+```text
+Before: 14473737, 14554159, 14560398, 14522053, 14730709 ns/op; 3604536-3604537 B/op; 4 allocs/op
+After:  4194657, 4102916, 4197940, 4117654, 4169117 ns/op; 1605632 B/op; 3 allocs/op
+```
+
+Admission is intentionally strict: at least 256 rows and every value must be
+an `int64`. The stable radix order preserves signed ascending order and ties;
+small or mixed batches retain the generic implementation. Focused correctness,
+race, and vet checks passed in the isolated harness. The full `hat/hatSql`
+package remains blocked by unrelated missing symbols on the clean base; see
+[CH051_COLUMNAR_RADIX_ORDER.md](CH051_COLUMNAR_RADIX_ORDER.md) for the exact
+scope and tradeoff.

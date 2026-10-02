@@ -22292,3 +22292,42 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: format-ch051-columnar-radix-order
+format-ch051-columnar-radix-order:
+	bash scripts/run-ch051-columnar-radix-order.sh format
+
+.PHONY: test-ch051-columnar-radix-order
+test-ch051-columnar-radix-order:
+	bash scripts/run-ch051-columnar-radix-order.sh test
+
+.PHONY: benchmark-ch051-columnar-radix-order
+benchmark-ch051-columnar-radix-order:
+	bash scripts/run-ch051-columnar-radix-order.sh benchmark
+
+.PHONY: race-ch051-columnar-radix-order
+race-ch051-columnar-radix-order:
+	bash scripts/run-ch051-columnar-radix-order.sh race
+
+.PHONY: vet-ch051-columnar-radix-order
+vet-ch051-columnar-radix-order:
+	bash scripts/run-ch051-columnar-radix-order.sh vet
+
+.PHONY: review-ch051-columnar-radix-order
+review-ch051-columnar-radix-order:
+	bash scripts/run-ch051-columnar-radix-order.sh review
+
+.PHONY: cleanup-ch051-columnar-radix-order
+cleanup-ch051-columnar-radix-order:
+	bash scripts/run-ch051-columnar-radix-order.sh cleanup
+
+.PHONY: stage-ch051-columnar-radix-order
+stage-ch051-columnar-radix-order:
+	bash scripts/run-ch051-columnar-radix-order.sh stage
+
+.PHONY: commit-ch051-columnar-radix-order
+commit-ch051-columnar-radix-order:
+	bash scripts/run-ch051-columnar-radix-order.sh commit
+
+.PHONY: push-ch051-columnar-radix-order
+push-ch051-columnar-radix-order:
+	bash scripts/run-ch051-columnar-radix-order.sh push
