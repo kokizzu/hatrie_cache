@@ -22478,3 +22478,38 @@ commit-tt013-range-cache:
 .PHONY: push-tt013-range-cache
 push-tt013-range-cache:
 	bash scripts/run-tt013-range-cache.sh push
+.PHONY: format-round19-ch024-detach
+format-round19-ch024-detach:
+	bash scripts/run-ch024-detach-checks.sh format
+
+.PHONY: test-round19-ch024-detach
+test-round19-ch024-detach:
+	bash scripts/run-ch024-detach-checks.sh test
+
+.PHONY: race-round19-ch024-detach
+race-round19-ch024-detach:
+	bash scripts/run-ch024-detach-checks.sh race
+
+.PHONY: vet-round19-ch024-detach
+vet-round19-ch024-detach:
+	bash scripts/run-ch024-detach-checks.sh vet
+
+.PHONY: benchmark-round19-ch024-detach
+benchmark-round19-ch024-detach:
+	bash scripts/run-ch024-detach-checks.sh benchmark
+
+.PHONY: package-round19-ch024-detach
+package-round19-ch024-detach:
+	bash scripts/run-ch024-detach-checks.sh package
+
+.PHONY: stage-round19-ch024-detach
+stage-round19-ch024-detach:
+	bash scripts/stage-round19-ch024-detach.sh
+
+.PHONY: commit-round19-ch024-detach
+commit-round19-ch024-detach:
+	bash scripts/commit-round19-ch024-detach.sh
+
+.PHONY: push-round19-ch024-detach
+push-round19-ch024-detach:
+	bash scripts/push-round19-ch024-detach.sh

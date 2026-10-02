@@ -4795,3 +4795,11 @@ policy for immutable parts. It retries only on the explicit
 `ErrStorageTierPartNotFound` sentinel and leaves all storage I/O and ownership
 decisions with the caller. See [CH021_TRANSPARENT_TIER_READS.md](CH021_TRANSPARENT_TIER_READS.md)
 and the [benchmark entry](BENCHMARK.md#ch-021-transparent-storage-tier-reads).
+### Detach and attach immutable parts
+
+`hatStorage.RemotePartAttachmentCatalog` provides an opt-in operator control
+plane for quarantining a part and attaching a verified replacement with
+generation fencing. It does not move or delete bytes; callers own storage I/O,
+cache invalidation, persistence, and replication. See
+[CH024_DETACH_ATTACH.md](CH024_DETACH_ATTACH.md) and the
+[benchmark entry](BENCHMARK.md#ch-024-detachattach-parts).

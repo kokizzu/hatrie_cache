@@ -32756,3 +32756,30 @@ existing direct APIs. It should be used when current-tier metadata may be
 stale and a not-found retry is preferable to exposing tier details to every
 caller. Full details and the exact benchmark target are in
 [CH021_TRANSPARENT_TIER_READS.md](CH021_TRANSPARENT_TIER_READS.md).
+## CH-024 Detach/Attach Parts
+
+This opt-in control-plane feature is compared with raw and locked caller-owned
+maps. Existing cache reads are not routed through the catalog, so they retain
+their previous cost.
+
+| Operation | Median ns/op | B/op | allocs/op | Relative result |
+| --- | ---: | ---: | ---: | ---: |
+| Raw map lookup | 10.17 | 0 | 0 | 1.00x |
+| Locked map lookup | 17.25 | 0 | 0 | 1.70x raw |
+| Attachment catalog lookup | 40.60 | 0 | 0 | 2.35x locked |
+| Detach plus verified replacement | 514.5 | 192 | 2 | Explicit operator action |
+
+Raw runs:
+
+```text
+raw lookup:    10.22, 10.15, 9.604, 10.17, 10.49 ns/op
+locked lookup: 17.52, 16.83, 17.45, 16.73, 17.25 ns/op
+catalog lookup: 40.41, 40.45, 40.79, 40.60, 40.62 ns/op; 0 B/op; 0 allocs/op
+detach/attach: 482.6, 518.2, 486.4, 514.5, 523.6 ns/op; 192 B/op; 2 allocs/op
+```
+
+The registry is opt-in and has no default runtime cost. Its synchronized
+lookup overhead buys copy-safe state snapshots, while generation fencing and
+pre-publication verification protect the explicit repair workflow. See
+[CH024_DETACH_ATTACH.md](CH024_DETACH_ATTACH.md) for the exact commands and
+scope boundaries.
