@@ -22387,3 +22387,14 @@ verify-mu034:
 
 benchmark-mu034:
 	bash scripts/benchmark-mu034.sh
+
+.PHONY: test-mu039 verify-mu039 benchmark-mu039
+
+test-mu039:
+	bash scripts/test-mu039.sh
+
+verify-mu039:
+	bash scripts/verify-mu039.sh
+
+benchmark-mu039:
+	bash scripts/benchmark-mu039.sh

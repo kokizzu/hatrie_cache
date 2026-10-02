@@ -11,6 +11,7 @@ type Catalog struct {
 	Namespaces     []string
 	Sources        []CatalogSource
 	Indexes        []CatalogIndex
+	Partitions     []SQLPartitionDeclaration
 	Objects        []CatalogObject
 	Dependencies   []CatalogDependency
 	SourceStatuses []CatalogSourceStatus
@@ -59,7 +60,7 @@ func CompileSQLShortcut(source string) (string, error) {
 			return "FROM CACHE('information_schema.source_status') SELECT catalog_version, namespace, source, kind, state, available, ready, frontier, observed, lag, error_code ORDER BY namespace, source", nil
 		}
 		if len(parts) != 2 {
-			return "", fmt.Errorf("SHOW expects NAMESPACES, SOURCES, INDEXES, OBJECTS, DEPENDENCIES, or SOURCE STATUS")
+			return "", fmt.Errorf("SHOW expects NAMESPACES, SOURCES, INDEXES, PARTITIONS, OBJECTS, DEPENDENCIES, or SOURCE STATUS")
 		}
 		switch strings.ToUpper(parts[1]) {
 		case "NAMESPACES":
@@ -68,6 +69,8 @@ func CompileSQLShortcut(source string) (string, error) {
 			return "FROM CACHE('information_schema.sources') SELECT namespace, name, kind", nil
 		case "INDEXES":
 			return "FROM CACHE('information_schema.indexes') SELECT namespace, source, name, kind, column, ordinal_position", nil
+		case "PARTITIONS":
+			return "FROM CACHE('information_schema.partitions') SELECT namespace, source, kind, partition_count, role, field, ordinal_position, descending, nulls_first ORDER BY namespace, source, role, ordinal_position", nil
 		case "OBJECTS":
 			return "FROM CACHE('information_schema.objects') SELECT catalog_version, namespace, name, kind, type, object_version, state ORDER BY namespace, name, kind", nil
 		case "DEPENDENCIES":
@@ -75,7 +78,7 @@ func CompileSQLShortcut(source string) (string, error) {
 		case "SOURCE_STATUS", "STATUS":
 			return "FROM CACHE('information_schema.source_status') SELECT catalog_version, namespace, source, kind, state, available, ready, frontier, observed, lag, error_code ORDER BY namespace, source", nil
 		default:
-			return "", fmt.Errorf("SHOW expects NAMESPACES, SOURCES, INDEXES, OBJECTS, DEPENDENCIES, or SOURCE STATUS")
+			return "", fmt.Errorf("SHOW expects NAMESPACES, SOURCES, INDEXES, PARTITIONS, OBJECTS, DEPENDENCIES, or SOURCE STATUS")
 		}
 	case "DESCRIBE":
 		if len(parts) != 2 || !catalogIdentifier(parts[1]) {
@@ -129,6 +132,8 @@ func (resolver CatalogResolver) ResolveSQLSource(name, key string) ([]Row, error
 				}
 			}
 			return rows, nil
+		case "information_schema.partitions":
+			return catalogPartitionRows(resolver.Catalog.Partitions)
 		case "information_schema.objects":
 			return catalogObjectRows(resolver.Catalog)
 		case "information_schema.dependencies":
@@ -148,11 +153,85 @@ func catalogOwnsVirtualSource(name, key string) bool {
 		return false
 	}
 	switch strings.ToLower(key) {
-	case "information_schema.namespaces", "information_schema.sources", "information_schema.fields", "information_schema.indexes", "information_schema.objects", "information_schema.dependencies", "information_schema.source_status":
+	case "information_schema.namespaces", "information_schema.sources", "information_schema.fields", "information_schema.indexes", "information_schema.partitions", "information_schema.objects", "information_schema.dependencies", "information_schema.source_status":
 		return true
 	default:
 		return false
 	}
+}
+
+// ResolveSQLPartitionDeclaration exposes catalog metadata first, then
+// forwards declarations supplied by an application source resolver.
+func (resolver CatalogResolver) ResolveSQLPartitionDeclaration(name, key string) (SQLPartitionDeclaration, bool, error) {
+	if catalogOwnsVirtualSource(name, key) {
+		return SQLPartitionDeclaration{}, false, nil
+	}
+	for _, declaration := range resolver.Catalog.Partitions {
+		if !strings.EqualFold(declaration.Source, key) {
+			continue
+		}
+		if declaration.Kind != "" && !strings.EqualFold(declaration.Kind, name) {
+			continue
+		}
+		validated, err := normalizeSQLPartitionDeclaration(declaration)
+		if err != nil {
+			return SQLPartitionDeclaration{}, false, err
+		}
+		return validated, true, nil
+	}
+	if resolver.Source == nil {
+		return SQLPartitionDeclaration{}, false, nil
+	}
+	declared, ok := resolver.Source.(SQLPartitionDeclarationResolver)
+	if !ok {
+		return SQLPartitionDeclaration{}, false, nil
+	}
+	declaration, available, err := declared.ResolveSQLPartitionDeclaration(name, key)
+	if err != nil || !available {
+		return SQLPartitionDeclaration{}, available, err
+	}
+	validated, err := normalizeSQLPartitionDeclaration(declaration)
+	if err != nil {
+		return SQLPartitionDeclaration{}, false, err
+	}
+	return validated, true, nil
+}
+
+func catalogPartitionRows(declarations []SQLPartitionDeclaration) ([]Row, error) {
+	rows := []Row{}
+	for _, declaration := range declarations {
+		validated, err := normalizeSQLPartitionDeclaration(declaration)
+		if err != nil {
+			return nil, err
+		}
+		for position, field := range validated.PartitionBy {
+			rows = append(rows, Row{
+				"namespace":        validated.Namespace,
+				"source":           validated.Source,
+				"kind":             validated.Kind,
+				"partition_count":  validated.PartitionCount,
+				"role":             "PARTITION",
+				"field":            field,
+				"ordinal_position": int64(position + 1),
+				"descending":       false,
+				"nulls_first":      false,
+			})
+		}
+		for position, order := range validated.OrderBy {
+			rows = append(rows, Row{
+				"namespace":        validated.Namespace,
+				"source":           validated.Source,
+				"kind":             validated.Kind,
+				"partition_count":  validated.PartitionCount,
+				"role":             "ORDER",
+				"field":            order.Field,
+				"ordinal_position": int64(position + 1),
+				"descending":       order.Desc,
+				"nulls_first":      order.NullsFirst,
+			})
+		}
+	}
+	return rows, nil
 }
 
 // ResolveSQLColumnarSource forwards the optional columnar contract for
@@ -277,11 +356,8 @@ func (resolver CatalogResolver) SQLSourceCardinality(name, key string) (int, boo
 // ResolveSQLSourcePartitions forwards partitioned application sources while
 // leaving information-schema sources owned by the catalog resolver.
 func (resolver CatalogResolver) ResolveSQLSourcePartitions(name, key string) ([]SQLSourcePartition, bool, error) {
-	if strings.EqualFold(name, "CACHE") {
-		switch strings.ToLower(key) {
-		case "information_schema.namespaces", "information_schema.sources", "information_schema.fields", "information_schema.indexes", "information_schema.objects", "information_schema.dependencies", "information_schema.source_status":
-			return nil, false, nil
-		}
+	if catalogOwnsVirtualSource(name, key) {
+		return nil, false, nil
 	}
 	if resolver.Source == nil {
 		return nil, false, nil
@@ -296,11 +372,8 @@ func (resolver CatalogResolver) ResolveSQLSourcePartitions(name, key string) ([]
 // ResolveSQLIndexDiagnostics forwards optional application index diagnostics
 // while leaving information-schema sources owned by the catalog resolver.
 func (resolver CatalogResolver) ResolveSQLIndexDiagnostics(name, key, field string, value interface{}) (SQLIndexDiagnostics, bool, error) {
-	if strings.EqualFold(name, "CACHE") {
-		switch strings.ToLower(key) {
-		case "information_schema.namespaces", "information_schema.sources", "information_schema.fields", "information_schema.indexes", "information_schema.objects", "information_schema.dependencies", "information_schema.source_status":
-			return SQLIndexDiagnostics{}, false, nil
-		}
+	if catalogOwnsVirtualSource(name, key) {
+		return SQLIndexDiagnostics{}, false, nil
 	}
 	if resolver.Source == nil {
 		return SQLIndexDiagnostics{}, false, nil
@@ -329,11 +402,8 @@ func (resolver CatalogResolver) ResolveSQLArrangementMetadata(name, key string) 
 // ResolveSQLOrderedSourcePartitions forwards ordered application partitions
 // while leaving information-schema sources owned by the catalog resolver.
 func (resolver CatalogResolver) ResolveSQLOrderedSourcePartitions(name, key, field string, desc, nullsFirst, nullsLast bool) ([]SQLSourcePartition, bool, error) {
-	if strings.EqualFold(name, "CACHE") {
-		switch strings.ToLower(key) {
-		case "information_schema.namespaces", "information_schema.sources", "information_schema.fields", "information_schema.indexes", "information_schema.objects", "information_schema.dependencies", "information_schema.source_status":
-			return nil, false, nil
-		}
+	if catalogOwnsVirtualSource(name, key) {
+		return nil, false, nil
 	}
 	if resolver.Source == nil {
 		return nil, false, nil

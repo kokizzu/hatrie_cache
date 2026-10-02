@@ -378,6 +378,27 @@ func (session *SQLSession) ResolveSQLSourcePartitions(name, key string) ([]SQLSo
 	return partitioned.ResolveSQLSourcePartitions(name, key)
 }
 
+// ResolveSQLPartitionDeclaration forwards the optional layout declaration to
+// the external source after preserving session-local source precedence.
+func (session *SQLSession) ResolveSQLPartitionDeclaration(name, key string) (SQLPartitionDeclaration, bool, error) {
+	if session == nil || session.hasLocalSQLSource(name, key) || session.source == nil {
+		return SQLPartitionDeclaration{}, false, nil
+	}
+	declared, ok := session.source.(SQLPartitionDeclarationResolver)
+	if !ok {
+		return SQLPartitionDeclaration{}, false, nil
+	}
+	declaration, available, err := declared.ResolveSQLPartitionDeclaration(name, key)
+	if err != nil || !available {
+		return SQLPartitionDeclaration{}, available, err
+	}
+	validated, err := normalizeSQLPartitionDeclaration(declaration)
+	if err != nil {
+		return SQLPartitionDeclaration{}, false, err
+	}
+	return validated, true, nil
+}
+
 // ResolveSQLOrderedSourcePartitions forwards ordered physical partitions to
 // the external source after preserving session-local source precedence.
 func (session *SQLSession) ResolveSQLOrderedSourcePartitions(name, key, field string, desc, nullsFirst, nullsLast bool) ([]SQLSourcePartition, bool, error) {

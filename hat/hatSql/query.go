@@ -13033,16 +13033,18 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 	}
 	steps := sqlExplainSteps(query)
 	var estimatedSteps []SQLExplainStep
+	var partitioning []ExplainPartitioningAnnotation
 	if query.analyze {
-		estimatedSteps = sqlExplainStepsWithResolver(query, resolver)
+		estimatedSteps, partitioning = sqlExplainStepsWithResolverAndPartitioning(query, resolver)
 	}
 	if !query.analyze {
-		steps = sqlExplainStepsWithResolver(query, resolver)
+		steps, partitioning = sqlExplainStepsWithResolverAndPartitioning(query, resolver)
 		if query.explainCost {
 			steps = CostSQLExplainSteps(steps, SQLExplainCostOptions{})
 		}
 	}
 	hasArrangementMetadata := sqlExplainHasArrangementMetadata(steps)
+	hasPartitioningMetadata := len(partitioning) > 0
 	hasExplainCost := sqlExplainHasCost(steps)
 	columns := []string{"node", "detail", "estimated_rows"}
 	if hasExplainCost {
@@ -13051,12 +13053,16 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 	if hasArrangementMetadata {
 		columns = append(columns, "arrangements")
 	}
-	result := SQLQueryResult{
-		Columns: columns,
-		Rows:    make([]SQLRow, 0, len(steps)+1),
-		Plan:    steps,
+	if hasPartitioningMetadata {
+		columns = append(columns, "partitioning")
 	}
-	for _, step := range steps {
+	result := SQLQueryResult{
+		Columns:      columns,
+		Rows:         make([]SQLRow, 0, len(steps)+1),
+		Plan:         steps,
+		Partitioning: partitioning,
+	}
+	for index, step := range steps {
 		row := SQLRow{"node": step.Node, "detail": step.Detail}
 		if step.EstimatedRows != nil {
 			row["estimated_rows"] = *step.EstimatedRows
@@ -13069,6 +13075,9 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		}
 		if hasArrangementMetadata && len(step.Arrangements) > 0 {
 			row["arrangements"] = cloneSQLArrangementMetadata(step.Arrangements)
+		}
+		if declaration := sqlExplainPartitioningForStep(partitioning, index); declaration != nil {
+			row["partitioning"] = declaration
 		}
 		result.Rows = append(result.Rows, row)
 	}
@@ -13091,11 +13100,12 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 	}
 	sqlMergeExplainCardinalityEstimates(metrics.steps, estimatedSteps)
 	result.Plan = metrics.steps
+	result.Partitioning = partitioning
 	if query.explainCost {
 		result.Plan = CostSQLExplainSteps(result.Plan, SQLExplainCostOptions{})
 	}
 	result.Rows = result.Rows[:0]
-	for _, step := range result.Plan {
+	for index, step := range result.Plan {
 		rowCapacity := 3
 		if step.Pruning != nil {
 			rowCapacity = 12
@@ -13133,6 +13143,9 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		if len(step.Arrangements) > 0 {
 			row["arrangements"] = cloneSQLArrangementMetadata(step.Arrangements)
 		}
+		if declaration := sqlExplainPartitioningForStep(result.Partitioning, index); declaration != nil {
+			row["partitioning"] = declaration
+		}
 		if step.Pruning != nil {
 			row["total_rows"] = step.Pruning.TotalRows
 			row["skipped_rows"] = step.Pruning.SkippedRows
@@ -13145,6 +13158,7 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 	}
 	hasIndexDiagnostics := false
 	hasArrangementMetadata = sqlExplainHasArrangementMetadata(result.Plan)
+	hasPartitioningMetadata = len(result.Partitioning) > 0
 	hasExplainCost = sqlExplainHasCost(result.Plan)
 	for _, step := range steps {
 		if step.Index != nil {
@@ -13161,6 +13175,9 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 	}
 	if hasArrangementMetadata {
 		result.Columns = append(result.Columns, "arrangements")
+	}
+	if hasPartitioningMetadata {
+		result.Columns = append(result.Columns, "partitioning")
 	}
 	result.Columns = append(result.Columns, "total_rows", "skipped_rows", "scanned_rows", "matched_rows", "residual_rows", "residual_false_positive_rate")
 	result.Rows = append(result.Rows, SQLRow{
@@ -13179,15 +13196,22 @@ func sqlExplainSteps(query *sqlQuery) []SQLExplainStep {
 
 func sqlExplainStepsWithResolver(query *sqlQuery, resolver SQLSourceResolver) []SQLExplainStep {
 	steps := make([]SQLExplainStep, 0, 8+len(query.ctes)+len(query.joins)+len(query.unions))
-	sqlAppendExplainSteps(&steps, query, "", resolver)
+	sqlAppendExplainSteps(&steps, query, "", resolver, nil)
 	return steps
 }
 
-func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix string, resolver SQLSourceResolver) {
+func sqlExplainStepsWithResolverAndPartitioning(query *sqlQuery, resolver SQLSourceResolver) ([]SQLExplainStep, []ExplainPartitioningAnnotation) {
+	steps := make([]SQLExplainStep, 0, 8+len(query.ctes)+len(query.joins)+len(query.unions))
+	var partitioning []ExplainPartitioningAnnotation
+	sqlAppendExplainSteps(&steps, query, "", resolver, &partitioning)
+	return steps, partitioning
+}
+
+func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix string, resolver SQLSourceResolver, partitioning *[]ExplainPartitioningAnnotation) {
 	for _, cte := range query.ctes {
 		*steps = append(*steps, SQLExplainStep{Node: prefix + "CTE", Detail: cte.name})
 		if cte.query != nil {
-			sqlAppendExplainSteps(steps, cte.query, prefix+"  ", resolver)
+			sqlAppendExplainSteps(steps, cte.query, prefix+"  ", resolver, partitioning)
 		} else {
 			estimate := len(cte.values)
 			*steps = append(*steps, SQLExplainStep{Node: prefix + "  VALUES", Detail: "CTE " + cte.name, EstimatedRows: &estimate})
@@ -13209,9 +13233,12 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 	scanStep := sqlExplainSourceStep(prefix+"SCAN", *query.from, resolver)
 	sqlMarkArrangementRecommendation(scanStep.Arrangements, sqlArrangementWorkloadForQuery(query))
 	sqlSetExplainCardinalityEstimate(&scanStep, sourceEstimate)
+	if declaration := resolveSQLPartitionDeclarationForSource(resolver, *query.from); declaration != nil && partitioning != nil {
+		*partitioning = append(*partitioning, ExplainPartitioningAnnotation{StepIndex: len(*steps), Declaration: *declaration})
+	}
 	*steps = append(*steps, scanStep)
 	if query.from.kind == "SUBQUERY" && query.from.query != nil {
-		sqlAppendExplainSteps(steps, query.from.query, prefix+"  ", resolver)
+		sqlAppendExplainSteps(steps, query.from.query, prefix+"  ", resolver, partitioning)
 	}
 	leftAliases := []string{}
 	if query.from != nil && query.from.alias != "" {
@@ -13250,9 +13277,12 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 		joinEstimate := sqlCardinalityEstimateForJoin(currentEstimate, join, leftAliases, resolver)
 		sqlSetExplainCardinalityEstimate(&joinStep, joinEstimate)
 		currentEstimate = joinEstimate
+		if declaration := resolveSQLPartitionDeclarationForSource(resolver, join.source); declaration != nil && partitioning != nil {
+			*partitioning = append(*partitioning, ExplainPartitioningAnnotation{StepIndex: len(*steps), Declaration: *declaration})
+		}
 		*steps = append(*steps, joinStep)
 		if join.source.kind == "SUBQUERY" && join.source.query != nil {
-			sqlAppendExplainSteps(steps, join.source.query, prefix+"  ", resolver)
+			sqlAppendExplainSteps(steps, join.source.query, prefix+"  ", resolver, partitioning)
 		}
 		if join.source.alias != "" {
 			leftAliases = append(leftAliases, join.source.alias)
@@ -13307,7 +13337,7 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 			kind += " ALL"
 		}
 		*steps = append(*steps, SQLExplainStep{Node: prefix + "SET", Detail: kind})
-		sqlAppendExplainSteps(steps, union.query, prefix+"  ", resolver)
+		sqlAppendExplainSteps(steps, union.query, prefix+"  ", resolver, partitioning)
 	}
 }
 

@@ -32704,3 +32704,29 @@ and the required result slice. Refresh is copy-on-write so readers never see a
 partial map; its temporary memory is the explicit tradeoff for that guarantee.
 Raw API and security semantics are in
 [CHU47_SQL_DICTIONARY_FUNCTIONS.md](CHU47_SQL_DICTIONARY_FUNCTIONS.md).
+<a id="m-u39-sql-partition-and-order-declarations"></a>
+## M-U39 SQL partition and order declarations
+
+This pass compares the pre-change commit `9a6c4555` with the feature worktree
+on the same AMD Ryzen 9 5950X host. The benchmark executes
+`EXPLAIN FROM CACHE('orders') SELECT id ORDER BY created_at DESC` and reports
+five `go test -benchmem -benchtime=500ms` runs per case.
+
+| Case | Median ns/op | B/op | allocs/op | Relative to baseline |
+| --- | ---: | ---: | ---: | --- |
+| Baseline, no declaration | 6,185 | 9,216 | 47 | 1.00x |
+| Feature, no declaration | 6,284 | 9,216 | 47 | 1.02x slower; same allocation profile and within normal run noise |
+| Feature, declaration published | 7,703 | 10,016 | 60 | 1.25x slower; +800 B and +13 allocs, opt-in explain metadata only |
+
+Raw runs:
+
+```text
+baseline: 6185, 6298, 6158, 6433, 6161 ns/op; 9216 B/op; 47 allocs/op
+feature/no declaration: 6483, 6136, 6151, 6533, 6284 ns/op; 9216 B/op; 47 allocs/op
+feature/with declaration: 7481, 7550, 7779, 7703, 7938 ns/op; 10016 B/op; 60 allocs/op
+```
+
+The declaration path is deliberately not enabled for ordinary execution. It
+only publishes bounded metadata through `SHOW PARTITIONS`,
+`information_schema.partitions`, and `QueryResult.Partitioning`; source
+resolvers continue to implement actual partition pruning and ordered reads.

@@ -12,11 +12,12 @@ func explainSQLPipelineQuery(query *sqlQuery, resolver SQLSourceResolver) (SQLQu
 	if query.analyze {
 		return SQLQueryResult{}, fmt.Errorf("EXPLAIN PIPELINE ANALYZE is not supported")
 	}
-	steps := sqlExplainPipelineStepsWithResolver(query, resolver)
+	steps, partitioning := sqlExplainPipelineStepsWithResolverAndPartitioning(query, resolver)
 	if query.explainCost {
 		steps = CostSQLExplainSteps(steps, SQLExplainCostOptions{})
 	}
 	hasArrangementMetadata := sqlExplainHasArrangementMetadata(steps)
+	hasPartitioningMetadata := len(partitioning) > 0
 	hasExplainCost := sqlExplainHasCost(steps)
 	columns := []string{"node", "detail", "stage", "worker", "workers", "estimated_rows"}
 	if hasExplainCost {
@@ -25,12 +26,16 @@ func explainSQLPipelineQuery(query *sqlQuery, resolver SQLSourceResolver) (SQLQu
 	if hasArrangementMetadata {
 		columns = append(columns, "arrangements")
 	}
-	result := SQLQueryResult{
-		Columns: columns,
-		Rows:    make([]SQLRow, 0, len(steps)),
-		Plan:    steps,
+	if hasPartitioningMetadata {
+		columns = append(columns, "partitioning")
 	}
-	for _, step := range steps {
+	result := SQLQueryResult{
+		Columns:      columns,
+		Rows:         make([]SQLRow, 0, len(steps)),
+		Plan:         steps,
+		Partitioning: partitioning,
+	}
+	for index, step := range steps {
 		row := SQLRow{
 			"node":    step.Node,
 			"detail":  step.Detail,
@@ -49,6 +54,9 @@ func explainSQLPipelineQuery(query *sqlQuery, resolver SQLSourceResolver) (SQLQu
 		}
 		if hasArrangementMetadata && len(step.Arrangements) > 0 {
 			row["arrangements"] = cloneSQLArrangementMetadata(step.Arrangements)
+		}
+		if declaration := sqlExplainPartitioningForStep(partitioning, index); declaration != nil {
+			row["partitioning"] = declaration
 		}
 		result.Rows = append(result.Rows, row)
 	}
@@ -71,6 +79,20 @@ func sqlExplainPipelineStepsWithResolver(query *sqlQuery, resolver SQLSourceReso
 		steps[index].Workers = 1
 	}
 	return steps
+}
+
+func sqlExplainPipelineStepsWithResolverAndPartitioning(query *sqlQuery, resolver SQLSourceResolver) ([]SQLExplainStep, []ExplainPartitioningAnnotation) {
+	steps, partitioning := sqlExplainStepsWithResolverAndPartitioning(query, resolver)
+	stage := 1
+	for index := range steps {
+		if index > 0 && sqlExplainPipelineBoundary(steps[index].Node) {
+			stage++
+		}
+		steps[index].Stage = stage
+		steps[index].Worker = 1
+		steps[index].Workers = 1
+	}
+	return steps, partitioning
 }
 
 func sqlExplainPipelineBoundary(node string) bool {

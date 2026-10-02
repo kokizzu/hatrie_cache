@@ -4779,3 +4779,9 @@ unchanged and do not pay this cost. See
 [MU034_HISTORICAL_SUBSCRIPTION_CHECKPOINTS.md](MU034_HISTORICAL_SUBSCRIPTION_CHECKPOINTS.md)
 and the measured comparison in
 [BENCHMARK.md](BENCHMARK.md#mu-034-historical-subscription-checkpoints).
+
+Opt-in SQL partition and order declarations expose existing physical layout to
+catalog queries and `EXPLAIN` without changing ordinary execution. See
+[MU039_SQL_PARTITION_ORDER_DECLARATIONS.md](MU039_SQL_PARTITION_ORDER_DECLARATIONS.md)
+and the raw measurements in
+[BENCHMARK.md](BENCHMARK.md#m-u39-sql-partition-and-order-declarations).
