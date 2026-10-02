@@ -278,8 +278,8 @@ func (ht *HatTrie) SaveSnapshotWithJournalSequence(path string, journalSequence 
 }
 
 func (ht *HatTrie) SaveSnapshotWithJournalSequenceAndFormat(path string, journalSequence uint64, format SnapshotFormat) error {
-	if ht == nil {
-		return ErrNilHatTrie
+	if err := requirePersistentTrie(ht); err != nil {
+		return err
 	}
 	format, err := ParseSnapshotFormat(string(format))
 	if err != nil {
@@ -296,6 +296,9 @@ func (ht *HatTrie) LoadSnapshot(path string) error {
 }
 
 func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, error) {
+	if err := requirePersistentTrie(ht); err != nil {
+		return SnapshotMetadata{}, err
+	}
 	return ht.loadSnapshotStaged(path)
 }
 

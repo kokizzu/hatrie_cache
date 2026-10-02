@@ -58,8 +58,8 @@ func CreateIncrementalBackupRepositoryWithContext(ctx context.Context, path stri
 		return BackupBundleManifest{}, err
 	}
 	path = filepath.Clean(absolutePath)
-	if trie == nil {
-		return BackupBundleManifest{}, ErrNilHatTrie
+	if err := requirePersistentTrie(trie); err != nil {
+		return BackupBundleManifest{}, err
 	}
 	if len(options.KeyPrefixes) > 0 {
 		return BackupBundleManifest{}, errors.New("hatriecache: backup key prefixes require snapshot mode")

@@ -22292,3 +22292,32 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+format-tu18-volatile:
+	sh ./scripts/format-tu18-volatile.sh
+
+test-tu18-volatile:
+	sh ./scripts/test-tu18-volatile.sh
+
+test-tu18-hatcache:
+	sh ./scripts/test-tu18-hatcache.sh
+
+benchmark-tu18-volatile:
+	sh ./scripts/benchmark-tu18-volatile.sh
+
+race-tu18-volatile:
+	sh ./scripts/race-tu18-volatile.sh
+
+vet-tu18-volatile:
+	sh ./scripts/vet-tu18-volatile.sh
+
+review-tu18-volatile:
+	sh ./scripts/review-tu18-volatile.sh
+
+stage-tu18-volatile:
+	sh ./scripts/stage-tu18-volatile.sh
+
+commit-tu18-volatile:
+	sh ./scripts/commit-tu18-volatile.sh
+
+push-tu18-volatile:
+	sh ./scripts/push-tu18-volatile.sh

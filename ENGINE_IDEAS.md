@@ -149,7 +149,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-009 | Backup manifest checksums | Implemented: backup manifests record per-file sizes and SHA-256 hashes, and restore/doctor verification checks them before publication. | Low |
 | TT-010 | Selective space backup | Partially adopted: snapshot bundles accept explicit logical key-prefix scope and record it in the manifest; Pebble checkpoint and incremental repository backups remain full-store only. | Medium |
 | TT-011 | Point-in-time incremental restore | Implemented as an opt-in snapshot-bundle restore through an exact committed journal sequence; default `MaxJournalSequence=0` preserves complete restore behavior. | Medium |
-| TT-012 | Per-space storage engine choice | A logical data structure cannot independently choose memory and LSM persistence policies. | High |
+| TT-012 | Per-space storage engine choice | Partially adopted: `CreateVolatileHatTrie()` provides an explicit cache-level memory-only engine; independent per-space memory/LSM selection remains open. | High |
 | TT-013 | Vinyl range tuple cache | Storage has no range-aware cache that retains only hot key intervals. | High |
 | TT-014 | Vinyl compaction throttling | Compaction does not expose adaptive disk/latency throttles and backpressure. | Medium |
 | TT-015 | Vinyl read/write thread tuning | Read and compaction workers lack independent bounded runtime configuration. | Medium |

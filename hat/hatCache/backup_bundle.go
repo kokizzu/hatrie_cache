@@ -100,8 +100,8 @@ func CreateBackupBundleWithContext(ctx context.Context, path string, trie *HatTr
 	if path == "" {
 		return BackupBundleManifest{}, errors.New("hatriecache: backup bundle path is required")
 	}
-	if trie == nil {
-		return BackupBundleManifest{}, ErrNilHatTrie
+	if err := requirePersistentTrie(trie); err != nil {
+		return BackupBundleManifest{}, err
 	}
 	mode, err := ParseBackupMode(string(options.Mode))
 	if err != nil {

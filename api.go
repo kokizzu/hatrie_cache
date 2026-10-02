@@ -713,6 +713,7 @@ var ErrTopKNil = core.ErrTopKNil
 var ErrTopKStateInvalid = core.ErrTopKStateInvalid
 var ErrUnsupportedCommandResponseContentType = core.ErrUnsupportedCommandResponseContentType
 var ErrUnsupportedCommandWireProtobufValue = core.ErrUnsupportedCommandWireProtobufValue
+var ErrVolatilePersistence = core.ErrVolatilePersistence
 
 var BeginSQLTransaction = core.BeginSQLTransaction
 var BeginSQLTransactionWithOptions = core.BeginSQLTransactionWithOptions
@@ -750,6 +751,7 @@ var CreateSliceStorage = core.CreateSliceStorage
 var CreateSparseBitsetStorage = core.CreateSparseBitsetStorage
 var CreateStringStorage = core.CreateStringStorage
 var CreateTopKStorage = core.CreateTopKStorage
+var CreateVolatileHatTrie = core.CreateVolatileHatTrie
 var CreateXorFilterStorage = core.CreateXorFilterStorage
 var DecodeCommandResponseWire = core.DecodeCommandResponseWire
 var DefaultLevelDBHotLoadPolicy = core.DefaultLevelDBHotLoadPolicy

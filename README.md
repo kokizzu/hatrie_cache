@@ -67,6 +67,7 @@ security guidance before exposing it on a network.
 - Materialize-style signed session snapshot tokens: [MZ044_SNAPSHOT_TOKENS.md](MZ044_SNAPSHOT_TOKENS.md), with measured opt-in overhead in [BENCHMARK.md](BENCHMARK.md#mz-044-session-snapshot-tokens)
 - Opt-in HMAC-authenticated and expiring SQL keyset cursor tokens: [TR028_AUTHENTICATED_KEYSET_TOKENS.md](TR028_AUTHENTICATED_KEYSET_TOKENS.md), with measured wire/CPU/heap tradeoffs in [BENCHMARK.md](BENCHMARK.md#tr-028-authenticated-sql-keyset-cursor-tokens)
 - Tarantool/ClickHouse-inspired single-source SQL row allocation fast paths: [TR017_SINGLE_SOURCE_ROW_FASTPATH.md](TR017_SINGLE_SOURCE_ROW_FASTPATH.md)
+- Tarantool-inspired explicit volatile memory-only cache engine: [T-U18_VOLATILE_CACHE_ENGINE.md](T-U18_VOLATILE_CACHE_ENGINE.md), with CPU and heap tradeoffs in [BENCHMARK.md](BENCHMARK.md#t-u18-volatile-cache-engine)
 - Flat native `[]int64` and `[]string` array columns for lower retained storage: [NATIVE_ARRAY_COLUMNS.md](NATIVE_ARRAY_COLUMNS.md)
 - ClickHouse/Materialize/Tarantool adoption and deferral matrix: [ADOPTED_QUERY_ENGINE_IDEAS.md](ADOPTED_QUERY_ENGINE_IDEAS.md)
 - ClickHouse-style typed-table decompressed column-block cache: [TYPED_TABLE_DECOMPRESSED_BLOCK_CACHE.md](TYPED_TABLE_DECOMPRESSED_BLOCK_CACHE.md)

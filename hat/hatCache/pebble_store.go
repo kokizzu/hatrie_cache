@@ -320,20 +320,32 @@ func (store *PebbleStore) Close() error {
 }
 
 func (store *PebbleStore) Save(trie *HatTrie) error {
+	if err := requirePersistentTrie(trie); err != nil {
+		return err
+	}
 	return store.saveGeneration(trie)
 }
 
 func (store *PebbleStore) SaveWithJournalSequence(trie *HatTrie, sequence uint64) error {
+	if err := requirePersistentTrie(trie); err != nil {
+		return err
+	}
 	return store.saveGenerationWithJournalSequence(trie, &sequence)
 }
 
 // SaveCheckpoint atomically persists the current trie as a complete Pebble
 // generation and creates a self-contained file-level checkpoint directory.
 func (store *PebbleStore) SaveCheckpoint(trie *HatTrie, destination string) error {
+	if err := requirePersistentTrie(trie); err != nil {
+		return err
+	}
 	return store.saveCheckpointWithJournalSequence(trie, destination, nil)
 }
 
 func (store *PebbleStore) SaveCheckpointWithJournalSequence(trie *HatTrie, destination string, sequence uint64) error {
+	if err := requirePersistentTrie(trie); err != nil {
+		return err
+	}
 	return store.saveCheckpointWithJournalSequence(trie, destination, &sequence)
 }
 
@@ -364,10 +376,16 @@ func (store *PebbleStore) saveCheckpointWithJournalSequence(trie *HatTrie, desti
 // a checkpoint without rewriting or compacting unchanged SST files. The caller
 // clears the returned dirty snapshot only after publishing its backup manifest.
 func (store *PebbleStore) SaveIncrementalCheckpoint(trie *HatTrie, tracker *LevelDBDirtyTracker, destination string) (LevelDBDirtySnapshot, uint64, error) {
+	if err := requirePersistentTrie(trie); err != nil {
+		return LevelDBDirtySnapshot{}, 0, err
+	}
 	return store.saveIncrementalCheckpointWithJournalSequence(trie, tracker, destination, nil)
 }
 
 func (store *PebbleStore) SaveIncrementalCheckpointWithJournalSequence(trie *HatTrie, tracker *LevelDBDirtyTracker, destination string, sequence uint64) (LevelDBDirtySnapshot, uint64, error) {
+	if err := requirePersistentTrie(trie); err != nil {
+		return LevelDBDirtySnapshot{}, 0, err
+	}
 	return store.saveIncrementalCheckpointWithJournalSequence(trie, tracker, destination, &sequence)
 }
 
@@ -570,11 +588,17 @@ func (store *PebbleStore) AppliedJournalSequence() (uint64, bool, error) {
 }
 
 func (store *PebbleStore) Load(trie *HatTrie) (int, error) {
+	if err := requirePersistentTrie(trie); err != nil {
+		return 0, err
+	}
 	result, err := store.LoadWithPolicy(trie, LevelDBLoadPolicy{})
 	return result.ValuesLoaded, err
 }
 
 func (store *PebbleStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolicy) (LevelDBLoadResult, error) {
+	if err := requirePersistentTrie(trie); err != nil {
+		return LevelDBLoadResult{}, err
+	}
 	db, unlock, err := store.lockDB()
 	if err != nil {
 		return LevelDBLoadResult{}, err

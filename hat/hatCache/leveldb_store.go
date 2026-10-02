@@ -369,8 +369,8 @@ func (store *LevelDBStore) SaveWithJournalSequence(trie *HatTrie, sequence uint6
 }
 
 func (store *LevelDBStore) saveWithJournalSequence(trie *HatTrie, sequence *uint64) error {
-	if trie == nil {
-		return ErrNilHatTrie
+	if err := requirePersistentTrie(trie); err != nil {
+		return err
 	}
 	if err := checkPersistentStorageDiskReserve(store.path, store.storageDiskReserveBytes.Load(), store.Backend()); err != nil {
 		return err
@@ -1302,6 +1302,9 @@ func (store *LevelDBStore) Load(trie *HatTrie) (int, error) {
 // cold values are represented by lightweight references; keep store open while
 // those references may be accessed or saved.
 func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolicy) (LevelDBLoadResult, error) {
+	if err := requirePersistentTrie(trie); err != nil {
+		return LevelDBLoadResult{}, err
+	}
 	db, unlock, err := store.lockDB()
 	if err != nil {
 		return LevelDBLoadResult{}, err
@@ -1322,8 +1325,8 @@ func (store *LevelDBStore) LoadWithPolicy(trie *HatTrie, policy LevelDBLoadPolic
 }
 
 func loadPersistentEntryData(trie *HatTrie, store persistentReferenceStore, policy LevelDBLoadPolicy, scan func(func(snapshotEntry, []byte) error) error) (LevelDBLoadResult, error) {
-	if trie == nil {
-		return LevelDBLoadResult{}, ErrNilHatTrie
+	if err := requirePersistentTrie(trie); err != nil {
+		return LevelDBLoadResult{}, err
 	}
 	if trie.localPartitionSet() != nil {
 		return loadLocalPartitionPersistentEntryData(trie, store, policy, scan)

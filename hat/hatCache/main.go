@@ -1181,6 +1181,7 @@ func (bs *BytesStorage) Del(idx int32) {
 
 // DiskStorage stores large byte values outside the Go heap.
 type DiskStorage struct {
+	volatile      bool
 	dir           string
 	rootDir       string
 	ownedDir      bool
@@ -3807,6 +3808,10 @@ func createHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool, ensur
 	} else {
 		disks = newDiskStorageValue(diskDir, removeDiskDirOnDestroy)
 	}
+	return createHatTrieWithStorage(disks), nil
+}
+
+func createHatTrieWithStorage(disks DiskStorage) *HatTrie {
 	storage := &hatTrieStorageGroup{}
 	auxStorage := &hatTrieAuxStorage{
 		disks: disks,
@@ -3840,7 +3845,7 @@ func createHatTrieWithDiskDir(diskDir string, removeDiskDirOnDestroy bool, ensur
 	}
 	ht.stats.initialize()
 	runtime.SetFinalizer(ht, (*HatTrie).Destroy)
-	return ht, nil
+	return ht
 }
 
 func (ht *HatTrie) Destroy() {
@@ -6802,6 +6807,18 @@ func (ht *HatTrie) GetBytesChecked(key string) ([]byte, error) {
 }
 
 func (ht *HatTrie) storeBytesValueLocked(old HatValue, val []byte) (HatValue, error) {
+	if ht.IsVolatile() {
+		if old.IsBytesAtRaws() {
+			if old.OnDisk() {
+				idx := ht.raws.Add(val)
+				ht.disks.Del(old.Index)
+				return HatValue{Index: idx, Flags: DATAVALUE_TYPE_RAW_BYTES}, nil
+			}
+			ht.raws.Put(old.Index, val)
+			return HatValue{Index: old.Index, Flags: DATAVALUE_TYPE_RAW_BYTES}, nil
+		}
+		return HatValue{Index: ht.raws.Add(val), Flags: DATAVALUE_TYPE_RAW_BYTES}, nil
+	}
 	if len(val) > DiskBytesThreshold {
 		if old.IsBytesAtRaws() && old.OnDisk() {
 			if err := ht.disks.Put(old.Index, val); err != nil {

@@ -32559,6 +32559,38 @@ unchanged unless the registry is constructed. See
 [MU043_SINK_BACKPRESSURE.md](MU043_SINK_BACKPRESSURE.md) for raw benchmark
 commands and operational semantics.
 
+## T-U18 Volatile Cache Engine
+
+Commands:
+
+```sh
+make benchmark-tu18-volatile
+```
+
+The workload uses a `DiskBytesThreshold+1` byte payload and performs one
+update plus one read per iteration. Samples were run on Linux/amd64 with an
+AMD Ryzen 9 5950X. The pre-change disk-backed baseline used
+`-count=3 -benchtime=100x`; its raw samples were 56,973,788, 123,370,767, and
+5,019,191 ns/op, with 79,780/80,041/79,474 B/op and 34/47/24 allocs/op. The
+first run was intentionally recorded before the volatile implementation and
+was filesystem-cache sensitive.
+
+The matched post-change run used `-count=5 -benchtime=500x` and included the
+unchanged disk-backed constructor as a same-process control:
+
+| Engine | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Disk-backed control | 2,609,202 | 79,351 | 23 | Baseline for the matched run |
+| Volatile | 28,014 | 147,457 | 2 | 93.2x faster, 1.86x higher allocated bytes |
+
+The volatile path avoids temporary-directory creation for its large raw byte
+values and removes filesystem reads/writes from the hot operation. The tradeoff
+is resident Go-heap retention for every large value; `CreateHatTrie()` remains
+the default for lower heap retention and persistence-compatible workloads.
+Raw API semantics and the refusal of snapshot, backup, LevelDB, and Pebble
+persistence calls are documented in
+[T-U18_VOLATILE_CACHE_ENGINE.md](T-U18_VOLATILE_CACHE_ENGINE.md).
+
 ## M-U47 Progress-Only Subscription Frames
 
 Commands:
