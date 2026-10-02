@@ -261,6 +261,7 @@ security guidance before exposing it on a network.
 - Cross-region backup restore drill: [CROSS_REGION_RESTORE_DRILL.md](CROSS_REGION_RESTORE_DRILL.md)
 - Partition ownership quorum certificates: [PARTITION_OWNERSHIP_CONSENSUS.md](PARTITION_OWNERSHIP_CONSENSUS.md)
 - Remote immutable part metadata references: [REMOTE_PARTS.md](REMOTE_PARTS.md)
+- Materialize-style persisted immutable part manifests with atomic publication and explicit object-store lifecycle: [MU038_PERSISTED_IMMUTABLE_PARTS.md](MU038_PERSISTED_IMMUTABLE_PARTS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m-u38-persisted-immutable-data-parts)
 - Opt-in checksum-verified immutable part envelopes: [REPLICATED_PARTS.md](REPLICATED_PARTS.md)
 - Opt-in zero-copy immutable part views: [ZERO_COPY_PARTS.md](ZERO_COPY_PARTS.md)
 - Distributed join movement accounting for adapters: [DISTRIBUTED_JOIN_ACCOUNTING.md](DISTRIBUTED_JOIN_ACCOUNTING.md)

@@ -22320,3 +22320,25 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+
+.PHONY: format-mu38 test-mu38 benchmark-mu38 race-mu38 vet-mu38 verify-mu38
+format-mu38:
+	bash scripts/format-mu38.sh
+test-mu38:
+	bash scripts/test-mu38.sh
+benchmark-mu38:
+	bash scripts/benchmark-mu38.sh
+race-mu38:
+	bash scripts/race-mu38.sh
+vet-mu38:
+	bash scripts/vet-mu38.sh
+verify-mu38:
+	bash scripts/verify-mu38.sh
+
+.PHONY: stage-mu38 commit-mu38 push-mu38
+stage-mu38:
+	bash scripts/deliver-mu38.sh stage
+commit-mu38:
+	bash scripts/deliver-mu38.sh commit
+push-mu38:
+	bash scripts/deliver-mu38.sh push

@@ -32559,6 +32559,26 @@ unchanged unless the registry is constructed. See
 [MU043_SINK_BACKPRESSURE.md](MU043_SINK_BACKPRESSURE.md) for raw benchmark
 commands and operational semantics.
 
+## M-U38 Persisted immutable data parts
+
+Workload: 512 normalized immutable parts, five benchmark samples on an AMD
+Ryzen 9 5950X. JSON is the interoperability fallback; relative latency uses
+the JSON operation as `1.00x`.
+
+| Operation | Binary manifest | JSON fallback | Binary result |
+| --- | ---: | ---: | ---: |
+| Marshal latency | ~140 us/op | ~202 us/op | 1.45x faster |
+| Marshal heap | 90,112 B/op | ~160,142 B/op | 1.78x lower |
+| Encoded size | 59,461 B | 148,589 B | 2.50x smaller |
+| Decode latency | ~226 us/op | ~1,409 us/op | 6.23x faster |
+| Decode heap | 135,193 B/op | 224,327 B/op | 1.66x lower |
+| Decode allocations | 3,586 | 3,604 | 1.01x lower |
+
+The binary path is the default for persisted manifests because it reduces
+storage/transfer size and wins marshal/decode CPU and heap for this workload.
+JSON remains useful for interoperability. See
+[MU038_PERSISTED_IMMUTABLE_PARTS.md](MU038_PERSISTED_IMMUTABLE_PARTS.md).
+
 ## M-U47 Progress-Only Subscription Frames
 
 Commands:
