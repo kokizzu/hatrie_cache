@@ -32580,3 +32580,35 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## T-U18: Explicit Volatile Cache Engine
+
+Command:
+
+```sh
+make benchmark-t-u18-volatile-engine
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is a
+plain `map[string][]byte` with the same mutex and caller-buffer copy shape, but
+without TTL, capacity admission, metrics, or eviction bookkeeping.
+
+| Workload | Volatile engine median | Map baseline median | CPU ratio | Memory |
+| --- | ---: | ---: | ---: | --- |
+| `GetInto`, 64-byte value | 55.23 ns/op | 10.78 ns/op | 5.12x slower | 0 B/op, 0 allocs/op for both |
+| replacing `Set`, 64-byte value | 94.95 ns/op | 43.10 ns/op | 2.20x slower | 64 B/op, 1 alloc/op for both |
+
+Raw samples:
+
+| Benchmark | Samples (ns/op) |
+| --- | --- |
+| `BenchmarkVolatileEngineGetInto` | 55.09, 55.59, 55.95, 55.23, 54.20 |
+| `BenchmarkMapGetInto` | 10.85, 10.70, 10.65, 10.78, 11.11 |
+| `BenchmarkVolatileEngineSet` | 95.20, 93.92, 95.49, 94.95, 94.48 |
+| `BenchmarkMapSet` | 43.15, 42.95, 43.10, 43.26, 42.86 |
+
+This is a functionality tradeoff, not a raw map speed claim. The new engine
+adds explicit volatile durability intent, bounded admission, TTL cleanup,
+copy-safe ownership, and metrics without touching existing data structures or
+creating temporary storage. Use a plain map when those controls are not worth
+the measured overhead. See [TU18_VOLATILE_ENGINE.md](TU18_VOLATILE_ENGINE.md).

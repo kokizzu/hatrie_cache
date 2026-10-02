@@ -734,3 +734,14 @@ Adopted as opt-in `hatStorage.CompactionDiagnostics`: bounded arrangement regist
 ## Materialize M-U41: Webhook Event Idempotency
 
 Adopted as opt-in `hatSql.WebhookEventDeduplicator`: bounded source/event-ID admission, payload-fingerprint conflict detection, expiry, deterministic CRC-protected HWE1 snapshots, and atomic restore. The caller owns application, durable storage, acknowledgement, and HTTP/webhook wiring; existing defaults remain unchanged. See [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md) and [BENCHMARK.md](BENCHMARK.md#m-u41-webhook-event-idempotency).
+
+## T-U18: Explicit Volatile Cache Engine
+
+T-U18 is adopted as the importable `hatDataStructure.VolatileEngine`. It is
+explicitly memory-only, bounded by entries and admitted key/value bytes, and
+supports TTL expiry, copy-safe values, reusable-buffer reads, deterministic
+reject-or-oldest admission, and cumulative stats. The zero-value policy is
+reject, so callers do not silently lose entries. It never creates persistence
+files; raw-map users should keep using a map when these controls are not
+needed. See [TU18_VOLATILE_ENGINE.md](TU18_VOLATILE_ENGINE.md) and
+[BENCHMARK.md](BENCHMARK.md#t-u18-explicit-volatile-cache-engine).

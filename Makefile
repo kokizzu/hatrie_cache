@@ -22292,3 +22292,42 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: test-t-u18-volatile-engine
+test-t-u18-volatile-engine:
+	bash scripts/test-t-u18-volatile-engine.sh test
+
+.PHONY: race-t-u18-volatile-engine
+race-t-u18-volatile-engine:
+	bash scripts/test-t-u18-volatile-engine.sh race
+
+.PHONY: vet-t-u18-volatile-engine
+vet-t-u18-volatile-engine:
+	bash scripts/test-t-u18-volatile-engine.sh vet
+
+.PHONY: package-t-u18-volatile-engine
+package-t-u18-volatile-engine:
+	bash scripts/test-t-u18-volatile-engine.sh package
+
+.PHONY: format-t-u18-volatile-engine
+format-t-u18-volatile-engine:
+	bash scripts/test-t-u18-volatile-engine.sh format
+
+.PHONY: benchmark-t-u18-volatile-engine
+benchmark-t-u18-volatile-engine:
+	bash scripts/test-t-u18-volatile-engine.sh benchmark
+
+.PHONY: status-t-u18-volatile-engine
+status-t-u18-volatile-engine:
+	bash scripts/deliver-t-u18-volatile-engine.sh status
+
+.PHONY: stage-t-u18-volatile-engine
+stage-t-u18-volatile-engine:
+	bash scripts/deliver-t-u18-volatile-engine.sh stage
+
+.PHONY: commit-t-u18-volatile-engine
+commit-t-u18-volatile-engine:
+	bash scripts/deliver-t-u18-volatile-engine.sh commit
+
+.PHONY: push-t-u18-volatile-engine
+push-t-u18-volatile-engine:
+	bash scripts/deliver-t-u18-volatile-engine.sh push
