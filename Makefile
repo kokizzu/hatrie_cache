@@ -22315,5 +22315,5 @@ benchmark-tu09-adoption:
 benchmark-tu09-baseline:
 	bash scripts/benchmark-tu09-baseline.sh
 
-deliver-tu09-adoption:
-	bash scripts/deliver-tu09-adoption.sh
+deliver-tu09-cleanup:
+	bash scripts/deliver-tu09-cleanup.sh
