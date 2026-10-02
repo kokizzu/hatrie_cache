@@ -22808,3 +22808,30 @@ commit-chg16-space-changefeed:
 
 push-chg16-space-changefeed:
 	bash ./scripts/push-chg16-space-changefeed.sh
+.PHONY: benchmark-chg18-session-settings-baseline inspect-chg18-session-settings inspect-chg18-session-settings-gap format-chg18-session-settings test-chg18-session-settings benchmark-chg18-session-settings verify-chg18-session-settings test-chg18-session-settings-package test-chg18-session-settings-full status-chg18-session-settings stage-chg18-session-settings commit-chg18-session-settings push-chg18-session-settings
+benchmark-chg18-session-settings-baseline:
+	bash scripts/chg18-session-settings.sh baseline
+inspect-chg18-session-settings:
+	bash scripts/chg18-session-settings.sh inspect
+inspect-chg18-session-settings-gap:
+	bash scripts/chg18-session-settings.sh inspect-gap
+format-chg18-session-settings:
+	bash scripts/chg18-session-settings.sh format
+test-chg18-session-settings:
+	bash scripts/chg18-session-settings.sh test
+benchmark-chg18-session-settings:
+	bash scripts/chg18-session-settings.sh benchmark
+verify-chg18-session-settings:
+	bash scripts/chg18-session-settings.sh verify
+test-chg18-session-settings-package:
+	bash scripts/chg18-session-settings.sh package
+test-chg18-session-settings-full:
+	bash scripts/chg18-session-settings.sh full
+status-chg18-session-settings:
+	bash scripts/deliver-chg18-session-settings.sh status
+stage-chg18-session-settings:
+	bash scripts/deliver-chg18-session-settings.sh stage
+commit-chg18-session-settings:
+	bash scripts/deliver-chg18-session-settings.sh commit
+push-chg18-session-settings:
+	bash scripts/deliver-chg18-session-settings.sh push
