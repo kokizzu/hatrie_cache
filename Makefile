@@ -22292,3 +22292,26 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: test-consumer-group-queue
+test-consumer-group-queue:
+	bash scripts/test-consumer-group-queue.sh test
+
+.PHONY: test-all-consumer-group-queue
+test-all-consumer-group-queue:
+	bash scripts/test-consumer-group-queue.sh test-all
+
+.PHONY: race-consumer-group-queue
+race-consumer-group-queue:
+	bash scripts/test-consumer-group-queue.sh race
+
+.PHONY: vet-consumer-group-queue
+vet-consumer-group-queue:
+	bash scripts/test-consumer-group-queue.sh vet
+
+.PHONY: benchmark-consumer-group-queue
+benchmark-consumer-group-queue:
+	bash scripts/test-consumer-group-queue.sh benchmark
+
+.PHONY: format-consumer-group-queue
+format-consumer-group-queue:
+	bash scripts/test-consumer-group-queue.sh format

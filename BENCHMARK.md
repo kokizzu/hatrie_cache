@@ -32580,3 +32580,20 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## Tarantool Consumer Group Queue
+
+The opt-in `hatDataStructure.ConsumerGroupQueue[T]` adds named work streams,
+consumer ownership, acknowledgement/retry fencing, and visibility-timeout
+recovery while reusing `VisibilityQueue[T]`. Median of five samples on an AMD
+Ryzen 9 5950X, Linux/amd64, using `-benchtime=200ms -benchmem`:
+
+| Workload | Existing `VisibilityQueue` | `ConsumerGroupQueue` | Relative CPU | Heap / allocations |
+|---|---:|---:|---:|---:|
+| One item lease/ack | 90.06 ns/op | 201.2 ns/op | 2.23x slower | 0 B/op, 0 allocs/op for both |
+| 256 resident items lease/ack | 541.8 ns/op | 704.5 ns/op | 1.30x slower | 0 B/op, 0 allocs/op for both |
+| Queue plus one group setup | 2,000 ns/op | 2,352 ns/op | 1.18x slower | 16,384 -> 16,872 B/op; 1 -> 8 allocs/op |
+
+This is an explicit capability, not a default queue replacement. See
+[T_G43_CONSUMER_GROUP_QUEUE.md](T_G43_CONSUMER_GROUP_QUEUE.md) for semantics,
+ownership fencing, and test commands.
