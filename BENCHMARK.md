@@ -32637,6 +32637,24 @@ normal tuple reads, writes, and packing do not call the manager. See
 [T-G16_VERSIONED_TUPLE_MIGRATION.md](T-G16_VERSIONED_TUPLE_MIGRATION.md) for
 the raw samples, rollback contract, and verification commands.
 
+## Tarantool Cross-Index Unique Constraints
+
+`hatDataStructure.CrossIndexUnique[T]` atomically validates and updates
+multiple named unique constraints. Five `-count=5` samples on Linux/amd64,
+AMD Ryzen 9 5950X, using `-benchtime=1s -benchmem`:
+
+| Workload | Manual map baseline | CrossIndexUnique | Relative result |
+|---|---:|---:|---|
+| Same-key update | 145.4 ns/op, 16 B/op, 1 alloc | 115.1 ns/op, 16 B/op, 1 alloc | 1.26x faster; same heap |
+| Changed-key update | 152.3 ns/op, 24 B/op, 1 alloc | 205.7 ns/op, 24 B/op, 1 alloc | 1.35x slower; same heap |
+
+The same-key improvement comes from skipping redundant map surgery. Changed
+keys pay the lock and atomic multi-index update cost, but the optimized path
+does not add heap allocation over the manual baseline. This is opt-in and
+does not change existing index behavior. Raw samples and the storage boundary
+are documented in
+[T-U22_CROSS_INDEX_UNIQUE.md](T-U22_CROSS_INDEX_UNIQUE.md).
+
 ## Tarantool Online Tuple Upgrade Coordinator
 
 `hatDataStructure.OnlineTupleUpgrade` adds an opt-in dual-format lifecycle:
