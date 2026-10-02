@@ -22360,3 +22360,19 @@ push-chu47:
 .PHONY: benchmark-mu036
 benchmark-mu036:
 	bash scripts/benchmark-mu036.sh
+
+.PHONY: test-tu38 test-tu38-package race-tu38 vet-tu38 benchmark-tu38
+test-tu38:
+	bash scripts/test-tu38.sh
+
+test-tu38-package:
+	bash scripts/test-tu38-package.sh
+
+race-tu38:
+	bash scripts/race-tu38.sh
+
+vet-tu38:
+	bash scripts/vet-tu38.sh
+
+benchmark-tu38:
+	bash scripts/benchmark-tu38.sh

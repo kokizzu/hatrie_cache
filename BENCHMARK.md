@@ -24,6 +24,29 @@ not treated as a statistically significant speed claim.
 adds admission correctness and cancellation without claiming faster replay.
 The default write, apply, and hydration paths remain unchanged.
 
+## T-U38 Conflict Introspection Stream
+
+Command:
+
+```sh
+make benchmark-tu38
+```
+
+The clean baseline measures the existing deterministic resolver. The feature
+build repeats that control and adds the explicitly opt-in redacted recording
+and snapshot paths. One `-benchtime=500ms` sample was collected on Linux/amd64
+with an AMD Ryzen 9 5950X.
+
+| Workload | Baseline | Feature | Relative result |
+| --- | ---: | ---: | --- |
+| Existing resolver | 2.68 ns/op, 0 B/op, 0 allocs/op | 2.90 ns/op, 0 B/op, 0 allocs/op | 1.08x slower, within noise |
+| Opt-in resolve plus record | N/A | 275 ns/op, 160 B/op, 3 allocs/op | Diagnostic cost is explicit |
+| Snapshot of 1,024 events | N/A | 68,648 bytes; 63,598 ns/op; 139,318 B/op; 1 alloc/op | Bounded binary snapshot |
+
+The normal resolver does not allocate or update a log unless callers opt into
+`ResolveAndRecord`. Full API and privacy semantics are in
+[TU38_CONFLICT_EVENT_STREAM.md](TU38_CONFLICT_EVENT_STREAM.md).
+
 ## CH-U49 Skip-Index EXPLAIN Diagnostics
 
 This paired clean-worktree benchmark compares the pre-CH-U49 implementation
