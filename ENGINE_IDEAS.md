@@ -78,6 +78,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-048 | SIMD/generic predicate coverage | Partially adopted: plain binary string comparisons now use a direct zero-allocation columnar kernel for all six ordering/equality operators, while packed/dictionary, non-binary collation, and broader predicate shapes remain on existing paths. | Medium |
 | CH-049 | Refreshable external dictionaries | Adopted as an opt-in `hatSql` registry with immutable atomic snapshots, manual/background refresh, bounded staleness, and `DICT_GET`/`DICT_GET_OR_DEFAULT`/`DICT_HAS`. | Done |
 | CH-050 | Named settings collections and inheritable validated profiles | Adopted as an imported `hatSql` registry with bounded immutable snapshots, revision compare-and-swap updates, optional parent inheritance with cycle/depth/effective-size checks, caller-supplied setting validation, isolated full-profile reads, and allocation-free single-value lookup. | Done |
+| CH-058 | Bitmap-backed literal `IN` union | Adopted an optional multi-value index resolver for low-cardinality bitmap indexes; one snapshot and direct posting traversal reduce repeated lookup overhead while non-bitmap sources retain the old fallback. | Low |
 
 ## Materialize candidates
 

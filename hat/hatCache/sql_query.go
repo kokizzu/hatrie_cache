@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/bits"
 	"sort"
 	"strconv"
 	"strings"
@@ -1384,6 +1385,96 @@ func (ht *HatTrie) CreateSQLJSONCompositeIndex(key string, fields ...string) err
 }
 
 func sqlJSONCompositeIndexIdentifier(fields []string) string { return strings.Join(fields, "\x00") }
+
+// ResolveSQLIndexedValues batches literal IN candidates through one bitmap
+// refresh and lock hold. Values may repeat; invalid or unindexable values are
+// ignored, matching equality-index candidate semantics.
+func (ht *HatTrie) ResolveSQLIndexedValues(name, key, field string, values []interface{}) ([]SQLRow, bool, error) {
+	if ht == nil || name != "CACHE" {
+		return nil, false, nil
+	}
+	ht.sqlIndexMu.Lock()
+	bitmap := ht.sqlJSONBitmapIndexes[key][field]
+	ht.sqlIndexMu.Unlock()
+	if bitmap == nil {
+		return nil, false, nil
+	}
+	source, err := ht.sqlJSONSource(key)
+	if err != nil {
+		return nil, false, err
+	}
+	ht.sqlIndexMu.Lock()
+	defer ht.sqlIndexMu.Unlock()
+	bitmap = ht.sqlJSONBitmapIndexes[key][field]
+	if bitmap == nil {
+		return nil, false, nil
+	}
+	snapshot, err := ht.sqlJSONIndexSnapshotForSourceLocked(key, source)
+	if err != nil {
+		if err == errSQLJSONIndexAdmissionDenied {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	if err := refreshSQLJSONBitmapIndexSourceRows(bitmap, field, source, snapshot.rows); err != nil {
+		return nil, false, err
+	}
+	keys := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	capacity := 0
+	maxInt := int(^uint(0) >> 1)
+	for _, value := range values {
+		valueKey, ok := sqlIndexValueKey(value)
+		if !ok {
+			continue
+		}
+		if _, duplicate := seen[valueKey]; duplicate {
+			continue
+		}
+		seen[valueKey] = struct{}{}
+		keys = append(keys, valueKey)
+		count := bitmap.postings[valueKey].Count()
+		if count > uint64(maxInt-capacity) {
+			capacity = 0
+			continue
+		}
+		capacity += int(count)
+	}
+	rows := make([]SQLRow, 0, capacity)
+	for _, valueKey := range keys {
+		rows = appendSQLBitmapRows(rows, bitmap.postings[valueKey], bitmap.rows)
+	}
+	return hatSql.CloneRows(rows), true, nil
+}
+
+func appendSQLBitmapRows(rows []SQLRow, posting hatDataStructure.RoaringBitmap, source []SQLRow) []SQLRow {
+	posting.VisitContainers(func(key uint16, _ uint32, values []uint16, bitset []uint64) bool {
+		base := uint32(key) << 16
+		if values != nil {
+			for _, value := range values {
+				ordinal := base | uint32(value)
+				if ordinal < uint32(len(source)) {
+					rows = append(rows, source[ordinal])
+				}
+			}
+			return true
+		}
+		for wordIndex, word := range bitset {
+			baseOrdinal := base + uint32(wordIndex<<6)
+			for word != 0 {
+				offset := uint32(bits.TrailingZeros64(word))
+				ordinal := baseOrdinal + offset
+				if ordinal < uint32(len(source)) {
+					rows = append(rows, source[ordinal])
+				}
+				word &= word - 1
+			}
+		}
+		return true
+	})
+	return rows
+}
+
 func (ht *HatTrie) ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]SQLRow, bool, error) {
 	if name != "CACHE" {
 		return nil, false, nil

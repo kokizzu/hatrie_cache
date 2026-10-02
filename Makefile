@@ -22353,3 +22353,32 @@ commit-disk-read-cache:
 
 push-disk-read-cache:
 	sh ./scripts/push-disk-read-cache.sh
+benchmark-ch058-bitmap-in:
+	bash scripts/benchmark-ch058-bitmap-in.sh
+
+test-ch058-bitmap-in:
+	bash scripts/test-ch058-bitmap-in.sh
+
+format-ch058-bitmap-in:
+	bash scripts/format-ch058-bitmap-in.sh
+
+verify-ch058-bitmap-in:
+	bash scripts/verify-ch058-bitmap-in.sh test
+
+verify-all-ch058-bitmap-in:
+	bash scripts/verify-ch058-bitmap-in.sh all
+
+race-focused-ch058-bitmap-in:
+	bash scripts/verify-ch058-bitmap-in.sh race-focused
+
+race-ch058-bitmap-in:
+	bash scripts/verify-ch058-bitmap-in.sh race
+
+vet-ch058-bitmap-in:
+	bash scripts/verify-ch058-bitmap-in.sh vet
+
+commit-ch058-bitmap-in:
+	bash scripts/commit-ch058-bitmap-in.sh
+
+push-ch058-bitmap-in:
+	bash scripts/push-ch058-bitmap-in.sh

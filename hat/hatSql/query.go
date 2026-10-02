@@ -14139,6 +14139,24 @@ func resolveSQLIndexedLiteralINSource(source sqlSource, condition sqlExpr, resol
 	if !ok {
 		return nil, false, nil
 	}
+	if multi, ok := resolver.(SQLMultiValueIndexedSourceResolver); ok {
+		values := make([]interface{}, 0, len(condition.args))
+		for _, argument := range condition.args {
+			if argument.kind != "literal" {
+				return nil, false, nil
+			}
+			if argument.value != nil {
+				values = append(values, argument.value)
+			}
+		}
+		if len(values) == 0 {
+			return []SQLRow{}, true, nil
+		}
+		rows, available, err := multi.ResolveSQLIndexedValues(source.kind, source.key, field, values)
+		if err != nil || available {
+			return rows, available, err
+		}
+	}
 	seen := make(map[string]struct{}, len(condition.args))
 	rows := make([]SQLRow, 0)
 	for _, argument := range condition.args {

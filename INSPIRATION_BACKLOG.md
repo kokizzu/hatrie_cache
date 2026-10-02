@@ -265,3 +265,12 @@ journal replay. Ordinary SQL mutations remain unchanged; `RETURNING`,
 `ON CONFLICT`, `MERGE`, and automatic triggers are rejected because their
 semantics are not represented by the existing public journal record. See
 [CH057_SQL_MUTATION_IDEMPOTENCY.md](CH057_SQL_MUTATION_IDEMPOTENCY.md).
+
+## CH-058 Bitmap-Backed Literal `IN` Union
+
+The ClickHouse/Tarantool-inspired follow-up batches literal binary-collation
+`IN` candidates through one opt-in low-cardinality bitmap-index snapshot and
+one clone pass. Duplicate and `NULL` literals retain existing semantics, while
+other indexes and sources fall back to the established per-value resolver. See
+[CH058_BITMAP_IN_UNION.md](CH058_BITMAP_IN_UNION.md) and
+[BENCHMARK.md#ch-058-bitmap-backed-literal-in-union](BENCHMARK.md#ch-058-bitmap-backed-literal-in-union).

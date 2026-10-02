@@ -32688,3 +32688,35 @@ cold read defaults. The clean `Compact` path deliberately does not call
 `Sync`; use `Sync` or `Flush` when the caller needs an fsync even when no
 compaction is needed. Stale segments still take the existing full rewrite
 path once the configured threshold is reached.
+
+## CH-058 Bitmap-Backed Literal `IN` Union
+
+The ClickHouse/Tarantool-inspired path batches a literal binary-collation `IN`
+list through one bitmap-index snapshot and one candidate clone pass. The
+fixture contains 4,000 rows with eight `state` values and probes four values.
+Three `-benchtime=200ms` samples were run on Linux/amd64 with an AMD Ryzen 9
+5950X.
+
+| Path | Median ns/op | B/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Legacy per-value equality resolver | 429,240 | 716,283 | 4,101 | baseline |
+| Batched bitmap `IN` resolver | 422,634 | 708,109 | 4,091 | 1.02x faster; 1.01x lower bytes; 10 fewer allocations |
+
+Raw samples:
+
+```text
+Before: BenchmarkCH058BitmapIndexedINLegacy-32
+446625 ns/op 716569 B/op 4108 allocs/op
+427312 ns/op 716209 B/op 4099 allocs/op
+429240 ns/op 716283 B/op 4101 allocs/op
+
+After: BenchmarkCH058BitmapIndexedINBatch-32
+436286 ns/op 708329 B/op 4096 allocs/op
+422634 ns/op 708042 B/op 4089 allocs/op
+412211 ns/op 708109 B/op 4091 allocs/op
+```
+
+The result is a small but positive optimization. The remaining cost is cloning
+candidate row maps for SQL isolation; eliminating that would require a separate
+borrowed-row contract and a larger semantic tradeoff, so it is not included in
+this change.

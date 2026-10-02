@@ -1317,6 +1317,13 @@ type IndexedSourceResolver interface {
 	ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]Row, bool, error)
 }
 
+// SQLMultiValueIndexedSourceResolver optionally resolves a de-duplicated set
+// of literal equality values in one index snapshot. Implementations return
+// candidates only; the executor evaluates the original IN predicate again.
+type SQLMultiValueIndexedSourceResolver interface {
+	ResolveSQLIndexedValues(name, key, field string, values []interface{}) ([]Row, bool, error)
+}
+
 // GeoIndexedSourceResolver optionally resolves GEO_WITHIN_* predicates through
 // a spatial candidate index. The SQL executor evaluates the original
 // predicate again, so implementations may return false positives but must not
