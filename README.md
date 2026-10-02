@@ -4765,3 +4765,14 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+
+## Cross-Index Uniqueness
+
+`hatDataStructure.CrossIndexUniqueSet[T]` atomically maintains multiple named
+unique keys for the same record. Use it when a space must reject conflicts
+across identities such as email and username; existing indexes and defaults are
+unchanged. See [TU22_CROSS_INDEX_UNIQUENESS.md](TU22_CROSS_INDEX_UNIQUENESS.md)
+for the API, bounds, atomicity contract, and measurements.
+
+Run `make test-tu22`, `make race-tu22`, `make vet-tu22`, and
+`make benchmark-tu22-comparison` for focused verification.

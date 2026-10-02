@@ -32580,3 +32580,34 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## T-U22 Cross-Index Uniqueness
+
+Commands:
+
+```sh
+make benchmark-tu22-before
+make benchmark-tu22-comparison
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The comparison
+baseline is a sequential implementation with two unique maps and a record
+map. The coordinator uses one lock, two maintained owner maps, and a record
+map; it is intended for atomic concurrent enforcement rather than as a
+drop-in replacement for an unprotected single-threaded update.
+
+| Workload | Sequential two-map median ns/op | CrossIndexUniqueSet median ns/op | CPU improvement | Baseline B/op | Set B/op | Baseline allocs/op | Set allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Existing keys unchanged | 136.3 | 90.36 | 1.51x faster | 0 | 0 | 0 | 0 |
+| Keys changed on every update | 134.2 | 98.98 | 1.36x faster | 0 | 0 | 0 | 0 |
+
+The initial coordinator implementation measured 205.7 ns/op for unchanged-key
+updates. The key-equality fast path reduced that to 90.36 ns/op, a 2.28x
+improvement, without changing the atomicity contract. New IDs allocate their
+stored key slice once; the measured steady-state update paths allocate nothing.
+The set's memory guard is `MaxEntries` (default 1,048,576); `Capacity` is an
+optional map reservation and is never enabled implicitly.
+
+The raw samples are kept in the benchmark command output and the focused
+implementation and safety contract are documented in
+[TU22_CROSS_INDEX_UNIQUENESS.md](TU22_CROSS_INDEX_UNIQUENESS.md).

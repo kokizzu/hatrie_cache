@@ -22292,3 +22292,35 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+benchmark-tu22-before:
+	bash scripts/benchmark-tu22-before.sh
+
+format-tu22:
+	bash scripts/format-tu22.sh
+
+test-tu22:
+	bash scripts/test-tu22.sh
+
+test-tu22-package:
+	bash scripts/test-tu22-package.sh
+
+race-tu22:
+	bash scripts/race-tu22.sh
+
+vet-tu22:
+	bash scripts/vet-tu22.sh
+
+benchmark-tu22:
+	bash scripts/benchmark-tu22.sh
+
+benchmark-tu22-comparison:
+	bash scripts/benchmark-tu22-comparison.sh
+
+verify-tu22:
+	bash scripts/verify-tu22.sh
+
+status-tu22:
+	bash scripts/status-tu22.sh
+
+deliver-tu22:
+	bash scripts/deliver-tu22.sh
