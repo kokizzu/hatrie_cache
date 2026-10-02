@@ -1,4 +1,40 @@
 .PHONY: verify-ch029-dictionary-join-c203
+.PHONY: format-round18-ch021-tier-reader
+format-round18-ch021-tier-reader:
+	bash scripts/run-ch021-tier-reader-checks.sh format
+
+.PHONY: test-round18-ch021-tier-reader
+test-round18-ch021-tier-reader:
+	bash scripts/run-ch021-tier-reader-checks.sh test
+
+.PHONY: race-round18-ch021-tier-reader
+race-round18-ch021-tier-reader:
+	bash scripts/run-ch021-tier-reader-checks.sh race
+
+.PHONY: vet-round18-ch021-tier-reader
+vet-round18-ch021-tier-reader:
+	bash scripts/run-ch021-tier-reader-checks.sh vet
+
+.PHONY: benchmark-round18-ch021-tier-reader
+benchmark-round18-ch021-tier-reader:
+	bash scripts/run-ch021-tier-reader-checks.sh benchmark
+
+.PHONY: package-round18-ch021-tier-reader
+package-round18-ch021-tier-reader:
+	bash scripts/run-ch021-tier-reader-checks.sh package
+
+.PHONY: stage-round18-ch021-tier-reader
+stage-round18-ch021-tier-reader:
+	bash scripts/stage-round18-ch021-tier-reader.sh
+
+.PHONY: commit-round18-ch021-tier-reader
+commit-round18-ch021-tier-reader:
+	bash scripts/commit-round18-ch021-tier-reader.sh
+
+.PHONY: push-round18-ch021-tier-reader
+push-round18-ch021-tier-reader:
+	bash scripts/push-round18-ch021-tier-reader.sh
+
 .PHONY: format-round17-ch020-cache
 format-round17-ch020-cache:
 	bash scripts/run-ch020-zero-copy-checks.sh format

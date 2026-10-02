@@ -4788,3 +4788,10 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+### Transparent storage-tier reads
+
+`hatStorage.StorageTierReader` provides an opt-in current-tier-first read
+policy for immutable parts. It retries only on the explicit
+`ErrStorageTierPartNotFound` sentinel and leaves all storage I/O and ownership
+decisions with the caller. See [CH021_TRANSPARENT_TIER_READS.md](CH021_TRANSPARENT_TIER_READS.md)
+and the [benchmark entry](BENCHMARK.md#ch-021-transparent-storage-tier-reads).

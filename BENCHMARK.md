@@ -32731,3 +32731,28 @@ Cold miss:     3943, 3358, 4169, 3836, 4130 ns/op; 24576 B/op; 1 alloc/op
 
 Generation invalidation, cache capacity, reusable destinations, and inverted
 bounds are covered by focused tests; see [TT013_RANGE_TUPLE_CACHE.md](TT013_RANGE_TUPLE_CACHE.md).
+## CH-021 Transparent Storage-Tier Reads
+
+This is an opt-in functionality feature, so the comparison measures its
+dispatch cost against the existing direct current-tier selector. All paths
+reported zero allocations and zero bytes per operation.
+
+| Path | Median ns/op | B/op | allocs/op | Relative to direct baseline |
+| --- | ---: | ---: | ---: | ---: |
+| Direct current-tier selection baseline | 11.61 | 0 | 0 | 1.00x |
+| Transparent reader, current-tier hit | 27.29 | 0 | 0 | 2.35x |
+| Transparent reader, not-found fallback | 42.94 | 0 | 0 | 3.70x |
+
+Raw runs:
+
+```text
+direct:   11.61, 11.89, 11.67, 11.31, 10.97 ns/op
+current:  27.29, 27.67, 27.67, 25.96, 25.84 ns/op
+fallback: 42.63, 42.94, 42.29, 44.14, 44.84 ns/op
+```
+
+The feature adds no allocation cost and does not change callers that use the
+existing direct APIs. It should be used when current-tier metadata may be
+stale and a not-found retry is preferable to exposing tier details to every
+caller. Full details and the exact benchmark target are in
+[CH021_TRANSPARENT_TIER_READS.md](CH021_TRANSPARENT_TIER_READS.md).
