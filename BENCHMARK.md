@@ -32580,3 +32580,19 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## T-U03 stored procedure registry
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X, with a 17-byte
+payload and `-benchtime=200ms`. The direct handler is a lower-bound baseline;
+it does not include authorization or boundary copies.
+
+| Operation | Median ns/op | B/op | allocs/op |
+|---|---:|---:|---:|
+| Direct handler baseline | 0.2412 | 0 | 0 |
+| Authorized registry call | 83.00 | 48 | 2 |
+| Three-entry registry listing | 188.0 | 176 | 4 |
+
+Raw samples: `make benchmark-tu03-procedure` on branch `codex/t-u02-peer-daemon`.
+The registry is disabled unless an application creates it, so this cost is not
+present on the default path.

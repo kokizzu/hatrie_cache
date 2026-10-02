@@ -734,3 +734,11 @@ Adopted as opt-in `hatStorage.CompactionDiagnostics`: bounded arrangement regist
 ## Materialize M-U41: Webhook Event Idempotency
 
 Adopted as opt-in `hatSql.WebhookEventDeduplicator`: bounded source/event-ID admission, payload-fingerprint conflict detection, expiry, deterministic CRC-protected HWE1 snapshots, and atomic restore. The caller owns application, durable storage, acknowledgement, and HTTP/webhook wiring; existing defaults remain unchanged. See [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md) and [BENCHMARK.md](BENCHMARK.md#m-u41-webhook-event-idempotency).
+
+## T-U03: Stored procedure registry
+
+Adopted as the importable `hat/hatProcedure` package. It registers trusted Go
+handlers under exact name/version pairs, requires an authorization callback,
+copies bounded payloads, propagates cancellation, and converts handler panics
+to errors. It is opt-in and does not execute untrusted scripts or expose a
+network registration path.

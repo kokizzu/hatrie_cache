@@ -22292,3 +22292,43 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+
+.PHONY: test-tu03-procedure
+test-tu03-procedure:
+	bash scripts/test-tu03-procedure.sh
+
+.PHONY: format-tu03-procedure
+format-tu03-procedure:
+	bash scripts/format-tu03-procedure.sh
+
+.PHONY: benchmark-tu03-procedure
+benchmark-tu03-procedure:
+	bash scripts/benchmark-tu03-procedure.sh
+
+.PHONY: test-tu03-package
+test-tu03-package:
+	bash scripts/test-tu03-package.sh
+
+.PHONY: race-tu03-procedure
+race-tu03-procedure:
+	bash scripts/race-tu03-procedure.sh
+
+.PHONY: vet-tu03-procedure
+vet-tu03-procedure:
+	bash scripts/vet-tu03-procedure.sh
+
+.PHONY: verify-tu03-procedure
+verify-tu03-procedure:
+	bash scripts/verify-tu03-procedure.sh
+
+.PHONY: stage-tu03-procedure
+stage-tu03-procedure:
+	bash scripts/deliver-tu03-procedure.sh stage
+
+.PHONY: commit-tu03-procedure
+commit-tu03-procedure:
+	bash scripts/deliver-tu03-procedure.sh commit
+
+.PHONY: push-tu03-procedure
+push-tu03-procedure:
+	bash scripts/deliver-tu03-procedure.sh push
