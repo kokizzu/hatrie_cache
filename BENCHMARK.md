@@ -24479,6 +24479,58 @@ BenchmarkCH019RemotePartCacheHitWithVerification-32 16529581 66.73 ns/op 982135.
 BenchmarkCH019RemotePartCacheHitWithVerification-32 18961641 57.67 ns/op 1136413.13 MB/s 0 B/op 0 allocs/op
 ```
 
+## CH-020 Zero-Copy Remote-Part Cache Admission
+
+The opt-in `RemotePartCacheOwnedLoader`, `GetOwned`, and `AcquireOwned` APIs
+transfer an immutable loader buffer directly into the bounded cache. The
+existing copy path remains the compatibility control. The focused benchmark
+uses a 64 KiB payload on Linux/amd64 with an AMD Ryzen 9 5950X and five samples
+per case.
+
+| Workload | Median ns/op | Median B/op | Median allocs/op | Improvement / cost |
+| --- | ---: | ---: | ---: | --- |
+| Pre-feature copy cold miss | 8,696 | 65,808 | 4 | baseline |
+| Post-feature copy cold miss | 7,799 | 65,808 | 4 | compatibility control |
+| `GetOwned` cold miss | 332.0 | 272 | 3 | 23.5x CPU; 241.9x lower B/op; 1.33x fewer allocs |
+| `AcquireOwned` cold miss, verification off | 389.8 | 336 | 4 | 20.0x CPU; 195.9x lower B/op; same alloc count |
+| `AcquireOwned` cold miss, SHA-256 verification on | 30,739 | 336 | 4 | integrity cost; no copy allocation |
+
+The gain comes from eliminating the 64 KiB copy. Ownership transfer is opt-in
+because the caller must not retain, mutate, or reuse the returned loader slice.
+The normal `Get`/`Acquire` APIs keep their previous copy behavior. See
+[CH020_ZERO_COPY_PARTS.md](CH020_ZERO_COPY_PARTS.md) for the contract and raw
+samples.
+
+Raw output:
+
+```text
+BenchmarkCH020RemotePartCacheCopyColdMissBaseline-32 157575 7646 ns/op 65808 B/op 4 allocs/op
+BenchmarkCH020RemotePartCacheCopyColdMissBaseline-32 135912 8273 ns/op 65808 B/op 4 allocs/op
+BenchmarkCH020RemotePartCacheCopyColdMissBaseline-32 140864 9183 ns/op 65808 B/op 4 allocs/op
+BenchmarkCH020RemotePartCacheCopyColdMissBaseline-32 126193 8696 ns/op 65809 B/op 4 allocs/op
+BenchmarkCH020RemotePartCacheCopyColdMissBaseline-32 142610 8904 ns/op 65809 B/op 4 allocs/op
+BenchmarkCH020RemotePartCacheCopyColdMissAfter-32 146920 7799 ns/op 65808 B/op 4 allocs/op
+BenchmarkCH020RemotePartCacheCopyColdMissAfter-32 168973 7175 ns/op 65808 B/op 4 allocs/op
+BenchmarkCH020RemotePartCacheCopyColdMissAfter-32 148792 8082 ns/op 65809 B/op 4 allocs/op
+BenchmarkCH020RemotePartCacheCopyColdMissAfter-32 171432 7239 ns/op 65810 B/op 4 allocs/op
+BenchmarkCH020RemotePartCacheCopyColdMissAfter-32 119902 8690 ns/op 65809 B/op 4 allocs/op
+BenchmarkCH020RemotePartCacheOwnedColdMiss-32 3745347 325.4 ns/op 272 B/op 3 allocs/op
+BenchmarkCH020RemotePartCacheOwnedColdMiss-32 3754467 322.2 ns/op 272 B/op 3 allocs/op
+BenchmarkCH020RemotePartCacheOwnedColdMiss-32 3741471 332.0 ns/op 272 B/op 3 allocs/op
+BenchmarkCH020RemotePartCacheOwnedColdMiss-32 3525028 338.8 ns/op 272 B/op 3 allocs/op
+BenchmarkCH020RemotePartCacheOwnedColdMiss-32 3527263 347.0 ns/op 272 B/op 3 allocs/op
+BenchmarkCH020RemotePartCacheOwnedAcquireColdMissNoVerification-32 2945000 389.8 ns/op 336 B/op 4 allocs/op
+BenchmarkCH020RemotePartCacheOwnedAcquireColdMissNoVerification-32 3098611 395.0 ns/op 336 B/op 4 allocs/op
+BenchmarkCH020RemotePartCacheOwnedAcquireColdMissNoVerification-32 2862544 402.7 ns/op 336 B/op 4 allocs/op
+BenchmarkCH020RemotePartCacheOwnedAcquireColdMissNoVerification-32 3078502 386.2 ns/op 336 B/op 4 allocs/op
+BenchmarkCH020RemotePartCacheOwnedAcquireColdMissNoVerification-32 3141662 386.7 ns/op 336 B/op 4 allocs/op
+BenchmarkCH020RemotePartCacheOwnedAcquireColdMissWithVerification-32 37611 31608 ns/op 336 B/op 4 allocs/op
+BenchmarkCH020RemotePartCacheOwnedAcquireColdMissWithVerification-32 35430 30367 ns/op 336 B/op 4 allocs/op
+BenchmarkCH020RemotePartCacheOwnedAcquireColdMissWithVerification-32 38284 30809 ns/op 336 B/op 4 allocs/op
+BenchmarkCH020RemotePartCacheOwnedAcquireColdMissWithVerification-32 39188 30739 ns/op 336 B/op 4 allocs/op
+BenchmarkCH020RemotePartCacheOwnedAcquireColdMissWithVerification-32 33619 30612 ns/op 336 B/op 4 allocs/op
+```
+
 ## CH-039 Automatic Distinct State Selection
 
 This benchmark compares the existing HyperLogLog distinct aggregate with

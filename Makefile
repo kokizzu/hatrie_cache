@@ -1,4 +1,40 @@
 .PHONY: verify-ch029-dictionary-join-c203
+.PHONY: format-round17-ch020-cache
+format-round17-ch020-cache:
+	bash scripts/run-ch020-zero-copy-checks.sh format
+
+.PHONY: test-round17-ch020-cache
+test-round17-ch020-cache:
+	bash scripts/run-ch020-zero-copy-checks.sh test
+
+.PHONY: race-round17-ch020-cache
+race-round17-ch020-cache:
+	bash scripts/run-ch020-zero-copy-checks.sh race
+
+.PHONY: vet-round17-ch020-cache
+vet-round17-ch020-cache:
+	bash scripts/run-ch020-zero-copy-checks.sh vet
+
+.PHONY: benchmark-round17-ch020-cache
+benchmark-round17-ch020-cache:
+	bash scripts/run-ch020-zero-copy-checks.sh benchmark
+
+.PHONY: package-round17-ch020-cache
+package-round17-ch020-cache:
+	bash scripts/run-ch020-zero-copy-checks.sh package
+
+.PHONY: stage-round17-ch020-cache
+stage-round17-ch020-cache:
+	bash scripts/stage-round17-ch020-cache.sh
+
+.PHONY: commit-round17-ch020-cache
+commit-round17-ch020-cache:
+	bash scripts/commit-round17-ch020-cache.sh
+
+.PHONY: push-round17-ch020-cache
+push-round17-ch020-cache:
+	bash scripts/push-round17-ch020-cache.sh
+
 .PHONY: format-ch019-remote-part-checks
 format-ch019-remote-part-checks:
 	bash scripts/run-ch019-remote-part-checks.sh format

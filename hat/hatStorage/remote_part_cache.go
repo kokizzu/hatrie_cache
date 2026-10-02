@@ -47,6 +47,12 @@ type RemotePartPrefetchOptions struct {
 // is copied once on a successful miss and is never mutated by the cache.
 type RemotePartCacheLoader func(context.Context, RemotePartReference) ([]byte, error)
 
+// RemotePartCacheOwnedLoader transfers ownership of one immutable remote part
+// to the cache. The loader must not retain, mutate, or reuse the returned slice
+// after the callback returns. Use this contract only when that ownership
+// transfer is safe; RemotePartCacheLoader remains the compatibility default.
+type RemotePartCacheOwnedLoader func(context.Context, RemotePartReference) ([]byte, error)
+
 // RemotePartCacheStats is a point-in-time cache accounting snapshot.
 type RemotePartCacheStats struct {
 	Entries          int
@@ -129,7 +135,16 @@ func NewRemotePartCache(options RemotePartCacheOptions) (*RemotePartCache, error
 // keeps its backing storage alive even if a later eviction removes the cache
 // entry; use Acquire when eviction should also be prevented during a read.
 func (cache *RemotePartCache) Get(ctx context.Context, reference RemotePartReference, priority int, loader RemotePartCacheLoader) ([]byte, error) {
-	data, _, err := cache.load(ctx, reference, priority, loader, false)
+	data, _, err := cache.load(ctx, reference, priority, loader, false, false)
+	return data, err
+}
+
+// GetOwned returns an immutable cached part while adopting the loader's buffer
+// on a successful miss. The loader must transfer ownership as documented by
+// RemotePartCacheOwnedLoader; the returned slice must not be mutated by the
+// caller.
+func (cache *RemotePartCache) GetOwned(ctx context.Context, reference RemotePartReference, priority int, loader RemotePartCacheOwnedLoader) ([]byte, error) {
+	data, _, err := cache.load(ctx, reference, priority, loader, false, true)
 	return data, err
 }
 
@@ -137,7 +152,18 @@ func (cache *RemotePartCache) Get(ctx context.Context, reference RemotePartRefer
 // Release. If the cache cannot admit the part because its budget is full of
 // pinned entries, the handle serves the loaded bytes without retaining them.
 func (cache *RemotePartCache) Acquire(ctx context.Context, reference RemotePartReference, priority int, loader RemotePartCacheLoader) (*RemotePartHandle, error) {
-	data, entry, err := cache.load(ctx, reference, priority, loader, true)
+	data, entry, err := cache.load(ctx, reference, priority, loader, true, false)
+	if err != nil {
+		return nil, err
+	}
+	return &RemotePartHandle{cache: cache, entry: entry, data: data}, nil
+}
+
+// AcquireOwned returns an immutable part handle while adopting the loader's
+// buffer on a successful miss. Release still controls pinning, and the loader
+// must transfer ownership as documented by RemotePartCacheOwnedLoader.
+func (cache *RemotePartCache) AcquireOwned(ctx context.Context, reference RemotePartReference, priority int, loader RemotePartCacheOwnedLoader) (*RemotePartHandle, error) {
+	data, entry, err := cache.load(ctx, reference, priority, loader, true, true)
 	if err != nil {
 		return nil, err
 	}
@@ -309,7 +335,7 @@ func (cache *RemotePartCache) Invalidate(reference RemotePartReference) bool {
 	return true
 }
 
-func (cache *RemotePartCache) load(ctx context.Context, reference RemotePartReference, priority int, loader RemotePartCacheLoader, pin bool) ([]byte, *remotePartCacheEntry, error) {
+func (cache *RemotePartCache) load(ctx context.Context, reference RemotePartReference, priority int, loader func(context.Context, RemotePartReference) ([]byte, error), pin bool, adopt bool) ([]byte, *remotePartCacheEntry, error) {
 	if cache == nil {
 		return nil, nil, ErrRemotePartCacheNil
 	}
@@ -375,7 +401,10 @@ func (cache *RemotePartCache) load(ctx context.Context, reference RemotePartRefe
 		var entry *remotePartCacheEntry
 		var owned []byte
 		if loadErr == nil {
-			owned = append([]byte(nil), data...)
+			owned = data
+			if !adopt {
+				owned = append([]byte(nil), data...)
+			}
 			cache.mu.Lock()
 			if cache.makeRoomLocked(uint64(len(owned))) {
 				cache.clock++

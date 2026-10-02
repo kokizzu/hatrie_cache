@@ -4529,6 +4529,16 @@ retry, and repair remain caller-owned. See
 [CH019_REMOTE_PART_CHECKS.md](CH019_REMOTE_PART_CHECKS.md) and the
 [CH-019 benchmark](BENCHMARK.md#ch-019-remote-part-checksum-admission).
 
+### Zero-copy remote-part cache admission
+
+Callers that can transfer ownership of an immutable loader buffer can use
+`hatStorage.RemotePartCache.GetOwned` or `AcquireOwned` through the
+`RemotePartCacheOwnedLoader` contract. These APIs avoid the cache-admission
+copy; the existing `Get` and `Acquire` APIs still copy by default. Checksum and
+size validation remain active when configured, and the caller must never reuse
+or mutate a transferred buffer. See [CH020_ZERO_COPY_PARTS.md](CH020_ZERO_COPY_PARTS.md)
+and the [CH-020 benchmark](BENCHMARK.md#ch-020-zero-copy-remote-part-cache-admission).
+
 ### Idempotent SQL mutation retries
 
 `POST /api/sql` is read-only by default. Add a stable `mutation_id` to opt into

@@ -47,7 +47,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-017 | Async-insert deduplication | No idempotency token ledger for safely retrying queued inserts. | Medium |
 | CH-018 | Insert quorum | No write acknowledgement policy requiring a configured replica quorum. | High |
 | CH-019 | Replicated-part checks | Partially adopted: opt-in `RemotePartCacheOptions.VerifyChecksums` validates supported SHA-256 checksums before cache admission; alternate-replica discovery, manifest repair, and remote cleanup remain caller-owned. | High |
-| CH-020 | Zero-copy part sharing | No remote part registration that avoids copying immutable storage between replicas. | High |
+| CH-020 | Zero-copy part sharing | Partially adopted: `RemotePartCacheOwnedLoader`, `GetOwned`, and `AcquireOwned` can retain immutable loader buffers without a cache-admission copy; ordinary APIs remain copy-safe and cross-replica registration remains caller-owned. | High |
 | CH-021 | Object-storage tiering | No hot/local and cold/object-storage tier with transparent reads. | High |
 | CH-022 | Incremental part backup | Adopted as content-addressed object storage with manifest-level changed-object accounting and an optional durable `BackupManifestCatalog` for incremental chain planning; retention execution remains caller-managed. | Medium |
 | CH-023 | Selective partition restore | Partially adopted for opt-in snapshot restores: a validated partition/prefix subset can be restored atomically; checkpoint-only markers and a safe single-key replay tail are handled, while complex replay commands and persistent-store subset restores remain rejected. | Medium |
