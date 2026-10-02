@@ -4803,3 +4803,14 @@ generation fencing. It does not move or delete bytes; callers own storage I/O,
 cache invalidation, persistence, and replication. See
 [CH024_DETACH_ATTACH.md](CH024_DETACH_ATTACH.md) and the
 [benchmark entry](BENCHMARK.md#ch-024-detachattach-parts).
+
+### Compaction merge selectors
+
+`hatStorage.CompactionMergeSelector` provides an opt-in deterministic policy
+for selecting bounded immutable-part merge candidates. Size-tiered selection
+groups similarly sized parts; time-aware selection chooses the oldest eligible
+window. It validates names and budgets but does not perform storage I/O,
+delete parts, or schedule merges. The default remains unchanged and no read
+path invokes it automatically. See
+[CH026_MERGE_SELECTOR.md](CH026_MERGE_SELECTOR.md) and the
+[benchmark entry](BENCHMARK.md#ch-026-merge-selector-policies).

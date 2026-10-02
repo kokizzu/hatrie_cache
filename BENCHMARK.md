@@ -32783,3 +32783,30 @@ lookup overhead buys copy-safe state snapshots, while generation fencing and
 pre-publication verification protect the explicit repair workflow. See
 [CH024_DETACH_ATTACH.md](CH024_DETACH_ATTACH.md) for the exact commands and
 scope boundaries.
+
+## CH-026 Merge Selector Policies
+
+This measures the opt-in deterministic merge selector against the legacy
+bounded sort on 256 candidates. The size-tiered selector uses four parts, a
+64 MiB total budget, and a 1.5 size ratio. The time-aware selector uses four
+parts, the same byte budget, and a 24-hour time span. Five samples were run on
+Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Legacy bounded sort | 20,388 | 13,688 | 4 | Baseline |
+| Size-tiered selector | 31,355 | 27,488 | 8 | 1.54x CPU, 2.01x heap, 2.00x allocations |
+| Time-aware selector | 23,146 | 27,488 | 8 | 1.14x CPU, 2.01x heap, 2.00x allocations |
+
+Raw samples:
+
+```text
+Legacy:  21634, 20903, 20388, 20284, 20347 ns/op; 13688 B/op; 4 allocs/op
+Size:    30578, 30780, 31355, 31632, 31870 ns/op; 27488 B/op; 8 allocs/op
+Time:    24378, 23031, 23146, 23420, 23064 ns/op; 27488 B/op; 8 allocs/op
+```
+
+This is a capability benchmark, not a default-path speedup. The selector is
+caller-owned and opt-in, so the measured planning cost is not added to normal
+reads or existing direct compaction selection. See
+[CH026_MERGE_SELECTOR.md](CH026_MERGE_SELECTOR.md) for the API and scope.

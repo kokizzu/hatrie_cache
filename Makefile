@@ -22513,3 +22513,35 @@ commit-round19-ch024-detach:
 .PHONY: push-round19-ch024-detach
 push-round19-ch024-detach:
 	bash scripts/push-round19-ch024-detach.sh
+.PHONY: format-round20-ch026-merge-selector
+format-round20-ch026-merge-selector:
+	bash scripts/run-ch026-merge-selector-checks.sh format
+
+.PHONY: test-round20-ch026-merge-selector
+test-round20-ch026-merge-selector:
+	bash scripts/run-ch026-merge-selector-checks.sh test
+
+.PHONY: race-round20-ch026-merge-selector
+race-round20-ch026-merge-selector:
+	bash scripts/run-ch026-merge-selector-checks.sh race
+
+.PHONY: vet-round20-ch026-merge-selector
+vet-round20-ch026-merge-selector:
+	bash scripts/run-ch026-merge-selector-checks.sh vet
+
+.PHONY: benchmark-round20-ch026-merge-selector
+benchmark-round20-ch026-merge-selector:
+	bash scripts/run-ch026-merge-selector-checks.sh benchmark
+
+.PHONY: package-round20-ch026-merge-selector
+package-round20-ch026-merge-selector:
+	bash scripts/run-ch026-merge-selector-checks.sh package
+
+stage-round20-ch026-merge-selector:
+	bash scripts/stage-round20-ch026-merge-selector.sh
+
+commit-round20-ch026-merge-selector:
+	bash scripts/commit-round20-ch026-merge-selector.sh
+
+push-round20-ch026-merge-selector:
+	bash scripts/push-round20-ch026-merge-selector.sh
