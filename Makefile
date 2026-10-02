@@ -22292,3 +22292,31 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: test-mu36-red
+test-mu36-red:
+	bash scripts/test-mu36-red.sh
+
+.PHONY: format-mu36
+format-mu36:
+	bash scripts/format-mu36.sh
+
+.PHONY: benchmark-mu36 race-mu36 vet-mu36
+benchmark-mu36:
+	bash scripts/benchmark-mu36.sh
+
+race-mu36:
+	bash scripts/race-mu36.sh
+
+vet-mu36:
+	bash scripts/vet-mu36.sh
+
+.PHONY: test-mu36-package
+test-mu36-package:
+	bash scripts/test-mu36-package.sh
+
+.PHONY: status-mu36 deliver-mu36
+status-mu36:
+	bash scripts/status-mu36.sh
+
+deliver-mu36:
+	bash scripts/deliver-mu36.sh
