@@ -1,149 +1,100 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-mode="${1:-audit}"
-tmp_root="/tmp"
-plan_file="${HATRIE_TMP_CLEANUP_PLAN:-/tmp/.hatrie-tmp-cleanup.plan}"
-repo_root="$(pwd -P)"
+mode="${1:-plan}"
+plan_file="${HATRIE_TMP_PLAN:-/tmp/hatrie-cache-cleanup-plan.tsv}"
+entries_file="${plan_file}.entries"
+worktrees_file="${plan_file}.worktrees"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-case "$mode" in
-  audit|plan|preview|apply)
-    ;;
-  *)
-  printf 'usage: %s [audit|plan|preview|apply]\n' "$0" >&2
-    exit 2
-    ;;
-esac
+is_protected() {
+  [[ "$1" == "$plan_file" || "$1" == "$entries_file" || "$1" == "$worktrees_file" || "$1" == "$repo_root" ]]
+}
 
-if [[ ! -d "$tmp_root" ]]; then
-  printf 'tmp root is missing: %s\n' "$tmp_root" >&2
-  exit 1
-fi
-
-worktree_file="$(mktemp /tmp/.hatrie-worktrees.XXXXXX)"
-trap 'rm -f -- "$worktree_file"' EXIT
-git -C "$repo_root" worktree list --porcelain > "$worktree_file"
-
-declare -a active_worktrees=()
-while IFS= read -r line; do
-  case "$line" in
-    worktree\ *)
-      active_worktrees+=("${line#worktree }")
-      ;;
-  esac
-done < "$worktree_file"
-
-is_active_worktree() {
+is_registered_worktree() {
   local candidate="$1"
-  local active
-  for active in "${active_worktrees[@]}"; do
-    if [[ "$candidate" == "$active" || "$candidate" == "$active"/* ]]; then
-      return 0
-    fi
-  done
+  local line
+  while IFS= read -r line; do
+    case "$line" in
+      worktree\ *)
+        [[ "${line#worktree }" == "$candidate" ]] && return 0
+        ;;
+    esac
+  done <"$worktrees_file"
   return 1
-}
-
-is_worktree_like() {
-  local name="$1"
-  case "$name" in
-    hatrie-cache-inspiration-*|hatrie-cache-worktree-*|hatrie-worktree-*)
-      return 0
-      ;;
-  esac
-  return 1
-}
-
-is_generated_candidate() {
-  local path="$1"
-  local name="${path##*/}"
-  if is_active_worktree "$path" || is_worktree_like "$name"; then
-    return 1
-  fi
-  case "$name" in
-    hatrie-build-*|hatrie-test-*|hatrie-cache-test-*|hatrie_cache_test_*|hatrie-*-gocache.*|hatrie-gocache.*|hatrie-*-test.*|hatrie-*.tmp|hatrie-*.plan|hatrie-*.cover|hatrie-*.prof|hatrie-*.log|hatrie-*.out)
-      return 0
-      ;;
-  esac
-  return 1
-}
-
-describe_path() {
-  local path="$1"
-  local name="${path##*/}"
-  local kind="REVIEW"
-  if is_active_worktree "$path"; then
-    kind="KEEP active-worktree"
-  elif is_worktree_like "$name"; then
-    kind="KEEP worktree-like"
-  elif is_generated_candidate "$path"; then
-    kind="CANDIDATE generated"
-  fi
-  printf '%s\t%s\t' "$kind" "$path"
-  du -sh -- "$path" 2>/dev/null || printf '?\t'
-  stat -c '%y' -- "$path" 2>/dev/null || printf 'unknown\n'
-}
-
-collect_entries() {
-  local path
-  while IFS= read -r -d '' path; do
-    describe_path "$path"
-  done < <(find "$tmp_root" -mindepth 1 -maxdepth 1 -name 'hatrie*' -print0)
-}
-
-write_plan() {
-  local path
-  : > "$plan_file"
-  while IFS= read -r -d '' path; do
-    if is_generated_candidate "$path"; then
-      printf '%s\n' "$path" >> "$plan_file"
-    fi
-  done < <(find "$tmp_root" -mindepth 1 -maxdepth 1 -name 'hatrie*' -print0)
 }
 
 case "$mode" in
-  audit)
-    printf 'Hatrie /tmp audit (no changes)\n'
-    printf 'Registered worktrees are protected, including nested contents.\n'
-    collect_entries
-    ;;
-  plan|preview)
-    write_plan
-    printf 'Hatrie /tmp cleanup preview\n'
-    printf 'Plan: %s\n' "$plan_file"
-    if [[ -s "$plan_file" ]]; then
-      while IFS= read -r path; do
-        describe_path "$path"
-      done < "$plan_file"
-    else
-      printf 'Plan: none\n'
-    fi
+  plan)
+    [[ "$plan_file" == /tmp/* ]] || {
+      printf 'refusing plan outside /tmp: %s\n' "$plan_file" >&2
+      exit 1
+    }
+    umask 077
+    : >"$plan_file"
+    git worktree list --porcelain >"$worktrees_file"
+    find /tmp -mindepth 1 -maxdepth 1 -print0 >"$entries_file"
+    printf 'Hatrie temporary cleanup plan: %s\n' "$plan_file"
+    found=0
+    while IFS= read -r -d '' path; do
+      base="${path##*/}"
+      case "$base" in
+        hatrie*|hatrie_cache*)
+          found=1
+          if is_protected "$path"; then
+            printf 'KEEP\t%s\n' "$path"
+          elif is_registered_worktree "$path"; then
+            printf 'REMOVE_WORKTREE\t%s\n' "$path" >>"$plan_file"
+            printf 'REMOVE_WORKTREE\t%s\n' "$path"
+          else
+            printf 'REMOVE_PATH\t%s\n' "$path" >>"$plan_file"
+            printf 'REMOVE_PATH\t%s\n' "$path"
+          fi
+          ;;
+      esac
+    done <"$entries_file"
+    [[ "$found" -eq 1 ]] || printf 'no Hatrie-named temporary paths\n'
+    printf 'Top-level generic go-build directories are not selected automatically:\n'
+    find /tmp -mindepth 1 -maxdepth 1 -type d -name 'go-build*' -print
+    rm -f -- "$entries_file" "$worktrees_file"
     ;;
   apply)
-    if [[ ! -f "$plan_file" ]]; then
-      printf 'cleanup plan is missing; run cleanup-hatrie-tmp-preview first: %s\n' "$plan_file" >&2
+    [[ -f "$plan_file" ]] || {
+      printf 'missing cleanup plan: %s\n' "$plan_file" >&2
       exit 1
-    fi
-    removed=0
-    while IFS= read -r path; do
-      [[ -n "$path" ]] || continue
-      if [[ "$path" != "$tmp_root"/* ]]; then
+    }
+    while IFS=$'\t' read -r action path; do
+      [[ -n "$action" ]] || continue
+      [[ "$path" == /tmp/* ]] || {
         printf 'refusing path outside /tmp: %s\n' "$path" >&2
         exit 1
-      fi
-      if [[ ! -e "$path" && ! -L "$path" ]]; then
-        printf 'already absent: %s\n' "$path"
-        continue
-      fi
-      if ! is_generated_candidate "$path"; then
-        printf 'refusing changed or protected path: %s\n' "$path" >&2
+      }
+      [[ "${path##*/}" == *[hH][aA][tT][rR][iI][eE]* ]] || {
+        printf 'refusing path without Hatrie name: %s\n' "$path" >&2
         exit 1
-      fi
-      rm -rf -- "$path"
-      printf 'removed: %s\n' "$path"
-      removed=$((removed + 1))
-    done < "$plan_file"
+      }
+      is_protected "$path" && {
+        printf 'refusing protected path: %s\n' "$path" >&2
+        exit 1
+      }
+      case "$action" in
+        REMOVE_WORKTREE)
+          git worktree remove --force "$path"
+          ;;
+        REMOVE_PATH)
+          rm -rf -- "$path"
+          ;;
+        *)
+          printf 'unknown cleanup action: %s\n' "$action" >&2
+          exit 1
+          ;;
+      esac
+    done <"$plan_file"
     rm -f -- "$plan_file"
-    printf 'Removed: %d\n' "$removed"
+    printf 'Applied and removed the cleanup plan.\n'
+    ;;
+  *)
+    printf 'usage: %s plan|apply\n' "$0" >&2
+    exit 2
     ;;
 esac

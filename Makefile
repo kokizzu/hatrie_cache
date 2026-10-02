@@ -22292,3 +22292,20 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: hatrie-tmp-audit hatrie-tmp-plan hatrie-tmp-apply hatrie-tmp-clean
+
+hatrie-tmp-audit:
+	bash scripts/audit-hatrie-tmp.sh
+
+hatrie-tmp-plan:
+	bash scripts/cleanup-hatrie-tmp.sh plan
+
+hatrie-tmp-apply:
+	bash scripts/cleanup-hatrie-tmp.sh apply
+
+hatrie-tmp-clean:
+	bash scripts/cleanup-hatrie-tmp.sh plan
+	bash scripts/cleanup-hatrie-tmp.sh apply
+
+hatrie-tmp-deliver:
+	bash scripts/deliver-tmp-hatrie-cleanup.sh
