@@ -22292,3 +22292,47 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+benchmark-tu23-before:
+	bash scripts/benchmark-tu23-before.sh
+
+format-tu23:
+	bash scripts/format-tu23.sh
+
+test-tu23:
+	bash scripts/test-tu23.sh
+
+test-tu23-package:
+	bash scripts/test-tu23-package.sh
+
+race-tu23:
+	bash scripts/race-tu23.sh
+
+race-tu23-package:
+	bash scripts/race-tu23-package.sh
+
+vet-tu23:
+	bash scripts/vet-tu23.sh
+
+benchmark-tu23:
+	bash scripts/benchmark-tu23.sh
+
+benchmark-tu23-comparison:
+	bash scripts/benchmark-tu23-comparison.sh
+
+benchmark-tu23-existing-lookup:
+	bash scripts/benchmark-tu23-existing-lookup.sh
+
+benchmark-tu23-existing-build:
+	bash scripts/benchmark-tu23-existing-build.sh
+
+benchmark-tu23-bounded-build:
+	bash scripts/benchmark-tu23-bounded-build.sh
+
+verify-tu23:
+	bash scripts/verify-tu23.sh
+
+status-tu23:
+	bash scripts/status-tu23.sh
+
+deliver-tu23:
+	bash scripts/deliver-tu23.sh

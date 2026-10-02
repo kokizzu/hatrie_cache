@@ -1,188 +1,324 @@
 package hatDataStructure
 
 import (
-	"fmt"
-	"sort"
+	"errors"
 	"sync"
 )
 
-// StringMultikeyIndexOptions bounds the state held by a
-// StringMultikeyIndex. A nonpositive limit means unlimited.
-type StringMultikeyIndexOptions struct {
-	MaxKeysPerItem int
-	MaxItems       int
+const (
+	// DefaultMultiKeyIndexMaxKeysPerEntry bounds the number of distinct keys
+	// derived from one record unless a caller provides a smaller limit.
+	DefaultMultiKeyIndexMaxKeysPerEntry = 64
+	maxMultiKeyIndexKeysPerEntry        = 4096
+	multiKeyIndexStackKeys              = 16
+)
+
+var (
+	// ErrMultiKeyIndexNil indicates that an operation was attempted on a nil
+	// index.
+	ErrMultiKeyIndexNil = errors.New("hatDataStructure: multi-key index is nil")
+	// ErrMultiKeyIndexExtractorRequired indicates that no key extractor was
+	// supplied.
+	ErrMultiKeyIndexExtractorRequired = errors.New("hatDataStructure: multi-key index extractor is required")
+	// ErrMultiKeyIndexLimit indicates that a configured key bound was exceeded.
+	ErrMultiKeyIndexLimit = errors.New("hatDataStructure: multi-key index limit exceeded")
+)
+
+// MultiKeyIndexOptions controls the initial map sizing and per-record key
+// bound. Duplicate elements from one record are indexed only once.
+type MultiKeyIndexOptions struct {
+	Capacity        int
+	MaxKeysPerEntry int
+	MaxItems        int
 }
 
-// StringMultikeyIndex maps each string key to sorted item IDs. It is intended
-// for read-heavy array-membership indexes: posting lists are compact slices,
-// while the reverse map makes replacement and deletion exact.
-type StringMultikeyIndex struct {
-	mu      sync.RWMutex
-	options StringMultikeyIndexOptions
-	byKey   map[string]u64PostingList
-	byID    map[uint64][]string
+// MultiKeyIndexEntry is one exact-match result with its stable ID, matched
+// key, and value.
+type MultiKeyIndexEntry[T any, K comparable] struct {
+	ID    uint64
+	Key   K
+	Value T
 }
 
-// NewStringMultikeyIndex creates an empty bounded multikey index.
-func NewStringMultikeyIndex(options StringMultikeyIndexOptions) *StringMultikeyIndex {
-	return &StringMultikeyIndex{
-		options: options,
-		byKey:   make(map[string]u64PostingList),
-		byID:    make(map[uint64][]string),
+type multiKeyIndexEntry[T any, K comparable] struct {
+	keys  []K
+	value T
+}
+
+// MultiKeyIndex maps every distinct key derived from a record to that
+// record's stable ID. It uses the same compact singleton/two-item/rest posting
+// representation as HashIndex and keeps a reverse ID map for exact updates
+// and deletes.
+type MultiKeyIndex[T any, K comparable] struct {
+	mu              sync.RWMutex
+	extractor       func(T) []K
+	maxKeysPerEntry int
+	maxItems        int
+	entries         map[uint64]multiKeyIndexEntry[T, K]
+	postings        map[K]u64PostingList
+}
+
+// NewMultiKeyIndex creates an empty typed multikey index.
+func NewMultiKeyIndex[T any, K comparable](extractor func(T) []K, options MultiKeyIndexOptions) (*MultiKeyIndex[T, K], error) {
+	if extractor == nil {
+		return nil, ErrMultiKeyIndexExtractorRequired
 	}
+	if options.Capacity < 0 {
+		options.Capacity = 0
+	}
+	if options.MaxItems < 0 {
+		return nil, ErrMultiKeyIndexLimit
+	}
+	maxKeys := options.MaxKeysPerEntry
+	if maxKeys == 0 {
+		maxKeys = DefaultMultiKeyIndexMaxKeysPerEntry
+	}
+	if maxKeys < 1 || maxKeys > maxMultiKeyIndexKeysPerEntry {
+		return nil, ErrMultiKeyIndexLimit
+	}
+	return &MultiKeyIndex[T, K]{
+		extractor:       extractor,
+		maxKeysPerEntry: maxKeys,
+		maxItems:        options.MaxItems,
+		entries:         make(map[uint64]multiKeyIndexEntry[T, K], options.Capacity),
+		postings:        make(map[K]u64PostingList, options.Capacity),
+	}, nil
 }
 
-// Set replaces all keys associated with id. Input keys are deduplicated and
-// sorted before mutation. Validation and capacity checks happen before any
-// existing state is changed, so rejected updates are atomic.
-func (index *StringMultikeyIndex) Set(id uint64, keys []string) error {
+// Upsert inserts or replaces a value for id. A record with repeated keys is
+// represented once per distinct key. An oversized input is rejected before
+// any index state changes.
+func (index *MultiKeyIndex[T, K]) Upsert(id uint64, value T) error {
 	if index == nil {
-		return fmt.Errorf("string multikey index is nil")
+		return ErrMultiKeyIndexNil
 	}
-	normalized, err := normalizeStringMultikeyKeys(keys, index.options.MaxKeysPerItem)
-	if err != nil {
-		return err
+	rawKeys := index.extractor(value)
+	if len(rawKeys) > index.maxKeysPerEntry {
+		return ErrMultiKeyIndexLimit
+	}
+
+	var stackKeys [multiKeyIndexStackKeys]K
+	keys := stackKeys[:0]
+	for _, key := range rawKeys {
+		duplicate := false
+		for _, existingKey := range keys {
+			if existingKey == key {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			keys = append(keys, key)
+		}
 	}
 
 	index.mu.Lock()
 	defer index.mu.Unlock()
-	old, exists := index.byID[id]
-	if !exists && index.options.MaxItems > 0 && len(index.byID) >= index.options.MaxItems {
-		return fmt.Errorf("string multikey index item limit exceeded: maximum %d", index.options.MaxItems)
+	index.ensureInitializedLocked()
+
+	current, exists := index.entries[id]
+	if !exists && index.maxItems > 0 && len(index.entries) >= index.maxItems {
+		return ErrMultiKeyIndexLimit
 	}
-	if stringMultikeyKeysEqual(old, normalized) {
+	if exists && multiKeyIndexKeySetsEqual(current.keys, keys) {
+		index.entries[id] = multiKeyIndexEntry[T, K]{keys: current.keys, value: value}
 		return nil
 	}
-	for _, key := range old {
-		index.removePosting(key, id)
+
+	var storedKeys []K
+	if exists && len(current.keys) == len(keys) {
+		storedKeys = current.keys
+	} else if len(keys) > 0 {
+		storedKeys = make([]K, len(keys))
 	}
-	if len(normalized) == 0 {
-		delete(index.byID, id)
-		return nil
+	if exists {
+		for _, key := range current.keys {
+			index.removeKeyLocked(key, id)
+		}
 	}
-	for _, key := range normalized {
-		index.insertPosting(key, id)
+	copy(storedKeys, keys)
+	for _, key := range storedKeys {
+		index.insertPostingLocked(key, id)
 	}
-	index.byID[id] = normalized
+	index.entries[id] = multiKeyIndexEntry[T, K]{keys: storedKeys, value: value}
 	return nil
 }
 
-// Delete removes id and all of its postings. It reports whether id existed.
-func (index *StringMultikeyIndex) Delete(id uint64) bool {
+// Delete removes id and reports whether it was present.
+func (index *MultiKeyIndex[T, K]) Delete(id uint64) bool {
 	if index == nil {
 		return false
 	}
 	index.mu.Lock()
 	defer index.mu.Unlock()
-	keys, exists := index.byID[id]
+	entry, exists := index.entries[id]
 	if !exists {
 		return false
 	}
-	for _, key := range keys {
-		index.removePosting(key, id)
+	delete(index.entries, id)
+	for _, key := range entry.keys {
+		index.removeKeyLocked(key, id)
 	}
-	delete(index.byID, id)
 	return true
 }
 
-// Lookup appends sorted matching item IDs to dst and returns the resulting
-// slice. Passing a reusable destination avoids an allocation on the caller's
-// hot path; a nil destination allocates only when matches exist.
-func (index *StringMultikeyIndex) Lookup(key string, dst []uint64) []uint64 {
+// LookupOne returns the lowest stable ID matching key. Use Lookup for all
+// matching values.
+func (index *MultiKeyIndex[T, K]) LookupOne(key K) (MultiKeyIndexEntry[T, K], bool) {
 	if index == nil {
-		if dst != nil {
-			return dst[:0]
-		}
-		return nil
+		return MultiKeyIndexEntry[T, K]{}, false
 	}
 	index.mu.RLock()
 	defer index.mu.RUnlock()
-	posting, ok := index.byKey[key]
+	posting, ok := index.postings[key]
 	if !ok {
-		if dst != nil {
-			return dst[:0]
-		}
-		return nil
+		return MultiKeyIndexEntry[T, K]{}, false
 	}
-	return posting.values(dst[:0])
+	entry, ok := index.entries[posting.first]
+	if !ok {
+		return MultiKeyIndexEntry[T, K]{}, false
+	}
+	return MultiKeyIndexEntry[T, K]{ID: posting.first, Key: key, Value: entry.value}, true
 }
 
-// Contains reports whether id is indexed under key.
-func (index *StringMultikeyIndex) Contains(key string, id uint64) bool {
+// Contains reports whether key has at least one indexed ID.
+func (index *MultiKeyIndex[T, K]) Contains(key K) bool {
 	if index == nil {
 		return false
 	}
 	index.mu.RLock()
 	defer index.mu.RUnlock()
-	posting, ok := index.byKey[key]
-	if !ok {
+	_, ok := index.postings[key]
+	return ok
+}
+
+// ContainsID reports whether id is currently present in the posting for key.
+func (index *MultiKeyIndex[T, K]) ContainsID(key K, id uint64) bool {
+	if index == nil {
 		return false
 	}
-	if posting.first == id {
-		return true
+	index.mu.RLock()
+	defer index.mu.RUnlock()
+	posting, ok := index.postings[key]
+	if !ok {
+		return false
 	}
 	if posting.rest == nil {
-		return false
+		return posting.first == id
 	}
-	if posting.rest.first == id {
+	if posting.first == id || posting.rest.first == id {
 		return true
 	}
-	position := sort.Search(len(posting.rest.rest), func(position int) bool { return posting.rest.rest[position] >= id })
-	return position < len(posting.rest.rest) && posting.rest.rest[position] == id
+	for _, candidate := range posting.rest.rest {
+		if candidate == id {
+			return true
+		}
+	}
+	return false
 }
 
-// Len returns the number of items with at least one indexed key.
-func (index *StringMultikeyIndex) Len() int {
+// Lookup returns values whose derived key equals key in stable ID order.
+func (index *MultiKeyIndex[T, K]) Lookup(key K) []T {
+	return index.LookupInto(key, nil)
+}
+
+// LookupInto resets dst and appends values whose derived key equals key. A
+// caller-owned destination avoids result allocation on repeated lookups.
+func (index *MultiKeyIndex[T, K]) LookupInto(key K, dst []T) []T {
+	dst = dst[:0]
+	if index == nil {
+		return dst
+	}
+	index.mu.RLock()
+	defer index.mu.RUnlock()
+	posting, ok := index.postings[key]
+	if !ok {
+		return dst
+	}
+	if posting.rest == nil {
+		if entry, exists := index.entries[posting.first]; exists {
+			return append(dst, entry.value)
+		}
+		return dst
+	}
+	if entry, exists := index.entries[posting.first]; exists {
+		dst = append(dst, entry.value)
+	}
+	if entry, exists := index.entries[posting.rest.first]; exists {
+		dst = append(dst, entry.value)
+	}
+	for _, id := range posting.rest.rest {
+		if entry, exists := index.entries[id]; exists {
+			dst = append(dst, entry.value)
+		}
+	}
+	return dst
+}
+
+// LookupIDs returns stable IDs whose derived key equals key.
+func (index *MultiKeyIndex[T, K]) LookupIDs(key K) []uint64 {
+	return index.LookupIDsInto(key, nil)
+}
+
+// LookupIDsInto resets dst and appends stable IDs whose derived key equals
+// key. A caller-owned destination avoids result allocation on repeated
+// lookups.
+func (index *MultiKeyIndex[T, K]) LookupIDsInto(key K, dst []uint64) []uint64 {
+	dst = dst[:0]
+	if index == nil {
+		return dst
+	}
+	index.mu.RLock()
+	defer index.mu.RUnlock()
+	posting, ok := index.postings[key]
+	if !ok {
+		return dst
+	}
+	return posting.values(dst)
+}
+
+// Len returns the number of indexed IDs, including records with no keys.
+func (index *MultiKeyIndex[T, K]) Len() int {
 	if index == nil {
 		return 0
 	}
 	index.mu.RLock()
 	defer index.mu.RUnlock()
-	return len(index.byID)
+	return len(index.entries)
 }
 
-// KeyCount returns the number of distinct keys with at least one posting.
-func (index *StringMultikeyIndex) KeyCount() int {
+// DistinctKeys returns the number of keys with at least one indexed ID.
+func (index *MultiKeyIndex[T, K]) DistinctKeys() int {
 	if index == nil {
 		return 0
 	}
 	index.mu.RLock()
 	defer index.mu.RUnlock()
-	return len(index.byKey)
+	return len(index.postings)
 }
 
-func normalizeStringMultikeyKeys(keys []string, maxKeys int) ([]string, error) {
-	if maxKeys > 0 && len(keys) > maxKeys {
-		return nil, fmt.Errorf("string multikey key limit exceeded: maximum %d", maxKeys)
+// Clear removes all entries while retaining the extractor and key bound.
+func (index *MultiKeyIndex[T, K]) Clear() {
+	if index == nil {
+		return
 	}
-	if len(keys) == 0 {
-		return nil, nil
-	}
-	normalized := append([]string(nil), keys...)
-	sort.Strings(normalized)
-	unique := normalized[:0]
-	for _, key := range normalized {
-		if len(unique) == 0 || unique[len(unique)-1] != key {
-			unique = append(unique, key)
-		}
-	}
-	return unique, nil
+	index.mu.Lock()
+	defer index.mu.Unlock()
+	index.entries = nil
+	index.postings = nil
 }
 
-func stringMultikeyKeysEqual(left, right []string) bool {
-	if len(left) != len(right) {
-		return false
+func (index *MultiKeyIndex[T, K]) ensureInitializedLocked() {
+	if index.entries == nil {
+		index.entries = make(map[uint64]multiKeyIndexEntry[T, K])
 	}
-	for index := range left {
-		if left[index] != right[index] {
-			return false
-		}
+	if index.postings == nil {
+		index.postings = make(map[K]u64PostingList)
 	}
-	return true
 }
 
-func (index *StringMultikeyIndex) removePosting(key string, id uint64) {
-	posting, ok := index.byKey[key]
+func (index *MultiKeyIndex[T, K]) removeKeyLocked(key K, id uint64) {
+	posting, ok := index.postings[key]
 	if !ok {
 		return
 	}
@@ -191,16 +327,35 @@ func (index *StringMultikeyIndex) removePosting(key string, id uint64) {
 		return
 	}
 	if empty {
-		delete(index.byKey, key)
+		delete(index.postings, key)
 		return
 	}
-	index.byKey[key] = next
+	index.postings[key] = next
 }
 
-func (index *StringMultikeyIndex) insertPosting(key string, id uint64) {
-	if posting, ok := index.byKey[key]; ok {
-		index.byKey[key] = posting.insertSorted(id)
+func (index *MultiKeyIndex[T, K]) insertPostingLocked(key K, id uint64) {
+	if posting, ok := index.postings[key]; ok {
+		index.postings[key] = posting.insertSorted(id)
 		return
 	}
-	index.byKey[key] = newU64PostingList(id)
+	index.postings[key] = newU64PostingList(id)
+}
+
+func multiKeyIndexKeySetsEqual[K comparable](left, right []K) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for _, leftKey := range left {
+		found := false
+		for _, rightKey := range right {
+			if leftKey == rightKey {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }

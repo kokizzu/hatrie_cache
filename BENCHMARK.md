@@ -32580,3 +32580,39 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+## T-U23 Multikey Indexes
+
+Commands:
+
+```sh
+make benchmark-tu23-comparison
+make benchmark-tu23-existing-lookup
+make benchmark-tu23-bounded-build
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The generic
+comparison baseline is a map of key to ID sets with a reverse record map. The
+existing 100k-row comparison also includes a linear scan. The bounded build
+comparison pre-sizes the item map to 10,000 rows and lets both postings
+implementations size their distinct-key structures independently.
+
+| Workload | Baseline median | Multikey median | Improvement | Baseline B/op | Multikey B/op | Baseline allocs/op | Multikey allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Generic three-key update | 217.4 ns/op | 81.14 ns/op | 2.68x faster | 0 | 0 | 0 | 0 |
+| 100k-row lookup, map-of-sets | 8,423 ns/op | 88.57 ns/op | 95.1x faster | 0 | 0 | 0 | 0 |
+| 100k-row lookup, linear scan | 171,563 ns/op | 88.57 ns/op | 1,938x faster | 1 | 0 | 0 | 0 |
+| 10k-row bounded build, reverse map | 2,210,890 ns/op | 2,204,260 ns/op | 1.00x | 2,056,904 | 1,800,456 | 11,616 | 1,300 |
+
+The generic upsert comparison has raw samples:
+
+```text
+baseline: 220.4 211.5 219.1 217.2 217.4 ns/op; 0 B/op; 0 allocs/op
+multikey: 80.78 81.91 79.23 81.84 81.14 ns/op; 0 B/op; 0 allocs/op
+```
+
+The bounded build uses `MaxItems: 10000`. The unbounded default intentionally
+avoids a large implicit reservation and measured about 3.57 ms, 3.11 MB, and
+1,348 allocations versus about 2.03 ms, 2.06 MB, and 11,616 allocations for
+the pre-sized reverse-map baseline. Use `MaxItems` when the ingestion bound is
+known. Full API semantics and raw lookup/build samples are in
+[TU23_MULTIKEY_INDEX.md](TU23_MULTIKEY_INDEX.md).

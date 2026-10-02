@@ -4765,3 +4765,13 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+## Multikey Indexes
+
+`hatDataStructure.MultiKeyIndex[T,K]` and the compact
+`StringMultikeyIndex` maintain sorted postings for every distinct key derived
+from a record. They are opt-in and bounded by key/item limits; existing index
+and SQL behavior is unchanged. See [TU23_MULTIKEY_INDEX.md](TU23_MULTIKEY_INDEX.md)
+for examples, defaults, correctness guarantees, and measured CPU/memory tradeoffs.
+
+Run `make test-tu23`, `make race-tu23-package`, `make vet-tu23`, and
+`make benchmark-tu23-bounded-build` for focused verification.
