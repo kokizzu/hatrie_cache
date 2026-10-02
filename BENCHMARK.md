@@ -17155,8 +17155,33 @@ selective_where runtime_filter: 16,602,205  16,695,200  17,127,066  16,958,095 1
 | Runtime filter with left-only `WHERE` | 16.958 ms | 0.941 MB | 6,226 | 1.93x faster, 49.49x lower heap, 33.13x fewer allocations |
 
 The improvement is workload-specific: it depends on a large streamed probe side
-and a selective left predicate. Unsupported and right-referencing predicates
+and a selective input-local predicate. Unsupported and mixed-source predicates
 retain the exact established execution path.
+
+### SQL Runtime Join Bloom Filter: Right-Only `WHERE` Pushdown
+
+The round-57 extension evaluates a deterministic predicate that references only
+the streamed right source before admitting rows to the exact hash table and
+Bloom filter. Command: `make benchmark-sql-runtime-join-filter-right`.
+
+Raw three-sample output on Linux/amd64 with an AMD Ryzen 9 5950X, using
+100,000 left rows, 512 right rows, `WHERE r.id < 1000256`, and 20 iterations
+per sample:
+
+```text
+right_where baseline:       30.827589  28.841962  28.992590 ms/op; 48,637,073 48,632,361 48,632,852 B/op; 303,919 303,910 303,911 allocs/op
+right_where runtime_filter: 10.018845  10.870952  10.609635 ms/op;  3,083,239  3,083,202  3,083,201 B/op; 105,195 105,195 105,194 allocs/op
+```
+
+| Path | Median time | Median heap | Median allocations | Relative to baseline |
+| --- | ---: | ---: | ---: | ---: |
+| Established materialized executor | 28.993 ms | 48.632 MB | 303,911 | 1.00x |
+| Runtime filter with right-only `WHERE` | 10.610 ms | 3.083 MB | 105,195 | 2.73x faster, 15.77x lower heap, 2.89x fewer allocations |
+
+Mixed-source predicates continue to use the exact executor. The feature stays
+opt-in because balanced joins can pay extra Bloom-filter setup and callback
+allocations; the focused test also verifies NULL and mixed-predicate fallback
+semantics.
 
 ## SQL Compact Hash Aggregation
 

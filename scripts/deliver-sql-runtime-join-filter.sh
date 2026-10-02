@@ -1,12 +1,12 @@
 #!/bin/sh
 set -eu
 
-commit_message='feat(sql): add runtime join filtering'
-expected_files='ADOPTED_QUERY_ENGINE_IDEAS.md BENCHMARK.md Makefile README.md SQL_RUNTIME_JOIN_FILTER.md hat/hatSql/query.go hat/hatSql/runtime_join_filter_benchmark_test.go hat/hatSql/runtime_join_filter_test.go scripts/benchmark-sql-runtime-join-filter.sh scripts/deliver-sql-runtime-join-filter.sh scripts/format-sql-runtime-join-filter.sh scripts/test-sql-runtime-join-filter.sh'
+commit_message='feat(sql): push right-local predicates through runtime filtering [skip ci]'
+expected_files='BENCHMARK.md Makefile PRODUCT_IDEA_GAPS.md README.md SQL_RUNTIME_JOIN_FILTER.md hat/hatSql/query.go hat/hatSql/runtime_join_filter_benchmark_test.go hat/hatSql/runtime_join_filter_test.go scripts/benchmark-sql-runtime-join-filter-right.sh scripts/deliver-sql-runtime-join-filter.sh'
 
 is_expected_file() {
 	case "$1" in
-		ADOPTED_QUERY_ENGINE_IDEAS.md|BENCHMARK.md|Makefile|README.md|SQL_RUNTIME_JOIN_FILTER.md|hat/hatSql/query.go|hat/hatSql/runtime_join_filter_benchmark_test.go|hat/hatSql/runtime_join_filter_test.go|scripts/benchmark-sql-runtime-join-filter.sh|scripts/deliver-sql-runtime-join-filter.sh|scripts/format-sql-runtime-join-filter.sh|scripts/test-sql-runtime-join-filter.sh)
+		BENCHMARK.md|Makefile|PRODUCT_IDEA_GAPS.md|README.md|SQL_RUNTIME_JOIN_FILTER.md|hat/hatSql/query.go|hat/hatSql/runtime_join_filter_benchmark_test.go|hat/hatSql/runtime_join_filter_test.go|scripts/benchmark-sql-runtime-join-filter-right.sh|scripts/deliver-sql-runtime-join-filter.sh)
 			return 0
 			;;
 		*)
@@ -90,10 +90,7 @@ stage_makefile_hunk() {
 }
 
 stage_feature() {
-	git add ADOPTED_QUERY_ENGINE_IDEAS.md BENCHMARK.md README.md SQL_RUNTIME_JOIN_FILTER.md hat/hatSql/query.go hat/hatSql/runtime_join_filter_benchmark_test.go hat/hatSql/runtime_join_filter_test.go scripts/benchmark-sql-runtime-join-filter.sh scripts/deliver-sql-runtime-join-filter.sh scripts/format-sql-runtime-join-filter.sh scripts/test-sql-runtime-join-filter.sh
-	if ! is_staged Makefile; then
-		stage_makefile_hunk
-	fi
+	git add BENCHMARK.md Makefile PRODUCT_IDEA_GAPS.md README.md SQL_RUNTIME_JOIN_FILTER.md hat/hatSql/query.go hat/hatSql/runtime_join_filter_benchmark_test.go hat/hatSql/runtime_join_filter_test.go scripts/benchmark-sql-runtime-join-filter-right.sh scripts/deliver-sql-runtime-join-filter.sh
 	check_staged
 }
 

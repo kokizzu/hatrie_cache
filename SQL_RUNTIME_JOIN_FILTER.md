@@ -5,8 +5,9 @@ shape: a direct two-source `CACHE` `INNER JOIN` on one equality field, with
 simple field projections. The executor streams the right source once, builds an
 exact hash table plus a compact Bloom filter of right-side keys, and uses the
 Bloom filter before probing the exact table for each left-side row. A
-deterministic `WHERE` that references only the left source can also be
-evaluated before the Bloom probe.
+deterministic `WHERE` that references only one input can be evaluated while
+that input is streamed: left-only predicates run before the Bloom probe, and
+right-only predicates run before right-side hash/Bloom admission.
 
 ```go
 options := hatSql.SQLQueryOptions{
@@ -16,9 +17,10 @@ result, err := hatSql.ExecuteSQLQueryContext(ctx, query, resolver, options)
 ```
 
 The flag is disabled by default. The normal executor remains authoritative for
-`LEFT`, `RIGHT`, and `FULL` joins, predicates involving the right source,
-aggregates, ordering, limits, subqueries, unions, typed sources, worker-parallel
-queries, join spilling, and queries with an available equality index. A resolver must implement
+`LEFT`, `RIGHT`, and `FULL` joins, predicates involving both sources,
+nondeterministic/custom functions, aggregates, ordering, limits, subqueries,
+unions, typed sources, worker-parallel queries, join spilling, and queries with
+an available equality index. A resolver must implement
 `hatSql.StreamSQLSourceResolver`; otherwise the query falls back without a
 runtime-filter plan step.
 
@@ -34,11 +36,11 @@ right-side key set. It allocates less because rejected left rows never become
 join envelopes or result rows. A balanced join with mostly matching keys can be
 slightly slower and allocate more because it pays for the Bloom filter and
 streaming callbacks. That is why this is an explicit query option rather than a
-new default. Left-only predicate pushdown reuses one evaluation container for
+new default. Input-local predicate pushdown reuses one evaluation container for
 the streamed source, so selective predicates avoid both join envelopes and
 per-row map allocations.
 
-## Left-Only `WHERE` Pushdown
+## Input-Local `WHERE` Pushdown
 
 For a query such as:
 
@@ -50,11 +52,33 @@ SELECT l.id, r.id AS right_id
 ```
 
 the runtime path evaluates `l.id < 512` while the left source is streamed.
-Predicates that reference `r`, nondeterministic/custom functions, or an
-unsupported query shape fall back to the established executor. Exact result
-comparison, SQL NULL truth handling, duplicate keys, and the fallback boundary
-are covered by `TestRuntimeJoinBloomFilterPushesLeftOnlyWhere` and
-`TestRuntimeJoinBloomFilterFallsBackForRightOnlyWhere`.
+For a right-local predicate, such as `WHERE r.id < 1000256`, it evaluates the
+predicate before inserting right rows into the exact hash table and Bloom
+filter. This avoids retaining and probing rows that cannot participate in the
+inner join. Predicates that reference both inputs, nondeterministic/custom
+functions, or an unsupported query shape fall back to the established
+executor. Exact result comparison, SQL NULL truth handling, duplicate keys,
+and the fallback boundary are covered by
+`TestRuntimeJoinBloomFilterPushesLeftOnlyWhere`,
+`TestRuntimeJoinBloomFilterPushesRightOnlyWhere`, and
+`TestRuntimeJoinBloomFilterFallsBackForMixedWhere`.
+
+## Right-Only Benchmark
+
+The focused benchmark uses 100,000 left rows, 512 right rows, and
+`WHERE r.id < 1000256`, leaving 256 right rows eligible. It uses three samples
+of 20 iterations with `-benchmem` on Linux/amd64 with an AMD Ryzen 9 5950X.
+Run it with `make benchmark-sql-runtime-join-filter-right`.
+
+```text
+baseline:       30.827589  28.841962  28.992590 ms/op; 48,637,073 48,632,361 48,632,852 B/op; 303,919 303,910 303,911 allocs/op
+runtime_filter: 10.018845  10.870952  10.609635 ms/op;  3,083,239  3,083,202  3,083,201 B/op; 105,195 105,195 105,194 allocs/op
+```
+
+The before median is 28.993 ms/op and the final after median is 10.610 ms/op:
+2.73x faster, 15.77x lower allocation volume, and 2.89x fewer allocations. The optimization remains
+opt-in because balanced joins can pay extra Bloom-filter setup and callback
+allocations.
 
 The five-sample benchmark uses 100,000 left rows, 512 right rows, and the
 predicate above. It was run with `make benchmark-sql-runtime-join-filter` on

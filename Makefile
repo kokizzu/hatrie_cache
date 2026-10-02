@@ -4035,6 +4035,9 @@ test-sql-runtime-join-filter:
 benchmark-sql-runtime-join-filter:
 	sh ./scripts/benchmark-sql-runtime-join-filter.sh
 
+benchmark-sql-runtime-join-filter-right:
+	sh ./scripts/benchmark-sql-runtime-join-filter-right.sh
+
 
 format-sql-runtime-join-filter:
 	sh ./scripts/format-sql-runtime-join-filter.sh
