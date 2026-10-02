@@ -115,6 +115,7 @@ security guidance before exposing it on a network.
 - Materialize-inspired exact-frontier subscription snapshot export: [MZ026_SUBSCRIPTION_SNAPSHOT_EXPORT.md](MZ026_SUBSCRIPTION_SNAPSHOT_EXPORT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-26-exact-frontier-subscription-snapshot-export)
 - Materialize-inspired SQL plan snapshots: [MZ050_PLAN_SNAPSHOTS.md](MZ050_PLAN_SNAPSHOTS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-050-sql-plan-snapshots)
 - Optional bounded arrangement metadata in `EXPLAIN`: [MU012_ARRANGEMENT_EXPLAIN.md](MU012_ARRANGEMENT_EXPLAIN.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mu-012-arrangement-explain)
+- Opt-in typed-table arrangement hydration status and query admission: [MU036_HYDRATION_ADMISSION.md](MU036_HYDRATION_ADMISSION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m-u36-hydration-admission)
 - Materialize-inspired bounded SQL source-frontier waits: [MZ018_SOURCE_FRONTIER_WAIT.md](MZ018_SOURCE_FRONTIER_WAIT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-018-source-frontier-wait)
 - Materialize-inspired frontier-aware source backpressure: [MZ007_FRONTIER_SOURCE_BACKPRESSURE.md](MZ007_FRONTIER_SOURCE_BACKPRESSURE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-07-frontier-aware-source-backpressure)
 - ClickHouse-inspired skip-index usefulness telemetry: [CH024_SKIP_INDEX_USEFULNESS.md](CH024_SKIP_INDEX_USEFULNESS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-24-skip-index-usefulness-telemetry)

@@ -1,5 +1,29 @@
 # Benchmark
 
+## M-U36 Hydration Admission
+
+Command:
+
+```sh
+make benchmark-mu036
+```
+
+The benchmark uses the existing 10,000-row typed-table changefeed fixture and
+the same one-change replay case before and after adding the opt-in status and
+admission API. Measurements are one `-benchtime=100ms` sample on Linux/amd64
+with an AMD Ryzen 9 5950X; the fixture setup dominates wall-clock test time,
+so the operation numbers are compared for allocations and order of magnitude,
+not treated as a statistically significant speed claim.
+
+| Workload | Before | After | Relative result |
+| --- | ---: | ---: | --- |
+| Existing one-change hydration | 795 ns/op, 288 B/op, 3 allocs/op | 714 ns/op, 288 B/op, 3 allocs/op | Allocation-neutral; timing within run noise |
+| New aggregate `HydrationStatus` | N/A | 13.13 ns/op, 0 B/op, 0 allocs/op | Zero-allocation status read |
+
+`HydrateUntilReady` reuses the existing bounded `Hydrate` replay path, so it
+adds admission correctness and cancellation without claiming faster replay.
+The default write, apply, and hydration paths remain unchanged.
+
 ## CH-U49 Skip-Index EXPLAIN Diagnostics
 
 This paired clean-worktree benchmark compares the pre-CH-U49 implementation

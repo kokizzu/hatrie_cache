@@ -22356,3 +22356,7 @@ commit-chu47:
 
 push-chu47:
 	bash scripts/push-chu47.sh
+
+.PHONY: benchmark-mu036
+benchmark-mu036:
+	bash scripts/benchmark-mu036.sh
