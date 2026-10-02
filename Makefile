@@ -22292,3 +22292,39 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: test-tu27-red
+test-tu27-red:
+	bash scripts/test-tu27-red.sh
+.PHONY: format-tu27 test-tu27 test-tu27-package race-tu27 vet-tu27 benchmark-tu27 verify-tu27 status-tu27 cleanup-tu27-worktree-preview cleanup-tu27-worktree deliver-tu27
+format-tu27:
+	bash scripts/format-tu27.sh
+
+test-tu27:
+	bash scripts/test-tu27.sh
+
+test-tu27-package:
+	bash scripts/test-tu27-package.sh
+
+race-tu27:
+	bash scripts/race-tu27.sh
+
+vet-tu27:
+	bash scripts/vet-tu27.sh
+
+benchmark-tu27:
+	bash scripts/benchmark-tu27.sh
+
+verify-tu27:
+	bash scripts/verify-tu27.sh
+
+status-tu27:
+	bash scripts/status-tu27.sh
+
+cleanup-tu27-worktree-preview:
+	bash scripts/cleanup-tu27-worktree.sh plan
+
+cleanup-tu27-worktree:
+	bash scripts/cleanup-tu27-worktree.sh apply
+
+deliver-tu27:
+	bash scripts/deliver-tu27.sh

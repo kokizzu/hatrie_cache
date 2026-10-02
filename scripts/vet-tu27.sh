@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export GOCACHE="${PWD}/.go-build-cache"
+export GOTMPDIR="${PWD}/.go-tmp"
+mkdir -p "${GOCACHE}" "${GOTMPDIR}"
+go vet ./hat/hatTopology

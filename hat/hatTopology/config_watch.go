@@ -93,9 +93,8 @@ func (action ConfigWatchAction) String() string {
 }
 
 // ConfigWatchAuthorization is passed to the configured authorizer. Read
-// authorization receives the requested key as empty because a read returns
-// the whole ordered change stream; a transport may add a key-scoped log when
-// that is required by its policy.
+// authorization receives the requested prefix in Key, or an empty key for a
+// whole-stream read.
 type ConfigWatchAuthorization struct {
 	Principal string
 	Action    ConfigWatchAction
@@ -131,6 +130,7 @@ type ConfigWatchEvent struct {
 // ConfigWatchRequest selects a replay or wait cursor.
 type ConfigWatchRequest struct {
 	Principal    string
+	Prefix       string
 	AfterVersion uint64
 	Limit        int
 }
@@ -324,7 +324,11 @@ func (log *ConfigWatchLog) readLimit(limit int) (int, error) {
 // cursor is the last delivered version, so callers can safely use it when a
 // response is smaller than the current history.
 func (log *ConfigWatchLog) Read(ctx context.Context, request ConfigWatchRequest) ([]ConfigWatchEvent, uint64, error) {
-	principal, err := log.authorize(ctx, request.Principal, ConfigWatchRead, "")
+	prefix, err := log.validatePrefix(request.Prefix)
+	if err != nil {
+		return nil, request.AfterVersion, err
+	}
+	principal, err := log.authorize(ctx, request.Principal, ConfigWatchRead, prefix)
 	if err != nil {
 		return nil, request.AfterVersion, err
 	}
@@ -352,6 +356,9 @@ func (log *ConfigWatchLog) Read(ctx context.Context, request ConfigWatchRequest)
 		if event.Version <= request.AfterVersion {
 			continue
 		}
+		if prefix != "" && !strings.HasPrefix(event.Key, prefix) {
+			continue
+		}
 		events = append(events, cloneConfigWatchEvent(event))
 	}
 	next := request.AfterVersion
@@ -359,6 +366,17 @@ func (log *ConfigWatchLog) Read(ctx context.Context, request ConfigWatchRequest)
 		next = events[len(events)-1].Version
 	}
 	return events, next, nil
+}
+
+func (log *ConfigWatchLog) validatePrefix(prefix string) (string, error) {
+	prefix = strings.TrimSpace(prefix)
+	if log == nil {
+		return "", ErrConfigWatchNil
+	}
+	if len(prefix) > log.maxKeyBytes {
+		return "", ErrConfigWatchKeyInvalid
+	}
+	return prefix, nil
 }
 
 // Wait returns retained events immediately when available, or blocks until a

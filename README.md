@@ -314,6 +314,7 @@ security guidance before exposing it on a network.
 - Opt-in structured source lag, retry, and health records: [SOURCE_HEALTH.md](SOURCE_HEALTH.md)
 - Opt-in bounded async command failure retention and replay: [ASYNC_COMMAND_DEAD_LETTERS.md](ASYNC_COMMAND_DEAD_LETTERS.md)
 - Opt-in exact-key mutation watchers for local invalidation: [KEY_CHANGE_WATCHERS.md](KEY_CHANGE_WATCHERS.md)
+- Opt-in authenticated prefix/config watches over compact peer sessions: [CONFIG_WATCH_PEER.md](CONFIG_WATCH_PEER.md)
 - Latest ClickHouse/Materialize/Tarantool gap audit: [CLICKHOUSE_MATERIALIZE_TARANTOOL_AUDIT.md](CLICKHOUSE_MATERIALIZE_TARANTOOL_AUDIT.md)
 - 150-item ClickHouse/Materialize/Tarantool adoption gap catalog: [IDEA_GAP_CATALOG.md](IDEA_GAP_CATALOG.md)
 - Importable package layout and extraction boundaries: [ARCHITECTURE.md](ARCHITECTURE.md)
