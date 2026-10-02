@@ -22315,3 +22315,14 @@ benchmark-consumer-group-queue:
 .PHONY: format-consumer-group-queue
 format-consumer-group-queue:
 	bash scripts/test-consumer-group-queue.sh format
+.PHONY: test-chg27-default-column
+test-chg27-default-column:
+	bash scripts/test-chg27-default-column.sh test
+
+.PHONY: race-chg27-default-column
+race-chg27-default-column:
+	bash scripts/test-chg27-default-column.sh race
+
+.PHONY: benchmark-chg27-default-column
+benchmark-chg27-default-column:
+	bash scripts/test-chg27-default-column.sh benchmark

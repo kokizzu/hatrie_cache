@@ -32597,3 +32597,23 @@ Ryzen 9 5950X, Linux/amd64, using `-benchtime=200ms -benchmem`:
 This is an explicit capability, not a default queue replacement. See
 [T_G43_CONSUMER_GROUP_QUEUE.md](T_G43_CONSUMER_GROUP_QUEUE.md) for semantics,
 ownership fencing, and test commands.
+
+## ClickHouse Default-Value Suppression
+
+`hatDataStructure.DefaultValueColumn[T]` is an opt-in sparse column for
+default-heavy typed data. Five `-count=5` samples on Linux/amd64, AMD Ryzen 9
+5950X, using `-benchtime=300ms -benchmem`, with 4,096 `int64` rows and one
+non-default per 64 rows:
+
+| Workload | Dense `[]int64` | DefaultValueColumn | Result |
+|---|---:|---:|---|
+| Append | 4,719 ns/op, 32,792 B/op, 2 allocs/op | 11,591 ns/op, 5,328 B/op, 4 allocs/op | 2.46x slower CPU; 6.16x less benchmark allocation |
+| Random lookup | 0.718 ns/op, 0 B/op, 0 allocs/op | 2.932 ns/op, 0 B/op, 0 allocs/op | 4.09x slower CPU; no heap cost |
+| Retained backing estimate | 32,768 B | 5,128 B | 6.39x lower |
+
+The dense fallback retains 32,768 B at 75% and 100% non-default density. At
+1%, 25%, and 50%, retained estimates are 5,128 B, 11,272 B, and 21,512 B.
+This is a deliberate memory/CPU tradeoff for sparse data, not a default
+replacement for dense columns. See
+[CHG27_DEFAULT_VALUE_COLUMN.md](CHG27_DEFAULT_VALUE_COLUMN.md) for raw
+commands and semantics.
