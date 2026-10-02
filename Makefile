@@ -1,4 +1,32 @@
 .PHONY: verify-ch029-dictionary-join-c203
+.PHONY: test-mu35-red format-mu35 benchmark-mu35 race-mu35 vet-mu35 test-mu35-package test-mu35-all status-mu35 deliver-mu35
+test-mu35-red:
+	@bash scripts/test-mu35-red.sh
+
+format-mu35:
+	@bash scripts/format-mu35.sh
+
+benchmark-mu35:
+	@bash scripts/benchmark-mu35.sh
+
+race-mu35:
+	@bash scripts/race-mu35.sh
+
+vet-mu35:
+	@bash scripts/vet-mu35.sh
+
+test-mu35-package:
+	@bash scripts/test-mu35-package.sh
+
+test-mu35-all:
+	@bash scripts/test-mu35-all.sh
+
+status-mu35:
+	@bash scripts/status-mu35.sh
+
+deliver-mu35:
+	@bash scripts/deliver-mu35.sh
+
 .PHONY: test-tt020
 test-tt020:
 	@sh ./scripts/test-tt020.sh test

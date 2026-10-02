@@ -60,6 +60,7 @@ type SQLSourceFrontierTracker struct {
 	indexes       map[sqlSourceFrontierKey]int
 	frontierHeap  []int
 	observedCount int
+	notify        chan struct{}
 }
 
 // NewSQLSourceFrontierTracker creates a tracker for the supplied fixed source
@@ -120,7 +121,11 @@ func (tracker *SQLSourceFrontierTracker) Observe(frontier SQLSourceFrontier) (bo
 	if !known {
 		return false, fmt.Errorf("%w: %s/%s", ErrSQLSourceFrontierUnknownPartition, normalized.Source, normalized.Partition)
 	}
-	return tracker.observeLocked(index, normalized.Frontier), nil
+	changed := tracker.observeLocked(index, normalized.Frontier)
+	if changed {
+		tracker.signalLocked()
+	}
+	return changed, nil
 }
 
 // ObserveBatch validates and observes distinct partitions atomically. Stale
@@ -163,6 +168,9 @@ func (tracker *SQLSourceFrontierTracker) ObserveBatch(frontiers []SQLSourceFront
 		if tracker.observeLocked(indexes[index], frontier.Frontier) {
 			changed++
 		}
+	}
+	if changed > 0 {
+		tracker.signalLocked()
 	}
 	return changed, nil
 }
@@ -238,6 +246,13 @@ func (tracker *SQLSourceFrontierTracker) observeLocked(index int, frontier uint6
 	state.frontier = frontier
 	tracker.frontierDown(state.heapIndex)
 	return true
+}
+
+func (tracker *SQLSourceFrontierTracker) signalLocked() {
+	if tracker.notify != nil {
+		close(tracker.notify)
+		tracker.notify = nil
+	}
 }
 
 func (tracker *SQLSourceFrontierTracker) frontierDown(index int) {
