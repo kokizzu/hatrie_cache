@@ -1,5 +1,25 @@
 # Benchmark
 
+## T-U09 Snapshot-plus-WAL Join Bootstrap
+
+Five samples per benchmark on Linux/amd64, AMD Ryzen 9 5950X. The direct
+sequence loop is an unsafe control only; it is not a correctness-equivalent
+replica join. T-U09 is opt-in and caller-driven, so its coordination cost is
+paid only during snapshot bootstrap and checkpointing.
+
+| Workload | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Direct two-record sequence control | 0.2452 | 0 | 0 | Unsafe control |
+| Snapshot plus two-record WAL coordinator | 180.8 | 240 | 4 | 738x CPU vs unsafe control; correctness path |
+| SJC1 checkpoint encode/decode | 256.0 | 288 | 3 | Resume/verification path |
+
+Raw samples: direct `0.2452 0.2451 0.2429 0.2684 0.2752` ns/op; WAL
+coordinator `185.1 174.2 182.2 180.8 175.5` ns/op, `240 B/op`, `4 allocs/op`;
+checkpoint `252.4 254.8 259.4 257.6 256.0` ns/op, `288 B/op`, `3 allocs/op`.
+The cost is a deliberate tradeoff for fenced activation, contiguous replay,
+checksum validation, and resumable state; normal cache and replication paths
+remain unchanged unless a caller invokes the coordinator.
+
 ## CH-U49 Skip-Index EXPLAIN Diagnostics
 
 This paired clean-worktree benchmark compares the pre-CH-U49 implementation
@@ -32580,3 +32600,21 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+<a id="tu-09-snapshot-plus-wal-join-bootstrap"></a>
+## TU-09 Snapshot-Plus-WAL Join Bootstrap
+
+This measures the opt-in Tarantool-inspired join coordinator against a clean
+pre-feature direct sequence-check control. Both runs use two records. The
+coordinator additionally validates the manifest, locks its state transitions,
+copies payloads for callback isolation, and supports fenced activation. The
+checkpoint row measures deterministic SJC1 CRC-protected encode/decode.
+
+| Workload | Median ns/op | B/op | allocs/op | Relative to direct control |
+| --- | ---: | ---: | ---: | ---: |
+| Direct two-record sequence control | 2.607 | 0 | 0 | 1.00x |
+| Snapshot plus two-record WAL coordinator | 201.1 | 240 | 4 | 77.1x cost |
+| SJC1 checkpoint encode/decode | 294.7 | 288 | 3 | 113.0x cost |
+
+The ratios are coordination overhead, not a claim that a join is slower than
+an equivalent complete snapshot transfer. The ordinary write, replay, and
+backup paths do not construct this coordinator.

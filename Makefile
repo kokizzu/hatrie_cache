@@ -22292,3 +22292,28 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: format-tu09-adoption test-tu09-adoption race-tu09-adoption vet-tu09-adoption review-tu09-adoption benchmark-tu09-baseline benchmark-tu09-adoption
+
+format-tu09-adoption:
+	bash scripts/format-tu09.sh
+
+test-tu09-adoption:
+	bash scripts/test-tu09.sh
+
+race-tu09-adoption:
+	bash scripts/race-tu09.sh
+
+vet-tu09-adoption:
+	bash scripts/vet-tu09.sh
+
+review-tu09-adoption:
+	bash scripts/review-tu09.sh
+
+benchmark-tu09-adoption:
+	bash scripts/benchmark-tu09.sh
+
+benchmark-tu09-baseline:
+	bash scripts/benchmark-tu09-baseline.sh
+
+deliver-tu09-adoption:
+	bash scripts/deliver-tu09-adoption.sh
