@@ -1195,6 +1195,7 @@ func CreateDiskStorage(dir string, ownedDir bool) (*DiskStorage, error) {
 	if err != nil {
 		return nil, err
 	}
+	runtime.SetFinalizer(&storage, (*DiskStorage).finalize)
 	return &storage, nil
 }
 
@@ -1226,6 +1227,7 @@ func (ds *DiskStorage) Put(idx int32, value []byte) error {
 		ds.paths[idx] = path
 	}
 	ds.reusables.Use(idx)
+	ds.invalidateReadCache(idx)
 	return nil
 }
 
@@ -1241,6 +1243,7 @@ func (ds *DiskStorage) PutStream(idx int32, write func(io.Writer) error) error {
 		ds.paths[idx] = path
 	}
 	ds.reusables.Use(idx)
+	ds.invalidateReadCache(idx)
 	return nil
 }
 
@@ -1274,6 +1277,7 @@ func (ds *DiskStorage) Add(value []byte) (int32, error) {
 		if restored {
 			ds.paths[idx] = path
 		}
+		ds.invalidateReadCache(idx)
 		return idx, nil
 	}
 	return ds.Append(value)
@@ -1289,6 +1293,7 @@ func (ds *DiskStorage) AddStream(write func(io.Writer) error) (int32, error) {
 		if restored {
 			ds.paths[idx] = path
 		}
+		ds.invalidateReadCache(idx)
 		return idx, nil
 	}
 	return ds.AppendStream(write)
@@ -1301,7 +1306,19 @@ func (ds *DiskStorage) Get(idx int32) ([]byte, error) {
 	if ds.paths[idx] == "" {
 		return nil, nil
 	}
-	return os.ReadFile(ds.paths[idx])
+	if cache := ds.loadReadCache(); cache != nil {
+		if value, ok := cache.get(idx); ok {
+			return value, nil
+		}
+	}
+	value, err := os.ReadFile(ds.paths[idx])
+	if err != nil {
+		return nil, err
+	}
+	if cache := ds.loadReadCache(); cache != nil {
+		cache.observeMiss(idx, value)
+	}
+	return value, nil
 }
 
 func (ds *DiskStorage) open(idx int32) (*os.File, int64, error) {
@@ -1332,6 +1349,7 @@ func (ds *DiskStorage) Del(idx int32) {
 	if idx < 0 || int(idx) >= len(ds.paths) {
 		return
 	}
+	ds.invalidateReadCache(idx)
 	if ds.paths[idx] != "" {
 		_ = os.Remove(ds.paths[idx])
 		ds.paths[idx] = ""
@@ -1344,9 +1362,11 @@ func (ds *DiskStorage) Destroy() {
 	if ds == nil {
 		return
 	}
+	runtime.SetFinalizer(ds, nil)
 	defer func() {
 		ds.paths = nil
 		ds.reusables.Compact(0)
+		ds.clearReadCache()
 	}()
 	if ds.ownedDir {
 		_ = os.RemoveAll(ds.configuredRoot())

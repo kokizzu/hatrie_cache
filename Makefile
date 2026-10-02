@@ -22321,3 +22321,24 @@ commit-tu18-volatile:
 
 push-tu18-volatile:
 	sh ./scripts/push-tu18-volatile.sh
+
+benchmark-disk-read-cache:
+	sh ./scripts/benchmark-disk-read-cache.sh
+
+test-disk-read-cache:
+	sh ./scripts/test-disk-read-cache.sh
+
+verify-disk-read-cache:
+	sh ./scripts/verify-disk-read-cache.sh
+
+format-disk-read-cache:
+	sh ./scripts/format-disk-read-cache.sh
+
+review-disk-read-cache:
+	sh ./scripts/review-disk-read-cache.sh
+
+commit-disk-read-cache:
+	sh ./scripts/commit-disk-read-cache.sh
+
+push-disk-read-cache:
+	sh ./scripts/push-disk-read-cache.sh

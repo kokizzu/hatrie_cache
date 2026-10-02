@@ -139,10 +139,16 @@ func (ht *HatTrie) compactMemoryLocked(options MemoryCompactionOptions) (MemoryC
 	}
 
 	oldRoot := ht.root
+	readCacheOptions := ht.disks.configuredReadCacheOptions()
+	oldDisks := ht.disks
 	ht.root = nextRoot
 	ht.strings = plan.strings
 	ht.raws = plan.raws
 	ht.disks = plan.disks
+	if readCacheOptions.MaxBytes > 0 {
+		_ = ht.disks.ConfigureReadCache(readCacheOptions)
+	}
+	oldDisks.clearReadCache()
 	ht.maps = plan.maps
 	ht.slices = plan.slices
 	ht.sets = plan.sets

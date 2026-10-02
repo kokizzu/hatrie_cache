@@ -32612,3 +32612,26 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## ClickHouse-Inspired Disk Read Cache Admission
+
+Commands:
+
+```sh
+make benchmark-disk-read-cache
+```
+
+Three `-benchtime=200ms` samples on Linux/amd64, AMD Ryzen 9 5950X. The
+filesystem row is the unchanged `DiskStorage.Get` control. The admitted-cache
+row uses a bounded 128 KiB cache, a 64 KiB per-value limit, and one-read
+admission for the repeated 64 KiB value.
+
+| Workload | Median ns/op | B/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Filesystem control | 19,648 | 74,120 | 5 | Baseline |
+| Admitted LRU cache | 10,366 | 65,536 | 1 | 1.90x faster, 11.6% lower allocated bytes, 80% fewer allocations |
+
+The cache is opt-in and bounded. It trades resident memory for repeated-read
+latency while retaining copy-on-read semantics. See
+[DISK_READ_CACHE.md](DISK_READ_CACHE.md) for configuration, invalidation, and
+the full tradeoff.
