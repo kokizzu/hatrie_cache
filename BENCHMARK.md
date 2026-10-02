@@ -32580,3 +32580,50 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## T-U21 Versioned Space Migration
+
+Commands:
+
+```sh
+make benchmark-tu21-before
+make benchmark-tu21-status
+make benchmark-tu21-admission
+make benchmark-tu21-snapshot
+make benchmark-tu21-run
+```
+
+Three post-change samples and five baseline samples on Linux/amd64, AMD Ryzen
+9 5950X. The baseline is the existing one-entry `SpaceCatalog.Lookup` path; it
+is a reference point, not an equivalent implementation of migration state.
+
+| Workload | Baseline median ns/op | Manager median ns/op | Relative reference | Manager B/op | Manager allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Metadata lookup / status | 51.45 | 21.62 | 2.38x lower | 0 | 0 |
+| Compatibility check | N/A | 16.96 | new opt-in path | 0 | 0 |
+| Snapshot encode | N/A | 516.3 | new persistence path | 584 | 9 |
+| Two-step run with no-op callbacks | N/A | 733.7 | new control-plane path | 720 | 10 |
+
+Raw baseline samples:
+
+```text
+51.45 ns/op  0 B/op  0 allocs/op
+56.27 ns/op  0 B/op  0 allocs/op
+50.01 ns/op  0 B/op  0 allocs/op
+56.40 ns/op  0 B/op  0 allocs/op
+49.18 ns/op  0 B/op  0 allocs/op
+```
+
+Raw manager samples:
+
+```text
+Status:       22.45, 20.93, 21.62 ns/op; 0 B/op; 0 allocs/op
+Admission:    17.65, 16.87, 16.96 ns/op; 0 B/op; 0 allocs/op
+Snapshot:     514.1, 516.3, 517.1 ns/op; 584 B/op; 9 allocs/op
+Run:          738.4, 733.7, 731.7 ns/op; 720 B/op; 10 allocs/op
+```
+
+The read-only manager checks are allocation-free in this benchmark. Snapshot
+and run allocations are intentional control-plane work and are not on the
+default query path. The benchmark does not claim a general migration speedup:
+the baseline and manager lookup use different APIs and synchronization scopes.

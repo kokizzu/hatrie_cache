@@ -22292,3 +22292,50 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+test-tu21-before:
+	bash scripts/test-tu21-before.sh
+
+benchmark-tu21-before:
+	bash scripts/benchmark-tu21-before.sh
+
+format-tu21:
+	bash scripts/format-tu21.sh
+
+test-tu21:
+	bash scripts/test-tu21.sh
+
+test-tu21-package:
+	bash scripts/test-tu21-package.sh
+
+benchmark-tu21:
+	bash scripts/benchmark-tu21.sh "$(BENCHMARK_PATTERN)"
+
+benchmark-tu21-status:
+	bash scripts/benchmark-tu21.sh '^BenchmarkTU21SpaceMigrationStatus$$'
+
+benchmark-tu21-admission:
+	bash scripts/benchmark-tu21.sh '^BenchmarkTU21SpaceMigrationAllowsVersion$$'
+
+benchmark-tu21-snapshot:
+	bash scripts/benchmark-tu21.sh '^BenchmarkTU21SpaceMigrationSnapshot$$'
+
+benchmark-tu21-run:
+	bash scripts/benchmark-tu21.sh '^BenchmarkTU21SpaceMigrationRun$$'
+
+race-tu21:
+	bash scripts/race-tu21.sh
+
+vet-tu21:
+	bash scripts/vet-tu21.sh
+
+verify-tu21:
+	bash scripts/verify-tu21.sh
+
+stage-tu21:
+	bash scripts/deliver-tu21.sh stage
+
+commit-tu21:
+	bash scripts/deliver-tu21.sh commit
+
+push-tu21:
+	bash scripts/deliver-tu21.sh push

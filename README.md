@@ -4765,3 +4765,12 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+
+## Versioned Space Migration
+
+The opt-in `hatSchema.SpaceMigrationManager` coordinates bounded named space
+migrations with mixed-version admission, pause/resume, reverse rollback, and
+CRC-protected snapshots. It is default-off and does not automatically route
+requests or execute conversion callbacks. See
+[TU21_SPACE_MIGRATION.md](TU21_SPACE_MIGRATION.md) for the recovery contract,
+limits, security notes, and measured cost.
