@@ -32720,3 +32720,33 @@ The result is a small but positive optimization. The remaining cost is cloning
 candidate row maps for SQL isolation; eliminating that would require a separate
 borrowed-row contract and a larger semantic tradeoff, so it is not included in
 this change.
+
+## CH-059 Bitmap Equality Container Scan
+
+The Tarantool/ClickHouse-inspired follow-up removes the temporary ordinal
+slice from one low-cardinality bitmap equality lookup. The fixture contains
+4,000 rows with eight `state` values and probes one value. Three
+`-benchtime=200ms` samples were run on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | B/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Before: `Values()` equality traversal | 104,192 | 179,069 | 1,025 | baseline |
+| After: direct container traversal | 102,395 | 177,004 | 1,023 | 1.02x faster; 1.01x lower bytes; 2 fewer allocations |
+
+Raw samples:
+
+```text
+Before: BenchmarkCH059BitmapIndexedEquality-32
+123935 ns/op 179228 B/op 1029 allocs/op
+97889 ns/op 179035 B/op 1024 allocs/op
+104192 ns/op 179069 B/op 1025 allocs/op
+
+After: BenchmarkCH059BitmapIndexedEquality-32
+116429 ns/op 177170 B/op 1028 allocs/op
+102395 ns/op 177004 B/op 1023 allocs/op
+97079 ns/op 176989 B/op 1023 allocs/op
+```
+
+The optimization has no index-format or query-semantics tradeoff. Candidate row
+cloning remains the dominant allocation cost, so this is a small positive
+follow-up rather than a borrowed-row redesign.

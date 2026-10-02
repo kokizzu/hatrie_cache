@@ -22382,3 +22382,25 @@ commit-ch058-bitmap-in:
 
 push-ch058-bitmap-in:
 	bash scripts/push-ch058-bitmap-in.sh
+benchmark-ch059-bitmap-equality:
+	bash scripts/benchmark-ch059-bitmap-equality.sh
+
+test-ch059-bitmap-equality:
+	bash scripts/test-ch059-bitmap-equality.sh
+
+format-ch059-bitmap-equality:
+	bash scripts/format-ch059-bitmap-equality.sh
+
+verify-ch059-bitmap-equality:
+	bash scripts/verify-ch059-bitmap-equality.sh test
+
+race-ch059-bitmap-equality:
+	bash scripts/verify-ch059-bitmap-equality.sh race
+
+vet-ch059-bitmap-equality:
+	bash scripts/verify-ch059-bitmap-equality.sh vet
+commit-ch059-bitmap-equality:
+	bash scripts/commit-ch059-bitmap-equality.sh
+
+push-ch059-bitmap-equality:
+	bash scripts/push-ch059-bitmap-equality.sh

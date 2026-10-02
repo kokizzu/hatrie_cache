@@ -1541,13 +1541,9 @@ func (ht *HatTrie) ResolveSQLIndexedSource(name, key, field string, value interf
 		if !ok {
 			return []SQLRow{}, true, nil
 		}
-		ordinals := bitmap.postings[valueKey].Values()
-		rows := make([]SQLRow, 0, len(ordinals))
-		for _, ordinal := range ordinals {
-			if int(ordinal) < len(bitmap.rows) {
-				rows = append(rows, bitmap.rows[ordinal])
-			}
-		}
+		posting := bitmap.postings[valueKey]
+		rows := make([]SQLRow, 0, int(posting.Count()))
+		rows = appendSQLBitmapRows(rows, posting, bitmap.rows)
 		return hatSql.CloneRows(rows), true, nil
 	}
 	if index == nil && skip == nil {

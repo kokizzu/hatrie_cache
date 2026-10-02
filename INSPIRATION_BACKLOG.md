@@ -274,3 +274,11 @@ one clone pass. Duplicate and `NULL` literals retain existing semantics, while
 other indexes and sources fall back to the established per-value resolver. See
 [CH058_BITMAP_IN_UNION.md](CH058_BITMAP_IN_UNION.md) and
 [BENCHMARK.md#ch-058-bitmap-backed-literal-in-union](BENCHMARK.md#ch-058-bitmap-backed-literal-in-union).
+
+## CH-059 Bitmap Equality Container Scan
+
+The Tarantool/ClickHouse-inspired follow-up removes the temporary ordinal
+slice from single-value low-cardinality bitmap equality probes by traversing
+Roaring containers directly. Storage and semantics remain unchanged; see
+[CH059_BITMAP_EQUALITY_CONTAINER_SCAN.md](CH059_BITMAP_EQUALITY_CONTAINER_SCAN.md)
+and [BENCHMARK.md#ch-059-bitmap-equality-container-scan](BENCHMARK.md#ch-059-bitmap-equality-container-scan).
