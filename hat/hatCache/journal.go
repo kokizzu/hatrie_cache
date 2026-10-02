@@ -1395,6 +1395,18 @@ func (journal *CommandJournal) replayThroughWithProgress(trie *HatTrie, afterSeq
 	if targetSequence < afterSequence {
 		return 0, fmt.Errorf("hatriecache: requested journal sequence %d precedes snapshot sequence %d", targetSequence, afterSequence)
 	}
+	var replayScalarBatch []CommandJournalRecord
+	var replayScalarBatchStorage [minNativeCommandBatchSize]CommandJournalRecord
+	var replayScalarFamily nativeCommandBatchFamily
+	flushReplayScalarBatch := func() error {
+		if len(replayScalarBatch) == 0 {
+			return nil
+		}
+		err := journal.replayScalarRecords(trie, replayScalarBatch, progress)
+		replayScalarBatch = replayScalarBatch[:0]
+		replayScalarFamily = nativeCommandBatchUnsupported
+		return err
+	}
 	if _, err := scanCommandJournalSetWithEncryption(journal.path, journal.segmented(), journal.encryption, func(entry commandJournalEntry) error {
 		if entry.Checkpoint {
 			return nil
@@ -1405,7 +1417,38 @@ func (journal *CommandJournal) replayThroughWithProgress(trie *HatTrie, afterSeq
 		if progress != nil {
 			progress.markCurrent(entry.Sequence)
 		}
-		if journal.idempotency.enabled() && strings.TrimSpace(entry.Request.IdempotencyKey) != "" {
+		idempotent := journal.idempotency.enabled() && strings.TrimSpace(entry.Request.IdempotencyKey) != ""
+		scalarRequest := entry.Request
+		family := nativeCommandBatchUnsupported
+		if !idempotent {
+			scalarRequest.Command = normalizedCommand(scalarRequest.Command)
+			family = journalScalarCommandBatchFamilyCanonical(scalarRequest)
+		}
+		if !idempotent && family != nativeCommandBatchUnsupported {
+			if len(replayScalarBatch) > 0 && replayScalarFamily != family {
+				if err := flushReplayScalarBatch(); err != nil {
+					return err
+				}
+			}
+			if len(replayScalarBatch) == 0 {
+				replayScalarFamily = family
+				if replayScalarBatch == nil {
+					replayScalarBatch = replayScalarBatchStorage[:0]
+				}
+			}
+			replayScalarBatch = append(replayScalarBatch, CommandJournalRecord{
+				Sequence: entry.Sequence,
+				Request:  scalarRequest,
+			})
+			if len(replayScalarBatch) >= minNativeCommandBatchSize {
+				return flushReplayScalarBatch()
+			}
+			return nil
+		}
+		if err := flushReplayScalarBatch(); err != nil {
+			return err
+		}
+		if idempotent {
 			response := trie.ExecuteCommand(entry.Request)
 			if !response.OK {
 				return fmt.Errorf("hatriecache: replay command journal entry %d failed: %s", entry.Sequence, response.Message)
@@ -1423,6 +1466,9 @@ func (journal *CommandJournal) replayThroughWithProgress(trie *HatTrie, afterSeq
 		}
 		return nil
 	}); err != nil {
+		return 0, err
+	}
+	if err := flushReplayScalarBatch(); err != nil {
 		return 0, err
 	}
 	journal.advanceSequenceLocked(maxSequence)

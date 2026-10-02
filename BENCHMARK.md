@@ -1,5 +1,31 @@
 # Benchmark
 
+## Recovery Scalar Replay Batching
+
+This benchmark compares the pre-change ordered journal replay with bounded
+ordered batching of contiguous compatible `SETINT` records. It uses a
+4,096-record binary journal, five samples, and an AMD Ryzen 9 5950X Linux amd64
+host. The change does not parallelize mutation and does not alter replay
+ordering.
+
+| Path | Median time | B/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | ---: |
+| Existing ordered replay | 3.884 ms | 1,081,557 | 20,490 | baseline |
+| Scalar-batched replay | 3.163 ms | 1,081,551 | 20,490 | 1.23x faster; heap and allocations unchanged |
+
+Raw `ns/op` samples:
+
+```text
+existing: 3827861 3884964 3841962 3883935 4202243
+batched: 3103744 3142028 3162797 3255527 3245695
+```
+
+Compatible runs are limited to `SET`, `SETSTR`, and `SETINT` records without
+TTL fields. Idempotent entries, mixed families, partitioned tries, and
+unsupported commands retain the serial path. The broader package run remains
+dependent on the concurrent SQL worktree overlay; the journal/replay suite and
+race checks pass independently.
+
 ## CH-U49 Skip-Index EXPLAIN Diagnostics
 
 This paired clean-worktree benchmark compares the pre-CH-U49 implementation

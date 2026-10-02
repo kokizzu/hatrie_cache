@@ -36,6 +36,28 @@ allocations and effectively unchanged total bytes. The focused command-path
 result is larger because journal decoding remains the dominant cost for a full
 recovery.
 
+## Recovery Scalar Replay Batching
+
+Replay now reuses the existing single-lock scalar mutation primitive for
+contiguous compatible `SET`, `SETSTR`, and `SETINT` records without TTL fields.
+It applies records in journal order in bounded batches of the native minimum
+size. Mixed command families, TTL mutations, idempotent records, partitioned
+tries, and unsupported commands flush the batch and keep the existing ordered
+dispatcher. No replay workers or parallel writes are introduced, so recovery
+ordering and failure-prefix behavior remain unchanged.
+
+The focused benchmark used a 4,096-record binary `SETINT` journal on an AMD
+Ryzen 9 5950X, with five samples per path:
+
+| Path | Raw ns/op samples | Median ns/op | B/op | Allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Existing ordered replay | 3,827,861; 3,884,964; 3,841,962; 3,883,935; 4,202,243 | 3,883,935 | 1,081,557 | 20,490 |
+| Scalar-batched replay | 3,103,744; 3,142,028; 3,162,797; 3,255,527; 3,245,695 | 3,162,797 | 1,081,551 | 20,490 |
+
+The batched path is `1.23x` faster with effectively identical heap and
+allocation counts. The parallel T042 proposal remains deferred because the
+global trie lock prevents useful concurrent mutation.
+
 ## Cached Replay Metadata
 
 The journal already validates its complete tail and checkpoint boundary while

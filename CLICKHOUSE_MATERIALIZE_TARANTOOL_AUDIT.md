@@ -170,6 +170,7 @@ or intentionally deferred, and `[-]` rejected or rolled back.
 - [x] T041 WAL segment compression and independent verification.
 - [ ] T042 Recovery-time parallel replay. A bounded single-key parallel replay
 - [x] T042a Recovery replay mutation fast path - scalar durable mutations avoid constructing public command responses; unsupported commands keep the existing dispatcher (see [JOURNAL_REPLAY.md](JOURNAL_REPLAY.md)).
+- [x] T042b Ordered scalar replay batching - contiguous compatible `SET`, `SETSTR`, and `SETINT` journal records reuse the existing single-lock scalar batch primitive without changing T042's deferred parallel-replay status; see [JOURNAL_REPLAY.md](JOURNAL_REPLAY.md#recovery-scalar-replay-batching).
 - [x] T043 Recovery replay progress and ETA metrics.
 - [x] T044 Recovery point selection by logical sequence.
 - [x] T045 Crash-consistency fault injection.

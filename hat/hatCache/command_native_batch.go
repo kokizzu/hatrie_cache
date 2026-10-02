@@ -163,6 +163,10 @@ func nativePublicCommandBatchRequestFamily(payload CacheCommandRequest) nativeCo
 
 func journalScalarCommandBatchFamily(request CacheCommandRequest) nativeCommandBatchFamily {
 	request.Command = normalizedCommand(request.Command)
+	return journalScalarCommandBatchFamilyCanonical(request)
+}
+
+func journalScalarCommandBatchFamilyCanonical(request CacheCommandRequest) nativeCommandBatchFamily {
 	family := nativePublicCommandBatchRequestFamily(request)
 	switch family {
 	case nativeCommandBatchSetString, nativeCommandBatchSetCounter:
@@ -188,15 +192,34 @@ func journalScalarCommandBatchRun(records []CommandJournalRecord, start int) (in
 }
 
 func (ht *HatTrie) executeJournalScalarBatch(records []CommandJournalRecord) (int, CacheCommandResponse, bool) {
-	if ht == nil || len(records) < minNativeCommandBatchSize || ht.localPartitionSet() != nil {
+	if len(records) == 0 {
 		return 0, CacheCommandResponse{}, false
 	}
 	family := journalScalarCommandBatchFamily(records[0].Request)
+	return ht.executeJournalScalarBatchForFamily(records, family, false)
+}
+
+func (ht *HatTrie) executeJournalScalarBatchCanonical(records []CommandJournalRecord) (int, CacheCommandResponse, bool) {
+	if len(records) == 0 {
+		return 0, CacheCommandResponse{}, false
+	}
+	family := journalScalarCommandBatchFamilyCanonical(records[0].Request)
+	return ht.executeJournalScalarBatchForFamily(records, family, true)
+}
+
+func (ht *HatTrie) executeJournalScalarBatchForFamily(records []CommandJournalRecord, family nativeCommandBatchFamily, canonical bool) (int, CacheCommandResponse, bool) {
+	if ht == nil || len(records) < minNativeCommandBatchSize || ht.localPartitionSet() != nil {
+		return 0, CacheCommandResponse{}, false
+	}
 	if family == nativeCommandBatchUnsupported {
 		return 0, CacheCommandResponse{}, false
 	}
 	for _, record := range records[1:] {
-		if journalScalarCommandBatchFamily(record.Request) != family {
+		candidate := journalScalarCommandBatchFamily(record.Request)
+		if canonical {
+			candidate = journalScalarCommandBatchFamilyCanonical(record.Request)
+		}
+		if candidate != family {
 			return 0, CacheCommandResponse{}, false
 		}
 	}
