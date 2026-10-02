@@ -22292,3 +22292,21 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: test-native-block
+test-native-block:
+	bash ./scripts/test-native-block.sh
+.PHONY: format-native-block
+format-native-block:
+	bash ./scripts/format-native-block.sh
+.PHONY: benchmark-native-block
+benchmark-native-block:
+	bash ./scripts/benchmark-native-block.sh
+.PHONY: deliver-native-block-plan
+deliver-native-block-plan:
+	bash ./scripts/deliver-native-block.sh plan
+.PHONY: deliver-native-block-apply
+deliver-native-block-apply:
+	bash ./scripts/deliver-native-block.sh apply
+.PHONY: deliver-native-block-push
+deliver-native-block-push:
+	bash ./scripts/deliver-native-block.sh push

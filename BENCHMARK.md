@@ -32580,3 +32580,13 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+## CH-046 Native block protocol
+
+The paired benchmark is defined by `make benchmark-native-block` and compares
+`BenchmarkSQLNativeBlockVsRowBinary` with five `-benchmem` samples. It records
+`ns/op`, `B/op`, allocations, and `wire-bytes/op` for a 1,024-row mixed typed
+block. A valid numeric result is intentionally not recorded yet: the clean
+round-65 parent cannot compile because an unrelated concurrent refactor leaves
+missing/incompatible `hatSql` symbols (`TypedTableGeneratedFunc`, the sparse
+primary tuple helper, and decompressed-block defaults). The native block test
+also reaches the new API only after those parent errors are resolved.
