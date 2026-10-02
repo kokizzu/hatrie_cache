@@ -32580,3 +32580,30 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## CH-U47 SQL Dictionary Functions
+
+Command:
+
+```sh
+make benchmark-chu47
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The direct map is
+a lower-bound control and does not materialize SQL result values. The
+`DICT_GET` benchmark evaluates one 10,000-call vectorized batch against a
+256-entry immutable dictionary.
+
+| Workload | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Direct map lookup loop | 104,949 | 0 | 0 | 1.00x control |
+| Vectorized `DICT_GET` | 227,717 | 163,857 | 2 | 2.17x slower than control |
+| Refresh 10,000 entries | 833,819 | 816,054 | 10,034 | write-side copy cost |
+
+The shared-name snapshot fast path improved `DICT_GET` from the pre-fast-path
+median of 352,516 ns/op to 227,717 ns/op, or 1.55x faster. The remaining
+overhead is expected from SQL argument validation, immutable snapshot capture,
+and the required result slice. Refresh is copy-on-write so readers never see a
+partial map; its temporary memory is the explicit tradeoff for that guarantee.
+Raw API and security semantics are in
+[CHU47_SQL_DICTIONARY_FUNCTIONS.md](CHU47_SQL_DICTIONARY_FUNCTIONS.md).

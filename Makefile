@@ -22320,3 +22320,39 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+format-chu47:
+	bash scripts/format-chu47.sh
+
+benchmark-chu47:
+	bash scripts/benchmark-chu47.sh
+
+test-chu47:
+	bash scripts/test-chu47.sh
+
+test-chu47-package:
+	bash scripts/test-chu47-package.sh
+
+race-chu47:
+	bash scripts/race-chu47.sh
+
+vet-chu47:
+	bash scripts/vet-chu47.sh
+
+verify-chu47-docs:
+	bash scripts/verify-chu47-docs.sh
+
+test-chu47-full:
+	bash scripts/test-chu47-full.sh
+show-chu47-temporary-targets:
+	bash scripts/show-chu47-temporary-targets.sh
+status-chu47:
+	bash scripts/status-chu47.sh
+
+stage-chu47:
+	bash scripts/stage-chu47.sh
+
+commit-chu47:
+	bash scripts/commit-chu47.sh
+
+push-chu47:
+	bash scripts/push-chu47.sh
