@@ -32637,6 +32637,26 @@ normal tuple reads, writes, and packing do not call the manager. See
 [T-G16_VERSIONED_TUPLE_MIGRATION.md](T-G16_VERSIONED_TUPLE_MIGRATION.md) for
 the raw samples, rollback contract, and verification commands.
 
+## Tarantool Online Tuple Upgrade Coordinator
+
+`hatDataStructure.OnlineTupleUpgrade` adds an opt-in dual-format lifecycle:
+source rows can be read and repaired, source writes are normalized to the
+target, background migration is bounded by batch size, and cutover rejects
+old rows. Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X, using
+`-benchtime=1s -benchmem`:
+
+| Workload | Median ns/op | B/op | Allocs/op | Comparison |
+|---|---:|---:|---:|---|
+| Baseline manual two-format packing | 435.5 | 392 | 3 | reference |
+| Adoption manual two-format packing | 437.6 | 392 | 3 | 1.00x CPU, same heap |
+| Adoption coordinator write normalization | 591.6 | 464 | 7 | 1.36x baseline CPU, +72 B, +4 allocs |
+
+The coordinator preserves the direct migration path and adds the lifecycle
+checks and storage write needed for online operation. Its overhead is paid
+only by callers that opt into the coordinator; it is not wired into ordinary
+tuple reads or writes. The raw samples and storage contract are in
+[T-U20_ONLINE_TUPLE_UPGRADE.md](T-U20_ONLINE_TUPLE_UPGRADE.md).
+
 ## Tarantool Durable Tuple Field-Update Journal
 
 `hatDataStructure` now has an opt-in TFJ1 record for atomic tuple field
