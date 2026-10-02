@@ -22292,3 +22292,43 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+
+.PHONY: test-tu28-lifecycle
+test-tu28-lifecycle:
+	bash scripts/test-tu28-lifecycle.sh
+
+.PHONY: benchmark-tu28-lifecycle
+benchmark-tu28-lifecycle:
+	bash scripts/benchmark-tu28-lifecycle.sh
+
+.PHONY: format-tu28-lifecycle
+format-tu28-lifecycle:
+	bash scripts/format-tu28-lifecycle.sh
+
+.PHONY: test-tu28-package
+test-tu28-package:
+	bash scripts/test-tu28-package.sh
+
+.PHONY: race-tu28-lifecycle
+race-tu28-lifecycle:
+	bash scripts/race-tu28-lifecycle.sh
+
+.PHONY: vet-tu28-lifecycle
+vet-tu28-lifecycle:
+	bash scripts/vet-tu28-lifecycle.sh
+
+.PHONY: verify-tu28-lifecycle
+verify-tu28-lifecycle:
+	bash scripts/verify-tu28-lifecycle.sh
+
+.PHONY: stage-tu28-lifecycle
+stage-tu28-lifecycle:
+	bash scripts/deliver-tu28-lifecycle.sh stage
+
+.PHONY: commit-tu28-lifecycle
+commit-tu28-lifecycle:
+	bash scripts/deliver-tu28-lifecycle.sh commit
+
+.PHONY: push-tu28-lifecycle
+push-tu28-lifecycle:
+	bash scripts/deliver-tu28-lifecycle.sh push

@@ -734,3 +734,10 @@ Adopted as opt-in `hatStorage.CompactionDiagnostics`: bounded arrangement regist
 ## Materialize M-U41: Webhook Event Idempotency
 
 Adopted as opt-in `hatSql.WebhookEventDeduplicator`: bounded source/event-ID admission, payload-fingerprint conflict detection, expiry, deterministic CRC-protected HWE1 snapshots, and atomic restore. The caller owns application, durable storage, acknowledgement, and HTTP/webhook wiring; existing defaults remain unchanged. See [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md) and [BENCHMARK.md](BENCHMARK.md#m-u41-webhook-event-idempotency).
+## T-U28: Connection-pool lifecycle hooks
+
+Adopted as opt-in `hatPeer.ConnectionPoolOptions.Lifecycle` integration over
+the existing bounded `PeerLifecycleRegistry`. Physical connect, connect-failed,
+disconnect, and one-time shutdown events carry `PeerID` metadata; idle reuse
+stays silent and the default nil-registry path remains allocation-free. See
+[TU28_CONNECTION_POOL_LIFECYCLE.md](TU28_CONNECTION_POOL_LIFECYCLE.md).

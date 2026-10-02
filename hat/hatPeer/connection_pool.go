@@ -105,6 +105,10 @@ type ConnectionPoolOptions struct {
 	DialRetryMaxDelay time.Duration
 	Dial              DialFunc
 	Breaker           *ConnectionPoolCircuitBreakerOptions
+	// Lifecycle receives opt-in physical connection and pool lifecycle events.
+	Lifecycle *PeerLifecycleRegistry
+	// PeerID identifies the dial target in lifecycle events.
+	PeerID string
 }
 
 // ConnectionPoolStats is a point-in-time pool snapshot.
@@ -128,6 +132,8 @@ type ConnectionPool struct {
 	dialRetryDelay    time.Duration
 	dialRetryMaxDelay time.Duration
 	breaker           *connectionPoolCircuitBreaker
+	lifecycle         *PeerLifecycleRegistry
+	peerID            string
 
 	slots   chan struct{}
 	idle    chan Connection
@@ -243,6 +249,8 @@ func NewConnectionPool(options ConnectionPoolOptions) (*ConnectionPool, error) {
 		dialRetryDelay:    options.DialRetryDelay,
 		dialRetryMaxDelay: options.DialRetryMaxDelay,
 		breaker:           breaker,
+		lifecycle:         options.Lifecycle,
+		peerID:            options.PeerID,
 		slots:             make(chan struct{}, options.MaxOpen),
 		idle:              make(chan Connection, options.MaxIdle),
 		closed:            make(chan struct{}),
@@ -295,7 +303,9 @@ func (pool *ConnectionPool) Close(ctx context.Context) error {
 	}
 
 	pool.mu.Lock()
+	firstClose := false
 	if !pool.closedState {
+		firstClose = true
 		pool.closedState = true
 		close(pool.closed)
 		pool.cancel()
@@ -304,6 +314,9 @@ func (pool *ConnectionPool) Close(ctx context.Context) error {
 		}
 	}
 	pool.mu.Unlock()
+	if firstClose {
+		pool.emitLifecycle(PeerLifecycleShutdown, nil)
+	}
 
 	pool.closeIdle()
 	select {
@@ -375,6 +388,9 @@ func (pool *ConnectionPool) acquire(ctx context.Context) (Connection, error) {
 		}
 		connection, err := pool.dialWithRetry(ctx)
 		if err != nil {
+			if !connectionPoolContextError(err) && !errors.Is(err, ErrConnectionPoolClosed) {
+				pool.emitLifecycle(PeerLifecycleConnectFailed, err)
+			}
 			pool.releaseSlot()
 			return nil, err
 		}
@@ -387,6 +403,7 @@ func (pool *ConnectionPool) acquire(ctx context.Context) (Connection, error) {
 		}
 		pool.open++
 		pool.mu.Unlock()
+		pool.emitLifecycle(PeerLifecycleConnected, nil)
 		return connection, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -526,7 +543,20 @@ func (pool *ConnectionPool) closeConnection(connection Connection) error {
 		pool.open--
 	}
 	pool.mu.Unlock()
-	return connection.Close()
+	err := connection.Close()
+	pool.emitLifecycle(PeerLifecycleDisconnected, err)
+	return err
+}
+
+func (pool *ConnectionPool) emitLifecycle(kind PeerLifecycleKind, lifecycleErr error) {
+	if pool == nil || pool.lifecycle == nil {
+		return
+	}
+	event := PeerLifecycleEvent{Kind: kind, PeerID: pool.peerID}
+	if lifecycleErr != nil {
+		event.Error = lifecycleErr.Error()
+	}
+	_ = pool.lifecycle.Emit(event)
 }
 
 func (pool *ConnectionPool) closeConnectionAndReleaseSlot(connection Connection) error {

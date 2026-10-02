@@ -32580,3 +32580,18 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+## T-U28 connection-pool lifecycle hooks
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X, with
+`-benchtime=200ms`:
+
+| Path | Median ns/op | B/op | allocs/op |
+|---|---:|---:|---:|
+| Clean-base pool reuse | 47.76 | 0 | 0 |
+| Pool reuse with lifecycle fields, nil registry | 49.65 | 0 | 0 |
+| Opt-in connect, hook, handler-error, disconnect | 580.7 | 240 | 5 |
+
+The clean-base run used commit `13de1212`; the after run used the T-U28
+worktree. The default-path difference was about 4.0% in this run with no
+allocation change. Opt-in hooks pay their cost only on physical lifecycle
+transitions.

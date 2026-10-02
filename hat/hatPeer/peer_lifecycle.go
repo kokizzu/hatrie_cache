@@ -36,6 +36,7 @@ const (
 	PeerLifecycleDisconnected
 	PeerLifecycleShutdown
 	PeerLifecycleSchemaReloaded
+	PeerLifecycleConnectFailed
 	peerLifecycleKindCount
 )
 
@@ -50,6 +51,8 @@ func (kind PeerLifecycleKind) String() string {
 		return "shutdown"
 	case PeerLifecycleSchemaReloaded:
 		return "schema_reloaded"
+	case PeerLifecycleConnectFailed:
+		return "connect_failed"
 	default:
 		return "unknown"
 	}
@@ -60,8 +63,9 @@ func (kind PeerLifecycleKind) valid() bool {
 }
 
 // PeerLifecycleEvent is the immutable value passed to a lifecycle hook.
-// Error contains a bounded terminal error string for disconnect/shutdown
-// events when the session ended with an error.
+// Error contains a bounded terminal error string for connect-failed,
+// disconnect, or shutdown events when the lifecycle operation ended with an
+// error.
 type PeerLifecycleEvent struct {
 	Kind   PeerLifecycleKind `json:"kind"`
 	PeerID string            `json:"peer_id,omitempty"`
