@@ -32750,3 +32750,22 @@ After: BenchmarkCH059BitmapIndexedEquality-32
 The optimization has no index-format or query-semantics tradeoff. Candidate row
 cloning remains the dominant allocation cost, so this is a small positive
 follow-up rather than a borrowed-row redesign.
+
+## CH-060 Bitmap Secondary-Index Union
+
+The ClickHouse/Tarantool-inspired follow-up removes the temporary ordinal
+slice from multi-index bitmap `OR` combinations. Posting containers are merged
+directly into the existing Roaring bitmap before source-row traversal. The
+`AND` path remains unchanged after direct traversal measured slower on the
+representative dense workload. The `OR` median improved from `13.721 ms` to
+`13.370 ms`, bytes from `18,207,250` to `17,691,154`, and allocations from
+`100,042` to `100,039` over five samples.
+
+Raw samples:
+
+| Path | Before 1 | Before 2 | Before 3 | Before 4 | Before 5 | After 1 | After 2 | After 3 | After 4 | After 5 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `AND` ns/op | 8,535,490 | 7,462,279 | 7,203,709 | 7,363,300 | 6,945,319 | 8,486,024 | 8,457,073 | 8,529,858 | 8,177,152 | 7,964,784 |
+| `OR` ns/op | 14,401,737 | 14,009,136 | 13,720,784 | 13,495,665 | 12,944,566 | 13,369,822 | 13,325,781 | 13,366,243 | 13,553,522 | 13,652,526 |
+
+See [CH060_BITMAP_SECONDARY_UNION.md](CH060_BITMAP_SECONDARY_UNION.md).

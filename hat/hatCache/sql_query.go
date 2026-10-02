@@ -1663,50 +1663,68 @@ func (ht *HatTrie) ResolveSQLSecondaryIndexedSource(name, key, operation string,
 		indexes[index] = bitmap
 		postings[index] = bitmap.postings[valueKey]
 	}
-	ordinals := sqlSecondaryBitmapOrdinals(operation, postings)
-	rows := make([]SQLRow, 0, len(ordinals))
-	for _, ordinal := range ordinals {
-		if int(ordinal) < len(indexes[0].rows) {
-			rows = append(rows, indexes[0].rows[ordinal])
-		}
-	}
-	return hatSql.CloneRows(rows), true, nil
-}
-
-func sqlSecondaryBitmapOrdinals(operation string, postings []hatDataStructure.RoaringBitmap) []uint32 {
-	if len(postings) == 0 {
-		return []uint32{}
-	}
 	if operation == "AND" {
-		base := 0
-		for index := 1; index < len(postings); index++ {
-			if postings[index].Count() < postings[base].Count() {
-				base = index
+		ordinals := sqlSecondaryBitmapOrdinals(postings)
+		rows := make([]SQLRow, 0, len(ordinals))
+		for _, ordinal := range ordinals {
+			if int(ordinal) < len(indexes[0].rows) {
+				rows = append(rows, indexes[0].rows[ordinal])
 			}
 		}
-		candidates := postings[base].Values()
-		matched := candidates[:0]
-		for _, ordinal := range candidates {
-			present := true
-			for index := range postings {
-				if index != base && !postings[index].Contains(ordinal) {
-					present = false
-					break
-				}
-			}
-			if present {
-				matched = append(matched, ordinal)
-			}
-		}
-		return matched
+		return hatSql.CloneRows(rows), true, nil
 	}
 	merged := hatDataStructure.NewRoaringBitmap()
 	for _, posting := range postings {
-		for _, ordinal := range posting.Values() {
-			merged.Add(ordinal)
+		appendSQLBitmapUnion(&merged, posting)
+	}
+	rows := make([]SQLRow, 0, int(merged.Count()))
+	rows = appendSQLBitmapRows(rows, merged, indexes[0].rows)
+	return hatSql.CloneRows(rows), true, nil
+}
+
+func sqlSecondaryBitmapOrdinals(postings []hatDataStructure.RoaringBitmap) []uint32 {
+	base := 0
+	for index := 1; index < len(postings); index++ {
+		if postings[index].Count() < postings[base].Count() {
+			base = index
 		}
 	}
-	return merged.Values()
+	candidates := postings[base].Values()
+	matched := candidates[:0]
+	for _, ordinal := range candidates {
+		present := true
+		for index := range postings {
+			if index != base && !postings[index].Contains(ordinal) {
+				present = false
+				break
+			}
+		}
+		if present {
+			matched = append(matched, ordinal)
+		}
+	}
+	return matched
+}
+
+func appendSQLBitmapUnion(destination *hatDataStructure.RoaringBitmap, source hatDataStructure.RoaringBitmap) {
+	source.VisitContainers(func(key uint16, _ uint32, values []uint16, bitset []uint64) bool {
+		base := uint32(key) << 16
+		if values != nil {
+			for _, value := range values {
+				destination.Add(base | uint32(value))
+			}
+			return true
+		}
+		for wordIndex, word := range bitset {
+			baseOrdinal := base + uint32(wordIndex<<6)
+			for word != 0 {
+				offset := uint32(bits.TrailingZeros64(word))
+				destination.Add(baseOrdinal + offset)
+				word &= word - 1
+			}
+		}
+		return true
+	})
 }
 
 // ResolveSQLCompositeIndexedSource uses the longest configured composite

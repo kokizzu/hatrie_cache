@@ -80,6 +80,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-050 | Named settings collections and inheritable validated profiles | Adopted as an imported `hatSql` registry with bounded immutable snapshots, revision compare-and-swap updates, optional parent inheritance with cycle/depth/effective-size checks, caller-supplied setting validation, isolated full-profile reads, and allocation-free single-value lookup. | Done |
 | CH-058 | Bitmap-backed literal `IN` union | Adopted an optional multi-value index resolver for low-cardinality bitmap indexes; one snapshot and direct posting traversal reduce repeated lookup overhead while non-bitmap sources retain the old fallback. | Low |
 | CH-059 | Bitmap equality container traversal | Adopted direct Roaring container traversal for single-value bitmap probes, removing one temporary ordinal slice without changing index format or row-clone semantics. | Low |
+| CH-060 | Bitmap secondary-index union traversal | Adopted direct Roaring container traversal for multi-index bitmap `OR` unions; the measured `AND` variant was rolled back after a CPU regression. | Low |
 
 ## Materialize candidates
 

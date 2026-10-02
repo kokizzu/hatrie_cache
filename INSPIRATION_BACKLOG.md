@@ -282,3 +282,11 @@ slice from single-value low-cardinality bitmap equality probes by traversing
 Roaring containers directly. Storage and semantics remain unchanged; see
 [CH059_BITMAP_EQUALITY_CONTAINER_SCAN.md](CH059_BITMAP_EQUALITY_CONTAINER_SCAN.md)
 and [BENCHMARK.md#ch-059-bitmap-equality-container-scan](BENCHMARK.md#ch-059-bitmap-equality-container-scan).
+
+## CH-060 Bitmap Secondary-Index Union
+
+The ClickHouse/Tarantool-inspired follow-up removes the temporary ordinal
+slice from multi-index bitmap `OR` combinations by merging posting containers
+directly. The `AND` path remains unchanged because direct filtering measured
+slower. See [CH060_BITMAP_SECONDARY_UNION.md](CH060_BITMAP_SECONDARY_UNION.md)
+and [BENCHMARK.md#ch-060-bitmap-secondary-index-union](BENCHMARK.md#ch-060-bitmap-secondary-index-union).

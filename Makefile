@@ -22404,3 +22404,25 @@ commit-ch059-bitmap-equality:
 
 push-ch059-bitmap-equality:
 	bash scripts/push-ch059-bitmap-equality.sh
+test-ch060-bitmap-secondary:
+	bash scripts/test-ch060-bitmap-secondary.sh
+benchmark-ch060-bitmap-secondary:
+	bash scripts/benchmark-ch060-bitmap-secondary.sh
+
+format-ch060-bitmap-secondary:
+	bash scripts/format-ch060-bitmap-secondary.sh
+
+verify-ch060-bitmap-secondary:
+	bash scripts/verify-ch060-bitmap-secondary.sh test
+
+race-ch060-bitmap-secondary:
+	bash scripts/verify-ch060-bitmap-secondary.sh race
+
+vet-ch060-bitmap-secondary:
+	bash scripts/verify-ch060-bitmap-secondary.sh vet
+
+commit-ch060-bitmap-secondary:
+	bash scripts/commit-ch060-bitmap-secondary.sh
+
+push-ch060-bitmap-secondary:
+	bash scripts/push-ch060-bitmap-secondary.sh
