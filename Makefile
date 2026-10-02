@@ -22371,3 +22371,49 @@ commit-chg21-conflict:
 
 push-chg21-conflict:
 	bash scripts/deliver-chg21-conflict.sh push
+
+.PHONY: status-chg22-changefeed
+status-chg22-changefeed:
+	bash scripts/deliver-chg22-changefeed.sh status
+
+.PHONY: verify-chg22-changefeed
+verify-chg22-changefeed:
+	bash scripts/deliver-chg22-changefeed.sh verify
+
+.PHONY: stage-chg22-changefeed
+stage-chg22-changefeed:
+	bash scripts/deliver-chg22-changefeed.sh stage
+
+.PHONY: commit-chg22-changefeed
+commit-chg22-changefeed:
+	bash scripts/deliver-chg22-changefeed.sh commit
+
+.PHONY: push-chg22-changefeed
+push-chg22-changefeed:
+	bash scripts/deliver-chg22-changefeed.sh push
+
+.PHONY: format-chg22-changefeed baseline-chg22-changefeed red-chg22-changefeed test-chg22-changefeed race-chg22-changefeed vet-chg22-changefeed package-chg22-changefeed benchmark-chg22-changefeed
+
+format-chg22-changefeed:
+	bash scripts/test-chg22-changefeed.sh format
+
+baseline-chg22-changefeed:
+	bash scripts/test-chg22-changefeed.sh baseline
+
+red-chg22-changefeed:
+	bash scripts/test-chg22-changefeed.sh red
+
+test-chg22-changefeed:
+	bash scripts/test-chg22-changefeed.sh unit
+
+race-chg22-changefeed:
+	bash scripts/test-chg22-changefeed.sh race
+
+vet-chg22-changefeed:
+	bash scripts/test-chg22-changefeed.sh vet
+
+package-chg22-changefeed:
+	bash scripts/test-chg22-changefeed.sh package
+
+benchmark-chg22-changefeed:
+	bash scripts/test-chg22-changefeed.sh benchmark
