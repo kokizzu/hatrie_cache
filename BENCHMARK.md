@@ -32636,3 +32636,23 @@ adding allocations. That cost is paid only during explicit schema migration;
 normal tuple reads, writes, and packing do not call the manager. See
 [T-G16_VERSIONED_TUPLE_MIGRATION.md](T-G16_VERSIONED_TUPLE_MIGRATION.md) for
 the raw samples, rollback contract, and verification commands.
+
+## Tarantool Durable Tuple Field-Update Journal
+
+`hatDataStructure` now has an opt-in TFJ1 record for atomic tuple field
+operations. It carries a row key, schema version, sequence, bounded update
+batch, and CRC32C, with replay/gap checks through
+`TupleFieldUpdateJournalApplier`. Five `-count=5` samples on Linux/amd64,
+AMD Ryzen 9 5950X, using `-benchtime=300ms -benchmem`:
+
+| Workload | Median ns/op | B/op | Allocs/op | Comparison |
+|---|---:|---:|---:|---|
+| Baseline direct `ApplyUpdates` | 177.1 | 40 | 2 | reference |
+| Adoption direct `ApplyUpdates` | 175.2 | 40 | 2 | unchanged path |
+| TFJ1 marshal/decode/apply | 690.2 | 288 | 6 | 3.90x baseline CPU |
+
+The durable path is explicit and bounded, but it is not free: this workload
+adds 248 B and 4 allocations per replayed record. It is not wired into normal
+tuple mutation. See
+[T-U19_TUPLE_FIELD_UPDATE_JOURNAL.md](T-U19_TUPLE_FIELD_UPDATE_JOURNAL.md)
+for raw samples, crash/replay ownership, and limits.
