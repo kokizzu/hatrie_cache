@@ -22376,3 +22376,14 @@ vet-tu38:
 
 benchmark-tu38:
 	bash scripts/benchmark-tu38.sh
+
+.PHONY: test-mu034 verify-mu034 benchmark-mu034
+
+test-mu034:
+	bash scripts/test-mu034.sh
+
+verify-mu034:
+	bash scripts/verify-mu034.sh
+
+benchmark-mu034:
+	bash scripts/benchmark-mu034.sh

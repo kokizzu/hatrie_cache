@@ -1,5 +1,55 @@
 # Benchmark
 
+## M-U34 Historical Subscription Checkpoints
+
+Command:
+
+```sh
+make benchmark-mu034
+```
+
+Five `-count=5` samples were collected on Linux/amd64 with an AMD Ryzen 9
+5950X. The normal subscription path remains the control; the checkpoint layer
+is opt-in.
+
+| Workload | Median | Memory | Relative result |
+| --- | ---: | ---: | --- |
+| Ordinary `Snapshot` control | 294.9 ns/op | 376 B/op, 4 allocs/op | Existing path |
+| Historical `Checkpoint` | 307.6 ns/op | 376 B/op, 4 allocs/op | 1.04x control cost, opt-in |
+| HQS1 binary encode | 236.4 ns/op; 42 B payload | 160 B/op, 2 allocs/op | 3.60x faster and 3.19x smaller than JSON |
+| JSON compatibility encode | 851.8 ns/op; 134 B payload | 448 B/op, 7 allocs/op | Baseline format |
+
+Raw feature samples (`ns/op`, `payload-B/op`, `B/op`, `allocs/op`):
+
+```text
+ordinary: 302.2 0 376 4
+ordinary: 320.1 0 376 4
+ordinary: 282.5 0 376 4
+ordinary: 283.1 0 376 4
+ordinary: 294.9 0 376 4
+checkpoint: 298.0 0 376 4
+checkpoint: 307.6 0 376 4
+checkpoint: 313.2 0 376 4
+checkpoint: 309.2 0 376 4
+checkpoint: 296.1 0 376 4
+hqs1: 235.8 42 160 2
+hqs1: 236.8 42 160 2
+hqs1: 236.4 42 160 2
+hqs1: 236.1 42 160 2
+hqs1: 231.9 42 160 2
+json: 821.7 134 448 7
+json: 857.9 134 448 7
+json: 851.8 134 448 7
+json: 848.1 134 448 7
+json: 868.3 134 448 7
+```
+
+The paired clean-base frontier control was `160 B/op` and `1 alloc/op` both
+before and after; median timing was approximately `171 ns/op` versus
+`172 ns/op`, within run noise. See
+[MU034_HISTORICAL_SUBSCRIPTION_CHECKPOINTS.md](MU034_HISTORICAL_SUBSCRIPTION_CHECKPOINTS.md)
+for the recovery contract and security notes.
+
 ## M-U36 Hydration Admission
 
 Command:

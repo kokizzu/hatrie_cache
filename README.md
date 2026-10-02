@@ -4768,3 +4768,14 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+## Historical SQL subscription checkpoints
+
+`hatSql.HistoricalQuerySubscription` adds opt-in acknowledgements and durable
+cancellation to historical query replay. Persist its monotone checkpoint only
+after the downstream effect is durable, then use `ResumeHistorical` after a
+restart. HQS1 checkpoints are bounded, deterministic, CRC32C-protected, and
+exclude explain plans and runtime statistics. Ordinary query subscriptions are
+unchanged and do not pay this cost. See
+[MU034_HISTORICAL_SUBSCRIPTION_CHECKPOINTS.md](MU034_HISTORICAL_SUBSCRIPTION_CHECKPOINTS.md)
+and the measured comparison in
+[BENCHMARK.md](BENCHMARK.md#mu-034-historical-subscription-checkpoints).
