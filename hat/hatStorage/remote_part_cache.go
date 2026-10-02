@@ -8,12 +8,14 @@ import (
 )
 
 var (
-	ErrRemotePartCacheDisabled        = errors.New("hatriecache: remote-part cache requires a positive byte budget")
-	ErrRemotePartCacheInvalidConfig   = errors.New("hatriecache: remote-part cache configuration is invalid")
-	ErrRemotePartCacheContextRequired = errors.New("hatriecache: remote-part cache context is required")
-	ErrRemotePartCacheLoaderRequired  = errors.New("hatriecache: remote-part cache loader is required")
-	ErrRemotePartCacheSizeMismatch    = errors.New("hatriecache: remote-part cache loader size does not match metadata")
-	ErrRemotePartCacheNil             = errors.New("hatriecache: remote-part cache is nil")
+	ErrRemotePartCacheDisabled            = errors.New("hatriecache: remote-part cache requires a positive byte budget")
+	ErrRemotePartCacheInvalidConfig       = errors.New("hatriecache: remote-part cache configuration is invalid")
+	ErrRemotePartCacheContextRequired     = errors.New("hatriecache: remote-part cache context is required")
+	ErrRemotePartCacheLoaderRequired      = errors.New("hatriecache: remote-part cache loader is required")
+	ErrRemotePartCacheSizeMismatch        = errors.New("hatriecache: remote-part cache loader size does not match metadata")
+	ErrRemotePartCacheChecksumMismatch    = errors.New("hatriecache: remote-part cache loader checksum does not match metadata")
+	ErrRemotePartCacheChecksumUnsupported = errors.New("hatriecache: remote-part cache checksum format is unsupported")
+	ErrRemotePartCacheNil                 = errors.New("hatriecache: remote-part cache is nil")
 )
 
 // DefaultRemotePartCacheMaxEntries bounds the number of cached parts when the
@@ -28,8 +30,9 @@ const DefaultRemotePartPrefetchConcurrency = 2
 // MaxBytes is required; MaxEntries uses DefaultRemotePartCacheMaxEntries when
 // zero. The cache allocates no part storage until the first miss.
 type RemotePartCacheOptions struct {
-	MaxBytes   uint64
-	MaxEntries int
+	MaxBytes        uint64
+	MaxEntries      int
+	VerifyChecksums bool
 }
 
 // RemotePartPrefetchOptions controls one explicit bounded read-ahead pass.
@@ -46,13 +49,14 @@ type RemotePartCacheLoader func(context.Context, RemotePartReference) ([]byte, e
 
 // RemotePartCacheStats is a point-in-time cache accounting snapshot.
 type RemotePartCacheStats struct {
-	Entries   int
-	Bytes     uint64
-	Hits      uint64
-	Misses    uint64
-	Loads     uint64
-	Evictions uint64
-	Uncached  uint64
+	Entries          int
+	Bytes            uint64
+	Hits             uint64
+	Misses           uint64
+	Loads            uint64
+	Evictions        uint64
+	Uncached         uint64
+	ChecksumFailures uint64
 }
 
 type remotePartCacheKey struct {
@@ -80,14 +84,15 @@ type remotePartCacheLoad struct {
 // Higher-priority entries survive eviction ahead of lower-priority entries;
 // pinned entries are never evicted until all their handles are released.
 type RemotePartCache struct {
-	mu         sync.Mutex
-	maxBytes   uint64
-	maxEntries int
-	bytes      uint64
-	clock      uint64
-	entries    map[remotePartCacheKey]*remotePartCacheEntry
-	loading    map[remotePartCacheKey]*remotePartCacheLoad
-	stats      RemotePartCacheStats
+	mu              sync.Mutex
+	maxBytes        uint64
+	maxEntries      int
+	verifyChecksums bool
+	bytes           uint64
+	clock           uint64
+	entries         map[remotePartCacheKey]*remotePartCacheEntry
+	loading         map[remotePartCacheKey]*remotePartCacheLoad
+	stats           RemotePartCacheStats
 }
 
 // RemotePartHandle pins one cached part until Release. The handle's bytes are
@@ -112,10 +117,11 @@ func NewRemotePartCache(options RemotePartCacheOptions) (*RemotePartCache, error
 		options.MaxEntries = DefaultRemotePartCacheMaxEntries
 	}
 	return &RemotePartCache{
-		maxBytes:   options.MaxBytes,
-		maxEntries: options.MaxEntries,
-		entries:    make(map[remotePartCacheKey]*remotePartCacheEntry),
-		loading:    make(map[remotePartCacheKey]*remotePartCacheLoad),
+		maxBytes:        options.MaxBytes,
+		maxEntries:      options.MaxEntries,
+		verifyChecksums: options.VerifyChecksums,
+		entries:         make(map[remotePartCacheKey]*remotePartCacheEntry),
+		loading:         make(map[remotePartCacheKey]*remotePartCacheLoad),
 	}, nil
 }
 
@@ -357,6 +363,13 @@ func (cache *RemotePartCache) load(ctx context.Context, reference RemotePartRefe
 				loadErr = err
 			} else if reference.SizeBytes() != 0 && uint64(len(data)) != reference.SizeBytes() {
 				loadErr = fmt.Errorf("%w: declared %d, got %d", ErrRemotePartCacheSizeMismatch, reference.SizeBytes(), len(data))
+			} else if cache.verifyChecksums {
+				if err := VerifyRemotePartChecksum(data, reference.Checksum()); err != nil {
+					cache.mu.Lock()
+					cache.stats.ChecksumFailures++
+					cache.mu.Unlock()
+					loadErr = err
+				}
 			}
 		}
 		var entry *remotePartCacheEntry

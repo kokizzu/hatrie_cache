@@ -1,4 +1,40 @@
 .PHONY: verify-ch029-dictionary-join-c203
+.PHONY: format-ch019-remote-part-checks
+format-ch019-remote-part-checks:
+	bash scripts/run-ch019-remote-part-checks.sh format
+
+.PHONY: test-ch019-remote-part-checks
+test-ch019-remote-part-checks:
+	bash scripts/run-ch019-remote-part-checks.sh test
+
+.PHONY: test-ch019-remote-part-checks-package
+test-ch019-remote-part-checks-package:
+	bash scripts/run-ch019-remote-part-checks.sh package
+
+.PHONY: race-ch019-remote-part-checks
+race-ch019-remote-part-checks:
+	bash scripts/run-ch019-remote-part-checks.sh race
+
+.PHONY: vet-ch019-remote-part-checks
+vet-ch019-remote-part-checks:
+	bash scripts/run-ch019-remote-part-checks.sh vet
+
+.PHONY: benchmark-ch019-remote-part-checks
+benchmark-ch019-remote-part-checks:
+	bash scripts/run-ch019-remote-part-checks.sh benchmark
+
+.PHONY: stage-ch019-remote-part-checks
+stage-ch019-remote-part-checks:
+	bash scripts/stage-ch019-remote-part-checks.sh
+
+.PHONY: commit-ch019-remote-part-checks
+commit-ch019-remote-part-checks:
+	bash scripts/commit-ch019-remote-part-checks.sh
+
+.PHONY: push-ch019-remote-part-checks
+push-ch019-remote-part-checks:
+	bash scripts/push-ch019-remote-part-checks.sh
+
 .PHONY: test-tt020
 test-tt020:
 	@sh ./scripts/test-tt020.sh test

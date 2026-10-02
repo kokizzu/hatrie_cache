@@ -4518,6 +4518,17 @@ calling the injected publication store. Discovery, retries, and rollback remain
 caller-owned. See [CHU33_REMOTE_PART_PUBLICATION.md](CHU33_REMOTE_PART_PUBLICATION.md)
 and the [CH-U33 benchmark](BENCHMARK.md#ch-u33-quorum-remote-part-publication).
 
+### Remote-part checksum admission
+
+`hatStorage.RemotePartCacheOptions.VerifyChecksums` is an opt-in integrity gate
+for remote-part cache misses. It validates the declared size and
+`sha256:<hex>` checksum before retaining loaded bytes, counts rejected loads in
+`ChecksumFailures`, and does not rehash cache hits. The default remains off for
+backward compatibility with caller-defined checksum strings. Replica discovery,
+retry, and repair remain caller-owned. See
+[CH019_REMOTE_PART_CHECKS.md](CH019_REMOTE_PART_CHECKS.md) and the
+[CH-019 benchmark](BENCHMARK.md#ch-019-remote-part-checksum-admission).
+
 ### Idempotent SQL mutation retries
 
 `POST /api/sql` is read-only by default. Add a stable `mutation_id` to opt into

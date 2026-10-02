@@ -24432,6 +24432,53 @@ BenchmarkRemotePartCache/pinned-acquire-release-32     11313973 103.2 ns/op  64 
 ```
 ```
 
+## CH-019 Remote-Part Checksum Admission
+
+The opt-in `hatStorage.RemotePartCacheOptions.VerifyChecksums` gate validates
+the loaded payload before cache admission. The focused benchmark uses a 64 KiB
+payload on Linux/amd64 with an AMD Ryzen 9 5950X and five samples per case.
+Verification is deliberately off by default, so the post-feature control is
+the normal path.
+
+| Workload | Median ns/op | Median B/op | Median allocs/op | Improvement / cost |
+| --- | ---: | ---: | ---: | --- |
+| Pre-feature cold miss | 9,018 | 65,808 | 4 | control |
+| Post-feature cold miss, verification disabled | 7,768 | 65,808 | 4 | default path; no memory/allocation cost |
+| Post-feature cold miss, SHA-256 verification enabled | 38,406 | 65,808 | 4 | 4.94x slower than the post-feature control; same memory/allocation profile |
+| Verified cache hit | 63.38 | 0 | 0 | no rehash; zero allocations |
+
+The feature trades about 30.6 microseconds per 64 KiB cold miss for integrity.
+The fixed-size checksum decoder keeps the verified path at the same bytes and
+allocation count as the unverified path. Alternate-replica discovery and
+repair are intentionally outside this partial adoption. See
+[CH019_REMOTE_PART_CHECKS.md](CH019_REMOTE_PART_CHECKS.md) for configuration,
+security behavior, and raw output.
+
+Raw output:
+
+```text
+BenchmarkCH019RemotePartCacheColdMissBaseline-32 153777 9018 ns/op 65808 B/op 4 allocs/op
+BenchmarkCH019RemotePartCacheColdMissBaseline-32 134552 8894 ns/op 65808 B/op 4 allocs/op
+BenchmarkCH019RemotePartCacheColdMissBaseline-32 145676 9210 ns/op 65809 B/op 4 allocs/op
+BenchmarkCH019RemotePartCacheColdMissBaseline-32 134308 7939 ns/op 65809 B/op 4 allocs/op
+BenchmarkCH019RemotePartCacheColdMissBaseline-32 128179 9582 ns/op 65809 B/op 4 allocs/op
+BenchmarkCH019RemotePartCacheColdMissNoVerification-32 148267 7065 ns/op 9276.63 MB/s 65808 B/op 4 allocs/op
+BenchmarkCH019RemotePartCacheColdMissNoVerification-32 183144 7308 ns/op 8968.18 MB/s 65808 B/op 4 allocs/op
+BenchmarkCH019RemotePartCacheColdMissNoVerification-32 155706 7816 ns/op 8384.71 MB/s 65809 B/op 4 allocs/op
+BenchmarkCH019RemotePartCacheColdMissNoVerification-32 142617 7768 ns/op 8436.44 MB/s 65810 B/op 4 allocs/op
+BenchmarkCH019RemotePartCacheColdMissNoVerification-32 145898 9042 ns/op 7247.95 MB/s 65809 B/op 4 allocs/op
+BenchmarkCH019RemotePartCacheColdMissWithVerification-32 31257 38750 ns/op 1691.27 MB/s 65808 B/op 4 allocs/op
+BenchmarkCH019RemotePartCacheColdMissWithVerification-32 31620 39664 ns/op 1652.30 MB/s 65808 B/op 4 allocs/op
+BenchmarkCH019RemotePartCacheColdMissWithVerification-32 30235 38406 ns/op 1706.39 MB/s 65808 B/op 4 allocs/op
+BenchmarkCH019RemotePartCacheColdMissWithVerification-32 32149 37175 ns/op 1762.92 MB/s 65808 B/op 4 allocs/op
+BenchmarkCH019RemotePartCacheColdMissWithVerification-32 32394 38013 ns/op 1724.04 MB/s 65808 B/op 4 allocs/op
+BenchmarkCH019RemotePartCacheHitWithVerification-32 18745982 63.38 ns/op 1034036.94 MB/s 0 B/op 0 allocs/op
+BenchmarkCH019RemotePartCacheHitWithVerification-32 18996555 63.40 ns/op 1033694.35 MB/s 0 B/op 0 allocs/op
+BenchmarkCH019RemotePartCacheHitWithVerification-32 18758750 59.40 ns/op 1103236.10 MB/s 0 B/op 0 allocs/op
+BenchmarkCH019RemotePartCacheHitWithVerification-32 16529581 66.73 ns/op 982135.63 MB/s 0 B/op 0 allocs/op
+BenchmarkCH019RemotePartCacheHitWithVerification-32 18961641 57.67 ns/op 1136413.13 MB/s 0 B/op 0 allocs/op
+```
+
 ## CH-039 Automatic Distinct State Selection
 
 This benchmark compares the existing HyperLogLog distinct aggregate with
