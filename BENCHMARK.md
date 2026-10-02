@@ -23210,6 +23210,32 @@ The opt-in path measured about 6.5% higher latency, 336 extra bytes, and five
 extra allocations in this workload. The default writer path has no manifest
 hashing cost and snapshot bytes remain unchanged.
 
+## T-U10: Journal write-quorum state
+
+Seven local runs compare the existing quorum decision helper with the new
+per-journal-sequence state object:
+
+| Path | Median ns/op | B/op | allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Existing `EvaluateWriteQuorum` | 2.174 | 0 | 0 | 1.00x |
+| `JournalWriteQuorumState.Decision` | 7.143 | 0 | 0 | 3.29x |
+| `JournalWriteQuorumState.Acknowledge` | 5.875 | 0 | 0 | 2.70x |
+
+Raw `go test -run '^$' -bench '^BenchmarkJournalWriteQuorumState$' -benchmem -count=7` samples:
+
+```text
+baseline-evaluate: 2.174, 2.177, 2.104, 2.162, 2.072, 2.176, 2.176 ns/op
+state-decision:    6.722, 6.861, 7.166, 7.161, 7.424, 7.143, 6.755 ns/op
+state-acknowledge: 5.540, 5.876, 5.906, 5.422, 5.427, 6.014, 5.875 ns/op
+```
+
+The state uses a fixed 64-bit acknowledgement mask, so duplicate acknowledgements
+do not allocate or grow per-write maps. The state decision is 3.29x the direct
+helper because it validates the persisted sequence and mask on every call;
+this is control-plane overhead, not a per-key data-path cost. The state object
+itself does not perform network I/O or change journal latency;
+caller-owned transport and journal integration remain the open part of T-U10.
+
 ## T-U11: Per-space conflict policy
 
 The existing direct resolver remains unchanged. Five local runs compare it with

@@ -22292,3 +22292,27 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+
+.PHONY: format-tu10-state test-tu10-state benchmark-tu10-state race-tu10-state vet-tu10-state review-tu10-state
+format-tu10-state:
+	bash scripts/format-t-u10-state.sh
+test-tu10-state:
+	bash scripts/test-t-u10-state.sh
+test-tu10-package:
+	bash scripts/test-t-u10-package.sh
+benchmark-tu10-state:
+	bash scripts/benchmark-t-u10-state.sh
+race-tu10-state:
+	bash scripts/race-t-u10-state.sh
+vet-tu10-state:
+	bash scripts/vet-t-u10-state.sh
+review-tu10-state:
+	bash scripts/review-t-u10-state.sh
+
+.PHONY: stage-tu10-state commit-tu10-state push-tu10-state
+stage-tu10-state:
+	bash scripts/stage-t-u10-state.sh
+commit-tu10-state:
+	bash scripts/commit-t-u10-state.sh
+push-tu10-state:
+	bash scripts/push-t-u10-state.sh
