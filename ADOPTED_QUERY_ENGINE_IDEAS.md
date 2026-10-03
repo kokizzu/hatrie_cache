@@ -734,3 +734,9 @@ Adopted as opt-in `hatStorage.CompactionDiagnostics`: bounded arrangement regist
 ## Materialize M-U41: Webhook Event Idempotency
 
 Adopted as opt-in `hatSql.WebhookEventDeduplicator`: bounded source/event-ID admission, payload-fingerprint conflict detection, expiry, deterministic CRC-protected HWE1 snapshots, and atomic restore. The caller owns application, durable storage, acknowledgement, and HTTP/webhook wiring; existing defaults remain unchanged. See [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md) and [BENCHMARK.md](BENCHMARK.md#m-u41-webhook-event-idempotency).
+## T-U30: Cooperative execution lanes
+
+The new `hat/hatFiber` package adopts Tarantool's cooperative execution idea
+for resumable query-adjacent workflows. Continuations yield explicitly onto a
+bounded FIFO queue, reuse fixed worker and fiber slots, and preserve existing
+`hatPipeline` behavior by remaining opt-in.

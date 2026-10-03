@@ -1,0 +1,18 @@
+T030 feature benchmark: continuation scheduler, lifecycle and steady-state
+command: go test ./hat/hatFiber -run ^$ -bench BenchmarkContinuationFibers -benchmem -count=5
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatFiber
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkContinuationFibers-32               	    5548	    191156 ns/op	   26544 B/op	     785 allocs/op
+BenchmarkContinuationFibers-32               	    5653	    181792 ns/op	   26504 B/op	     785 allocs/op
+BenchmarkContinuationFibers-32               	    7213	    164353 ns/op	   26503 B/op	     785 allocs/op
+BenchmarkContinuationFibers-32               	    7338	    166549 ns/op	   26501 B/op	     785 allocs/op
+BenchmarkContinuationFibers-32               	    7033	    164362 ns/op	   26498 B/op	     785 allocs/op
+BenchmarkContinuationFibersSteadyState-32    	    6940	    174841 ns/op	   10384 B/op	     771 allocs/op
+BenchmarkContinuationFibersSteadyState-32    	    7134	    189016 ns/op	   10384 B/op	     771 allocs/op
+BenchmarkContinuationFibersSteadyState-32    	    5959	    186917 ns/op	   10384 B/op	     771 allocs/op
+BenchmarkContinuationFibersSteadyState-32    	    6414	    183234 ns/op	   10384 B/op	     771 allocs/op
+BenchmarkContinuationFibersSteadyState-32    	    7093	    174790 ns/op	   10384 B/op	     771 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatFiber	12.917s

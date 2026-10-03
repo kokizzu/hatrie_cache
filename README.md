@@ -4765,3 +4765,9 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+## Cooperative fibers
+
+For many small resumable workflows with a bounded worker budget, use the
+opt-in [`hat/hatFiber`](hat/hatFiber) package. See
+[`T030_COOPERATIVE_FIBER_SCHEDULER.md`](T030_COOPERATIVE_FIBER_SCHEDULER.md)
+for the continuation API, cancellation semantics, and benchmark tradeoffs.

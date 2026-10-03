@@ -964,3 +964,11 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   four normalized `GROUP BY` keys use an inline linear index and promote to the
   existing map for larger groups; see [CHG02_SMALL_GROUP_INDEX.md](CHG02_SMALL_GROUP_INDEX.md)
   and [BENCHMARK.md](BENCHMARK.md#chg02-small-cardinality-group-by-index).
+## T-U30: Tarantool-style cooperative fibers
+
+Adopted as the opt-in `hat/hatFiber` package. It uses stackless continuation
+steps, FIFO yielding, a fixed worker set, bounded live fibers, cancellation,
+and `WaitIdle` reuse. It deliberately does not alter the existing pipeline
+schedulers or pretend to provide stackful suspension. See
+[`T030_COOPERATIVE_FIBER_SCHEDULER.md`](T030_COOPERATIVE_FIBER_SCHEDULER.md)
+for API, tests, and measured tradeoffs.

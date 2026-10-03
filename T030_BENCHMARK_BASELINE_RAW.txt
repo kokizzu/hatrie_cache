@@ -1,0 +1,13 @@
+T030 reference benchmark: goroutine-per-flow equivalent workload
+command: go test ./hat/hatFiber -run ^$ -bench ^BenchmarkGoroutinePerFlow$ -benchmem -count=5
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatFiber
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkGoroutinePerFlow-32    	    1089	   1103615 ns/op	    8240 B/op	     513 allocs/op
+BenchmarkGoroutinePerFlow-32    	    1154	   1106692 ns/op	    8208 B/op	     513 allocs/op
+BenchmarkGoroutinePerFlow-32    	    1059	   1095630 ns/op	    8209 B/op	     513 allocs/op
+BenchmarkGoroutinePerFlow-32    	    1086	   1090519 ns/op	    8208 B/op	     513 allocs/op
+BenchmarkGoroutinePerFlow-32    	    1062	   1098759 ns/op	    8209 B/op	     513 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatFiber	6.561s

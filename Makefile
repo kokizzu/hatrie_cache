@@ -22292,3 +22292,22 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: verify-t030 verify-t030-package verify-t030-race verify-t030-vet verify-t030-full format-t030 benchmark-t030 benchmark-t030-feature-raw benchmark-t030-reference-raw
+verify-t030:
+	bash ./scripts/verify-t030.sh unit
+verify-t030-package:
+	bash ./scripts/verify-t030.sh package
+verify-t030-race:
+	bash ./scripts/verify-t030.sh race
+verify-t030-vet:
+	bash ./scripts/verify-t030.sh vet
+verify-t030-full:
+	bash ./scripts/verify-t030.sh full
+format-t030:
+	bash ./scripts/verify-t030.sh format
+benchmark-t030:
+	bash ./scripts/verify-t030.sh benchmark
+benchmark-t030-feature-raw:
+	bash ./scripts/verify-t030.sh benchmark-feature-raw
+benchmark-t030-reference-raw:
+	bash ./scripts/verify-t030.sh benchmark-reference-raw

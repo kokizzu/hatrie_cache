@@ -32580,3 +32580,21 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+## T-U30 Cooperative Fiber Scheduler
+
+Five-sample `-benchmem` run on AMD Ryzen 9 5950X, Linux amd64; 256 logical
+flows and eight steps per flow. The reference is a stateful goroutine per
+flow. Median values:
+
+| Feature benchmark | Hatrie | Reference | Hatrie / reference | Result |
+| --- | ---: | ---: | ---: | --- |
+| Steady-state CPU | 183,234 ns/op | 1,098,759 ns/op | 0.17x | 5.99x faster |
+| Steady-state memory | 10,384 B/op | 8,209 B/op | 1.27x | 26.5% higher |
+| Steady-state allocations | 771 allocs/op | 513 allocs/op | 1.50x | 50.3% higher |
+| Create/drain CPU | 166,549 ns/op | 1,098,759 ns/op | 0.15x | 6.60x faster |
+| Create/drain memory | 26,501 B/op | 8,209 B/op | 3.23x | lifecycle cost |
+
+The steady-state path is the intended service configuration: keep one
+scheduler alive and call `WaitIdle` between batches. Raw output is preserved in
+[`T030_BENCHMARK_RAW.txt`](T030_BENCHMARK_RAW.txt) and
+[`T030_BENCHMARK_BASELINE_RAW.txt`](T030_BENCHMARK_BASELINE_RAW.txt).
