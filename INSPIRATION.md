@@ -964,3 +964,8 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   four normalized `GROUP BY` keys use an inline linear index and promote to the
   existing map for larger groups; see [CHG02_SMALL_GROUP_INDEX.md](CHG02_SMALL_GROUP_INDEX.md)
   and [BENCHMARK.md](BENCHMARK.md#chg02-small-cardinality-group-by-index).
+- [x] T-U38 Tarantool-style bounded conflict introspection. `hatReplication.ConflictEventLog`
+  records keyed redacted conflict decisions in a bounded ring, exposes
+  cursor-gap detection, and supports CRC-protected HCE1 snapshots; recording is
+  caller-owned and opt-in. See [TR038_CONFLICT_INTROSPECTION.md](TR038_CONFLICT_INTROSPECTION.md)
+  and [BENCHMARK.md](BENCHMARK.md#t-u38-conflict-introspection).

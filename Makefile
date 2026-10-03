@@ -22292,3 +22292,6 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: benchmark-tr038
+benchmark-tr038:
+	@bash scripts/benchmark-tr038.sh

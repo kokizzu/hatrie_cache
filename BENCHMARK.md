@@ -32580,3 +32580,30 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## T-U38 Conflict Introspection
+
+Command:
+
+```sh
+make benchmark-tr038
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
+the existing conflict resolver without diagnostic recording. The feature's
+normal resolver control remains allocation-free; recording is explicitly
+opt-in.
+
+| Workload | Median ns/op | B/op | Allocs/op | Comparison |
+| --- | ---: | ---: | ---: | --- |
+| Existing resolution baseline | 2.153 | 0 | 0 | control |
+| Feature resolution only | 2.357 | 0 | 0 | same no-log control; measurement noise |
+| Resolution plus `ConflictEventLog.Record` | 262.3 | 8 | 1 | 122x baseline CPU, 1 allocation |
+| `MarshalBinary`, 128 retained events | 5,562 | 14,336 | 1 | 13,853-byte wire/storage payload |
+
+The initial implementation measured 588.5 ns/op, 544 B/op, and 8 allocs/op;
+fixed-buffer HMAC reduced that to 258.6 ns/op, 8 B/op, and 1 alloc/op. The
+recording cost is the intentional observability tradeoff and is absent unless a
+caller constructs and uses the log. See
+[TR038_CONFLICT_INTROSPECTION.md](TR038_CONFLICT_INTROSPECTION.md) and the raw
+samples in [TR038_BENCHMARK_RAW.txt](TR038_BENCHMARK_RAW.txt).

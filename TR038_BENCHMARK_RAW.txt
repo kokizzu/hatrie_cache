@@ -1,0 +1,37 @@
+T-U38 conflict introspection raw benchmark results
+Host: Linux/amd64, AMD Ryzen 9 5950X 16-Core Processor
+Command: go test ./hat/hatReplication -run '^$' -bench '^BenchmarkT038ConflictEventLog$' -benchmem -count=5
+
+Baseline (existing conflict resolution, before feature)
+BenchmarkT038ConflictEventLog-32  550984414  2.124 ns/op  0 B/op  0 allocs/op
+BenchmarkT038ConflictEventLog-32  522306111  2.153 ns/op  0 B/op  0 allocs/op
+BenchmarkT038ConflictEventLog-32  560306340  2.066 ns/op  0 B/op  0 allocs/op
+BenchmarkT038ConflictEventLog-32  592707120  2.186 ns/op  0 B/op  0 allocs/op
+BenchmarkT038ConflictEventLog-32  548762690  2.174 ns/op  0 B/op  0 allocs/op
+
+Feature, optimized implementation (repository target)
+BenchmarkT038ConflictEventLog/resolution_only-32  499519566  2.357 ns/op  0 B/op  0 allocs/op
+BenchmarkT038ConflictEventLog/resolution_only-32  506896460  2.352 ns/op  0 B/op  0 allocs/op
+BenchmarkT038ConflictEventLog/resolution_only-32  537065565  2.285 ns/op  0 B/op  0 allocs/op
+BenchmarkT038ConflictEventLog/resolution_only-32  502228944  2.411 ns/op  0 B/op  0 allocs/op
+BenchmarkT038ConflictEventLog/resolution_only-32  506488153  2.388 ns/op  0 B/op  0 allocs/op
+BenchmarkT038ConflictEventLog/resolution_plus_log-32  4628635  255.8 ns/op  8 B/op  1 allocs/op
+BenchmarkT038ConflictEventLog/resolution_plus_log-32  4562731  264.0 ns/op  8 B/op  1 allocs/op
+BenchmarkT038ConflictEventLog/resolution_plus_log-32  4673516  266.4 ns/op  8 B/op  1 allocs/op
+BenchmarkT038ConflictEventLog/resolution_plus_log-32  4555377  262.3 ns/op  8 B/op  1 allocs/op
+BenchmarkT038ConflictEventLog/resolution_plus_log-32  4668582  255.2 ns/op  8 B/op  1 allocs/op
+
+Feature, initial HMAC implementation before fixed-buffer optimization
+BenchmarkT038ConflictEventLog/resolution_plus_log-32  2055537  580.3 ns/op  544 B/op  8 allocs/op
+BenchmarkT038ConflictEventLog/resolution_plus_log-32  2081534  593.5 ns/op  544 B/op  8 allocs/op
+BenchmarkT038ConflictEventLog/resolution_plus_log-32  2054511  582.3 ns/op  544 B/op  8 allocs/op
+BenchmarkT038ConflictEventLog/resolution_plus_log-32  2035653  592.4 ns/op  544 B/op  8 allocs/op
+BenchmarkT038ConflictEventLog/resolution_plus_log-32  2035720  588.5 ns/op  544 B/op  8 allocs/op
+
+Feature snapshot benchmark
+Command: go test ./hat/hatReplication -run '^$' -bench '^BenchmarkT038ConflictEventLogSnapshot$' -benchmem -count=5
+BenchmarkT038ConflictEventLogSnapshot-32  209978  5499 ns/op  14336 B/op  1 allocs/op
+BenchmarkT038ConflictEventLogSnapshot-32  221024  5562 ns/op  14336 B/op  1 allocs/op
+BenchmarkT038ConflictEventLogSnapshot-32  206496  5654 ns/op  14336 B/op  1 allocs/op
+BenchmarkT038ConflictEventLogSnapshot-32  206088  5615 ns/op  14336 B/op  1 allocs/op
+BenchmarkT038ConflictEventLogSnapshot-32  219152  5551 ns/op  14336 B/op  1 allocs/op
