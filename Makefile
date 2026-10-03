@@ -22814,3 +22814,7 @@ bench-chu06-delete-bitmap:
 
 bench-mz039-partitioned-order:
 	bash ./scripts/benchmark-mz039-partitioned-order.sh
+benchmark-mu040-source-schema-registry:
+	bash scripts/benchmark-mu040-source-schema-registry.sh
+
+.PHONY: benchmark-mu040-source-schema-registry

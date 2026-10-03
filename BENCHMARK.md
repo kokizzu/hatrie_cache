@@ -33191,3 +33191,21 @@ after wait:            286.7 192 2; 289.7 192 2; 288.3 192 2; 297.6 192 2; 297.0
 apply new:             116.2 128 3; 115.2 128 3; 112.1 128 3; 114.5 128 3; 114.1 128 3
 apply duplicate:        66.21 8 1; 66.47 8 1; 66.55 8 1; 66.78 8 1; 66.70 8 1
 ```
+### M-U40 Source Schema Registry
+
+The opt-in `hatSchema.SchemaRegistry` adds bounded subject/version tracking and
+strict or rolling compatibility validation around the existing schema
+comparison helper. The default query and connector paths do not construct one.
+
+Benchmark: `make benchmark-mu040-source-schema-registry`, AMD Ryzen 9 5950X, Go benchmark
+`-count=3 -benchmem`, 2026-10-03.
+
+| Path | ns/op | B/op | allocs/op |
+|---|---:|---:|---:|
+| Direct `CheckRollingCompatibility` | 766.4 | 224 | 3 |
+| `SchemaRegistry.Check` | 1,321 | 1,120 | 6 |
+
+The registry check is about 1.72x slower, uses 5.00x the transient bytes, and
+uses 2.00x the allocations for this fixture. This is bounded control-plane
+validation overhead, not a data-path optimization. Details and policy examples
+are in [MU040_SOURCE_SCHEMA_REGISTRY.md](MU040_SOURCE_SCHEMA_REGISTRY.md).

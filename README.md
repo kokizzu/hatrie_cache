@@ -4816,3 +4816,10 @@ non-binary collations fall back automatically. See
 
 Run `make bench-mz039-partitioned-order` for the focused CPU and allocation
 comparison.
+# Source Schema Registry
+
+Use the opt-in `hatSchema.SchemaRegistry` to validate versioned CDC/source
+schema changes before publishing them. Strict mode is the safe default;
+`SchemaRegistryPolicyRolling` permits only the documented rolling-compatible
+changes. See [MU040_SOURCE_SCHEMA_REGISTRY.md](MU040_SOURCE_SCHEMA_REGISTRY.md)
+for usage, bounds, rollback ownership, and measured overhead.
