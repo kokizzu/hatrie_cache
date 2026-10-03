@@ -34,15 +34,24 @@ type hashIndexEntry[T any, K comparable] struct {
 	value T
 }
 
+const hashIndexUniqueSmallThreshold = 32
+
+type hashIndexUniqueEntry[T any, K comparable] struct {
+	id    uint64
+	entry hashIndexEntry[T, K]
+}
+
 // HashIndex is a typed exact-match secondary index. It uses a hash map for
 // key lookup and keeps a reverse ID map so updates and deletes are exact.
 type HashIndex[T any, K comparable] struct {
-	mu          sync.RWMutex
-	extractor   func(T) K
-	unique      bool
-	entries     map[uint64]hashIndexEntry[T, K]
-	uniqueByKey map[K]uint64
-	postings    map[K]u64PostingList
+	mu             sync.RWMutex
+	extractor      func(T) K
+	unique         bool
+	uniqueCapacity int
+	entries        map[uint64]hashIndexEntry[T, K]
+	uniqueByKey    map[K]uint64
+	uniqueEntries  []hashIndexUniqueEntry[T, K]
+	postings       map[K]u64PostingList
 }
 
 // NewHashIndex creates an empty typed hash index.
@@ -53,14 +62,15 @@ func NewHashIndex[T any, K comparable](extractor func(T) K, options HashIndexOpt
 	if options.Capacity < 0 {
 		options.Capacity = 0
 	}
-	index := &HashIndex[T, K]{
-		extractor: extractor,
-		unique:    options.Unique,
-		entries:   make(map[uint64]hashIndexEntry[T, K], options.Capacity),
-	}
+	index := &HashIndex[T, K]{extractor: extractor, unique: options.Unique, uniqueCapacity: options.Capacity}
 	if options.Unique {
-		index.uniqueByKey = make(map[K]uint64, options.Capacity)
+		capacity := options.Capacity
+		if capacity > hashIndexUniqueSmallThreshold {
+			capacity = hashIndexUniqueSmallThreshold
+		}
+		index.uniqueEntries = make([]hashIndexUniqueEntry[T, K], 0, capacity)
 	} else {
+		index.entries = make(map[uint64]hashIndexEntry[T, K], options.Capacity)
 		index.postings = make(map[K]u64PostingList, options.Capacity)
 	}
 	return index, nil
@@ -75,6 +85,11 @@ func (index *HashIndex[T, K]) Upsert(id uint64, value T) error {
 	key := index.extractor(value)
 	index.mu.Lock()
 	defer index.mu.Unlock()
+	if index.entries == nil {
+		if index.unique {
+			return index.upsertUniqueSmallLocked(id, key, value)
+		}
+	}
 	index.ensureInitializedLocked()
 	current, exists := index.entries[id]
 	if index.unique {
@@ -109,12 +124,25 @@ func (index *HashIndex[T, K]) Delete(id uint64) bool {
 	}
 	index.mu.Lock()
 	defer index.mu.Unlock()
+	if index.unique && index.entries == nil {
+		for position, item := range index.uniqueEntries {
+			if item.id != id {
+				continue
+			}
+			copy(index.uniqueEntries[position:], index.uniqueEntries[position+1:])
+			index.uniqueEntries[len(index.uniqueEntries)-1] = hashIndexUniqueEntry[T, K]{}
+			index.uniqueEntries = index.uniqueEntries[:len(index.uniqueEntries)-1]
+			return true
+		}
+		return false
+	}
 	entry, exists := index.entries[id]
 	if !exists {
 		return false
 	}
 	delete(index.entries, id)
 	index.removeKeyLocked(entry.key, id)
+	index.demoteUniqueLocked()
 	return true
 }
 
@@ -127,6 +155,14 @@ func (index *HashIndex[T, K]) LookupOne(key K) (HashIndexEntry[T, K], bool) {
 	index.mu.RLock()
 	defer index.mu.RUnlock()
 	if index.unique {
+		if index.entries == nil {
+			for _, item := range index.uniqueEntries {
+				if item.entry.key == key {
+					return HashIndexEntry[T, K]{ID: item.id, Key: item.entry.key, Value: item.entry.value}, true
+				}
+			}
+			return HashIndexEntry[T, K]{}, false
+		}
 		id, ok := index.uniqueByKey[key]
 		if !ok {
 			return HashIndexEntry[T, K]{}, false
@@ -151,6 +187,14 @@ func (index *HashIndex[T, K]) Contains(key K) bool {
 	index.mu.RLock()
 	defer index.mu.RUnlock()
 	if index.unique {
+		if index.entries == nil {
+			for _, item := range index.uniqueEntries {
+				if item.entry.key == key {
+					return true
+				}
+			}
+			return false
+		}
 		_, ok := index.uniqueByKey[key]
 		return ok
 	}
@@ -174,6 +218,14 @@ func (index *HashIndex[T, K]) LookupInto(key K, dst []T) []T {
 	index.mu.RLock()
 	defer index.mu.RUnlock()
 	if index.unique {
+		if index.entries == nil {
+			for _, item := range index.uniqueEntries {
+				if item.entry.key == key {
+					return append(dst, item.entry.value)
+				}
+			}
+			return dst
+		}
 		id, ok := index.uniqueByKey[key]
 		if !ok {
 			return dst
@@ -218,6 +270,14 @@ func (index *HashIndex[T, K]) LookupIDsInto(key K, dst []uint64) []uint64 {
 	index.mu.RLock()
 	defer index.mu.RUnlock()
 	if index.unique {
+		if index.entries == nil {
+			for _, item := range index.uniqueEntries {
+				if item.entry.key == key {
+					return append(dst, item.id)
+				}
+			}
+			return dst
+		}
 		if id, ok := index.uniqueByKey[key]; ok {
 			dst = append(dst, id)
 		}
@@ -237,6 +297,9 @@ func (index *HashIndex[T, K]) Len() int {
 	}
 	index.mu.RLock()
 	defer index.mu.RUnlock()
+	if index.unique && index.entries == nil {
+		return len(index.uniqueEntries)
+	}
 	return len(index.entries)
 }
 
@@ -248,6 +311,9 @@ func (index *HashIndex[T, K]) DistinctKeys() int {
 	index.mu.RLock()
 	defer index.mu.RUnlock()
 	if index.unique {
+		if index.entries == nil {
+			return len(index.uniqueEntries)
+		}
 		return len(index.uniqueByKey)
 	}
 	return len(index.postings)
@@ -262,6 +328,7 @@ func (index *HashIndex[T, K]) Clear() {
 	defer index.mu.Unlock()
 	index.entries = nil
 	index.uniqueByKey = nil
+	index.uniqueEntries = nil
 	index.postings = nil
 }
 
@@ -278,6 +345,53 @@ func (index *HashIndex[T, K]) ensureInitializedLocked() {
 	if index.postings == nil {
 		index.postings = make(map[K]u64PostingList)
 	}
+}
+
+func (index *HashIndex[T, K]) upsertUniqueSmallLocked(id uint64, key K, value T) error {
+	for position, item := range index.uniqueEntries {
+		if item.entry.key == key && item.id != id {
+			return ErrHashIndexDuplicateKey
+		}
+		if item.id != id {
+			continue
+		}
+		index.uniqueEntries[position].entry = hashIndexEntry[T, K]{key: key, value: value}
+		return nil
+	}
+	index.uniqueEntries = append(index.uniqueEntries, hashIndexUniqueEntry[T, K]{id: id, entry: hashIndexEntry[T, K]{key: key, value: value}})
+	if len(index.uniqueEntries) > hashIndexUniqueSmallThreshold {
+		index.promoteUniqueLocked()
+	}
+	return nil
+}
+
+func (index *HashIndex[T, K]) promoteUniqueLocked() {
+	if !index.unique || index.entries != nil {
+		return
+	}
+	capacity := index.uniqueCapacity
+	if capacity < len(index.uniqueEntries) {
+		capacity = len(index.uniqueEntries)
+	}
+	index.entries = make(map[uint64]hashIndexEntry[T, K], capacity)
+	index.uniqueByKey = make(map[K]uint64, capacity)
+	for _, item := range index.uniqueEntries {
+		index.entries[item.id] = item.entry
+		index.uniqueByKey[item.entry.key] = item.id
+	}
+	index.uniqueEntries = nil
+}
+
+func (index *HashIndex[T, K]) demoteUniqueLocked() {
+	if !index.unique || index.entries == nil || len(index.entries) > hashIndexUniqueSmallThreshold {
+		return
+	}
+	index.uniqueEntries = make([]hashIndexUniqueEntry[T, K], 0, len(index.entries))
+	for id, entry := range index.entries {
+		index.uniqueEntries = append(index.uniqueEntries, hashIndexUniqueEntry[T, K]{id: id, entry: entry})
+	}
+	index.entries = nil
+	index.uniqueByKey = nil
 }
 
 func (index *HashIndex[T, K]) removeKeyLocked(key K, id uint64) {
