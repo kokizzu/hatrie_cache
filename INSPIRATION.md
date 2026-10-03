@@ -644,6 +644,12 @@ Materialize's Timely/Differential Dataflow runtime.
   shapes and legacy resolvers fall back unchanged. See
   [M090C_PROJECTED_SOURCE.md](M090C_PROJECTED_SOURCE.md) and
   [BENCHMARK.md#m090c-projected-materialized-sources](BENCHMARK.md#m090c-projected-materialized-sources).
+- [x] M090d Native dataflow source snapshots. Repeated ordinary materialized
+  source identities share one read-only per-query source slice in the native
+  executor, preserving join snapshot consistency while reducing resolver
+  work, heap, and allocations. See
+  [M090D_NATIVE_SOURCE_SNAPSHOTS.md](M090D_NATIVE_SOURCE_SNAPSHOTS.md) and
+  [BENCHMARK.md#m090d-native-dataflow-source-snapshots](BENCHMARK.md#m090d-native-dataflow-source-snapshots).
 - [x] M091 Durable persistent shards through the local storage layer.
 - [x] M092 Batched writes to durable storage.
 - [x] M093 Caller-driven bounded persistent-shard compaction scheduling with duplicate request coalescing, deterministic task ordering, retry-preserving failures, and explicit concurrency limits; see [COMPACTION_SCHEDULER.md](COMPACTION_SCHEDULER.md).

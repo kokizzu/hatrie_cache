@@ -23537,6 +23537,34 @@ win is primarily reduced remote materialization and transfer work, not a
 local row-map memory reduction. Unsupported query shapes and legacy resolvers
 use the existing full-row path. Reproduce with `make benchmark-m090c-projected-source`.
 
+<a id="m090d-native-dataflow-source-snapshots"></a>
+## M090d Native Dataflow Source Snapshots
+
+This benchmark compares the native equality join before and after per-query
+source-slice sharing. The deterministic fixture has 1,024 rows and joins
+`CACHE('users')` to itself. Five `-benchmem` samples were collected with
+`make benchmark-m090d-native-source-snapshots` on Linux/amd64 with an AMD
+Ryzen 9 5950X.
+
+### Raw Samples
+
+| Path | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| Before, two resolver reads | 1,292,018; 1,373,203; 1,277,281; 1,241,816; 1,193,142 | 1,944,089; 1,944,083; 1,944,090; 1,944,082; 1,944,084 | 12,317; 12,317; 12,317; 12,317; 12,317 |
+| After, one shared snapshot | 1,114,298; 1,056,972; 1,048,320; 1,033,764; 1,032,622 | 1,590,978; 1,590,978; 1,590,973; 1,590,971; 1,590,973 | 10,273; 10,273; 10,273; 10,273; 10,273 |
+
+### Median Comparison
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Before, two resolver reads | 1,277,281 | 1,944,084 | 12,317 | `1.00x` |
+| After, one shared snapshot | 1,048,320 | 1,590,973 | 10,273 | `1.22x` faster, `1.22x` lower bytes, `1.20x` fewer allocations |
+
+The correctness test also verifies that a resolver changing its answer between
+calls is invoked once and produces the same value on both join aliases. The
+shared state is per query; there is no cross-query cache retention or source
+invalidation cost.
+
 <a id="mz-019-named-sql-compute-pools"></a>
 ## MZ-019 Named SQL Compute Pools
 

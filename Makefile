@@ -28611,3 +28611,30 @@ benchmark-t204:
 
 benchmark-t206:
 	@bash ./scripts/benchmark-t206.sh
+.PHONY: m090d-status
+m090d-status:
+	bash scripts/m090d-commit-push.sh status
+
+.PHONY: m090d-commit-push
+m090d-commit-push:
+	bash scripts/m090d-commit-push.sh commit-push
+
+.PHONY: test-m090d-native-source-snapshots-full
+test-m090d-native-source-snapshots-full:
+	bash scripts/m090d-native-source-snapshots.sh full
+
+.PHONY: test-m090d-native-source-snapshots
+test-m090d-native-source-snapshots:
+	bash scripts/m090d-native-source-snapshots.sh test
+
+.PHONY: race-m090d-native-source-snapshots
+race-m090d-native-source-snapshots:
+	bash scripts/m090d-native-source-snapshots.sh race
+
+.PHONY: vet-m090d-native-source-snapshots
+vet-m090d-native-source-snapshots:
+	bash scripts/m090d-native-source-snapshots.sh vet
+
+.PHONY: benchmark-m090d-native-source-snapshots
+benchmark-m090d-native-source-snapshots:
+	bash scripts/m090d-native-source-snapshots.sh benchmark

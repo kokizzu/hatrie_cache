@@ -21,7 +21,7 @@ func executeSQLAutoNativeDataflow(ctx context.Context, query *sqlQuery, resolver
 	}
 	rows, _, projected, err := resolveSQLProjectedSourceRows(query, resolver, control, sqlQueryPartitionPredicates(query))
 	if !projected {
-		rows, err = resolveSQLSourceContext(ctx, resolver, query.from.kind, query.from.key)
+		rows, err = resolveSQLNativeSource(*query.from, resolver, control)
 	}
 	if err != nil {
 		return SQLQueryResult{}, true, err
@@ -36,7 +36,7 @@ func executeSQLAutoNativeDataflow(ctx context.Context, query *sqlQuery, resolver
 	var rightRows []SQLRow
 	if isJoin {
 		join := query.joins[0]
-		rightRows, err = resolveSQLSourceContext(ctx, resolver, join.source.kind, join.source.key)
+		rightRows, err = resolveSQLNativeSource(join.source, resolver, control)
 		if err != nil {
 			return SQLQueryResult{}, true, err
 		}
@@ -84,6 +84,23 @@ func executeSQLAutoNativeDataflow(ctx context.Context, query *sqlQuery, resolver
 		}}
 	}
 	return result, true, nil
+}
+
+// resolveSQLNativeSource retains one read-only source slice for the duration
+// of a native dataflow query. Native operators build new result rows and do
+// not mutate source rows, so repeating the same source can share the slice
+// without the defensive clones required by the general executor.
+func resolveSQLNativeSource(source sqlSource, resolver SQLSourceResolver, control *sqlExecutionControl) ([]SQLRow, error) {
+	cacheKey := source.kind + "\x00" + source.key
+	if rows, ok := control.sources[cacheKey]; ok {
+		return rows, nil
+	}
+	rows, err := resolveSQLSourceContext(control.executionContext(), resolver, source.kind, source.key)
+	if err != nil {
+		return nil, err
+	}
+	control.sources[cacheKey] = rows
+	return rows, nil
 }
 
 func sqlAutoNativeDataflowEligible(query *sqlQuery, resolver SQLSourceResolver, options SQLQueryOptions) bool {
