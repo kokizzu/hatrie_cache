@@ -32580,3 +32580,25 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## TT-039 Live Credential Rotation
+
+Commands:
+
+```sh
+make round75-tt039-bench
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X 16-Core Processor.
+The immutable `TokenSet` is the read-path baseline.
+
+| Operation | Median ns/op | B/op | Allocs/op | Comparison |
+| --- | ---: | ---: | ---: | --- |
+| Immutable `TokenSet.Matches` | 12.82 | 0 | 0 | baseline |
+| `TokenRotator.Matches` | 14.77 | 0 | 0 | 1.15x CPU, +1.95 ns |
+| `TokenRotator.Rotate` | 93.35 | 64 | 1 | infrequent control-plane update |
+
+Live reads add about 1.15x CPU without heap allocation. Rotation allocates one
+immutable snapshot and does not block readers. Raw samples and the security
+contract are in
+[TT039_LIVE_CREDENTIAL_ROTATION.md](TT039_LIVE_CREDENTIAL_ROTATION.md).

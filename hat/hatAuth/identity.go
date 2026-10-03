@@ -58,6 +58,32 @@ func (provider LocalTokenIdentity) Authenticate(_ context.Context, request *http
 	return token, true, nil
 }
 
+// RotatingTokenIdentity authenticates against a live TokenRotator. Keep one
+// provider instance in the listener and call Rotate to change credentials
+// without rebuilding the listener or replacing its provider chain.
+type RotatingTokenIdentity struct {
+	Rotator *TokenRotator
+	Now     func() time.Time
+}
+
+func (provider RotatingTokenIdentity) Authenticate(_ context.Context, request *http.Request) (string, bool, error) {
+	if provider.Rotator == nil || request == nil {
+		return "", false, nil
+	}
+	token := BearerToken(request.Header.Get("Authorization"))
+	if token == "" {
+		return "", false, nil
+	}
+	now := time.Now()
+	if provider.Now != nil {
+		now = provider.Now()
+	}
+	if !provider.Rotator.Matches(token, now) {
+		return "", false, nil
+	}
+	return token, true, nil
+}
+
 // OIDCIdentityFunc validates a Bearer token with an OIDC implementation.
 // It is a function adapter so OIDC clients stay outside the core package.
 type OIDCIdentityFunc func(context.Context, string) (identity string, authenticated bool, err error)

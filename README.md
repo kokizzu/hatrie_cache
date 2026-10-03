@@ -4765,3 +4765,8 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+
+## Live Credential Rotation
+
+Opt-in atomic token rotation for long-lived auth providers is documented in
+[TT039_LIVE_CREDENTIAL_ROTATION.md](TT039_LIVE_CREDENTIAL_ROTATION.md).
