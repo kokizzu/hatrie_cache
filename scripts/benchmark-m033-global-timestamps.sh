@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-go test ./hat/hatReplication -run '^$' -bench '^(BenchmarkTimestampOracleNext|BenchmarkGlobalTimestampOracle)$' -benchmem -benchtime=250ms -count=5
+go test ./hat/hatReplication \
+	-run '^$' \
+	-bench '^BenchmarkGlobalTimestampOracle(SnapshotJSON|SnapshotBinary|SnapshotBinaryDecode|SnapshotJSONDecode|FileStoreSave|FileStoreLoad)$' \
+	-benchmem \
+	-benchtime=300ms \
+	-count=5

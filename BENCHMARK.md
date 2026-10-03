@@ -39424,3 +39424,29 @@ difference is within normal benchmark noise. Existing join/leave behavior is
 preserved. See [T207_REPLICA_EVICTION_REJOIN.md](T207_REPLICA_EVICTION_REJOIN.md)
 for the recovery sequence, API contract, security boundaries, and verification
 commands.
+## M033c: Global Timestamp Oracle Binary Codec And Durable Checkpoints
+
+The matched workload contains a 64-node, 1,024-timestamp-per-node oracle
+snapshot. JSON is the existing caller-owned representation. The binary codec is
+explicitly opt-in through `MarshalGlobalTimestampOracleSnapshot`; the file
+store adds atomic replacement and file/directory `fsync`.
+
+Command: `make benchmark-m033-global-timestamps` (five `-benchmem` samples;
+the split codec and durable targets were used for the final raw runs).
+
+| Path | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op | Comparison |
+| --- | --- | ---: | ---: | ---: | --- |
+| JSON snapshot encode, before | 29,524; 54,595; 29,260; 28,858; 28,710 | 29,260 | 18,054 | 6 | baseline |
+| JSON snapshot encode, final | 28,870; 29,777; 28,668; 29,009; 29,591 | 29,009 | 18,047 | 6 | baseline |
+| Binary snapshot encode, final | 11,181; 11,259; 11,132; 11,283; 11,001 | 11,181 | 9,864 | 5 | 2.60x faster; 1.83x lower allocated bytes |
+| JSON snapshot decode, final | 144,080; 145,683; 144,190; 143,828; 145,257 | 144,190 | 17,144 | 144 | baseline |
+| Binary snapshot decode, final | 15,672; 15,998; 15,548; 14,819; 15,009 | 15,548 | 12,296 | 69 | 9.27x faster; 1.39x lower allocated bytes; 2.09x fewer allocations |
+| Durable file save, final | 1,635,290; 1,925,450; 1,686,885; 1,666,614; 1,669,838 | 1,669,838 | 11,464 | 23 | explicit fsync cost; not a hot-path optimization |
+| Durable file load, final | 28,623; 28,224; 28,404; 28,294; 28,101 | 28,294 | 16,008 | 81 | binary read plus validation |
+
+The encoded snapshot size was 1,251 bytes for binary versus 10,810 bytes for
+JSON, an 8.64x reduction. The durable save latency measured 1.64-1.93 ms
+across the final five samples; that is the intentional cost of
+crash safety and should be paid only at a caller-selected checkpoint or
+consensus boundary. The zero-value oracle, `Reserve`, and lease consumption
+remain unchanged.

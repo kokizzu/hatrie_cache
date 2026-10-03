@@ -1193,3 +1193,17 @@ existing payload-first path. The 32-command encoding benchmark measured 1.86x
 lower CPU time, 1.15x lower wire bytes, 1.45x lower allocated bytes, and 32x
 fewer allocations than 32 individual frames. See [T238_COMPACT_BATCH.md](T238_COMPACT_BATCH.md)
 and [BENCHMARK.md](BENCHMARK.md#t238-ordered-compact-binary-request-batches).
+## M033c: Durable Global Timestamp Oracle Checkpoints
+
+The Materialize-style global timestamp authority now has an explicit
+`hatReplication.GlobalTimestampOracleFileStore`. It persists deterministic
+`GTO1` binary snapshots with canonical varints and CRC32C, validates bounded
+node/range state on restore, rejects symlink state paths, and uses a private
+temporary file plus file and directory `fsync` before atomic replacement.
+`SaveOracle`/`LoadOracle` are convenience methods; consensus callers can bind
+`SaveSnapshot`/`LoadSnapshot` to their own commit boundary. The default oracle
+allocation and lease paths perform no file I/O. Binary encode/decode are faster
+and smaller than the existing JSON caller-owned representation; durable saves
+retain the expected fsync latency and remain opt-in. See
+[M033_GLOBAL_TIMESTAMP_ORACLE_FILE_STORE.md](M033_GLOBAL_TIMESTAMP_ORACLE_FILE_STORE.md)
+and [BENCHMARK.md](BENCHMARK.md#m033c-global-timestamp-oracle-binary-codec-and-durable-checkpoints).
