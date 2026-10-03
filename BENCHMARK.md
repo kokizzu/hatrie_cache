@@ -33234,3 +33234,30 @@ The indexed lookup is a planning/catalog improvement: it does not change join
 semantics and does not automatically allocate or maintain a physical index.
 The same bytes and allocation counts show that the improvement comes from
 avoiding unrelated candidate scans, not from trading memory for CPU.
+## CH-G14 Prepared-Plan Cache Metrics
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The same prepared
+cache workloads were run on the green base branch and after adding public
+capacity, eviction, and retained-byte statistics.
+
+| Workload | Before median ns/op | After median ns/op | CPU ratio (before/after) | B/op before/after | Allocs/op before/after |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Prepared-cache hit | 27.28 | 26.90 | 1.01x | 0 / 0 | 0 / 0 |
+| Exact-key control | 26.01 | 25.75 | 1.01x | 0 / 0 | 0 / 0 |
+| Capacity-1 eviction | 3,636 | 3,703 | 0.98x | 4,539 / 4,538 | 20 / 20 |
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+before hit:      30.22 0 0; 25.95 0 0; 27.28 0 0; 25.70 0 0; 31.27 0 0
+after hit:       27.45 0 0; 26.05 0 0; 26.90 0 0; 27.27 0 0; 26.02 0 0
+before exact:    26.01 0 0; 25.60 0 0; 25.94 0 0; 29.80 0 0; 29.15 0 0
+after exact:     25.69 0 0; 25.75 0 0; 27.60 0 0; 27.44 0 0; 24.90 0 0
+before eviction: 3633 4538 20; 3676 4539 20; 3574 4539 20; 3636 4539 20; 3650 4539 20
+after eviction:  3647 4538 20; 3808 4538 20; 3703 4538 20; 3792 4538 20; 3561 4538 20
+```
+
+The feature is retained for operational observability, not a claimed CPU
+improvement. It adds one `int64` accounting field per retained cache entry and
+reports an estimate rather than recursive AST memory; transient benchmark
+bytes and allocations did not increase.

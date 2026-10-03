@@ -88,3 +88,20 @@ func BenchmarkSQLPreparedQueryCacheVersionedHit(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkSQLPreparedQueryCacheEviction(b *testing.B) {
+	cache := NewSQLPreparedQueryCache(1)
+	first := "SELECT 1 FROM CACHE('one')"
+	second := "SELECT 2 FROM CACHE('two')"
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		source := first
+		if index&1 == 1 {
+			source = second
+		}
+		if _, err := cache.template(source); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

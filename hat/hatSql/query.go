@@ -395,11 +395,16 @@ type SQLQueryOptions struct {
 type QueryOptions = SQLQueryOptions
 
 // SQLPreparedQueryCacheStats reports immutable parsed-template reuse. Values
-// bound to `$n` are never stored in this cache.
+// bound to `$n` are never stored in this cache. EstimatedBytes accounts for
+// cache-owned key strings and bounded entry overhead; parser object internals
+// are intentionally not recursively measured.
 type SQLPreparedQueryCacheStats struct {
-	Entries int
-	Hits    uint64
-	Misses  uint64
+	Capacity       int
+	Entries        int
+	Hits           uint64
+	Misses         uint64
+	Evictions      uint64
+	EstimatedBytes int64
 }
 
 // PreparedQueryCacheStats reports parsed-template cache reuse.
@@ -417,12 +422,15 @@ type SQLPreparedQueryCache struct {
 	order                 *list.List
 	hits                  uint64
 	misses                uint64
+	evictions             uint64
+	estimatedBytes        int64
 }
 
 type sqlPreparedQueryCacheEntry struct {
-	query     *sqlQuery
-	order     *list.Element
-	lookupKey sqlPreparedQueryCacheLookupKey
+	query          *sqlQuery
+	order          *list.Element
+	lookupKey      sqlPreparedQueryCacheLookupKey
+	estimatedBytes int64
 }
 
 // PreparedQueryCache caches immutable parsed, unbound SQL templates.
@@ -452,7 +460,18 @@ func (cache *SQLPreparedQueryCache) Stats() SQLPreparedQueryCacheStats {
 	}
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
-	return SQLPreparedQueryCacheStats{Entries: len(cache.entries), Hits: cache.hits, Misses: cache.misses}
+	capacity := cache.capacity
+	if capacity < 0 {
+		capacity = 0
+	}
+	return SQLPreparedQueryCacheStats{
+		Capacity:       capacity,
+		Entries:        len(cache.entries),
+		Hits:           cache.hits,
+		Misses:         cache.misses,
+		Evictions:      cache.evictions,
+		EstimatedBytes: cache.estimatedBytes,
+	}
 }
 
 var defaultSQLPreparedQueryCache = NewSQLPreparedQueryCache(256)

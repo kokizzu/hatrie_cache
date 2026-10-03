@@ -3,7 +3,7 @@ package hatSql
 import "encoding/binary"
 
 type sqlPreparedQueryCacheLookupKey struct {
-	source       string
+	source        string
 	schemaVersion string
 }
 
@@ -47,7 +47,10 @@ func (cache *SQLPreparedQueryCache) templateWithSchemaVersion(source, schemaVers
 		cache.hits++
 		cache.order.MoveToBack(entry.order)
 		sqlPreparedQueryCacheDeleteExactEntry(cache, entry.lookupKey)
+		previousBytes := entry.estimatedBytes
 		entry.lookupKey = lookupKey
+		entry.estimatedBytes = sqlPreparedQueryCacheEntryBytes(key, lookupKey)
+		cache.estimatedBytes += entry.estimatedBytes - previousBytes
 		cache.entries[key] = entry
 		sqlPreparedQueryCacheSetExactEntry(cache, lookupKey, entry)
 		return entry.query, nil
@@ -64,11 +67,24 @@ func (cache *SQLPreparedQueryCache) templateWithSchemaVersion(source, schemaVers
 		cache.order.Remove(oldest)
 		delete(cache.entries, evicted)
 		sqlPreparedQueryCacheDeleteExactEntry(cache, entry.lookupKey)
+		cache.estimatedBytes -= entry.estimatedBytes
+		cache.evictions++
 	}
-	entry = sqlPreparedQueryCacheEntry{query: query, order: cache.order.PushBack(key), lookupKey: lookupKey}
+	entry = sqlPreparedQueryCacheEntry{
+		query:          query,
+		order:          cache.order.PushBack(key),
+		lookupKey:      lookupKey,
+		estimatedBytes: sqlPreparedQueryCacheEntryBytes(key, lookupKey),
+	}
 	cache.entries[key] = entry
 	sqlPreparedQueryCacheSetExactEntry(cache, lookupKey, entry)
+	cache.estimatedBytes += entry.estimatedBytes
 	return query, nil
+}
+
+func sqlPreparedQueryCacheEntryBytes(key string, lookupKey sqlPreparedQueryCacheLookupKey) int64 {
+	const entryOverhead = int64(128)
+	return entryOverhead + int64(len(key)+len(lookupKey.source)+len(lookupKey.schemaVersion))
 }
 
 func sqlPreparedQueryCacheExactEntry(cache *SQLPreparedQueryCache, lookupKey sqlPreparedQueryCacheLookupKey) (sqlPreparedQueryCacheEntry, bool) {
@@ -124,7 +140,11 @@ func (cache *SQLPreparedQueryCache) invalidatePreparedPlans(scoped bool, schemaV
 		cache.order.Remove(entry.order)
 		delete(cache.entries, key)
 		sqlPreparedQueryCacheDeleteExactEntry(cache, entry.lookupKey)
+		cache.estimatedBytes -= entry.estimatedBytes
 		removed++
+	}
+	if cache.estimatedBytes < 0 {
+		cache.estimatedBytes = 0
 	}
 	return removed
 }

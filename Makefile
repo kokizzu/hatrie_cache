@@ -22839,3 +22839,22 @@ benchmark-mu040-source-schema-registry:
 	bash scripts/benchmark-mu040-source-schema-registry.sh
 
 .PHONY: benchmark-mu040-source-schema-registry
+.PHONY: test-chg14-prepared-cache benchmark-chg14-prepared-cache race-chg14-prepared-cache vet-chg14-prepared-cache commit-chg14-prepared-cache push-chg14-prepared-cache
+
+test-chg14-prepared-cache:
+	bash ./scripts/test-chg14-prepared-cache.sh
+
+benchmark-chg14-prepared-cache:
+	bash ./scripts/benchmark-chg14-prepared-cache.sh
+
+race-chg14-prepared-cache:
+	bash ./scripts/race-chg14-prepared-cache.sh
+
+vet-chg14-prepared-cache:
+	bash ./scripts/vet-chg14-prepared-cache.sh
+
+commit-chg14-prepared-cache:
+	bash ./scripts/commit-chg14-prepared-cache.sh
+
+push-chg14-prepared-cache:
+	bash ./scripts/push-chg14-prepared-cache.sh
