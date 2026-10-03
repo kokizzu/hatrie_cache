@@ -40301,3 +40301,22 @@ The retained feature is default-off. Opt-in sharing reduces duplicate source
 evaluations by 64x, refresh time by about 1.68x, bytes by about 39%, and
 allocations by about 39%. The memoization is scoped to one refresh call and
 does not retain stale rows between calls. See [M248_SHARED_MAINTAINED_READS.md](M248_SHARED_MAINTAINED_READS.md).
+
+## M251: Reusable Group-Commit Rollback Metadata
+
+Workload: a 64-command group-commit batch with the journal write and sync
+hooks stubbed to isolate in-process bookkeeping. The baseline allocates a
+temporary encoded-length slice; M251 stores each length on its existing job
+metadata. Five `-benchmem` samples were measured on Linux amd64 with an AMD
+Ryzen 9 5950X.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative CPU | Relative bytes | Relative allocs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Existing temporary slice | 32,071 | 4,560 | 3 | 1.00x | 1.00x | 1.00x |
+| M251 per-job metadata | 32,347 | 4,304 | 2 | 0.99x | 0.94x | 0.67x |
+
+CPU is flat within measurement noise; M251 is retained for the one fewer
+allocation and 256 fewer allocated bytes per batch. Journal framing, sequence
+numbers, durability barriers, and command behavior are unchanged. Raw samples
+are in [`M251_BENCHMARK_RAW.txt`](M251_BENCHMARK_RAW.txt), with the design and
+tradeoff in [M251_GROUP_COMMIT_METADATA.md](M251_GROUP_COMMIT_METADATA.md).

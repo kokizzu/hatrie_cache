@@ -1,0 +1,13 @@
+M251 baseline, detached at 5a2ee61f
+BenchmarkM251GroupCommitMetadata-32    37186 32630 ns/op 4560 B/op 3 allocs/op
+BenchmarkM251GroupCommitMetadata-32    37506 32237 ns/op 4560 B/op 3 allocs/op
+BenchmarkM251GroupCommitMetadata-32    37536 32071 ns/op 4560 B/op 3 allocs/op
+BenchmarkM251GroupCommitMetadata-32    38149 32025 ns/op 4560 B/op 3 allocs/op
+BenchmarkM251GroupCommitMetadata-32    37126 31943 ns/op 4560 B/op 3 allocs/op
+
+M251 feature, commit under test
+BenchmarkM251GroupCommitMetadata-32    36525 32114 ns/op 4304 B/op 2 allocs/op
+BenchmarkM251GroupCommitMetadata-32    37022 32347 ns/op 4304 B/op 2 allocs/op
+BenchmarkM251GroupCommitMetadata-32    37069 32554 ns/op 4304 B/op 2 allocs/op
+BenchmarkM251GroupCommitMetadata-32    36865 32269 ns/op 4304 B/op 2 allocs/op
+BenchmarkM251GroupCommitMetadata-32    37704 32498 ns/op 4304 B/op 2 allocs/op

@@ -201,6 +201,7 @@ type commandJournalJob struct {
 	operation      *snapshotOperation
 	submission     *CommandJournalSubmission
 	onComplete     func(CacheCommandResponse)
+	recordSize     uint32
 	prepared       bool
 	result         chan CacheCommandResponse
 }
@@ -581,9 +582,8 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 			failCommandJournalJobs(pending, err)
 			return
 		}
-		recordSizes := make([]uint32, len(pending))
 		encoded := make([]byte, 0, commandJournalRequestBatchInitialCapacity(pending, chunkBytes))
-		for idx, job := range pending {
+		for _, job := range pending {
 			sequence, nextErr := journal.nextAppendSequenceLocked()
 			if nextErr != nil {
 				err = journal.rollbackPreparedBatchLocked(batchState, nextErr)
@@ -610,7 +610,7 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 				failCommandJournalJobs(pending, err)
 				return
 			}
-			recordSizes[idx] = uint32(len(encoded) - start)
+			job.recordSize = uint32(len(encoded) - start)
 			journal.markAppendedLocked(sequence)
 			if len(encoded) >= chunkBytes {
 				if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
@@ -647,7 +647,7 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 					Request:  job.journalRequest,
 				})
 				job.complete(response)
-				rollbackOffset += int64(recordSizes[idx])
+				rollbackOffset += int64(pending[idx].recordSize)
 				continue
 			}
 			rollbackState := commandJournalAppendState{
@@ -675,10 +675,11 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 }
 
 type commandJournalIdempotentGroupEntry struct {
-	job      *commandJournalJob
-	check    commandIdempotencyCheck
-	aliases  []*commandJournalJob
-	sequence uint64
+	job        *commandJournalJob
+	check      commandIdempotencyCheck
+	aliases    []*commandJournalJob
+	sequence   uint64
+	recordSize uint32
 }
 
 func (journal *CommandJournal) processIdempotentGroupCommitLocked(batch []*commandJournalJob) {
@@ -716,7 +717,6 @@ func (journal *CommandJournal) processIdempotentGroupCommitLocked(batch []*comma
 			failCommandJournalIdempotentGroupEntries(entries, err)
 			return
 		}
-		recordSizes := make([]uint32, len(entries))
 		encoded := make([]byte, 0, commandJournalRequestBatchInitialCapacityFromIdempotentEntries(entries, chunkBytes))
 		for index := range entries {
 			entry := &entries[index]
@@ -748,7 +748,7 @@ func (journal *CommandJournal) processIdempotentGroupCommitLocked(batch []*comma
 				failCommandJournalIdempotentGroupEntries(entries, err)
 				return
 			}
-			recordSizes[index] = uint32(len(encoded) - start)
+			entry.recordSize = uint32(len(encoded) - start)
 			journal.markAppendedLocked(sequence)
 			if len(encoded) >= chunkBytes {
 				if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
@@ -783,7 +783,7 @@ func (journal *CommandJournal) processIdempotentGroupCommitLocked(batch []*comma
 					Request:  entry.job.journalRequest,
 				})
 				completeCommandJournalIdempotentGroupEntry(entry, response)
-				rollbackOffset += int64(recordSizes[index])
+				rollbackOffset += int64(entry.recordSize)
 				continue
 			}
 			rollbackState := commandJournalAppendState{

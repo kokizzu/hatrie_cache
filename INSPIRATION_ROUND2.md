@@ -139,6 +139,7 @@ operator control remain the preferred deployment model.
 - [x] M248 Reusable maintained-result sharing for identical read expressions during one refresh frontier; opt-in `QuerySubscriptionDefinition.ShareIdenticalReads` avoids duplicate evaluations without retaining stale results. See [M248_SHARED_MAINTAINED_READS.md](M248_SHARED_MAINTAINED_READS.md) and [BENCHMARK.md](BENCHMARK.md#m248-reusable-maintained-read-sharing).
 - [x] M249 Consistency fencing between a point read and a subsequent subscription; see [M249_READ_FENCE.md](M249_READ_FENCE.md).
 - [x] M250 Temporal join alignment that waits for both input frontiers. Implemented as opt-in `DifferentialTemporalJoinAligned`; see [M250_TEMPORAL_JOIN_ALIGNMENT.md](M250_TEMPORAL_JOIN_ALIGNMENT.md) and [BENCHMARK.md](BENCHMARK.md#m250-temporal-join-frontier-alignment).
+- [x] M251 Ordered group-commit rollback metadata is retained on the existing job objects, removing one temporary allocation per ordinary or idempotent batch without changing journal format or durability semantics; see [M251_GROUP_COMMIT_METADATA.md](M251_GROUP_COMMIT_METADATA.md) and [BENCHMARK.md](BENCHMARK.md#m251-reusable-group-commit-rollback-metadata).
 
 ## Tarantool: 50 Additional Ideas
 
