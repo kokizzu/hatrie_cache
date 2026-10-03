@@ -1,0 +1,56 @@
+T-U39 Named-Space Changefeed
+============================
+
+Environment
+-----------
+OS: Linux
+Architecture: amd64
+CPU: AMD Ryzen 9 5950X 16-Core Processor
+Command: go test ./hat/hatDataStructure -run '^$' -bench '^BenchmarkT039SpaceChangefeed$' -benchmem -count=5
+
+Baseline: direct buffered channel handoff, no retained history, schema checks,
+checkpointing, byte detachment, or backpressure policy
+-------------------------------------------------------------------------------
+BenchmarkT039SpaceChangefeed-32  44813354  26.54 ns/op  0 B/op  0 allocs/op
+BenchmarkT039SpaceChangefeed-32  45083413  26.57 ns/op  0 B/op  0 allocs/op
+BenchmarkT039SpaceChangefeed-32  45050239  26.52 ns/op  0 B/op  0 allocs/op
+BenchmarkT039SpaceChangefeed-32  46058428  26.57 ns/op  0 B/op  0 allocs/op
+BenchmarkT039SpaceChangefeed-32  44106580  26.36 ns/op  0 B/op  0 allocs/op
+Median: 26.54 ns/op, 0 B/op, 0 allocs/op
+
+Feature: named-space feed with one update payload
+--------------------------------------------------
+BenchmarkT039SpaceChangefeed/direct_channel-32  45575510  26.75 ns/op  0 B/op  0 allocs/op
+BenchmarkT039SpaceChangefeed/direct_channel-32  44946732  27.81 ns/op  0 B/op  0 allocs/op
+BenchmarkT039SpaceChangefeed/direct_channel-32  46620799  26.81 ns/op  0 B/op  0 allocs/op
+BenchmarkT039SpaceChangefeed/direct_channel-32  40850880  24.70 ns/op  0 B/op  0 allocs/op
+BenchmarkT039SpaceChangefeed/direct_channel-32  43526307  24.63 ns/op  0 B/op  0 allocs/op
+Median direct control: 26.75 ns/op, 0 B/op, 0 allocs/op
+
+BenchmarkT039SpaceChangefeed/feed_append_no_subscriber-32  9278544  130.8 ns/op  72 B/op  2 allocs/op
+BenchmarkT039SpaceChangefeed/feed_append_no_subscriber-32  9285775  124.3 ns/op  72 B/op  2 allocs/op
+BenchmarkT039SpaceChangefeed/feed_append_no_subscriber-32  9566395  124.9 ns/op  72 B/op  2 allocs/op
+BenchmarkT039SpaceChangefeed/feed_append_no_subscriber-32  9566572  126.2 ns/op  72 B/op  2 allocs/op
+BenchmarkT039SpaceChangefeed/feed_append_no_subscriber-32  9172951  128.0 ns/op  72 B/op  2 allocs/op
+Median feed append without subscriber: 126.2 ns/op, 72 B/op, 2 allocs/op
+
+BenchmarkT039SpaceChangefeed/feed_append_with_subscriber-32  4093180  287.0 ns/op  160 B/op  4 allocs/op
+BenchmarkT039SpaceChangefeed/feed_append_with_subscriber-32  4411282  275.6 ns/op  160 B/op  4 allocs/op
+BenchmarkT039SpaceChangefeed/feed_append_with_subscriber-32  4309221  273.9 ns/op  160 B/op  4 allocs/op
+BenchmarkT039SpaceChangefeed/feed_append_with_subscriber-32  4290538  278.6 ns/op  160 B/op  4 allocs/op
+BenchmarkT039SpaceChangefeed/feed_append_with_subscriber-32  4461001  275.8 ns/op  160 B/op  4 allocs/op
+Median feed append with one subscriber: 275.8 ns/op, 160 B/op, 4 allocs/op
+
+Derived comparison
+------------------
+Feed append without subscriber / direct control: 4.72x CPU, 2 allocations
+Feed append with one subscriber / direct control: 10.31x CPU, 4 allocations
+Feed append with one subscriber / initial un-packed implementation: 0.70x CPU,
+ 0.54x bytes, and 0.33x allocations (275.8 ns/op versus 396.2 ns/op;
+ 160 B/op versus 296 B/op; 4 versus 12 allocs/op)
+
+The direct channel is intentionally a weaker control. It does not retain
+history, validate schema/sequence, detach caller bytes, support replay/ack,
+or evict slow consumers. The feed is opt-in and should be used when those
+correctness and recovery guarantees are required; ordinary paths are
+unchanged.

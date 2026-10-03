@@ -974,3 +974,8 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   back conflicting updates without exposing raw keys in errors, and reuses
   existing-row key storage. See [TR022_CROSS_INDEX_UNIQUE.md](TR022_CROSS_INDEX_UNIQUE.md)
   and [BENCHMARK.md](BENCHMARK.md#t-u22-cross-index-unique-constraints).
+- [x] T-U39 Tarantool-style named-space changefeed. `hatDataStructure.SpaceChangefeed`
+  publishes bounded schema-bound binary key/before/after batches with
+  checkpointed replay, CRC-protected cursors, and nonblocking slow-consumer
+  eviction. See [TR039_SPACE_CHANGEFEED.md](TR039_SPACE_CHANGEFEED.md) and
+  [BENCHMARK.md](BENCHMARK.md#t-u39-named-space-changefeed).

@@ -32633,3 +32633,30 @@ paths are unchanged. The initial implementation was `216.3 ns/op`, `48 B/op`,
 and `1 alloc/op`; row-key slice reuse removed that allocation and improved the
 final measured median by 1.04x. Full samples and the comparison limits are in
 [TR022_BENCHMARK_RAW.txt](TR022_BENCHMARK_RAW.txt).
+
+## T-U39 Named-Space Changefeed
+
+Command:
+
+```sh
+make benchmark-tr039
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The direct channel
+is a deliberately weaker control with no retained history, schema/sequence
+validation, byte detachment, checkpointed replay, or slow-consumer policy.
+
+| Workload | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Direct buffered handoff | 26.75 | 0 | 0 | 1.00x |
+| `SpaceChangefeed.Append`, no subscriber | 126.2 | 72 | 2 | 4.72x |
+| `SpaceChangefeed.Append`, one subscriber | 275.8 | 160 | 4 | 10.31x |
+
+The subscriber path is the cost of retaining one packed detached payload and
+creating one independent delivery payload. Compared with the initial
+implementation, packed storage improved the subscriber path from `396.2` to
+`275.8 ns/op`, `296` to `160 B/op`, and `12` to `4 allocs/op`. The feed is
+opt-in and should be selected when replay, acknowledgement, schema fencing,
+and bounded backpressure matter; ordinary watcher and SQL paths are
+unchanged. Full samples are in
+[TR039_BENCHMARK_RAW.txt](TR039_BENCHMARK_RAW.txt).
