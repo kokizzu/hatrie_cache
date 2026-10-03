@@ -32614,3 +32614,32 @@ candidate. Reusing the destination with `SuggestInto` measured 909.7 ns/op,
 0 B/op, and 0 allocs/op. These are planner/catalog operations, not ordinary
 index reads or writes; the feature remains disabled unless a caller registers
 and consults the catalog.
+
+## T-U27 bounded binary peer configuration watch transport
+
+Workload: one revisioned configuration event with a 51-byte path and a
+58-byte value, five runs on an AMD Ryzen 9 5950X. The JSON row is the
+pre-change wire control; the binary row is the new bounded watch codec.
+
+| Operation | Median ns/op | B/op | Allocs/op | Wire bytes | Relative |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| JSON encode baseline | 295.3 | 224 | 2 | 163 | 1.00x |
+| Binary encode | 75.72 | 128 | 1 | 114 | 3.90x faster |
+| JSON decode baseline | 1,510 | 392 | 7 | 163 | 1.00x |
+| Binary decode | 106.4 | 176 | 3 | 114 | 14.19x faster |
+
+Raw samples:
+
+```text
+json_encode_ns: 295.8 288.8 295.0 295.3 296.6
+binary_encode_ns: 76.59 76.64 75.00 74.96 75.72
+json_decode_ns: 1500 1510 1514 1521 1506
+binary_decode_ns: 105.1 106.4 107.8 106.2 107.6
+```
+
+The feature keeps the existing JSON path out of the transport and uses a
+bounded binary payload with revision cursors. The server history is explicitly
+bounded; it trades replay capacity for memory, and a history gap requires a
+full snapshot rather than silently losing updates. The JSON control remained
+within normal benchmark noise on the feature branch. See
+[TU27_PEER_CONFIG_WATCH.md](TU27_PEER_CONFIG_WATCH.md).
