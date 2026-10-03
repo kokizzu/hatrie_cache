@@ -127,6 +127,7 @@ type sqlPublicationSubscriber struct {
 	checkpoint        SQLPublicationCheckpoint
 	deliveredRevision uint64
 	deliveredFrontier uint64
+	completed         bool
 	err               error
 	closed            bool
 }
@@ -139,21 +140,24 @@ type sqlPublicationSubscriber struct {
 type SQLPublication struct {
 	mu sync.Mutex
 
-	name        string
-	columns     []string
-	columnSet   map[string]struct{}
-	options     normalizedSQLPublicationOptions
-	history     []SQLPublicationBatch
-	latest      SQLPublicationCheckpoint
-	subscribers map[uint64]*sqlPublicationSubscriber
-	nextID      uint64
-	closed      bool
+	name                 string
+	columns              []string
+	columnSet            map[string]struct{}
+	options              normalizedSQLPublicationOptions
+	history              []SQLPublicationBatch
+	latest               SQLPublicationCheckpoint
+	subscribers          map[uint64]*sqlPublicationSubscriber
+	durableSubscriptions map[string]*sqlPublicationSubscriber
+	nextID               uint64
+	closed               bool
 }
 
 // SQLPublicationSubscription is a replay-plus-live consumer handle.
 type SQLPublicationSubscription struct {
-	publication *SQLPublication
-	state       *sqlPublicationSubscriber
+	publication  *SQLPublication
+	state        *sqlPublicationSubscriber
+	durableStore SQLPublicationSubscriptionStore
+	durableID    string
 }
 
 // NewSQLPublication creates a named publication with one fixed column schema.
@@ -183,12 +187,13 @@ func NewSQLPublication(name string, columns []string, options SQLPublicationOpti
 		columnSet[column] = struct{}{}
 	}
 	return &SQLPublication{
-		name:        name,
-		columns:     copiedColumns,
-		columnSet:   columnSet,
-		options:     normalized,
-		history:     make([]SQLPublicationBatch, 0, normalized.maxHistoryBatches),
-		subscribers: make(map[uint64]*sqlPublicationSubscriber),
+		name:                 name,
+		columns:              copiedColumns,
+		columnSet:            columnSet,
+		options:              normalized,
+		history:              make([]SQLPublicationBatch, 0, normalized.maxHistoryBatches),
+		subscribers:          make(map[uint64]*sqlPublicationSubscriber),
+		durableSubscriptions: make(map[string]*sqlPublicationSubscriber),
 	}, nil
 }
 
@@ -240,6 +245,9 @@ func (publication *SQLPublication) Append(batch SQLPublicationBatch) error {
 		case subscriber.updates <- cloneSQLPublicationBatch(normalized):
 			subscriber.deliveredRevision = normalized.Revision
 			subscriber.deliveredFrontier = normalized.Frontier
+			if normalized.Complete {
+				subscriber.completed = true
+			}
 		default:
 			publication.closeSubscriberLocked(subscriber, ErrSQLPublicationBackpressure)
 			delete(publication.subscribers, id)
@@ -299,6 +307,7 @@ func (publication *SQLPublication) Subscribe(ctx context.Context, checkpoint SQL
 		subscriber.deliveredRevision = batch.Revision
 		subscriber.deliveredFrontier = batch.Frontier
 		if batch.Complete {
+			subscriber.completed = true
 			publication.closeSubscriberLocked(subscriber, nil)
 			return &SQLPublicationSubscription{publication: publication, state: subscriber}, nil
 		}
@@ -372,8 +381,22 @@ func (subscription *SQLPublicationSubscription) Done() <-chan struct{} {
 // Ack advances the consumer checkpoint monotonically. Call it only after the
 // downstream side effect represented by the checkpoint is durable.
 func (subscription *SQLPublicationSubscription) Ack(checkpoint SQLPublicationCheckpoint) error {
+	return subscription.ackContext(context.Background(), checkpoint)
+}
+
+// AckContext advances the consumer checkpoint with a caller-supplied context.
+// Durable subscriptions use the context for their checkpoint-store commit;
+// non-durable subscriptions retain the same in-memory behavior as Ack.
+func (subscription *SQLPublicationSubscription) AckContext(ctx context.Context, checkpoint SQLPublicationCheckpoint) error {
+	return subscription.ackContext(ctx, checkpoint)
+}
+
+func (subscription *SQLPublicationSubscription) ackContext(ctx context.Context, checkpoint SQLPublicationCheckpoint) error {
 	if subscription == nil || subscription.publication == nil || subscription.state == nil {
 		return fmt.Errorf("%w: nil subscription", ErrSQLPublicationInvalid)
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	publication := subscription.publication
 	publication.mu.Lock()
@@ -390,6 +413,20 @@ func (subscription *SQLPublicationSubscription) Ack(checkpoint SQLPublicationChe
 	if checkpoint.Revision < subscription.state.checkpoint.Revision ||
 		(checkpoint.Revision == subscription.state.checkpoint.Revision && checkpoint.Frontier < subscription.state.checkpoint.Frontier) {
 		return fmt.Errorf("%w: checkpoint moved backwards", ErrSQLPublicationSequence)
+	}
+	if subscription.durableStore != nil {
+		record := SQLPublicationSubscriptionRecord{
+			PublicationName: publication.name,
+			SubscriptionID:  subscription.durableID,
+			Checkpoint:      checkpoint,
+			State:           SQLPublicationSubscriptionStateActive,
+		}
+		if subscription.state.completed && checkpoint.Revision == subscription.state.deliveredRevision && checkpoint.Frontier == subscription.state.deliveredFrontier {
+			record.State = SQLPublicationSubscriptionStateCompleted
+		}
+		if err := subscription.durableStore.Commit(ctx, record); err != nil {
+			return fmt.Errorf("%w: %v", ErrSQLPublicationSubscriptionStore, err)
+		}
 	}
 	subscription.state.checkpoint = checkpoint
 	return nil
@@ -623,6 +660,11 @@ func (publication *SQLPublication) closeSubscriberLocked(subscriber *sqlPublicat
 	}
 	subscriber.closed = true
 	subscriber.err = err
+	for id, current := range publication.durableSubscriptions {
+		if current == subscriber {
+			delete(publication.durableSubscriptions, id)
+		}
+	}
 	close(subscriber.updates)
 	close(subscriber.done)
 }

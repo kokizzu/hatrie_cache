@@ -1,4 +1,19 @@
-# Product Idea Gaps
+# ClickHouse, Materialize, and Tarantool Adoption Ideas
+
+This dedicated catalog mirrors the 152-row implementation queue in `PRODUCT_IDEA_GAPS.md`: 50 ClickHouse-inspired ideas, 50 Materialize-inspired ideas, and 52 Tarantool-inspired ideas. Status text is kept synchronized with that source catalog.
+
+The catalog is implementation-oriented: each row names the product idea, current adoption status, and the correctness or operational constraint to preserve. Completed rows remain for historical coverage and regression review.
+
+## Official Reference Material
+
+- [ClickHouse Feature Journey](https://clickhouse.com/clickhouse/feature-journey)
+- [Materialize concepts and arrangements](https://materialize.com/docs/fundamentals/concepts/arrangements/)
+- [Materialize EXPLAIN plans](https://materialize.com/docs/sql/explain-plan/)
+- [Tarantool documentation](https://www.tarantool.io/en/doc/latest/singlepage/)
+- [Tarantool configuration reference](https://www.tarantool.io/en/doc/latest/reference/configuration/)
+
+## Full Catalog
+
 
 This is the current implementation queue for ideas compared with ClickHouse,
 Materialize, and Tarantool. It contains 50 candidate gaps for each product.

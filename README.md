@@ -315,7 +315,7 @@ security guidance before exposing it on a network.
 - Opt-in bounded async command failure retention and replay: [ASYNC_COMMAND_DEAD_LETTERS.md](ASYNC_COMMAND_DEAD_LETTERS.md)
 - Opt-in exact-key mutation watchers for local invalidation: [KEY_CHANGE_WATCHERS.md](KEY_CHANGE_WATCHERS.md)
 - Latest ClickHouse/Materialize/Tarantool gap audit: [CLICKHOUSE_MATERIALIZE_TARANTOOL_AUDIT.md](CLICKHOUSE_MATERIALIZE_TARANTOOL_AUDIT.md)
-- 150-item ClickHouse/Materialize/Tarantool adoption gap catalog: [IDEA_GAP_CATALOG.md](IDEA_GAP_CATALOG.md)
+- Current ClickHouse/Materialize/Tarantool adoption gap catalog: [CLICKHOUSE_MATERIALIZE_TARANTOOL_IDEAS.md](CLICKHOUSE_MATERIALIZE_TARANTOOL_IDEAS.md)
 - Importable package layout and extraction boundaries: [ARCHITECTURE.md](ARCHITECTURE.md)
 - API and configuration examples: [Development](#development)
 
