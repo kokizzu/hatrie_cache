@@ -32580,3 +32580,29 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## T-U38 Redacted Conflict Event Journal
+
+Commands:
+
+```sh
+make round66-conflict-baseline-benchmark
+make round66-conflict-benchmark
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The resolver row
+is the clean baseline and the feature control; the other rows measure the
+opt-in journal itself.
+
+| Workload | Median ns/op | B/op | Allocs/op | Comparison |
+| --- | ---: | ---: | ---: | --- |
+| Existing conflict resolution, baseline | 5.99 | 0 | 0 | unchanged control |
+| Existing conflict resolution, feature | 5.96 | 0 | 0 | within run noise |
+| `ConflictEventLog.Append` | 31.56 | 0 | 0 | bounded ring append |
+| `ReadAfter`, 1,024 events | 28,146 | 98,304 | 1 | copied replay batch |
+| `MarshalBinary`, 1,024 events | 40,709 | 163,840 | 2 | persistence payload |
+
+The append result is allocation-free after removing a temporary validation map
+and per-append notification-channel allocation. The default conflict resolver
+does not construct a journal and retains its original zero-allocation path.
+Snapshot storage, encryption, and fsync remain caller-owned.
