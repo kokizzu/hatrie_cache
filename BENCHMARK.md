@@ -32580,3 +32580,24 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## TT-035 Per-Request Deadlines
+
+Commands:
+
+```sh
+make round70-tt035-bench
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The benchmark
+measures prepared request encoding with and without an absolute deadline.
+
+| Workload | Median ns/op | Wire bytes/op | B/op | Allocs/op | Comparison |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Legacy v1 request | 18.75 | 19 | 0 | 0 | baseline |
+| Deadline v2 request | 27.36 | 28 | 0 | 0 | 1.46x CPU, +47.4% wire |
+
+The deadline path adds 9 encoded bytes and about 1.46x encoding CPU while
+remaining allocation-free. It is disabled by default, so ordinary requests
+retain the legacy wire format and cost. Raw samples and the API contract are in
+[TT035_REQUEST_DEADLINES.md](TT035_REQUEST_DEADLINES.md).

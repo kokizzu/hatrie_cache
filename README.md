@@ -4765,3 +4765,9 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+
+## Request Deadlines
+
+Opt-in `hatPeer` request deadline propagation and its measured CPU, memory, and
+wire tradeoff are documented in
+[TT035_REQUEST_DEADLINES.md](TT035_REQUEST_DEADLINES.md).

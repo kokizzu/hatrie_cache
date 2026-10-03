@@ -9,11 +9,12 @@ import (
 )
 
 const (
-	compactProtocolMagic0  byte = 'H'
-	compactProtocolMagic1  byte = 'P'
-	compactProtocolVersion byte = 1
-	compactProtocolHeader  int  = 5
-	compactProtocolFlags   byte = 3
+	compactProtocolMagic0          byte = 'H'
+	compactProtocolMagic1          byte = 'P'
+	compactProtocolVersion         byte = 1
+	compactProtocolDeadlineVersion byte = 2
+	compactProtocolHeader          int  = 5
+	compactProtocolFlags           byte = 7
 
 	// DefaultCompactProtocolMaxFrameBytes bounds one encoded frame body.
 	DefaultCompactProtocolMaxFrameBytes = 4 << 20
@@ -30,21 +31,23 @@ const (
 )
 
 var (
-	ErrCompactProtocolOptionsInvalid     = errors.New("hatPeer: compact protocol options are invalid")
-	ErrCompactProtocolInvalidFrame       = errors.New("hatPeer: compact protocol frame is invalid")
-	ErrCompactProtocolVersionUnsupported = errors.New("hatPeer: compact protocol version is unsupported")
-	ErrCompactProtocolTruncated          = errors.New("hatPeer: compact protocol frame is truncated")
-	ErrCompactProtocolFrameTooLarge      = errors.New("hatPeer: compact protocol frame is too large")
-	ErrCompactProtocolCommandTooLarge    = errors.New("hatPeer: compact protocol command is too large")
-	ErrCompactProtocolPayloadTooLarge    = errors.New("hatPeer: compact protocol payload is too large")
-	ErrCompactProtocolRequestIDInvalid   = errors.New("hatPeer: compact protocol request ID is invalid")
-	ErrCompactProtocolReaderNil          = errors.New("hatPeer: compact protocol reader is nil")
-	ErrCompactProtocolWriterNil          = errors.New("hatPeer: compact protocol writer is nil")
-	ErrCompactMultiplexerClosed          = errors.New("hatPeer: compact multiplexer is closed")
-	ErrCompactMultiplexerUnknownRequest  = errors.New("hatPeer: compact multiplexer request is unknown")
-	ErrCompactMultiplexerCanceled        = errors.New("hatPeer: compact multiplexer request is canceled")
-	ErrCompactMultiplexerOptionsInvalid  = errors.New("hatPeer: compact multiplexer options are invalid")
-	ErrCompactMultiplexerPendingLimit    = errors.New("hatPeer: compact multiplexer pending limit reached")
+	ErrCompactProtocolOptionsInvalid      = errors.New("hatPeer: compact protocol options are invalid")
+	ErrCompactProtocolInvalidFrame        = errors.New("hatPeer: compact protocol frame is invalid")
+	ErrCompactProtocolVersionUnsupported  = errors.New("hatPeer: compact protocol version is unsupported")
+	ErrCompactProtocolTruncated           = errors.New("hatPeer: compact protocol frame is truncated")
+	ErrCompactProtocolFrameTooLarge       = errors.New("hatPeer: compact protocol frame is too large")
+	ErrCompactProtocolCommandTooLarge     = errors.New("hatPeer: compact protocol command is too large")
+	ErrCompactProtocolPayloadTooLarge     = errors.New("hatPeer: compact protocol payload is too large")
+	ErrCompactProtocolRequestIDInvalid    = errors.New("hatPeer: compact protocol request ID is invalid")
+	ErrCompactProtocolDeadlineUnsupported = errors.New("hatPeer: compact protocol request deadline is unsupported")
+	ErrCompactProtocolDeadlineInvalid     = errors.New("hatPeer: compact protocol request deadline is invalid")
+	ErrCompactProtocolReaderNil           = errors.New("hatPeer: compact protocol reader is nil")
+	ErrCompactProtocolWriterNil           = errors.New("hatPeer: compact protocol writer is nil")
+	ErrCompactMultiplexerClosed           = errors.New("hatPeer: compact multiplexer is closed")
+	ErrCompactMultiplexerUnknownRequest   = errors.New("hatPeer: compact multiplexer request is unknown")
+	ErrCompactMultiplexerCanceled         = errors.New("hatPeer: compact multiplexer request is canceled")
+	ErrCompactMultiplexerOptionsInvalid   = errors.New("hatPeer: compact multiplexer options are invalid")
+	ErrCompactMultiplexerPendingLimit     = errors.New("hatPeer: compact multiplexer pending limit reached")
 )
 
 // CompactFrameKind identifies the direction and result of one frame.
@@ -61,14 +64,21 @@ const (
 // original payload while retaining this flag for observability.
 const CompactFrameFlagPayloadCompressed byte = 1 << 0
 
+// CompactFrameFlagDeadline marks a request carrying an absolute Unix-nanosecond
+// deadline. Deadline frames use protocol version 2 and require the explicit
+// EnableRequestDeadlines option on both encoders and decoders. Bit 1 remains a
+// reserved v1 flag for compatibility with existing frames.
+const CompactFrameFlagDeadline byte = 1 << 2
+
 // CompactFrame is the compact command envelope exchanged by a peer adapter.
 // RequestID correlates responses with requests; it must be non-zero.
 type CompactFrame struct {
-	Kind      CompactFrameKind
-	RequestID uint64
-	Flags     byte
-	Command   []byte
-	Payload   []byte
+	Kind             CompactFrameKind
+	RequestID        uint64
+	Flags            byte
+	DeadlineUnixNano int64
+	Command          []byte
+	Payload          []byte
 }
 
 // CompactProtocolOptions bounds decoding before memory is allocated. Zero
@@ -85,6 +95,9 @@ type CompactProtocolOptions struct {
 	// MaxDecompressedPayloadBytes bounds a compressed payload after inflation.
 	// Zero defaults to MaxPayloadBytes.
 	MaxDecompressedPayloadBytes int
+	// EnableRequestDeadlines enables protocol-v2 deadline request frames.
+	// Existing v1 frames remain unchanged when this is false.
+	EnableRequestDeadlines bool
 }
 
 // CompactProtocol encodes and decodes length-prefixed compact frames.
@@ -94,6 +107,7 @@ type CompactProtocol struct {
 	maxPayloadBytes             int
 	compressPayloadsAbove       int
 	maxDecompressedPayloadBytes int
+	enableRequestDeadlines      bool
 }
 
 // NewCompactProtocol creates a bounded compact protocol codec.
@@ -129,6 +143,7 @@ func NewCompactProtocol(options CompactProtocolOptions) (CompactProtocol, error)
 		maxPayloadBytes:             maxPayloadBytes,
 		compressPayloadsAbove:       compressPayloadsAbove,
 		maxDecompressedPayloadBytes: maxDecompressedPayloadBytes,
+		enableRequestDeadlines:      options.EnableRequestDeadlines,
 	}, nil
 }
 
@@ -150,7 +165,14 @@ func (protocol CompactProtocol) MarshalInto(frame CompactFrame, dst []byte) ([]b
 	if len(payload) > protocol.maxPayloadBytes {
 		return dst, ErrCompactProtocolPayloadTooLarge
 	}
+	version := compactProtocolVersion
+	if flags&CompactFrameFlagDeadline != 0 {
+		version = compactProtocolDeadlineVersion
+	}
 	bodyBytes := compactProtocolHeader + compactUvarintSize(frame.RequestID) + compactUvarintSize(uint64(len(frame.Command))) + len(frame.Command) + compactUvarintSize(uint64(len(payload))) + len(payload)
+	if flags&CompactFrameFlagDeadline != 0 {
+		bodyBytes += compactUvarintSize(uint64(frame.DeadlineUnixNano))
+	}
 	if bodyBytes > protocol.maxFrameBytes {
 		return dst, ErrCompactProtocolFrameTooLarge
 	}
@@ -171,12 +193,15 @@ func (protocol CompactProtocol) MarshalInto(frame CompactFrame, dst []byte) ([]b
 	offset++
 	encoded[offset] = compactProtocolMagic1
 	offset++
-	encoded[offset] = compactProtocolVersion
+	encoded[offset] = version
 	offset++
 	encoded[offset] = byte(frame.Kind)
 	offset++
 	encoded[offset] = flags
 	offset++
+	if flags&CompactFrameFlagDeadline != 0 {
+		offset += binary.PutUvarint(encoded[offset:], uint64(frame.DeadlineUnixNano))
+	}
 	offset += binary.PutUvarint(encoded[offset:], frame.RequestID)
 	offset += binary.PutUvarint(encoded[offset:], uint64(len(frame.Command)))
 	offset += copy(encoded[offset:], frame.Command)
@@ -241,6 +266,17 @@ func (protocol CompactProtocol) validateFrame(frame CompactFrame) error {
 	if frame.Flags&^compactProtocolFlags != 0 || !validCompactFrameKind(frame.Kind) {
 		return ErrCompactProtocolInvalidFrame
 	}
+	if frame.DeadlineUnixNano != 0 && frame.Flags&CompactFrameFlagDeadline == 0 {
+		return ErrCompactProtocolDeadlineInvalid
+	}
+	if frame.Flags&CompactFrameFlagDeadline != 0 {
+		if !protocol.enableRequestDeadlines {
+			return ErrCompactProtocolDeadlineUnsupported
+		}
+		if frame.Kind != CompactRequest || frame.DeadlineUnixNano <= 0 {
+			return ErrCompactProtocolDeadlineInvalid
+		}
+	}
 	if frame.Kind == CompactRequest && len(frame.Command) == 0 {
 		return ErrCompactProtocolInvalidFrame
 	}
@@ -260,9 +296,7 @@ func (protocol CompactProtocol) decodeBody(body []byte) (CompactFrame, error) {
 	if body[0] != compactProtocolMagic0 || body[1] != compactProtocolMagic1 {
 		return CompactFrame{}, ErrCompactProtocolInvalidFrame
 	}
-	if body[2] != compactProtocolVersion {
-		return CompactFrame{}, ErrCompactProtocolVersionUnsupported
-	}
+	version := body[2]
 	kind := CompactFrameKind(body[3])
 	if !validCompactFrameKind(kind) {
 		return CompactFrame{}, ErrCompactProtocolInvalidFrame
@@ -271,7 +305,24 @@ func (protocol CompactProtocol) decodeBody(body []byte) (CompactFrame, error) {
 	if flags&^compactProtocolFlags != 0 {
 		return CompactFrame{}, ErrCompactProtocolInvalidFrame
 	}
+	if version == compactProtocolDeadlineVersion && flags&CompactFrameFlagDeadline != 0 {
+		if !protocol.enableRequestDeadlines {
+			return CompactFrame{}, ErrCompactProtocolDeadlineUnsupported
+		}
+	} else if version != compactProtocolVersion {
+		return CompactFrame{}, ErrCompactProtocolVersionUnsupported
+	} else if flags&CompactFrameFlagDeadline != 0 {
+		return CompactFrame{}, ErrCompactProtocolDeadlineInvalid
+	}
 	offset := compactProtocolHeader
+	var deadlineUnixNano int64
+	if flags&CompactFrameFlagDeadline != 0 {
+		deadlineValue, err := readCompactBodyUvarint(body, &offset)
+		if err != nil || deadlineValue == 0 || deadlineValue > uint64(1<<63-1) {
+			return CompactFrame{}, ErrCompactProtocolDeadlineInvalid
+		}
+		deadlineUnixNano = int64(deadlineValue)
+	}
 	requestID, err := readCompactBodyUvarint(body, &offset)
 	if err != nil || requestID == 0 {
 		return CompactFrame{}, ErrCompactProtocolRequestIDInvalid
@@ -308,11 +359,12 @@ func (protocol CompactProtocol) decodeBody(body []byte) (CompactFrame, error) {
 		return CompactFrame{}, err
 	}
 	return CompactFrame{
-		Kind:      kind,
-		RequestID: requestID,
-		Flags:     flags,
-		Command:   command,
-		Payload:   payload,
+		Kind:             kind,
+		RequestID:        requestID,
+		Flags:            flags,
+		DeadlineUnixNano: deadlineUnixNano,
+		Command:          command,
+		Payload:          payload,
 	}, nil
 }
 

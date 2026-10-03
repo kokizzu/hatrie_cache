@@ -172,7 +172,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-032 | IProto-style multiplexing | Partially adopted: opt-in nonzero `request_id` correlation and bounded `CommandStreamWorkers` allow independent commands to overlap; zero-ID streams and the default worker count preserve legacy ordering. | High |
 | TT-033 | Fiber scheduler quotas | Cooperative tasks lack per-tenant CPU and queue budgets. | Medium |
 | TT-034 | Cooperative task cancellation | Background fibers do not share a standard cancellation token and drain state. | Low |
-| TT-035 | Per-request deadlines | Command APIs lack a consistent deadline propagated through storage and replication. | Low |
+| TT-035 | Per-request deadlines | Adopted as opt-in compact-peer deadline propagation with legacy-frame compatibility; storage and application work remains caller-context-owned. | Low |
 | TT-036 | Storage `box.stat` equivalent | Partially adopted: `CompactionScheduler.Stats()` adds low-overhead maintenance queue and outcome counters; storage-engine operation, page, cache, and WAL counters remain provider-owned. | Low |
 | TT-037 | Audit log | No append-only operator/security audit stream with redacted command metadata. | Medium |
 | TT-038 | Roles and grants for commands | Command access is not modeled as a per-operation role/privilege matrix. | Medium |

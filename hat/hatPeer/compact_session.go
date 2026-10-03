@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 )
 
 var (
@@ -59,6 +60,9 @@ type CompactPeerSessionOptions struct {
 	// caller context cancels. The remote session cancels the matching handler
 	// context. It is disabled by default to preserve existing wire behavior.
 	EnableRequestCancellation bool
+	// EnableRequestDeadlines sends caller context deadlines in protocol-v2
+	// request frames. Both peers must enable it for remote deadline behavior.
+	EnableRequestDeadlines bool
 }
 
 // CompactPeerSessionOptionsForNegotiatedHandshake returns session options
@@ -117,7 +121,11 @@ func NewCompactPeerSession(conn net.Conn, options CompactPeerSessionOptions) (*C
 	if maxInFlight < 1 || maxInFlight > maxCompactPeerMaxInFlight {
 		return nil, ErrCompactPeerOptionsInvalid
 	}
-	protocol, err := NewCompactProtocol(options.Protocol)
+	protocolOptions := options.Protocol
+	if options.EnableRequestDeadlines {
+		protocolOptions.EnableRequestDeadlines = true
+	}
+	protocol, err := NewCompactProtocol(protocolOptions)
 	if err != nil {
 		return nil, fmt.Errorf("%w: protocol: %v", ErrCompactPeerOptionsInvalid, err)
 	}
@@ -175,6 +183,7 @@ func (session *CompactPeerSession) Call(ctx context.Context, command, payload []
 	if err != nil {
 		return CompactFrame{}, err
 	}
+	request = session.applyRequestDeadline(ctx, request)
 	if err := session.write(request); err != nil {
 		session.fail(err)
 		return CompactFrame{}, err
@@ -189,6 +198,11 @@ func (session *CompactPeerSession) Call(ctx context.Context, command, payload []
 		return CompactFrame{}, err
 	}
 	if response.Kind == CompactError {
+		if session.protocol.enableRequestDeadlines {
+			if contextErr := ctx.Err(); contextErr != nil {
+				return CompactFrame{}, contextErr
+			}
+		}
 		return CompactFrame{}, fmt.Errorf("%w: %s", ErrCompactPeerRemote, response.Payload)
 	}
 	return response, nil
@@ -215,7 +229,8 @@ func (session *CompactPeerSession) CallTemplate(ctx context.Context, template Co
 	if err != nil {
 		return CompactFrame{}, err
 	}
-	if session.protocol.compressPayloadsAbove > 0 {
+	request = session.applyRequestDeadline(ctx, request)
+	if session.protocol.compressPayloadsAbove > 0 || request.DeadlineUnixNano != 0 {
 		err = session.write(request)
 	} else {
 		err = session.writeTemplate(template, request.RequestID, payload)
@@ -234,6 +249,11 @@ func (session *CompactPeerSession) CallTemplate(ctx context.Context, template Co
 		return CompactFrame{}, err
 	}
 	if response.Kind == CompactError {
+		if session.protocol.enableRequestDeadlines {
+			if contextErr := ctx.Err(); contextErr != nil {
+				return CompactFrame{}, contextErr
+			}
+		}
 		return CompactFrame{}, fmt.Errorf("%w: %s", ErrCompactPeerRemote, response.Payload)
 	}
 	return response, nil
@@ -306,8 +326,12 @@ func (session *CompactPeerSession) dispatch(request CompactFrame) {
 	case session.inflight <- struct{}{}:
 		handlerContext := session.context
 		var cancel context.CancelFunc
-		if session.cancellation != nil {
+		if request.DeadlineUnixNano != 0 {
+			handlerContext, cancel = context.WithDeadline(session.context, time.Unix(0, request.DeadlineUnixNano))
+		} else if session.cancellation != nil {
 			handlerContext, cancel = context.WithCancel(session.context)
+		}
+		if session.cancellation != nil {
 			session.registerInbound(request.RequestID, cancel)
 		}
 		go session.handle(handlerContext, request, cancel)
@@ -333,10 +357,29 @@ func (session *CompactPeerSession) handle(ctx context.Context, request CompactFr
 			response.Command = request.Command
 		}
 	}
+	response.Flags &^= CompactFrameFlagDeadline
+	response.DeadlineUnixNano = 0
 	response.RequestID = request.RequestID
 	if err := session.write(response); err != nil {
 		session.fail(err)
 	}
+}
+
+func (session *CompactPeerSession) applyRequestDeadline(ctx context.Context, request CompactFrame) CompactFrame {
+	if session == nil || !session.protocol.enableRequestDeadlines {
+		return request
+	}
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return request
+	}
+	deadlineUnixNano := deadline.UnixNano()
+	if deadlineUnixNano <= 0 {
+		return request
+	}
+	request.Flags |= CompactFrameFlagDeadline
+	request.DeadlineUnixNano = deadlineUnixNano
+	return request
 }
 
 func (session *CompactPeerSession) registerInbound(requestID uint64, cancel context.CancelFunc) {
