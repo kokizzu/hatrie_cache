@@ -170,7 +170,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-030 | Transactional DDL | Schema/index changes cannot be atomically grouped with data mutations. | High |
 | TT-031 | Stream API | Implemented: public gRPC `CommandStream` and `CommandBatchStream` provide request streaming with ordered responses for the legacy path. | Medium |
 | TT-032 | IProto-style multiplexing | Partially adopted: opt-in nonzero `request_id` correlation and bounded `CommandStreamWorkers` allow independent commands to overlap; zero-ID streams and the default worker count preserve legacy ordering. | High |
-| TT-033 | Fiber scheduler quotas | Cooperative tasks lack per-tenant CPU and queue budgets. | Medium |
+| TT-033 | Fiber scheduler quotas | Implemented as an opt-in tenant concurrency and waiting-queue quota wrapper around `hatPipeline.Scheduler`. | Medium |
 | TT-034 | Cooperative task cancellation | Background fibers do not share a standard cancellation token and drain state. | Low |
 | TT-035 | Per-request deadlines | Command APIs lack a consistent deadline propagated through storage and replication. | Low |
 | TT-036 | Storage `box.stat` equivalent | Partially adopted: `CompactionScheduler.Stats()` adds low-overhead maintenance queue and outcome counters; storage-engine operation, page, cache, and WAL counters remain provider-owned. | Low |

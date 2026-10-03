@@ -4765,3 +4765,8 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+
+### Pipeline Quotas
+
+The opt-in tenant-aware scheduler and its measured tradeoff are documented in
+[TT033_TENANT_QUOTA_SCHEDULER.md](TT033_TENANT_QUOTA_SCHEDULER.md).
