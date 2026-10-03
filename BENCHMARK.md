@@ -32695,3 +32695,38 @@ each call. A graph mutation invalidates it, so the first order request after a
 mutation retains the original sort cost. This is an automatic optimization;
 there is no new worker, configuration flag, or behavior change. See
 [M052_DATAFLOW_GRAPH_ORDER_CACHE.md](M052_DATAFLOW_GRAPH_ORDER_CACHE.md).
+
+## M052 Dataflow Snapshot Cache
+
+Commands:
+
+```sh
+make round86-snapshot-baseline-bench
+make round86-snapshot-bench
+```
+
+Five `-count=5` samples used `-benchtime=100ms -benchmem` on Linux/amd64,
+AMD Ryzen 9 5950X. The graph contains 2,048 nodes and 2,047 edges; setup is
+outside the timed region.
+
+| Workload | Before median | After median | CPU improvement | Before memory | After memory | Before allocs | After allocs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Repeated graph snapshot | 460,904 ns/op | 34,896 ns/op | 13.2x faster | 163,840 B/op | 131,123 B/op | 3 | 2 |
+
+Raw before samples:
+
+```text
+451655 466281 451225 460904 463146 ns/op, 163840 B/op, 3 allocs/op
+```
+
+Raw after samples:
+
+```text
+33409 37682 38094 34896 33400 ns/op, 131120/131124/131123/131126/131115 B/op, 2 allocs/op
+```
+
+The cache retains one bounded snapshot and returns detached copies. Graph
+mutations invalidate it; graphs larger than the default node or edge bounds do
+not retain snapshots. See
+[M052_DATAFLOW_SNAPSHOT_CACHE.md](M052_DATAFLOW_SNAPSHOT_CACHE.md) for the
+memory tradeoff and correctness contract.

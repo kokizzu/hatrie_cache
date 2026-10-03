@@ -18,6 +18,8 @@ const (
 	maxDataflowGraphEdges   = 1 << 22
 	maxDataflowNodeIDSize   = 256
 	maxDataflowNodeKindSize = 128
+	maxCachedSnapshotNodes  = DefaultDataflowGraphMaxNodes
+	maxCachedSnapshotEdges  = DefaultDataflowGraphMaxEdges
 )
 
 var (
@@ -80,6 +82,8 @@ type DataflowGraph struct {
 	incoming              map[string]map[string]struct{}
 	topologicalOrder      []string
 	topologicalOrderValid bool
+	snapshot              DataflowGraphSnapshot
+	snapshotValid         bool
 }
 
 // NewDataflowGraph creates an empty bounded graph.
@@ -123,8 +127,7 @@ func (graph *DataflowGraph) AddNode(node DataflowNode) error {
 	graph.nodes[id] = DataflowNode{ID: id, Kind: kind}
 	graph.outgoing[id] = make(map[string]struct{})
 	graph.incoming[id] = make(map[string]struct{})
-	graph.topologicalOrder = nil
-	graph.topologicalOrderValid = false
+	graph.invalidateCachesLocked()
 	return nil
 }
 
@@ -159,8 +162,7 @@ func (graph *DataflowGraph) AddEdge(edge DataflowEdge) error {
 	graph.outgoing[from][to] = struct{}{}
 	graph.incoming[to][from] = struct{}{}
 	graph.edges++
-	graph.topologicalOrder = nil
-	graph.topologicalOrderValid = false
+	graph.invalidateCachesLocked()
 	return nil
 }
 
@@ -189,8 +191,7 @@ func (graph *DataflowGraph) RemoveEdge(edge DataflowEdge) error {
 	delete(graph.outgoing[from], to)
 	delete(graph.incoming[to], from)
 	graph.edges--
-	graph.topologicalOrder = nil
-	graph.topologicalOrderValid = false
+	graph.invalidateCachesLocked()
 	return nil
 }
 
@@ -221,8 +222,7 @@ func (graph *DataflowGraph) RemoveNode(id string) error {
 	delete(graph.incoming, id)
 	delete(graph.outgoing, id)
 	delete(graph.nodes, id)
-	graph.topologicalOrder = nil
-	graph.topologicalOrderValid = false
+	graph.invalidateCachesLocked()
 	return nil
 }
 
@@ -342,7 +342,18 @@ func (graph *DataflowGraph) Snapshot() DataflowGraphSnapshot {
 		return DataflowGraphSnapshot{}
 	}
 	graph.mu.RLock()
-	defer graph.mu.RUnlock()
+	if graph.snapshotValid {
+		snapshot := cloneDataflowGraphSnapshot(graph.snapshot)
+		graph.mu.RUnlock()
+		return snapshot
+	}
+	graph.mu.RUnlock()
+
+	graph.mu.Lock()
+	defer graph.mu.Unlock()
+	if graph.snapshotValid {
+		return cloneDataflowGraphSnapshot(graph.snapshot)
+	}
 
 	ids := make([]string, 0, len(graph.nodes))
 	for id := range graph.nodes {
@@ -364,7 +375,26 @@ func (graph *DataflowGraph) Snapshot() DataflowGraphSnapshot {
 			snapshot.Edges = append(snapshot.Edges, DataflowEdge{From: id, To: dependent})
 		}
 	}
+	if len(graph.nodes) <= maxCachedSnapshotNodes && graph.edges <= maxCachedSnapshotEdges {
+		graph.snapshot = snapshot
+		graph.snapshotValid = true
+		return cloneDataflowGraphSnapshot(graph.snapshot)
+	}
 	return snapshot
+}
+
+func (graph *DataflowGraph) invalidateCachesLocked() {
+	graph.topologicalOrder = nil
+	graph.topologicalOrderValid = false
+	graph.snapshot = DataflowGraphSnapshot{}
+	graph.snapshotValid = false
+}
+
+func cloneDataflowGraphSnapshot(snapshot DataflowGraphSnapshot) DataflowGraphSnapshot {
+	return DataflowGraphSnapshot{
+		Nodes: append([]DataflowNode(nil), snapshot.Nodes...),
+		Edges: append([]DataflowEdge(nil), snapshot.Edges...),
+	}
 }
 
 // Len returns the number of nodes in the graph.

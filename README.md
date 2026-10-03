@@ -4768,3 +4768,4 @@ memory estimates without changing default EXPLAIN output.
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
 - Dataflow graphs cache detached deterministic topological orders and invalidate them on mutation: [M052_DATAFLOW_GRAPH_ORDER_CACHE.md](M052_DATAFLOW_GRAPH_ORDER_CACHE.md)
+- Dataflow graph snapshots are cached with detached results and bounded-size retention: [M052_DATAFLOW_SNAPSHOT_CACHE.md](M052_DATAFLOW_SNAPSHOT_CACHE.md)
