@@ -32644,3 +32644,24 @@ index-name field adds a small amount of carried heap. See the implementation
 details in [T026_INDEX_HINTS.md](T026_INDEX_HINTS.md), with raw output in
 [T026_BENCHMARK_BASELINE_RAW.txt](T026_BENCHMARK_BASELINE_RAW.txt) and
 [T026_BENCHMARK_RAW.txt](T026_BENCHMARK_RAW.txt).
+
+## T-U27: Remote Prefix And Configuration Watches
+
+The feature was measured against the `5a6a7d5a` baseline on Linux/amd64 with
+the same AMD Ryzen 9 5950X host. Normal runs used five `-count=5` samples and
+`-benchmem`; raw output is retained in
+`T027_BENCHMARK_BASELINE_RAW.txt` and `T027_BENCHMARK_RAW.txt`.
+
+| Workload | Baseline median | Feature median | Before/after ratio | Memory and allocation result |
+| --- | ---: | ---: | ---: | --- |
+| Ordinary compact call | 4,650 ns/op | 5,170 ns/op | 0.90x | 448 -> 448 B/op; 8 -> 8 allocs/op |
+| Remote watch event | Not available before | 6,705 ns/op | 1.30x vs feature compact call | 560 B/op; 10 allocs/op |
+
+The normal compact-call run is noisy because it uses the host's default
+parallelism. A separate ten-sample `GOMAXPROCS=1` control measured 4,037 ns/op
+before and 3,895 ns/op after, or 1.04x faster after. The watch benchmark is a
+new end-to-end operation that includes a trie mutation, bounded remote event
+delivery, and acknowledgement; it is not a replacement for ordinary calls.
+The capability is opt-in, so the default write/read path does not pay the
+watch allocation or delivery cost. See
+[T027_REMOTE_WATCHES.md](T027_REMOTE_WATCHES.md).

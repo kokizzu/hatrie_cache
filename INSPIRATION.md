@@ -993,3 +993,12 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   `INDEX CANDIDATES`, including rejected strategies and reasons. See
   [T026_INDEX_HINTS.md](T026_INDEX_HINTS.md) and the measured raw runs in
   [BENCHMARK.md](BENCHMARK.md#t-u26-named-index-hints).
+
+### T-U27: Prefix/config watchers over peer connections
+
+- [x] Adopted as an opt-in bounded binary watch protocol over the existing
+  compact peer session. `hatCache.HatTrie` exposes exact-key and prefix watches,
+  reconnect re-registration, epoch-based gap signaling, and generation fencing
+  for late events. Authentication remains owned by the existing compact
+  handshake and caller policy. See
+  [T027_REMOTE_WATCHES.md](T027_REMOTE_WATCHES.md).

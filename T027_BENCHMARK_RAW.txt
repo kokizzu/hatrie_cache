@@ -1,0 +1,22 @@
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatPeer
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkT027CompactPeerCall-32    	  209738	      5343 ns/op	     449 B/op	       8 allocs/op
+BenchmarkT027CompactPeerCall-32    	  220202	      5559 ns/op	     448 B/op	       8 allocs/op
+BenchmarkT027CompactPeerCall-32    	  220968	      5170 ns/op	     448 B/op	       8 allocs/op
+BenchmarkT027CompactPeerCall-32    	  246208	      5061 ns/op	     448 B/op	       8 allocs/op
+BenchmarkT027CompactPeerCall-32    	  220606	      4752 ns/op	     448 B/op	       8 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatPeer	6.068s
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatCache
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkT027RemoteWatchEvent-32    	  169111	      6713 ns/op	     561 B/op	      10 allocs/op
+BenchmarkT027RemoteWatchEvent-32    	  176742	      6600 ns/op	     560 B/op	      10 allocs/op
+BenchmarkT027RemoteWatchEvent-32    	  178356	      6705 ns/op	     560 B/op	      10 allocs/op
+BenchmarkT027RemoteWatchEvent-32    	  152271	      6709 ns/op	     560 B/op	      10 allocs/op
+BenchmarkT027RemoteWatchEvent-32    	  191080	      6670 ns/op	     560 B/op	      10 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatCache	7.162s

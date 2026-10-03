@@ -1,0 +1,11 @@
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatPeer
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkT027CompactPeerCall-32    	  247388	      4650 ns/op	     448 B/op	       8 allocs/op
+BenchmarkT027CompactPeerCall-32    	  239545	      4642 ns/op	     448 B/op	       8 allocs/op
+BenchmarkT027CompactPeerCall-32    	  250261	      4634 ns/op	     448 B/op	       8 allocs/op
+BenchmarkT027CompactPeerCall-32    	  237682	      4818 ns/op	     448 B/op	       8 allocs/op
+BenchmarkT027CompactPeerCall-32    	  249219	      4719 ns/op	     448 B/op	       8 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatPeer	6.006s

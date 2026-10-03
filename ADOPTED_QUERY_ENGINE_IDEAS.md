@@ -736,6 +736,18 @@ Adopted as opt-in `hatStorage.CompactionDiagnostics`: bounded arrangement regist
 ## Materialize M-U41: Webhook Event Idempotency
 
 Adopted as opt-in `hatSql.WebhookEventDeduplicator`: bounded source/event-ID admission, payload-fingerprint conflict detection, expiry, deterministic CRC-protected HWE1 snapshots, and atomic restore. The caller owns application, durable storage, acknowledgement, and HTTP/webhook wiring; existing defaults remain unchanged. See [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md) and [BENCHMARK.md](BENCHMARK.md#m-u41-webhook-event-idempotency).
+
+## T-U27: Prefix/config watchers over peer connections
+
+Adopted as opt-in `hatPeer.CompactPeerWatchServer` and
+`hatPeer.CompactPeerWatchClient` endpoints. They carry bounded exact-key or
+prefix registrations over the existing compact session, preserve ordered
+events, re-register active watches after an explicit reconnect, and emit an
+explicit gap when the `hatCache.HatTrie` adapter cannot replay mutations after
+an epoch change. Existing authentication, ordinary requests, and default
+write behavior remain unchanged. See
+[T027_REMOTE_WATCHES.md](T027_REMOTE_WATCHES.md) and
+[BENCHMARK.md](BENCHMARK.md#t-u27-remote-prefix-and-configuration-watches).
 ### T-U26: Named index hints and strategy inspection
 
 Inspired by the explicit index-selection and plan-inspection workflows in
