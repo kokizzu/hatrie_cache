@@ -1776,6 +1776,28 @@ make test-race-sql-query-trace-spans
 make benchmark-sql-query-trace-spans
 ```
 
+## CH-G44 Opt-In Query Trace Span Export
+
+This is an additive adapter over `OpenTelemetrySpans()`. The existing trace
+snapshot path was measured at the parent commit and again after the exporter
+was added. The exporter uses the same span conversion and sends 64-span
+batches to a no-op callback. Three samples on an AMD Ryzen 9 5950X, with 64
+retained events and two operators per event, produced these raw results:
+
+| Path | Before ns/op | After ns/op | After B/op | After allocs/op |
+| --- | ---: | ---: | ---: | ---: |
+| `Events()` snapshot | 7,315; 7,502; 7,368 | 7,378; 7,422; 7,683 | 17,432 | 66 |
+| `OpenTelemetrySpans()` | 96,122; 94,625; 103,464 | 97,280; 97,309; 94,794 | 100,974 | 963 |
+| `ExportOpenTelemetry()` | not applicable | 93,328; 95,745; 98,649 | 100,950 | 962 |
+
+The medians are 7,368 ns before versus 7,422 ns after for `Events()` (+0.7%)
+and 96,122 ns before versus 97,280 ns after for `OpenTelemetrySpans` (+1.2%),
+which is within normal benchmark noise. Export adds no default-path work; when
+called, its no-op callback cost is within the existing span-conversion noise
+and its batch slices do not add allocations in this benchmark. Reproduce with
+the repository's `round99-trace-before` and `round99-trace-after` measurement
+wrappers, or the feature worktree's trace benchmark target.
+
 ## CH-U43 mergeable SQL t-digest percentile states
 
 This benchmark measures the new mergeable SQL t-digest state path against the

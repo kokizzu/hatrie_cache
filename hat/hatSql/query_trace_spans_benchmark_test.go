@@ -1,6 +1,9 @@
 package hatSql
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 var queryTraceSpansBenchmarkSink interface{}
 
@@ -35,5 +38,18 @@ func BenchmarkQueryTraceRecorderOpenTelemetrySpans(b *testing.B) {
 	b.ResetTimer()
 	for index := 0; index < b.N; index++ {
 		queryTraceSpansBenchmarkSink = recorder.OpenTelemetrySpans()
+	}
+}
+
+func BenchmarkQueryTraceRecorderExportOpenTelemetry(b *testing.B) {
+	recorder := benchmarkQueryTraceRecorderWithEvents()
+	exporter := func(context.Context, []QueryTraceSpan) error { return nil }
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		stats, err := recorder.ExportOpenTelemetry(context.Background(), exporter, QueryTraceSpanExportOptions{BatchSize: 64})
+		if err != nil || stats.ExportedSpans == 0 {
+			b.Fatalf("ExportOpenTelemetry() = %#v/%v", stats, err)
+		}
 	}
 }

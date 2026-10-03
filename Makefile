@@ -22858,3 +22858,26 @@ commit-chg14-prepared-cache:
 
 push-chg14-prepared-cache:
 	bash ./scripts/push-chg14-prepared-cache.sh
+test-chg44-query-trace-export:
+	@bash ./scripts/test-chg44-query-trace-export.sh
+
+format-chg44-query-trace-export:
+	@bash ./scripts/format-chg44-query-trace-export.sh
+
+test-chg44-query-trace-export-package:
+	@bash ./scripts/test-chg44-query-trace-export-package.sh
+
+benchmark-chg44-query-trace-export:
+	@bash ./scripts/benchmark-chg44-query-trace-export.sh
+
+race-chg44-query-trace-export:
+	@bash ./scripts/race-chg44-query-trace-export.sh
+
+vet-chg44-query-trace-export:
+	@bash ./scripts/vet-chg44-query-trace-export.sh
+
+commit-chg44-query-trace-export:
+	@bash ./scripts/commit-chg44-query-trace-export.sh
+
+push-chg44-query-trace-export:
+	@bash ./scripts/push-chg44-query-trace-export.sh
