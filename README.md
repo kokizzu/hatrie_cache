@@ -10,6 +10,7 @@ security guidance before exposing it on a network.
 
 - New to the cache commands and value types: [DATA_STRUCTURE.md](DATA_STRUCTURE.md)
 - Tarantool-inspired compact unique `HashIndex` storage for small secondary indexes: [TR053_HASH_INDEX_SMALL_VECTOR.md](TR053_HASH_INDEX_SMALL_VECTOR.md), with measurements in [BENCHMARK.md](BENCHMARK.md#tr-053-unique-hashindex-small-vector)
+- Tarantool-inspired compact `FunctionalIndex` storage for tiny secondary indexes: [TR054_FUNCTIONAL_INDEX_SMALL_VECTOR.md](TR054_FUNCTIONAL_INDEX_SMALL_VECTOR.md), with measurements in [BENCHMARK.md](BENCHMARK.md#tr-054-functional-index-small-vector)
 - ClickHouse-style SQL RowBinary streaming export and bounded bulk import: [CH050_SQL_ROW_BINARY_STREAM.md](CH050_SQL_ROW_BINARY_STREAM.md)
 - New to the SQL interface: [SQL.md](SQL.md)
 - Opt-in Materialize-style SQL result subscriptions with automatic `CACHE(...)` dependency discovery: [MZ010_SQL_SUBSCRIPTIONS.md](MZ010_SQL_SUBSCRIPTIONS.md), with registration cost measurements in [BENCHMARK.md#mz-010-sql-result-subscription-entrypoints](BENCHMARK.md#mz-010-sql-result-subscription-entrypoints)

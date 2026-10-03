@@ -32608,3 +32608,55 @@ BenchmarkTR053UniqueSmallUpsert: 13.78 14.16 13.47 12.93 13.54 ns/op
 BenchmarkTR053UniqueLargeUpsert: 31.45 30.93 30.99 30.59 30.35 ns/op
 BenchmarkTR053UniqueSmallBuild:  517.4 528.0 488.2 491.2 500.7 ns/op, 608 B/op, 2 allocs/op
 ```
+
+## TR-054 Functional Index Small Vector
+
+`FunctionalIndex` now keeps up to 16 rows in a compact vector before
+promoting to its existing maps. Five samples used `-benchtime=100ms -count=5`
+on Linux/amd64, AMD Ryzen 9 5950X.
+
+| Workload | Before median | After median | Improvement | Before memory | After memory | Before allocs | After allocs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Small upsert, 4 rows | 23.15 ns/op | 11.17 ns/op | 2.07x faster | 0 B/op | 0 B/op | 0 | 0 |
+| Small upsert, 16 rows | 24.15 ns/op | 12.70 ns/op | 1.90x faster | 0 B/op | 0 B/op | 0 | 0 |
+| Small lookup, 4 rows | 13.33 ns/op | 7.60 ns/op | 1.75x faster | 0 B/op | 0 B/op | 0 | 0 |
+| Small lookup, 16 rows | 18.79 ns/op | 14.97 ns/op | 1.26x faster | 0 B/op | 0 B/op | 0 | 0 |
+| Small build, 4 rows | 3,755 ns/op | 145.6 ns/op | 25.8x faster | 27,360 B/op | 464 B/op | 9 | 2 |
+| Small build, 16 rows | 4,465 ns/op | 324.6 ns/op | 13.8x faster | 27,584 B/op | 464 B/op | 21 | 2 |
+| 32-row lookup control | 19.86 ns/op | 20.07 ns/op | 0.99x, neutral | 0 B/op | 0 B/op | 0 | 0 |
+| 256-row build control | 20,747 ns/op | 21,385 ns/op | 0.97x, 3.1% slower | 32,224 B/op | 33,408 B/op | 169 | 171 |
+
+Raw before samples:
+
+```text
+BenchmarkTR054FunctionalSmallUpsert/size-4: 23.55 23.92 23.05 23.07 23.15 ns/op
+BenchmarkTR054FunctionalSmallUpsert/size-16: 24.13 24.34 24.15 24.17 26.04 ns/op
+BenchmarkTR054FunctionalSmallUpsert/size-32: 25.45 26.49 25.80 25.89 25.28 ns/op
+BenchmarkTR054FunctionalSmallBuild/size-4: 3775 3755 3242 3715 3804 ns/op, 27360 B/op, 9 allocs/op
+BenchmarkTR054FunctionalSmallBuild/size-16: 4287 4445 4465 4655 4711 ns/op, 27584 B/op, 21 allocs/op
+BenchmarkTR054FunctionalSmallBuild/size-32: 5607 5735 5892 5433 5759 ns/op, 27968 B/op, 29 allocs/op
+BenchmarkTR054FunctionalLargeBuild: 19712 20586 21000 20747 20803 ns/op, 32224 B/op, 169 allocs/op
+BenchmarkTR054FunctionalSmallLookupIDs/size-4: 13.04 13.01 13.52 13.34 13.33 ns/op
+BenchmarkTR054FunctionalSmallLookupIDs/size-16: 18.99 18.87 18.51 18.46 18.79 ns/op
+BenchmarkTR054FunctionalSmallLookupIDs/size-32: 19.86 19.86 19.56 20.00 20.09 ns/op
+```
+
+Raw after samples:
+
+```text
+BenchmarkTR054FunctionalSmallUpsert/size-4: 11.24 11.29 11.17 11.13 11.16 ns/op
+BenchmarkTR054FunctionalSmallUpsert/size-16: 12.70 12.51 12.80 12.59 12.81 ns/op
+BenchmarkTR054FunctionalSmallUpsert/size-32: 22.86 24.27 22.75 22.91 23.05 ns/op
+BenchmarkTR054FunctionalSmallBuild/size-4: 149.2 141.6 145.6 154.7 152.6 ns/op, 464 B/op, 2 allocs/op
+BenchmarkTR054FunctionalSmallBuild/size-16: 320.3 312.3 330.8 324.6 330.6 ns/op, 464 B/op, 2 allocs/op
+BenchmarkTR054FunctionalSmallBuild/size-32: 6227 6524 6444 7282 6070 ns/op, 29152 B/op, 31 allocs/op
+BenchmarkTR054FunctionalLargeBuild: 20880 22654 21127 21385 21707 ns/op, 33408 B/op, 171 allocs/op
+BenchmarkTR054FunctionalSmallLookupIDs/size-4: 7.596 7.804 7.822 7.542 7.548 ns/op
+BenchmarkTR054FunctionalSmallLookupIDs/size-16: 14.97 14.86 15.44 15.55 14.64 ns/op
+BenchmarkTR054FunctionalSmallLookupIDs/size-32: 19.98 20.09 20.09 19.53 20.07 ns/op
+```
+
+The 16-row threshold is intentional: a 32-row vector had a faster build but
+made 32-row lookups approximately 20% slower. See
+[TR054_FUNCTIONAL_INDEX_SMALL_VECTOR.md](TR054_FUNCTIONAL_INDEX_SMALL_VECTOR.md)
+for the representation and tradeoff analysis.

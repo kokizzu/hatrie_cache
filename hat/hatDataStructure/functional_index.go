@@ -12,7 +12,15 @@ var (
 	ErrFunctionalIndexExtractorRequired = errors.New("hatDataStructure: functional index extractor is required")
 )
 
+const functionalIndexSmallVectorThreshold = 16
+
 type functionalIndexEntry[T any, K comparable] struct {
+	key   K
+	value T
+}
+
+type functionalIndexSmallEntry[T any, K comparable] struct {
+	id    uint64
 	key   K
 	value T
 }
@@ -22,10 +30,12 @@ type functionalIndexEntry[T any, K comparable] struct {
 // readers and writers; LookupInto can reuse caller-owned scratch space to avoid
 // per-query allocations.
 type FunctionalIndex[T any, K comparable] struct {
-	mu        sync.RWMutex
-	extractor func(T) K
-	entries   map[uint64]functionalIndexEntry[T, K]
-	postings  map[K]u64PostingList
+	mu           sync.RWMutex
+	extractor    func(T) K
+	capacityHint int
+	entries      map[uint64]functionalIndexEntry[T, K]
+	postings     map[K]u64PostingList
+	smallEntries []functionalIndexSmallEntry[T, K]
 }
 
 // NewFunctionalIndex creates an index using extractor to derive each key.
@@ -37,11 +47,15 @@ func NewFunctionalIndex[T any, K comparable](extractor func(T) K, capacity int) 
 	if capacity < 0 {
 		capacity = 0
 	}
-	return &FunctionalIndex[T, K]{
-		extractor: extractor,
-		entries:   make(map[uint64]functionalIndexEntry[T, K], capacity),
-		postings:  make(map[K]u64PostingList, capacity),
-	}, nil
+	index := &FunctionalIndex[T, K]{extractor: extractor, capacityHint: capacity}
+	if capacity > 0 {
+		smallCapacity := capacity
+		if smallCapacity > functionalIndexSmallVectorThreshold {
+			smallCapacity = functionalIndexSmallVectorThreshold
+		}
+		index.smallEntries = make([]functionalIndexSmallEntry[T, K], 0, smallCapacity)
+	}
+	return index, nil
 }
 
 // Upsert inserts or replaces a value for id. Replacing a value also moves its
@@ -54,10 +68,8 @@ func (index *FunctionalIndex[T, K]) Upsert(id uint64, value T) error {
 	index.mu.Lock()
 	defer index.mu.Unlock()
 	if index.entries == nil {
-		index.entries = make(map[uint64]functionalIndexEntry[T, K])
-	}
-	if index.postings == nil {
-		index.postings = make(map[K]u64PostingList)
+		index.upsertFunctionalSmallLocked(id, key, value)
+		return nil
 	}
 	if current, ok := index.entries[id]; ok {
 		if current.key != key {
@@ -79,6 +91,18 @@ func (index *FunctionalIndex[T, K]) Delete(id uint64) bool {
 	}
 	index.mu.Lock()
 	defer index.mu.Unlock()
+	if index.entries == nil {
+		for position, entry := range index.smallEntries {
+			if entry.id != id {
+				continue
+			}
+			copy(index.smallEntries[position:], index.smallEntries[position+1:])
+			index.smallEntries[len(index.smallEntries)-1] = functionalIndexSmallEntry[T, K]{}
+			index.smallEntries = index.smallEntries[:len(index.smallEntries)-1]
+			return true
+		}
+		return false
+	}
 	entry, ok := index.entries[id]
 	if !ok {
 		return false
@@ -102,6 +126,14 @@ func (index *FunctionalIndex[T, K]) LookupInto(key K, dst []T) []T {
 	}
 	index.mu.RLock()
 	defer index.mu.RUnlock()
+	if index.entries == nil {
+		for _, entry := range index.smallEntries {
+			if entry.key == key {
+				dst = append(dst, entry.value)
+			}
+		}
+		return dst
+	}
 	posting, ok := index.postings[key]
 	if !ok {
 		return dst
@@ -143,6 +175,14 @@ func (index *FunctionalIndex[T, K]) LookupIDsInto(key K, dst []uint64) []uint64 
 	}
 	index.mu.RLock()
 	defer index.mu.RUnlock()
+	if index.entries == nil {
+		for _, entry := range index.smallEntries {
+			if entry.key == key {
+				dst = append(dst, entry.id)
+			}
+		}
+		return dst
+	}
 	posting, ok := index.postings[key]
 	if !ok {
 		return dst
@@ -157,6 +197,9 @@ func (index *FunctionalIndex[T, K]) Len() int {
 	}
 	index.mu.RLock()
 	defer index.mu.RUnlock()
+	if index.entries == nil {
+		return len(index.smallEntries)
+	}
 	return len(index.entries)
 }
 
@@ -167,6 +210,9 @@ func (index *FunctionalIndex[T, K]) DistinctKeys() int {
 	}
 	index.mu.RLock()
 	defer index.mu.RUnlock()
+	if index.entries == nil {
+		return functionalIndexSmallDistinctKeys(index.smallEntries)
+	}
 	return len(index.postings)
 }
 
@@ -179,6 +225,93 @@ func (index *FunctionalIndex[T, K]) Clear() {
 	defer index.mu.Unlock()
 	index.entries = nil
 	index.postings = nil
+	index.smallEntries = nil
+}
+
+func (index *FunctionalIndex[T, K]) upsertFunctionalSmallLocked(id uint64, key K, value T) {
+	for position, entry := range index.smallEntries {
+		if entry.id != id {
+			continue
+		}
+		if entry.key == key {
+			index.smallEntries[position] = functionalIndexSmallEntry[T, K]{id: id, key: key, value: value}
+			return
+		}
+		copy(index.smallEntries[position:], index.smallEntries[position+1:])
+		index.smallEntries[len(index.smallEntries)-1] = functionalIndexSmallEntry[T, K]{}
+		index.smallEntries = index.smallEntries[:len(index.smallEntries)-1]
+		break
+	}
+	index.smallEntries = append(index.smallEntries, functionalIndexSmallEntry[T, K]{id: id, key: key, value: value})
+	if len(index.smallEntries) > functionalIndexSmallVectorThreshold {
+		index.promoteFunctionalSmallLocked()
+	}
+}
+
+func (index *FunctionalIndex[T, K]) promoteFunctionalSmallLocked() {
+	capacity := index.capacityHint
+	if capacity < len(index.smallEntries) {
+		capacity = len(index.smallEntries)
+	}
+	index.entries = make(map[uint64]functionalIndexEntry[T, K], capacity)
+	index.postings = make(map[K]u64PostingList, capacity)
+	for _, entry := range index.smallEntries {
+		index.entries[entry.id] = functionalIndexEntry[T, K]{key: entry.key, value: entry.value}
+		index.appendFunctionalPostingLocked(entry.key, entry.id)
+	}
+	index.smallEntries = nil
+}
+
+func functionalIndexSmallDistinctKeys[T any, K comparable](entries []functionalIndexSmallEntry[T, K]) int {
+	distinct := 0
+	for position, entry := range entries {
+		seen := false
+		for previous := 0; previous < position; previous++ {
+			if entries[previous].key == entry.key {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			distinct++
+		}
+	}
+	return distinct
+}
+
+func (index *FunctionalIndex[T, K]) containsFunctionalID(key K, id uint64) bool {
+	if index == nil {
+		return false
+	}
+	index.mu.RLock()
+	defer index.mu.RUnlock()
+	if index.entries == nil {
+		for _, entry := range index.smallEntries {
+			if entry.key == key && entry.id == id {
+				return true
+			}
+		}
+		return false
+	}
+	posting, ok := index.postings[key]
+	if !ok {
+		return false
+	}
+	if posting.first == id {
+		return true
+	}
+	if posting.rest == nil {
+		return false
+	}
+	if posting.rest.first == id {
+		return true
+	}
+	for _, candidate := range posting.rest.rest {
+		if candidate == id {
+			return true
+		}
+	}
+	return false
 }
 
 func (index *FunctionalIndex[T, K]) removeFunctionalPostingLocked(key K, id uint64) {
