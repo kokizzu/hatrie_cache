@@ -22294,3 +22294,17 @@ push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
 benchmark-t024:
 	bash ./scripts/benchmark-t024.sh
+verify-t025:
+	bash ./scripts/verify-t025.sh test
+
+verify-t025-race:
+	bash ./scripts/verify-t025.sh race
+
+verify-t025-vet:
+	bash ./scripts/verify-t025.sh vet
+
+verify-t025-full:
+	bash ./scripts/verify-t025.sh full
+
+benchmark-t025:
+	bash ./scripts/benchmark-t025.sh

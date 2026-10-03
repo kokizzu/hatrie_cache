@@ -1,5 +1,24 @@
 # Benchmark
 
+## T-U25 R-tree Space Integration
+
+Command: `make benchmark-t025` (`-benchmem -count=1`), Linux/amd64, AMD Ryzen
+9 5950X. The fixture contains 50,000 materialized rows and a selective
+100-km `GEO_WITHIN_RADIUS` query.
+
+| Operation | Time | Heap | Allocs | Improvement / cost |
+| --- | ---: | ---: | ---: | --- |
+| Full scan query | 44,476,466 ns/op | 49,216,527 B/op | 300,029 | baseline |
+| R-tree query | 7,585 ns/op | 6,504 B/op | 34 | 5,864x faster; 7,567x lower heap; 8,824x fewer allocations |
+| Insert without R-tree | 885.7 ns/op | 762 B/op | 8 | baseline |
+| Insert with R-tree | 4,342 ns/op | 1,585 B/op | 12 | 4.90x slower; 2.08x higher heap; 1.50x allocations |
+| R-tree build | 123,657,854 ns/op | 37,346,156 B/op | 165,981 | one-time cost for 50,000 rows |
+
+The index is opt-in because the selective-read gain is workload-dependent and
+indexed writes/builds cost more. Full raw output is in
+`T025_BENCHMARK_RAW.txt`; implementation and correctness scope are in
+`T025_RTREE_SPACE_INTEGRATION.md`.
+
 ## T-U24 Conditional Space Indexes
 
 Command:

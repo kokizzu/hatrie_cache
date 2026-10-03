@@ -1,0 +1,11 @@
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatSchema
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkT025MaterializedGeoQueryBaseline-32     	      25	  44476466 ns/op	49216527 B/op	  300029 allocs/op
+BenchmarkT025MaterializedGeoInsertBaseline-32    	 1280064	       885.7 ns/op	     762 B/op	       8 allocs/op
+BenchmarkT025MaterializedGeoQueryRTree-32        	  156460	      7585 ns/op	    6504 B/op	      34 allocs/op
+BenchmarkT025MaterializedGeoInsertRTree-32       	  269138	      4342 ns/op	    1585 B/op	      12 allocs/op
+BenchmarkT025MaterializedRTreeIndexBuild-32      	       9	 123657854 ns/op	37346156 B/op	  165981 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatSchema	11.125s

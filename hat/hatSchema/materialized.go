@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hatrie_cache/hat/hatSql"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -20,6 +21,8 @@ var (
 	ErrMaterializedSourceFunctionalIndexNameConflict         = errors.New("hatSchema: materialized source functional index name conflicts with an existing index")
 	ErrMaterializedSourceConditionalPredicateRequired        = errors.New("hatSchema: conditional functional index predicate is required")
 	ErrMaterializedSourceConditionalMatcherRequired          = errors.New("hatSchema: conditional functional index matcher is required")
+	ErrMaterializedSourceRTreeIndexNameRequired              = errors.New("hatSchema: materialized source R-tree index name is required")
+	ErrMaterializedSourceRTreeIndexNameConflict              = errors.New("hatSchema: materialized source R-tree index name conflicts with an existing index")
 )
 
 type GeneratedValue func(Row) (interface{}, error)
@@ -35,6 +38,24 @@ type FunctionalIndexEvaluator func(Row) (interface{}, error)
 type ConditionalFunctionalIndexOptions struct {
 	Predicate string
 	Matches   func(Row) (bool, error)
+}
+
+// RTreeIndexOptions configures a named point R-tree over two numeric columns.
+// Rows with NULL or invalid coordinates remain in the source and are kept as
+// fallback candidates so SQL retains its normal predicate semantics.
+type RTreeIndexOptions struct {
+	LatitudeField  string
+	LongitudeField string
+	MaxEntries     int
+}
+
+// RTreeIndexBuildReport describes one online R-tree build.
+type RTreeIndexBuildReport struct {
+	Name           string
+	LatitudeField  string
+	LongitudeField string
+	Rows           int
+	Attempts       int
 }
 
 type DerivedColumn struct {
@@ -137,6 +158,22 @@ func (adapter SQLResolverAdapter) ResolveSQLCoveringSource(name, key, field stri
 	return nil, false, nil
 }
 
+// ResolveSQLGeoSource exposes maintained CACHE R-tree indexes to the SQL
+// executor. The executor still evaluates the original predicate against every
+// returned candidate, including fallback rows that cannot be indexed.
+func (adapter SQLResolverAdapter) ResolveSQLGeoSource(name, key string, predicate hatSql.SQLGeoPredicate) ([]hatSql.Row, bool, error) {
+	if strings.EqualFold(name, "CACHE") {
+		if source := adapter.Sources[strings.ToLower(key)]; source != nil {
+			rows, available, err := source.resolveSQLGeoSource(predicate)
+			return rows, available, err
+		}
+	}
+	if indexed, ok := adapter.Base.(hatSql.GeoIndexedSourceResolver); ok {
+		return indexed.ResolveSQLGeoSource(name, key, predicate)
+	}
+	return nil, false, nil
+}
+
 func sqlRows(rows []Row) []hatSql.Row {
 	converted := make([]hatSql.Row, len(rows))
 	for index, row := range rows {
@@ -185,6 +222,10 @@ type materializedFunctionalIndex struct {
 	positions    map[string][]int
 }
 
+type materializedRTreeIndex struct {
+	source *hatSql.RTreeSpatialSource
+}
+
 type MaterializedSource struct {
 	mu                sync.RWMutex
 	columns           []DerivedColumn
@@ -194,6 +235,7 @@ type MaterializedSource struct {
 	indexedFields     map[string]struct{}
 	coveringIndexes   map[string]*materializedCoveringIndex
 	functionalIndexes map[string]*materializedFunctionalIndex
+	rtreeIndexes      map[string]*materializedRTreeIndex
 	indexStatsCache   map[string]hatSql.JSONIndexStats
 	generation        uint64
 }
@@ -212,6 +254,7 @@ func NewMaterializedSource(columns []DerivedColumn) *MaterializedSource {
 		indexedFields:     indexedFields,
 		coveringIndexes:   map[string]*materializedCoveringIndex{},
 		functionalIndexes: map[string]*materializedFunctionalIndex{},
+		rtreeIndexes:      map[string]*materializedRTreeIndex{},
 	}
 }
 
@@ -273,6 +316,21 @@ func (source *MaterializedSource) Insert(row Row) (Row, error) {
 		}
 	}
 	position := len(source.rows)
+	spatialKey := strconv.Itoa(position)
+	insertedSpatial := make([]*materializedRTreeIndex, 0, len(source.rtreeIndexes))
+	for _, name := range source.rtreeIndexNamesLocked() {
+		index := source.rtreeIndexes[name]
+		if index == nil || index.source == nil {
+			continue
+		}
+		if err := index.source.Upsert(spatialKey, hatSql.Row(materialized)); err != nil {
+			for _, inserted := range insertedSpatial {
+				inserted.source.Delete(spatialKey)
+			}
+			return nil, fmt.Errorf("hatSchema: maintain R-tree index %q: %w", name, err)
+		}
+		insertedSpatial = append(insertedSpatial, index)
+	}
 	source.rows = append(source.rows, cloneRow(materialized))
 	for field := range source.indexedFields {
 		if source.indexes[field] == nil {
@@ -304,6 +362,130 @@ func (source *MaterializedSource) Insert(row Row) (Row, error) {
 	return cloneRow(materialized), nil
 }
 
+const materializedRTreeSourceName = "__materialized__"
+
+func (source *MaterializedSource) rtreeIndexNamesLocked() []string {
+	names := make([]string, 0, len(source.rtreeIndexes))
+	for name := range source.rtreeIndexes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// BuildRTreeIndex builds and atomically installs a named point R-tree while
+// allowing inserts and reads to continue. A concurrent insert causes a
+// generation-checked retry. The published index is maintained for later
+// inserts and is used only as a candidate source; SQL rechecks the predicate.
+func (source *MaterializedSource) BuildRTreeIndex(name string, options RTreeIndexOptions) (RTreeIndexBuildReport, error) {
+	if source == nil {
+		return RTreeIndexBuildReport{}, ErrMaterializedSourceNil
+	}
+	name = strings.TrimSpace(name)
+	options.LatitudeField = strings.TrimSpace(options.LatitudeField)
+	options.LongitudeField = strings.TrimSpace(options.LongitudeField)
+	if name == "" {
+		return RTreeIndexBuildReport{}, ErrMaterializedSourceRTreeIndexNameRequired
+	}
+	if options.LatitudeField == "" || options.LongitudeField == "" || options.LatitudeField == options.LongitudeField {
+		return RTreeIndexBuildReport{}, ErrMaterializedSourceColumnRequired
+	}
+	report := RTreeIndexBuildReport{
+		Name:           name,
+		LatitudeField:  options.LatitudeField,
+		LongitudeField: options.LongitudeField,
+	}
+	for {
+		source.mu.RLock()
+		if !source.hasColumnLocked(options.LatitudeField) {
+			source.mu.RUnlock()
+			return RTreeIndexBuildReport{}, fmt.Errorf("%w: %s", ErrMaterializedSourceColumnUnknown, options.LatitudeField)
+		}
+		if !source.hasColumnLocked(options.LongitudeField) {
+			source.mu.RUnlock()
+			return RTreeIndexBuildReport{}, fmt.Errorf("%w: %s", ErrMaterializedSourceColumnUnknown, options.LongitudeField)
+		}
+		if source.hasIndexNameConflictLocked(name) {
+			source.mu.RUnlock()
+			return RTreeIndexBuildReport{}, fmt.Errorf("%w: %s", ErrMaterializedSourceRTreeIndexNameConflict, name)
+		}
+		generation := source.generation
+		rows := append([]Row(nil), source.rows...)
+		source.mu.RUnlock()
+
+		spatial, err := hatSql.NewRTreeSpatialSource(hatSql.RTreeSpatialSourceOptions{
+			SourceName:     "CACHE",
+			Name:           materializedRTreeSourceName,
+			LatitudeField:  options.LatitudeField,
+			LongitudeField: options.LongitudeField,
+			MaxEntries:     options.MaxEntries,
+		})
+		if err != nil {
+			return RTreeIndexBuildReport{}, fmt.Errorf("hatSchema: create R-tree index %q: %w", name, err)
+		}
+		for position, row := range rows {
+			if err := spatial.Upsert(strconv.Itoa(position), hatSql.Row(row)); err != nil {
+				return RTreeIndexBuildReport{}, fmt.Errorf("hatSchema: build R-tree index %q at row %d: %w", name, position, err)
+			}
+		}
+		report.Attempts++
+
+		source.mu.Lock()
+		if source.generation != generation {
+			source.mu.Unlock()
+			continue
+		}
+		if source.rtreeIndexes == nil {
+			source.rtreeIndexes = make(map[string]*materializedRTreeIndex)
+		}
+		source.rtreeIndexes[name] = &materializedRTreeIndex{
+			source: spatial,
+		}
+		source.mu.Unlock()
+		report.Rows = len(rows)
+		return report, nil
+	}
+}
+
+func (source *MaterializedSource) hasIndexNameConflictLocked(name string) bool {
+	if source.hasColumnLocked(name) {
+		return true
+	}
+	if _, exists := source.indexedFields[name]; exists {
+		return true
+	}
+	if _, exists := source.coveringIndexes[name]; exists {
+		return true
+	}
+	if _, exists := source.functionalIndexes[name]; exists {
+		return true
+	}
+	_, exists := source.rtreeIndexes[name]
+	return exists
+}
+
+func (source *MaterializedSource) resolveSQLGeoSource(predicate hatSql.SQLGeoPredicate) ([]hatSql.Row, bool, error) {
+	if source == nil {
+		return nil, false, nil
+	}
+	source.mu.RLock()
+	names := source.rtreeIndexNamesLocked()
+	indexes := make([]*materializedRTreeIndex, 0, len(names))
+	for _, name := range names {
+		if index := source.rtreeIndexes[name]; index != nil {
+			indexes = append(indexes, index)
+		}
+	}
+	source.mu.RUnlock()
+	for _, index := range indexes {
+		rows, available, err := index.source.ResolveSQLGeoSource("CACHE", materializedRTreeSourceName, predicate)
+		if err != nil || available {
+			return rows, available, err
+		}
+	}
+	return nil, false, nil
+}
+
 // HasIndex reports whether field has a maintained equality index.
 func (source *MaterializedSource) HasIndex(field string) bool {
 	if source == nil {
@@ -320,6 +502,9 @@ func (source *MaterializedSource) HasIndex(field string) bool {
 	}
 	if !indexed {
 		_, indexed = source.functionalIndexes[field]
+	}
+	if !indexed {
+		_, indexed = source.rtreeIndexes[field]
 	}
 	source.mu.RUnlock()
 	return indexed
@@ -349,6 +534,10 @@ func (source *MaterializedSource) DropIndex(name string) bool {
 	}
 	if _, ok := source.functionalIndexes[name]; ok {
 		delete(source.functionalIndexes, name)
+		removed = true
+	}
+	if _, ok := source.rtreeIndexes[name]; ok {
+		delete(source.rtreeIndexes, name)
 		removed = true
 	}
 	if removed {

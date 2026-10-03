@@ -16,6 +16,17 @@ planner metadata, but the SQL resolver does not automatically use a partial
 index without proving predicate implication. See
 T024_CONDITIONAL_SPACE_INDEX.md and BENCHMARK.md#t-u24-conditional-space-indexes.
 
+## T-U25: R-tree Space Integration
+
+The existing R-tree is now available as an explicit named index on
+`hatSchema.MaterializedSource`. `BuildRTreeIndex` publishes it atomically,
+maintains later inserts, routes `GEO_WITHIN_BOX` and `GEO_WITHIN_RADIUS`
+candidate reads through `SQLResolverAdapter`, and keeps unindexable rows in the
+fallback path. The feature is opt-in because indexed writes are slower and the
+initial build allocates additional memory. See
+[T025_RTREE_SPACE_INTEGRATION.md](T025_RTREE_SPACE_INTEGRATION.md) and
+[BENCHMARK.md#t-u25-r-tree-space-integration](BENCHMARK.md#t-u25-r-tree-space-integration).
+
 ## How To Read This
 
 - `[x]` means the repository already has the capability, or a compatible local
