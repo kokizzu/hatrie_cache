@@ -72,12 +72,14 @@ type DataflowGraphSnapshot struct {
 type DataflowGraph struct {
 	mu sync.RWMutex
 
-	maxNodes int
-	maxEdges int
-	edges    int
-	nodes    map[string]DataflowNode
-	outgoing map[string]map[string]struct{}
-	incoming map[string]map[string]struct{}
+	maxNodes              int
+	maxEdges              int
+	edges                 int
+	nodes                 map[string]DataflowNode
+	outgoing              map[string]map[string]struct{}
+	incoming              map[string]map[string]struct{}
+	topologicalOrder      []string
+	topologicalOrderValid bool
 }
 
 // NewDataflowGraph creates an empty bounded graph.
@@ -121,6 +123,8 @@ func (graph *DataflowGraph) AddNode(node DataflowNode) error {
 	graph.nodes[id] = DataflowNode{ID: id, Kind: kind}
 	graph.outgoing[id] = make(map[string]struct{})
 	graph.incoming[id] = make(map[string]struct{})
+	graph.topologicalOrder = nil
+	graph.topologicalOrderValid = false
 	return nil
 }
 
@@ -155,6 +159,8 @@ func (graph *DataflowGraph) AddEdge(edge DataflowEdge) error {
 	graph.outgoing[from][to] = struct{}{}
 	graph.incoming[to][from] = struct{}{}
 	graph.edges++
+	graph.topologicalOrder = nil
+	graph.topologicalOrderValid = false
 	return nil
 }
 
@@ -183,6 +189,8 @@ func (graph *DataflowGraph) RemoveEdge(edge DataflowEdge) error {
 	delete(graph.outgoing[from], to)
 	delete(graph.incoming[to], from)
 	graph.edges--
+	graph.topologicalOrder = nil
+	graph.topologicalOrderValid = false
 	return nil
 }
 
@@ -213,6 +221,8 @@ func (graph *DataflowGraph) RemoveNode(id string) error {
 	delete(graph.incoming, id)
 	delete(graph.outgoing, id)
 	delete(graph.nodes, id)
+	graph.topologicalOrder = nil
+	graph.topologicalOrderValid = false
 	return nil
 }
 
@@ -283,7 +293,18 @@ func (graph *DataflowGraph) TopologicalOrder() ([]string, error) {
 		return nil, ErrDataflowGraphNil
 	}
 	graph.mu.RLock()
-	defer graph.mu.RUnlock()
+	if graph.topologicalOrderValid {
+		order := append([]string(nil), graph.topologicalOrder...)
+		graph.mu.RUnlock()
+		return order, nil
+	}
+	graph.mu.RUnlock()
+
+	graph.mu.Lock()
+	defer graph.mu.Unlock()
+	if graph.topologicalOrderValid {
+		return append([]string(nil), graph.topologicalOrder...), nil
+	}
 
 	indegree := make(map[string]int, len(graph.nodes))
 	ready := make([]string, 0, len(graph.nodes))
@@ -310,7 +331,9 @@ func (graph *DataflowGraph) TopologicalOrder() ([]string, error) {
 	if len(order) != len(graph.nodes) {
 		return nil, ErrDataflowGraphCycle
 	}
-	return order, nil
+	graph.topologicalOrder = append(graph.topologicalOrder[:0], order...)
+	graph.topologicalOrderValid = true
+	return append([]string(nil), graph.topologicalOrder...), nil
 }
 
 // Snapshot returns a deterministic detached graph view.

@@ -32660,3 +32660,38 @@ The 16-row threshold is intentional: a 32-row vector had a faster build but
 made 32-row lookups approximately 20% slower. See
 [TR054_FUNCTIONAL_INDEX_SMALL_VECTOR.md](TR054_FUNCTIONAL_INDEX_SMALL_VECTOR.md)
 for the representation and tradeoff analysis.
+
+## M052 Dataflow Topological-Order Cache
+
+Commands:
+
+```sh
+make round86-graph-baseline-bench
+make round86-graph-bench
+```
+
+Five `-count=5` samples used `-benchtime=100ms -benchmem` on Linux/amd64,
+AMD Ryzen 9 5950X. The graph contains 2,048 nodes and 2,047 edges; setup is
+outside the timed region.
+
+| Workload | Before median | After median | CPU improvement | Before memory | After memory | Before allocs | After allocs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Repeated topological order | 369,834 ns/op | 9,479 ns/op | 39.0x faster | 174,752 B/op | 32,785 B/op | 11 | 1 |
+
+Raw before samples:
+
+```text
+376467 373637 369834 368043 368238 ns/op, 174752 B/op, 11 allocs/op
+```
+
+Raw after samples:
+
+```text
+9763 9479 9115 9854 8758 ns/op, 32785/32785/32782/32785/32785 B/op, 1 alloc/op
+```
+
+The cache retains one ordered slice per graph and returns a detached copy on
+each call. A graph mutation invalidates it, so the first order request after a
+mutation retains the original sort cost. This is an automatic optimization;
+there is no new worker, configuration flag, or behavior change. See
+[M052_DATAFLOW_GRAPH_ORDER_CACHE.md](M052_DATAFLOW_GRAPH_ORDER_CACHE.md).
