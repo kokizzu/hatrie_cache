@@ -22295,3 +22295,5 @@ push-pgwire-parameter-description:
 .PHONY: benchmark-tr038
 benchmark-tr038:
 	@bash scripts/benchmark-tr038.sh
+benchmark-tr022:
+	bash scripts/benchmark-tr022.sh

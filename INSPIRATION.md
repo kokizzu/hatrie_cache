@@ -969,3 +969,8 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   cursor-gap detection, and supports CRC-protected HCE1 snapshots; recording is
   caller-owned and opt-in. See [TR038_CONFLICT_INTROSPECTION.md](TR038_CONFLICT_INTROSPECTION.md)
   and [BENCHMARK.md](BENCHMARK.md#t-u38-conflict-introspection).
+- [x] T-U22 Tarantool-style cross-index uniqueness. `hatDataStructure.UniqueIndexGroup`
+  atomically preflights and publishes multiple named unique projections, rolls
+  back conflicting updates without exposing raw keys in errors, and reuses
+  existing-row key storage. See [TR022_CROSS_INDEX_UNIQUE.md](TR022_CROSS_INDEX_UNIQUE.md)
+  and [BENCHMARK.md](BENCHMARK.md#t-u22-cross-index-unique-constraints).

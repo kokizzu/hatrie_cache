@@ -32607,3 +32607,29 @@ recording cost is the intentional observability tradeoff and is absent unless a
 caller constructs and uses the log. See
 [TR038_CONFLICT_INTROSPECTION.md](TR038_CONFLICT_INTROSPECTION.md) and the raw
 samples in [TR038_BENCHMARK_RAW.txt](TR038_BENCHMARK_RAW.txt).
+
+## T-U22 Cross-Index Unique Constraints
+
+Command:
+
+```sh
+make benchmark-tr022
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The plain-map
+control updates two unsynchronized maps and therefore does not provide the
+atomic preflight, rollback, or concurrent-read contract of the feature.
+
+| Workload | Median ns/op | B/op | Allocs/op | Relative CPU | Relative allocation |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Two plain-map control | 20.90 | 0 | 0 | 1.00x | 1.00x |
+| `UniqueIndexGroup.Upsert` existing row | 208.7 | 0 | 0 | 9.99x slower | 1.00x |
+
+The feature's update path is allocation-free after the row's initial key list
+has been stored. Its measured cost is the intentional price of one lock,
+multi-index duplicate preflight, old-key removal, and complete new-state
+publication. The primitive is opt-in; ordinary maps and existing single-index
+paths are unchanged. The initial implementation was `216.3 ns/op`, `48 B/op`,
+and `1 alloc/op`; row-key slice reuse removed that allocation and improved the
+final measured median by 1.04x. Full samples and the comparison limits are in
+[TR022_BENCHMARK_RAW.txt](TR022_BENCHMARK_RAW.txt).

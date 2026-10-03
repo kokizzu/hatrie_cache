@@ -1,0 +1,52 @@
+T-U22 Cross-Index Unique Constraints
+====================================
+
+Environment
+-----------
+OS: Linux
+Architecture: amd64
+CPU: AMD Ryzen 9 5950X 16-Core Processor
+Command: go test ./hat/hatDataStructure -run '^$' -bench '^BenchmarkT022UniqueIndexGroupUpsert$' -benchmem -count=5
+
+Baseline: two plain maps, no lock, no atomic preflight, no rollback contract
+-------------------------------------------------------------------------
+BenchmarkT022UniqueIndexGroupUpsert-32  58129885  20.66 ns/op  0 B/op  0 allocs/op
+BenchmarkT022UniqueIndexGroupUpsert-32  55313366  20.75 ns/op  0 B/op  0 allocs/op
+BenchmarkT022UniqueIndexGroupUpsert-32  55158979  21.18 ns/op  0 B/op  0 allocs/op
+BenchmarkT022UniqueIndexGroupUpsert-32  55815094  20.41 ns/op  0 B/op  0 allocs/op
+BenchmarkT022UniqueIndexGroupUpsert-32  57993264  21.62 ns/op  0 B/op  0 allocs/op
+Median: 20.75 ns/op, 0 B/op, 0 allocs/op
+
+Feature: synchronized two-index group with duplicate preflight and rollback
+-------------------------------------------------------------------------
+BenchmarkT022UniqueIndexGroupUpsert/plain_maps-32    57521203  21.34 ns/op  0 B/op  0 allocs/op
+BenchmarkT022UniqueIndexGroupUpsert/plain_maps-32    58298170  21.79 ns/op  0 B/op  0 allocs/op
+BenchmarkT022UniqueIndexGroupUpsert/plain_maps-32    60663138  20.90 ns/op  0 B/op  0 allocs/op
+BenchmarkT022UniqueIndexGroupUpsert/plain_maps-32    52344674  20.78 ns/op  0 B/op  0 allocs/op
+BenchmarkT022UniqueIndexGroupUpsert/plain_maps-32    55783026  19.40 ns/op  0 B/op  0 allocs/op
+Median plain-map control: 20.90 ns/op, 0 B/op, 0 allocs/op
+
+BenchmarkT022UniqueIndexGroupUpsert/atomic_group-32  6312475  208.7 ns/op  0 B/op  0 allocs/op
+BenchmarkT022UniqueIndexGroupUpsert/atomic_group-32  5835153  210.8 ns/op  0 B/op  0 allocs/op
+BenchmarkT022UniqueIndexGroupUpsert/atomic_group-32  6009950  200.4 ns/op  0 B/op  0 allocs/op
+BenchmarkT022UniqueIndexGroupUpsert/atomic_group-32  5446935  190.3 ns/op  0 B/op  0 allocs/op
+BenchmarkT022UniqueIndexGroupUpsert/atomic_group-32  5492935  218.3 ns/op  0 B/op  0 allocs/op
+Median atomic group: 208.7 ns/op, 0 B/op, 0 allocs/op
+
+Derived comparison
+------------------
+Atomic group / plain-map control: 9.99x the CPU time
+Atomic group / plain-map control: 1.00x measured allocations (both are zero)
+Plain-map control / atomic group: 0.10x the CPU throughput
+
+The plain-map control is intentionally weaker: it does not synchronize the
+two maps, preflight all keys, or roll back an update. The 9.77x figure is the
+cost of the correctness contract, not a claim that the group is a faster map.
+The feature is opt-in and does not affect ordinary map or single-index paths.
+
+Before allocation reuse optimization
+-------------------------------------
+The initial repeated-update implementation measured approximately 216.3
+ns/op, 48 B/op, and 1 alloc/op for the atomic group. Reusing each existing
+row's key slice reduced the update path to the measurements above: 208.7
+ns/op median, 0 B/op, and 0 allocs/op.
