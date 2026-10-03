@@ -128,7 +128,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | MZ-043 | Transactional DDL dependencies | DDL cannot atomically create/alter a source, view, index, and dependent sink plan. | High |
 | MZ-044 | Costed dataflow explanation | Adopted as explicit `EXPLAIN COST` operator CPU and memory heuristics; steps without cardinality estimates omit cost fields, and normal execution remains unchanged. See [MZ044_COSTED_EXPLAIN.md](MZ044_COSTED_EXPLAIN.md). | Medium |
 | MZ-045 | Workload plan equivalence | Partially implemented through `SQLCompiledQueryCache`: equivalent whitespace and keyword-casing token streams share one bounded compiled plan while literal values and schema versions remain distinct; query-fingerprint-to-arrangement reuse is still open. | Low |
-| MZ-046 | Frontier-aware cancellation | A query cannot cancel after a specified freshness or result frontier is reached. | Low |
+| MZ-046 | Frontier-aware cancellation | Adopted as importable `hatPipeline.FrontierCancellation`; callers can derive a context canceled at a named lower frontier, while SQL executor wiring remains caller-owned. | Low |
 | MZ-047 | Session compute routing | Client sessions cannot choose a named compute cluster for an operation. | Medium |
 | MZ-048 | Connector secret rotation | Source/sink credentials cannot rotate without stopping the maintained dataflow. | Medium |
 | MZ-049 | Exactly-once snapshot export | Export has no frontier-bound manifest that can resume without duplicate rows. | High |

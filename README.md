@@ -4765,3 +4765,9 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+
+### Frontier-Aware Cancellation
+
+The opt-in frontier-triggered query context and measured ready/pending costs are
+documented in
+[MZ046_FRONTIER_AWARE_CANCELLATION.md](MZ046_FRONTIER_AWARE_CANCELLATION.md).

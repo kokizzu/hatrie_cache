@@ -32580,3 +32580,16 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## MZ-046 Frontier-Aware Cancellation
+
+`FrontierCancellation` adds an opt-in context watcher that cancels query work
+when a named lower frontier reaches a target. Existing `WaitUntil` and query
+paths are unchanged. Raw samples and usage semantics are in
+[MZ046_FRONTIER_AWARE_CANCELLATION.md](MZ046_FRONTIER_AWARE_CANCELLATION.md).
+
+| Subcase | Median ns/op | Bytes/op | Allocs/op | Relative cost |
+| --- | ---: | ---: | ---: | ---: |
+| Existing ready `WaitUntil` | 11.63 | 0 | 0 | baseline |
+| Ready `FrontierCancellation` fast path | 225.7 | 272 | 4 | 19.4x CPU |
+| Pending watcher create/cancel/join | 698.2 | 320 | 5 | async control-plane cost |
