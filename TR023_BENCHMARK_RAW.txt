@@ -1,0 +1,67 @@
+T-U23 Generic Tuple Multikey Index
+==================================
+
+Environment
+-----------
+OS: Linux
+Architecture: amd64
+CPU: AMD Ryzen 9 5950X 16-Core Processor
+Command: go test ./hat/hatDataStructure -run '^$' -bench '^BenchmarkT023TupleMultikeyIndex$' -benchmem -count=5
+
+Feature lookup and build samples
+---------------------------------
+BenchmarkT023TupleMultikeyIndex/tuple_index_lookup-32  14250415  83.41 ns/op  0 B/op  0 allocs/op
+BenchmarkT023TupleMultikeyIndex/tuple_index_lookup-32  14438949  89.65 ns/op  0 B/op  0 allocs/op
+BenchmarkT023TupleMultikeyIndex/tuple_index_lookup-32  12651812  84.16 ns/op  0 B/op  0 allocs/op
+BenchmarkT023TupleMultikeyIndex/tuple_index_lookup-32  13645482  80.54 ns/op  0 B/op  0 allocs/op
+BenchmarkT023TupleMultikeyIndex/tuple_index_lookup-32  15750332  76.17 ns/op  0 B/op  0 allocs/op
+Median typed lookup: 84.16 ns/op, 0 B/op, 0 allocs/op
+
+BenchmarkT023TupleMultikeyIndex/map_of_sets_lookup-32  152436  8525 ns/op  0 B/op  0 allocs/op
+BenchmarkT023TupleMultikeyIndex/map_of_sets_lookup-32  134030  8376 ns/op  0 B/op  0 allocs/op
+BenchmarkT023TupleMultikeyIndex/map_of_sets_lookup-32  145434  8479 ns/op  0 B/op  0 allocs/op
+BenchmarkT023TupleMultikeyIndex/map_of_sets_lookup-32  145282  8675 ns/op  0 B/op  0 allocs/op
+BenchmarkT023TupleMultikeyIndex/map_of_sets_lookup-32  121954  8272 ns/op  0 B/op  0 allocs/op
+Median map-of-sets lookup: 8376 ns/op, 0 B/op, 0 allocs/op
+
+BenchmarkT023TupleMultikeyIndex/linear_scan-32  16782  69157 ns/op  0 B/op  0 allocs/op
+BenchmarkT023TupleMultikeyIndex/linear_scan-32  17904  71824 ns/op  0 B/op  0 allocs/op
+BenchmarkT023TupleMultikeyIndex/linear_scan-32  17286  69400 ns/op  0 B/op  0 allocs/op
+BenchmarkT023TupleMultikeyIndex/linear_scan-32  15946  71966 ns/op  0 B/op  0 allocs/op
+BenchmarkT023TupleMultikeyIndex/linear_scan-32  16506  74105 ns/op  0 B/op  0 allocs/op
+Median linear scan: 71824 ns/op, 0 B/op, 0 allocs/op
+
+BenchmarkT023TupleMultikeyIndex/tuple_index_build-32  5306  234023 ns/op  227601 B/op  2678 allocs/op
+BenchmarkT023TupleMultikeyIndex/tuple_index_build-32  4797  246466 ns/op  227601 B/op  2678 allocs/op
+BenchmarkT023TupleMultikeyIndex/tuple_index_build-32  5092  234232 ns/op  227601 B/op  2678 allocs/op
+BenchmarkT023TupleMultikeyIndex/tuple_index_build-32  4813  233483 ns/op  227602 B/op  2678 allocs/op
+BenchmarkT023TupleMultikeyIndex/tuple_index_build-32  4860  250771 ns/op  227601 B/op  2678 allocs/op
+Median typed build: 234232 ns/op, 227601 B/op, 2678 allocs/op
+
+BenchmarkT023TupleMultikeyIndex/map_of_sets_build-32  10000  115852 ns/op  114248 B/op  631 allocs/op
+BenchmarkT023TupleMultikeyIndex/map_of_sets_build-32  10000  116901 ns/op  114248 B/op  631 allocs/op
+BenchmarkT023TupleMultikeyIndex/map_of_sets_build-32  10000  116291 ns/op  114248 B/op  631 allocs/op
+BenchmarkT023TupleMultikeyIndex/map_of_sets_build-32  10000  114626 ns/op  114248 B/op  631 allocs/op
+BenchmarkT023TupleMultikeyIndex/map_of_sets_build-32  10000  115556 ns/op  114248 B/op  631 allocs/op
+Median map-of-sets build: 115852 ns/op, 114248 B/op, 631 allocs/op
+
+Fair reverse-map build control
+------------------------------
+BenchmarkT023TupleMultikeyIndex/map_of_sets_with_reverse_build-32  7552  159903 ns/op  204440 B/op  1660 allocs/op
+BenchmarkT023TupleMultikeyIndex/map_of_sets_with_reverse_build-32  6867  160081 ns/op  204440 B/op  1660 allocs/op
+BenchmarkT023TupleMultikeyIndex/map_of_sets_with_reverse_build-32  6686  160533 ns/op  204440 B/op  1660 allocs/op
+BenchmarkT023TupleMultikeyIndex/map_of_sets_with_reverse_build-32  6709  159619 ns/op  204440 B/op  1660 allocs/op
+BenchmarkT023TupleMultikeyIndex/map_of_sets_with_reverse_build-32  6868  156757 ns/op  204440 B/op  1660 allocs/op
+Median map-of-sets plus reverse build: 159903 ns/op, 204440 B/op, 1660 allocs/op
+
+Derived comparison
+------------------
+Typed lookup / map-of-sets lookup: 99.52x faster
+Typed lookup / linear scan: 853.7x faster
+Typed build / map-of-sets plus reverse build: 1.46x CPU, 1.11x bytes, 1.61x allocations
+
+The lookup controls reuse a destination slice. The map-of-sets control
+iterates an unordered posting set, while the typed index returns sorted IDs;
+the typed path therefore provides stronger deterministic output semantics.
+The feature is opt-in and should be used where repeated membership reads
+justify the bounded build and reverse-map cost.

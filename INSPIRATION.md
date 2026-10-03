@@ -979,3 +979,8 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   checkpointed replay, CRC-protected cursors, and nonblocking slow-consumer
   eviction. See [TR039_SPACE_CHANGEFEED.md](TR039_SPACE_CHANGEFEED.md) and
   [BENCHMARK.md](BENCHMARK.md#t-u39-named-space-changefeed).
+- [x] T-U23 Tarantool-style generic tuple multikey indexing. `hatDataStructure.TupleMultikeyIndex[T,K]`
+  expands caller-owned typed tuple keys into compact sorted postings with
+  atomic replacement/deletion and bounded reverse state. See
+  [TR023_GENERIC_MULTIKEY.md](TR023_GENERIC_MULTIKEY.md) and
+  [BENCHMARK.md](BENCHMARK.md#t-u23-generic-tuple-multikey-index).

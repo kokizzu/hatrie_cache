@@ -22299,3 +22299,5 @@ benchmark-tr022:
 	bash scripts/benchmark-tr022.sh
 benchmark-tr039:
 	bash scripts/benchmark-tr039.sh
+benchmark-tr023:
+	bash scripts/benchmark-tr023.sh

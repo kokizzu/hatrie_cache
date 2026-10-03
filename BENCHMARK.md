@@ -32660,3 +32660,30 @@ opt-in and should be selected when replay, acknowledgement, schema fencing,
 and bounded backpressure matter; ordinary watcher and SQL paths are
 unchanged. Full samples are in
 [TR039_BENCHMARK_RAW.txt](TR039_BENCHMARK_RAW.txt).
+
+## T-U23 Generic Tuple Multikey Index
+
+Command:
+
+```sh
+make benchmark-tr023
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The map-of-sets
+lookup control returns the same membership count but does not provide sorted
+posting IDs; the fair build control adds the reverse key map needed for exact
+replacement and deletion.
+
+| Workload | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Typed posting lookup | 84.16 | 0 | 0 | control feature |
+| Map-of-sets lookup | 8,376 | 0 | 0 | typed index is 99.52x faster |
+| Linear scan | 71,824 | 0 | 0 | typed index is 853.7x faster |
+| Typed index build, 1,024 tuples | 234,232 | 227,601 | 2,678 | reference |
+| Map plus reverse build | 159,903 | 204,440 | 1,660 | typed build is 1.46x CPU |
+
+The typed index uses about 11% more memory than the fair reverse-map control,
+but gives deterministic sorted IDs and a roughly 100x faster repeated lookup.
+It is therefore an opt-in read-heavy index; write-heavy callers that do not
+need ordered postings should keep the simpler map. Full samples are in
+[TR023_BENCHMARK_RAW.txt](TR023_BENCHMARK_RAW.txt).
