@@ -1,0 +1,37 @@
+Stable controlled comparison: GOMAXPROCS=1, -cpu=1, -count=10, -benchmem
+Host: Linux/amd64, AMD Ryzen 9 5950X 16-Core Processor
+
+== baseline-compact-call ==
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatPeer
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkT027CompactPeerCall  279079  4172 ns/op  448 B/op  8 allocs/op
+BenchmarkT027CompactPeerCall  274226  4139 ns/op  448 B/op  8 allocs/op
+BenchmarkT027CompactPeerCall  270668  4145 ns/op  448 B/op  8 allocs/op
+BenchmarkT027CompactPeerCall  280948  4217 ns/op  448 B/op  8 allocs/op
+BenchmarkT027CompactPeerCall  277878  3935 ns/op  448 B/op  8 allocs/op
+BenchmarkT027CompactPeerCall  304419  3823 ns/op  448 B/op  8 allocs/op
+BenchmarkT027CompactPeerCall  296302  3836 ns/op  448 B/op  8 allocs/op
+BenchmarkT027CompactPeerCall  300918  3899 ns/op  448 B/op  8 allocs/op
+BenchmarkT027CompactPeerCall  293194  4223 ns/op  448 B/op  8 allocs/op
+BenchmarkT027CompactPeerCall  271424  4217 ns/op  448 B/op  8 allocs/op
+
+== feature-compact-call ==
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatPeer
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkT027CompactPeerCall  265131  4280 ns/op  448 B/op  8 allocs/op
+BenchmarkT027CompactPeerCall  266968  3969 ns/op  448 B/op  8 allocs/op
+BenchmarkT027CompactPeerCall  292479  3858 ns/op  448 B/op  8 allocs/op
+BenchmarkT027CompactPeerCall  299790  3903 ns/op  448 B/op  8 allocs/op
+BenchmarkT027CompactPeerCall  292893  4075 ns/op  448 B/op  8 allocs/op
+BenchmarkT027CompactPeerCall  295087  3895 ns/op  448 B/op  8 allocs/op
+BenchmarkT027CompactPeerCall  299325  3852 ns/op  448 B/op  8 allocs/op
+BenchmarkT027CompactPeerCall  292654  3868 ns/op  448 B/op  8 allocs/op
+BenchmarkT027CompactPeerCall  299752  3895 ns/op  448 B/op  8 allocs/op
+BenchmarkT027CompactPeerCall  293127  3889 ns/op  448 B/op  8 allocs/op
+
+Median calculation: baseline (4139 + 4145) / 2 = 4142 ns/op;
+feature (3895 + 3895) / 2 = 3895 ns/op; before/after = 1.06x.

@@ -102,13 +102,16 @@ The raw normal-condition samples are in
 `T027_BENCHMARK_BASELINE_RAW.txt` and `T027_BENCHMARK_RAW.txt`. They use five
 samples on Linux/amd64 with the same host and `-benchmem`.
 
+The controlled ten-sample single-CPU comparison is retained in
+`T027_BENCHMARK_STABLE_RAW.txt`.
+
 | Workload | Baseline median | Feature median | Ratio | Interpretation |
 | --- | ---: | ---: | ---: | --- |
 | Ordinary compact call | 4,650 ns/op, 448 B/op, 8 allocs/op | 5,170 ns/op, 448 B/op, 8 allocs/op | 0.90x | No allocation regression; normal run was scheduler-noisy. |
 | Remote watch event | Not available before | 6,705 ns/op, 560 B/op, 10 allocs/op | 1.30x vs feature compact call | New end-to-end mutation, delivery, and acknowledgement path. |
 
 A separate ten-sample `GOMAXPROCS=1` control measured ordinary compact calls at
-4,037 ns/op before and 3,895 ns/op after, or 1.04x before/after. The feature is
+4,142 ns/op before and 3,895 ns/op after, or 1.06x before/after. The feature is
 therefore accepted as an opt-in capability rather than a replacement for the
 ordinary compact call path; its extra event-delivery cost is explicit and only
 paid when a remote watch is used.

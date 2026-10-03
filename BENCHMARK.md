@@ -32651,6 +32651,8 @@ The feature was measured against the `5a6a7d5a` baseline on Linux/amd64 with
 the same AMD Ryzen 9 5950X host. Normal runs used five `-count=5` samples and
 `-benchmem`; raw output is retained in
 `T027_BENCHMARK_BASELINE_RAW.txt` and `T027_BENCHMARK_RAW.txt`.
+The controlled ten-sample single-CPU samples are in
+`T027_BENCHMARK_STABLE_RAW.txt`.
 
 | Workload | Baseline median | Feature median | Before/after ratio | Memory and allocation result |
 | --- | ---: | ---: | ---: | --- |
@@ -32658,8 +32660,8 @@ the same AMD Ryzen 9 5950X host. Normal runs used five `-count=5` samples and
 | Remote watch event | Not available before | 6,705 ns/op | 1.30x vs feature compact call | 560 B/op; 10 allocs/op |
 
 The normal compact-call run is noisy because it uses the host's default
-parallelism. A separate ten-sample `GOMAXPROCS=1` control measured 4,037 ns/op
-before and 3,895 ns/op after, or 1.04x faster after. The watch benchmark is a
+parallelism. A separate ten-sample `GOMAXPROCS=1` control measured 4,142 ns/op
+before and 3,895 ns/op after, or 1.06x faster after. The watch benchmark is a
 new end-to-end operation that includes a trie mutation, bounded remote event
 delivery, and acknowledgement; it is not a replacement for ordinary calls.
 The capability is opt-in, so the default write/read path does not pay the
