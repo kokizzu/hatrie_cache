@@ -174,6 +174,7 @@ security guidance before exposing it on a network.
 - ClickHouse-style opt-in asynchronous batch ingestion: [ASYNC_BATCHER.md](ASYNC_BATCHER.md)
 - ClickHouse-style explicit partition-affine asynchronous batching: [C202_PARTITIONED_ASYNC_BATCHER.md](C202_PARTITIONED_ASYNC_BATCHER.md)
 - Tarantool-style bounded reusable peer connections: [PEER_CONNECTION_POOL.md](PEER_CONNECTION_POOL.md)
+- Tarantool-style bounded health-aware peer route failover: [TT003_ROUTE_CACHE.md](TT003_ROUTE_CACHE.md)
 - Tarantool-style compact multiplexed peer frames: [COMPACT_PEER_PROTOCOL.md](COMPACT_PEER_PROTOCOL.md)
 - Materialize-style connector lifecycle registry: [CONNECTOR_LIFECYCLE.md](CONNECTOR_LIFECYCLE.md)
 - Materialize-style durable connector lifecycle checkpoints: [MU01_DURABLE_CONNECTOR_STATE.md](MU01_DURABLE_CONNECTOR_STATE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m-u01-durable-connector-lifecycle-state)

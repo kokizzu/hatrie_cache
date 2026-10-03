@@ -140,7 +140,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | --- | --- | --- | --- |
 | TT-001 | Automatic vshard bucket rebalancing | Partition plans exist, but no automatic data movement and ownership convergence. | High |
 | TT-002 | Bucket ownership consensus | Partition ownership is not committed through a consensus-backed metadata log. | High |
-| TT-003 | Router failover route cache | No client/router route cache with health-aware retry and invalidation. | Medium |
+| TT-003 | Router failover route cache | Partially adopted: importable bounded `hatReplication.PeerRouteCache` supports health-aware selection, cooldown, retry, and explicit invalidation; transport dialing, topology discovery, and cross-process health remain caller-owned. | Medium |
 | TT-004 | Synchronous batch replication quorum | Single writes and batches do not provide rollback-free cluster-wide quorum commit. | High |
 | TT-005 | Raft configuration state | No consensus-backed configuration and membership state machine. | High |
 | TT-006 | Hot-standby WAL catch-up | No read-only standby that continuously replays and can be promoted without restore. | High |

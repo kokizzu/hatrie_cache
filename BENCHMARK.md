@@ -32580,3 +32580,31 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## TT-003 Health-Aware Peer Route Cache
+
+Commands:
+
+```sh
+make round67-route-cache-bench
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The raw control
+selects from a prebuilt slice; the route cache adds synchronized health state,
+cooldown filtering, and deterministic rotation. The failover fixture starts
+with the first route cooled, so the cache needs one eligible attempt while the
+raw sequential control needs two attempts.
+
+| Workload | ns/op samples | Median ns/op | B/op | Allocs/op | Attempts/op |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Raw round-robin slice selection | 0.8675; 0.8555; 0.8725; 0.8211; 0.8873 | 0.8675 | 0 | 0 | 1 |
+| `PeerRouteCache.Next` | 189.5; 188.7; 184.9; 192.5; 187.6 | 188.7 | 0 | 0 | 1 |
+| Raw sequential failover control | 1.688; 1.698; 1.731; 1.704; 1.679 | 1.698 | 0 | 0 | 2 |
+| `PeerRouteCache.Do` after cooled failure | 239.3; 240.8; 245.2; 248.4; 233.2 | 240.8 | 0 | 0 | 1 |
+
+The cache is not a CPU fast path: `Next` is about 217x the raw slice control.
+That is the explicit cost of health-aware retry state. The operational win is
+avoiding a known-dead first attempt, while the hot route-cache paths remain
+allocation-free and bounded. Existing replication paths do not pay this cost
+unless they opt into the new cache. See [TT003_ROUTE_CACHE.md](TT003_ROUTE_CACHE.md)
+for the API and limits.
