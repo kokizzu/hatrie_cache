@@ -78,7 +78,7 @@ func (query *CompiledSQLQuery) readOnlyTemplateEligible(parameters []interface{}
 	if options.Collation != "" || options.Optimizer != nil {
 		return false
 	}
-	return options.IndexHint.Source == "" && options.IndexHint.Field == "" && options.IndexHint.Mode == ""
+	return options.IndexHint.Source == "" && options.IndexHint.Field == "" && options.IndexHint.Index == "" && options.IndexHint.Mode == ""
 }
 
 func sqlQueryHasParameters(query *sqlQuery) bool {

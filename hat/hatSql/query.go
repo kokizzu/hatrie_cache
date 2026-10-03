@@ -13972,6 +13972,9 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 	if hint.Mode == SQLIndexHintForce {
 		return resolveSQLForcedIndex(source, condition, resolver, metrics, hint)
 	}
+	if hint.Mode == SQLIndexHintForbid && hint.Index != "" && hint.applies(source) {
+		return nil, false, nil
+	}
 	if indexed, ok := resolver.(SQLCoveringIndexedSourceResolver); ok && len(coveringFields) > 0 {
 		if field, value, matched := sqlCoveringIndexedEquality(source, condition); matched {
 			if hint.allowsField(source, field) {

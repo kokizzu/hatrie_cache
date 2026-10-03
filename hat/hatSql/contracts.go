@@ -1317,6 +1317,13 @@ type IndexedSourceResolver interface {
 	ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]Row, bool, error)
 }
 
+// NamedIndexedSourceResolver optionally resolves an equality predicate through
+// one explicitly named index. It is used only by SQLIndexHint FORCE; ordinary
+// planner selection keeps the existing field-based contract.
+type NamedIndexedSourceResolver interface {
+	ResolveSQLNamedIndexedSource(name, key, index, field string, value interface{}) ([]Row, bool, error)
+}
+
 // GeoIndexedSourceResolver optionally resolves GEO_WITHIN_* predicates through
 // a spatial candidate index. The SQL executor evaluates the original
 // predicate again, so implementations may return false positives but must not

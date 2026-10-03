@@ -32625,3 +32625,22 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+## T-U26: Named Index Hints
+
+This capability was benchmarked before and after adding the public named-index
+hint field. Five samples were collected for each case on the same host; the
+table reports medians. The ratio is `before / after`, so values near `1.00x`
+indicate no meaningful speed change.
+
+| Path | Before median | After median | Ratio | Heap | Allocs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Default query | 17,068 ns/op, 22,304 B/op | 16,561 ns/op, 22,560 B/op | 1.03x | +256 B | 90 -> 90 |
+| Existing field hint | 73,440 ns/op, 44,384 B/op | 70,886 ns/op, 44,659 B/op | 1.04x | +275 B | 825 -> 825 |
+| Named hint | not available before | 70,786 ns/op, 44,790 B/op | 1.00x vs field control | +131 B vs field control | 827 |
+
+The feature is a planner/operability improvement rather than a speed
+optimization. The default path keeps its allocation count; the extra public
+index-name field adds a small amount of carried heap. See the implementation
+details in [T026_INDEX_HINTS.md](T026_INDEX_HINTS.md), with raw output in
+[T026_BENCHMARK_BASELINE_RAW.txt](T026_BENCHMARK_BASELINE_RAW.txt) and
+[T026_BENCHMARK_RAW.txt](T026_BENCHMARK_RAW.txt).

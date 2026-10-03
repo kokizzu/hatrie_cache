@@ -99,6 +99,22 @@ func (adapter SQLResolverAdapter) ResolveSQLIndexedSource(name, key, field strin
 	return nil, false, nil
 }
 
+// ResolveSQLNamedIndexedSource resolves one explicitly named equality index
+// for SQLIndexHint FORCE. Ordinary planner selection continues to use the
+// field-based resolver above.
+func (adapter SQLResolverAdapter) ResolveSQLNamedIndexedSource(name, key, index, field string, value interface{}) ([]hatSql.Row, bool, error) {
+	if strings.EqualFold(name, "CACHE") {
+		if source := adapter.Sources[strings.ToLower(key)]; source != nil {
+			rows, available := source.LookupNamedIndex(index, field, value)
+			return sqlRows(rows), available, nil
+		}
+	}
+	if named, ok := adapter.Base.(hatSql.NamedIndexedSourceResolver); ok {
+		return named.ResolveSQLNamedIndexedSource(name, key, index, field, value)
+	}
+	return nil, false, nil
+}
+
 // SQLJSONIndexStats exposes current materialized-source index distribution
 // statistics to the SQL planner. The source remains the authority for rows;
 // a non-CACHE source is delegated to the optional base resolver.
@@ -956,6 +972,54 @@ func (source *MaterializedSource) Lookup(field string, value interface{}) []Row 
 		rows = append(rows, cloneRow(source.rows[position]))
 	}
 	return rows
+}
+
+// LookupNamedIndex resolves one named equality index and verifies that a
+// functional index depends on the hinted field. Conditional functional indexes
+// are excluded because a named hint cannot prove their predicate implication.
+func (source *MaterializedSource) LookupNamedIndex(name, field string, value interface{}) ([]Row, bool) {
+	if source == nil {
+		return nil, false
+	}
+	name = strings.TrimSpace(name)
+	field = strings.TrimSpace(field)
+	if name == "" || field == "" {
+		return nil, false
+	}
+	source.mu.RLock()
+	defer source.mu.RUnlock()
+	key := materializedIndexKey(value)
+	var positions []int
+	if index := source.functionalIndexes[name]; index != nil {
+		if index.predicate != "" || !materializedFunctionalIndexDependsOn(index, field) {
+			return nil, false
+		}
+		positions = index.positions[key]
+	} else if name == field {
+		if _, indexed := source.indexedFields[name]; indexed {
+			positions = source.indexes[name][key]
+		} else if index := source.coveringIndexes[name]; index != nil {
+			positions = index.positions[key]
+		} else {
+			return nil, false
+		}
+	} else {
+		return nil, false
+	}
+	rows := make([]Row, 0, len(positions))
+	for _, position := range positions {
+		rows = append(rows, cloneRow(source.rows[position]))
+	}
+	return rows, true
+}
+
+func materializedFunctionalIndexDependsOn(index *materializedFunctionalIndex, field string) bool {
+	for _, dependency := range index.dependencies {
+		if strings.EqualFold(dependency, field) {
+			return true
+		}
+	}
+	return false
 }
 
 // LookupCovering returns projected row copies when the installed covering

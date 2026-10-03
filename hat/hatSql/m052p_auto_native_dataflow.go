@@ -81,7 +81,7 @@ func sqlAutoNativeDataflowEligible(query *sqlQuery, resolver SQLSourceResolver, 
 			return false
 		}
 	}
-	if options.Collation != "" || options.Optimizer != nil || options.Workers != 0 || options.IndexHint.Source != "" || options.IndexHint.Field != "" || options.IndexHint.Mode != "" || options.AdaptivePlanner != nil || options.IndexAdvisor != nil || options.ProjectionAdvisor != nil || options.IndexUseRecorder != nil || options.SlowQueryRecorder != nil {
+	if options.Collation != "" || options.Optimizer != nil || options.Workers != 0 || options.IndexHint.Source != "" || options.IndexHint.Field != "" || options.IndexHint.Index != "" || options.IndexHint.Mode != "" || options.AdaptivePlanner != nil || options.IndexAdvisor != nil || options.ProjectionAdvisor != nil || options.IndexUseRecorder != nil || options.SlowQueryRecorder != nil {
 		return false
 	}
 	if sqlAutoNativeDataflowHasSpecializedResolver(resolver) {
@@ -221,7 +221,7 @@ func sqlAutoNativeDataflowBaseEligible(query *sqlQuery, resolver SQLSourceResolv
 	if query.explain || query.sample != nil || query.prewhere.kind != "" || len(query.ctes) != 0 || len(query.joins) != 0 || len(query.unions) != 0 {
 		return false
 	}
-	if options.Collation != "" || options.Optimizer != nil || options.Workers != 0 || options.IndexHint.Source != "" || options.IndexHint.Field != "" || options.IndexHint.Mode != "" || options.AdaptivePlanner != nil || options.IndexAdvisor != nil || options.ProjectionAdvisor != nil || options.IndexUseRecorder != nil || options.SlowQueryRecorder != nil {
+	if options.Collation != "" || options.Optimizer != nil || options.Workers != 0 || options.IndexHint.Source != "" || options.IndexHint.Field != "" || options.IndexHint.Index != "" || options.IndexHint.Mode != "" || options.AdaptivePlanner != nil || options.IndexAdvisor != nil || options.ProjectionAdvisor != nil || options.IndexUseRecorder != nil || options.SlowQueryRecorder != nil {
 		return false
 	}
 	return !sqlAutoNativeDataflowHasSpecializedResolver(resolver)

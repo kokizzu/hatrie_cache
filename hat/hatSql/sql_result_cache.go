@@ -172,6 +172,7 @@ func sqlResultCacheOptionsEligible(options SQLQueryOptions) bool {
 		options.ProjectionAdvisor == nil &&
 		options.ProjectionCatalog == nil &&
 		options.IndexUseRecorder == nil &&
+		options.IndexHint.Index == "" &&
 		options.IndexHint.Mode == "" &&
 		options.Optimizer == nil &&
 		options.SlowQueryRecorder == nil

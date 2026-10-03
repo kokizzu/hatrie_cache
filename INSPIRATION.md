@@ -986,3 +986,10 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   four normalized `GROUP BY` keys use an inline linear index and promote to the
   existing map for larger groups; see [CHG02_SMALL_GROUP_INDEX.md](CHG02_SMALL_GROUP_INDEX.md)
   and [BENCHMARK.md](BENCHMARK.md#chg02-small-cardinality-group-by-index).
+### T-U26: Named index hints and strategy inspection
+
+- [x] Named `SQLIndexHint.Index` selection is available through the opt-in
+  `NamedIndexedSourceResolver` contract. `EXPLAIN ANALYZE` continues to expose
+  `INDEX CANDIDATES`, including rejected strategies and reasons. See
+  [T026_INDEX_HINTS.md](T026_INDEX_HINTS.md) and the measured raw runs in
+  [BENCHMARK.md](BENCHMARK.md#t-u26-named-index-hints).

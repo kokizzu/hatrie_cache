@@ -1,0 +1,16 @@
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatSql
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkT026DefaultQuery-32    	   67332	     17440 ns/op	   22304 B/op	      90 allocs/op
+BenchmarkT026DefaultQuery-32    	   73320	     17162 ns/op	   22304 B/op	      90 allocs/op
+BenchmarkT026DefaultQuery-32    	   66714	     16599 ns/op	   22304 B/op	      90 allocs/op
+BenchmarkT026DefaultQuery-32    	   73146	     16993 ns/op	   22304 B/op	      90 allocs/op
+BenchmarkT026DefaultQuery-32    	   72138	     17068 ns/op	   22304 B/op	      90 allocs/op
+BenchmarkT026FieldHint-32       	   15678	     75553 ns/op	   44383 B/op	     825 allocs/op
+BenchmarkT026FieldHint-32       	   15546	     75710 ns/op	   44386 B/op	     825 allocs/op
+BenchmarkT026FieldHint-32       	   16188	     72372 ns/op	   44384 B/op	     825 allocs/op
+BenchmarkT026FieldHint-32       	   16221	     73132 ns/op	   44380 B/op	     825 allocs/op
+BenchmarkT026FieldHint-32       	   16680	     73440 ns/op	   44384 B/op	     825 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatSql	16.723s

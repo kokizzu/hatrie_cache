@@ -20,11 +20,14 @@ const (
 
 // SQLIndexHint is a per-query diagnostic planner override. Source is an
 // optional source alias; empty applies to a matching field in any source.
-// Hints do not create or alter indexes and should not be used as a permanent
-// plan-management mechanism.
+// Index optionally names one exact embedded index for FORCE or FORBID when the
+// resolver implements NamedIndexedSourceResolver. Hints do not create or
+// alter indexes and should not be used as a permanent plan-management
+// mechanism.
 type SQLIndexHint struct {
 	Source string
 	Field  string
+	Index  string
 	Mode   SQLIndexHintMode
 }
 
@@ -35,11 +38,14 @@ type IndexHint = SQLIndexHint
 type IndexHintMode = SQLIndexHintMode
 
 func (hint SQLIndexHint) validate() error {
-	if hint.Mode == "" && hint.Source == "" && hint.Field == "" {
+	if hint.Mode == "" && hint.Source == "" && hint.Field == "" && hint.Index == "" {
 		return nil
 	}
 	if strings.TrimSpace(hint.Field) == "" {
 		return fmt.Errorf("SQL index hint requires a field")
+	}
+	if strings.TrimSpace(hint.Index) != "" && hint.Mode == "" {
+		return fmt.Errorf("SQL named index hint requires FORCE or FORBID")
 	}
 	switch hint.Mode {
 	case SQLIndexHintForce, SQLIndexHintForbid:
@@ -55,6 +61,10 @@ func (hint SQLIndexHint) applies(source sqlSource) bool {
 
 func (hint SQLIndexHint) allowsField(source sqlSource, field string) bool {
 	return !hint.applies(source) || hint.Mode != SQLIndexHintForbid || !strings.EqualFold(hint.Field, field)
+}
+
+func (hint SQLIndexHint) allowsIndex(source sqlSource, index string) bool {
+	return !hint.applies(source) || hint.Mode != SQLIndexHintForbid || hint.Index == "" || !strings.EqualFold(hint.Index, index)
 }
 
 func sqlIndexHintAllowsFields(hint SQLIndexHint, source sqlSource, fields []string) bool {
@@ -99,13 +109,34 @@ func resolveSQLForcedIndex(source sqlSource, condition sqlExpr, resolver SQLSour
 		return nil, false, fmt.Errorf("SQL forced index %q has no compatible predicate", hint.Field)
 	}
 	started := time.Now()
-	rows, available, err := resolveSQLIndexedComparison(source, hint.Field, operator, value, resolver)
+	rows, available, err := resolveSQLIndexedComparisonWithHint(source, hint.Field, operator, value, resolver, hint)
 	if err != nil {
 		return nil, false, err
 	}
 	if !available {
+		if hint.Index != "" {
+			return nil, false, fmt.Errorf("SQL named index %q is unavailable", hint.Index)
+		}
 		return nil, false, fmt.Errorf("SQL forced index %q is unavailable", hint.Field)
 	}
-	metrics.record("FORCED INDEX SCAN", sqlExplainSource(source)+" field="+hint.Field, 0, len(rows), started)
+	detail := sqlExplainSource(source) + " field=" + hint.Field
+	if hint.Index != "" {
+		detail += " index=" + hint.Index
+	}
+	metrics.record("FORCED INDEX SCAN", detail, 0, len(rows), started)
 	return rows, true, nil
+}
+
+func resolveSQLIndexedComparisonWithHint(source sqlSource, field, operator string, value interface{}, resolver SQLSourceResolver, hint SQLIndexHint) ([]SQLRow, bool, error) {
+	if hint.Index == "" {
+		return resolveSQLIndexedComparison(source, field, operator, value, resolver)
+	}
+	if !hint.allowsIndex(source, hint.Index) {
+		return nil, false, nil
+	}
+	named, ok := resolver.(NamedIndexedSourceResolver)
+	if !ok {
+		return nil, false, fmt.Errorf("SQL named index %q is unavailable", hint.Index)
+	}
+	return named.ResolveSQLNamedIndexedSource(source.kind, source.key, hint.Index, field, value)
 }

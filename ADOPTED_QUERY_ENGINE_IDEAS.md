@@ -736,3 +736,11 @@ Adopted as opt-in `hatStorage.CompactionDiagnostics`: bounded arrangement regist
 ## Materialize M-U41: Webhook Event Idempotency
 
 Adopted as opt-in `hatSql.WebhookEventDeduplicator`: bounded source/event-ID admission, payload-fingerprint conflict detection, expiry, deterministic CRC-protected HWE1 snapshots, and atomic restore. The caller owns application, durable storage, acknowledgement, and HTTP/webhook wiring; existing defaults remain unchanged. See [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md) and [BENCHMARK.md](BENCHMARK.md#m-u41-webhook-event-idempotency).
+### T-U26: Named index hints and strategy inspection
+
+Inspired by the explicit index-selection and plan-inspection workflows in
+Tarantool and ClickHouse. `SQLIndexHint.Index` lets a caller force one named
+embedded index through `NamedIndexedSourceResolver`; existing `EXPLAIN ANALYZE`
+`INDEX CANDIDATES` output explains selected and rejected strategies. The
+feature is opt-in and preserves field-only hint behavior. See
+[T026_INDEX_HINTS.md](T026_INDEX_HINTS.md).

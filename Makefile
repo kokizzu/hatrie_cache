@@ -22308,3 +22308,23 @@ verify-t025-full:
 
 benchmark-t025:
 	bash ./scripts/benchmark-t025.sh
+
+.PHONY: verify-t026 verify-t026-race verify-t026-vet verify-t026-sql verify-t026-full-schema benchmark-t026
+
+verify-t026:
+	bash ./scripts/verify-t026.sh test
+
+verify-t026-race:
+	bash ./scripts/verify-t026.sh race
+
+verify-t026-vet:
+	bash ./scripts/verify-t026.sh vet
+
+verify-t026-sql:
+	bash ./scripts/verify-t026.sh sql
+
+verify-t026-full-schema:
+	bash ./scripts/verify-t026.sh full-schema
+
+benchmark-t026:
+	bash ./scripts/benchmark-t026.sh
