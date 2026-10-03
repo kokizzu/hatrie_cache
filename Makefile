@@ -21632,7 +21632,28 @@ push-cleanup-tooling:
 	bash ./scripts/push-cleanup-tooling.sh
 # END safe test temporary cleanup
 
-.PHONY: test
+.PHONY: format-mu045-incremental-join-selection test-mu045-incremental-join-selection test-mu045-incremental-join-selection-package test-mu045-incremental-join-selection-all race-mu045-incremental-join-selection vet-mu045-incremental-join-selection benchmark-mu045-incremental-join-selection
+
+format-mu045-incremental-join-selection:
+	bash scripts/format-mu045-incremental-join-selection.sh
+
+test-mu045-incremental-join-selection:
+	bash scripts/test-mu045-incremental-join-selection.sh
+
+test-mu045-incremental-join-selection-package:
+	bash scripts/test-mu045-incremental-join-selection-package.sh
+
+test-mu045-incremental-join-selection-all:
+	bash scripts/test-mu045-incremental-join-selection-all.sh
+
+race-mu045-incremental-join-selection:
+	bash scripts/race-mu045-incremental-join-selection.sh
+
+vet-mu045-incremental-join-selection:
+	bash scripts/vet-mu045-incremental-join-selection.sh
+
+benchmark-mu045-incremental-join-selection:
+	bash scripts/benchmark-mu045-incremental-join-selection.sh
 test:
 	bash ./scripts/test-all.sh
 

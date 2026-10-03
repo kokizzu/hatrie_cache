@@ -4823,3 +4823,13 @@ schema changes before publishing them. Strict mode is the safe default;
 `SchemaRegistryPolicyRolling` permits only the documented rolling-compatible
 changes. See [MU040_SOURCE_SCHEMA_REGISTRY.md](MU040_SOURCE_SCHEMA_REGISTRY.md)
 for usage, bounds, rollback ownership, and measured overhead.
+
+## Incremental Join Index Selection
+
+Use the opt-in `hatSql.SQLIncrementalJoinSelector` when several incremental
+join arrangements may serve changing predicates. It keeps a bounded index by
+join identity, rejects future generations, and returns explicit `reuse`,
+`refresh`, or `create` decisions using the existing arrangement cost model.
+The caller still owns arrangement construction and source-change application.
+See [MU045_INCREMENTAL_JOIN_SELECTION.md](MU045_INCREMENTAL_JOIN_SELECTION.md)
+for the example, defaults, and verification commands.

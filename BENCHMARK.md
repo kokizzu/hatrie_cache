@@ -33209,3 +33209,28 @@ The registry check is about 1.72x slower, uses 5.00x the transient bytes, and
 uses 2.00x the allocations for this fixture. This is bounded control-plane
 validation overhead, not a data-path optimization. Details and policy examples
 are in [MU040_SOURCE_SCHEMA_REGISTRY.md](MU040_SOURCE_SCHEMA_REGISTRY.md).
+
+## M-U45 Incremental Join Index Selection
+
+Command: `make benchmark-mu045-incremental-join-selection`.
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. Both paths select
+from the same 128-candidate catalog and use the same cost model. The indexed
+path uses the normalized join-identity map; the baseline scans all candidates.
+
+| Path | Median ns/op | B/op | Allocs/op | CPU improvement | Bytes improvement | Allocation improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Linear catalog scan | 1,113 | 16 | 2 | 1.00x | 1.00x | 1.00x |
+| Indexed join selection | 366.2 | 16 | 2 | 3.04x faster | 1.00x | 1.00x |
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+indexed: 368.8 16 2; 368.3 16 2; 363.9 16 2; 366.2 16 2; 361.8 16 2
+linear:  1140  16 2; 1147  16 2; 1113  16 2; 1093  16 2; 1109  16 2
+```
+
+The indexed lookup is a planning/catalog improvement: it does not change join
+semantics and does not automatically allocate or maintain a physical index.
+The same bytes and allocation counts show that the improvement comes from
+avoiding unrelated candidate scans, not from trading memory for CPU.
