@@ -136,7 +136,7 @@ operator control remain the preferred deployment model.
 - [x] M245 Timestamp throughput and input-to-output latency metrics. `SQLDataflowMetricsCatalog.ObserveProgress` exposes bounded input/output frontiers, timestamp throughput, saturated lag, and wall-clock input-to-output latency. See [M245_DATAFLOW_PROGRESS_METRICS.md](M245_DATAFLOW_PROGRESS_METRICS.md) and [BENCHMARK.md#m245-dataflow-progress-metrics](BENCHMARK.md#m245-dataflow-progress-metrics).
 - [x] M246 Per-object history-retention policies with bounded storage accounting.
 - [x] M247 Resume errors identify expired historical frontiers through the opt-in `QuerySubscriptionCheckpointValidator`; see [M247_RESUME_EXPIRED_FRONTIER.md](M247_RESUME_EXPIRED_FRONTIER.md).
-- [ ] M248 Reusable maintained-result cache for identical read expressions.
+- [x] M248 Reusable maintained-result sharing for identical read expressions during one refresh frontier; opt-in `QuerySubscriptionDefinition.ShareIdenticalReads` avoids duplicate evaluations without retaining stale results. See [M248_SHARED_MAINTAINED_READS.md](M248_SHARED_MAINTAINED_READS.md) and [BENCHMARK.md](BENCHMARK.md#m248-reusable-maintained-read-sharing).
 - [x] M249 Consistency fencing between a point read and a subsequent subscription; see [M249_READ_FENCE.md](M249_READ_FENCE.md).
 - [x] M250 Temporal join alignment that waits for both input frontiers. Implemented as opt-in `DifferentialTemporalJoinAligned`; see [M250_TEMPORAL_JOIN_ALIGNMENT.md](M250_TEMPORAL_JOIN_ALIGNMENT.md) and [BENCHMARK.md](BENCHMARK.md#m250-temporal-join-frontier-alignment).
 

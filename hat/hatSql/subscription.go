@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -24,6 +25,10 @@ type QuerySubscriptionDefinition struct {
 	// DeterministicOrder sorts each differential batch's removal and addition
 	// phases by canonical row key. It has no effect on normal snapshots.
 	DeterministicOrder bool
+	// ShareIdenticalReads enables per-refresh memoization for subscriptions with
+	// the same query, parameters, and source frontier. It is opt-in because a
+	// custom resolver may intentionally observe each execution.
+	ShareIdenticalReads bool
 }
 
 // QuerySubscriptionSnapshot is one immutable query-result version.
@@ -57,10 +62,19 @@ type QuerySubscription struct {
 // deliberately caller-driven so cache writes do not acquire query locks or
 // start background work implicitly.
 type QuerySubscriptions struct {
-	mu     sync.RWMutex
-	nextID uint64
-	buffer int
-	subs   map[uint64]*QuerySubscription
+	mu                  sync.RWMutex
+	nextID              uint64
+	buffer              int
+	subs                map[uint64]*QuerySubscription
+	shareIdenticalReads bool
+}
+
+type pendingQuerySubscriptionUpdate struct {
+	subscription *QuerySubscription
+	result       QueryResult
+	hasResult    bool
+	frontier     uint64
+	complete     bool
 }
 
 type historicalSubscriptionResolver struct {
@@ -154,6 +168,9 @@ func (registry *QuerySubscriptions) subscribe(ctx context.Context, definition Qu
 	if !differential {
 		subscription.differentialUpdates = nil
 	}
+	if definition.ShareIdenticalReads {
+		registry.shareIdenticalReads = true
+	}
 	registry.subs[subscription.id] = subscription
 	registry.mu.Unlock()
 	if differential && initialRevision > 0 {
@@ -230,19 +247,40 @@ func (registry *QuerySubscriptions) notifyChangedAt(ctx context.Context, frontie
 	}
 
 	registry.mu.RLock()
+	shareIdenticalReads := registry.shareIdenticalReads
 	subscriptions := make([]*QuerySubscription, 0, len(registry.subs))
 	for _, subscription := range registry.subs {
 		subscriptions = append(subscriptions, subscription)
 	}
 	registry.mu.RUnlock()
-	type pendingSubscriptionUpdate struct {
-		subscription *QuerySubscription
-		result       QueryResult
-		hasResult    bool
-		frontier     uint64
-		complete     bool
+	var updates []pendingQuerySubscriptionUpdate
+	var updateErr error
+	if shareIdenticalReads {
+		updates, updateErr = registry.collectSharedSubscriptionUpdates(ctx, subscriptions, frontier, changedSet, resolver, options)
+	} else {
+		updates, updateErr = registry.collectSubscriptionUpdates(ctx, subscriptions, frontier, changedSet, resolver, options)
 	}
-	updates := make([]pendingSubscriptionUpdate, 0, len(subscriptions))
+	if updateErr != nil {
+		return updateErr
+	}
+	for _, update := range updates {
+		if update.hasResult {
+			update.subscription.publishAt(update.result, update.frontier, update.complete)
+		} else {
+			update.subscription.advanceFrontier(update.frontier)
+		}
+		if update.subscription.definition.EmitProgress && frontier > 0 {
+			update.subscription.publishProgress(update.frontier, update.complete)
+		}
+		if update.complete {
+			update.subscription.complete()
+		}
+	}
+	return nil
+}
+
+func (registry *QuerySubscriptions) collectSubscriptionUpdates(ctx context.Context, subscriptions []*QuerySubscription, frontier uint64, changedSet map[string]struct{}, resolver SourceResolver, options QueryOptions) ([]pendingQuerySubscriptionUpdate, error) {
+	updates := make([]pendingQuerySubscriptionUpdate, 0, len(subscriptions))
 	for _, subscription := range subscriptions {
 		currentFrontier, ok := subscription.currentFrontier()
 		if !ok {
@@ -261,11 +299,11 @@ func (registry *QuerySubscriptions) notifyChangedAt(ctx context.Context, frontie
 			effectiveFrontier = currentFrontier
 		}
 		if frontier > 0 && subscription.definition.UpTo > 0 && frontier > subscription.definition.UpTo {
-			updates = append(updates, pendingSubscriptionUpdate{subscription: subscription, frontier: effectiveFrontier, complete: true})
+			updates = append(updates, pendingQuerySubscriptionUpdate{subscription: subscription, frontier: effectiveFrontier, complete: true})
 			continue
 		}
 		if !querySubscriptionDependsOn(subscription.definition, changedSet) {
-			updates = append(updates, pendingSubscriptionUpdate{subscription: subscription, frontier: effectiveFrontier, complete: complete})
+			updates = append(updates, pendingQuerySubscriptionUpdate{subscription: subscription, frontier: effectiveFrontier, complete: complete})
 			continue
 		}
 		queryResolver := resolver
@@ -273,29 +311,77 @@ func (registry *QuerySubscriptions) notifyChangedAt(ctx context.Context, frontie
 			var queryErr error
 			queryResolver, queryErr = querySubscriptionResolver(resolver, effectiveFrontier)
 			if queryErr != nil {
-				return fmt.Errorf("refresh query subscription %d: %w", subscription.id, queryErr)
+				return nil, fmt.Errorf("refresh query subscription %d: %w", subscription.id, queryErr)
 			}
 		}
 		result, err := ExecuteQueryParameters(ctx, subscription.definition.Query, queryResolver, subscription.definition.Parameters, options)
 		if err != nil {
-			return fmt.Errorf("refresh query subscription %d: %w", subscription.id, err)
+			return nil, fmt.Errorf("refresh query subscription %d: %w", subscription.id, err)
 		}
-		updates = append(updates, pendingSubscriptionUpdate{subscription: subscription, result: cloneQueryResult(result), hasResult: true, frontier: effectiveFrontier, complete: complete})
+		updates = append(updates, pendingQuerySubscriptionUpdate{subscription: subscription, result: cloneQueryResult(result), hasResult: true, frontier: effectiveFrontier, complete: complete})
 	}
-	for _, update := range updates {
-		if update.hasResult {
-			update.subscription.publishAt(update.result, update.frontier, update.complete)
-		} else {
-			update.subscription.advanceFrontier(update.frontier)
+	return updates, nil
+}
+
+func (registry *QuerySubscriptions) collectSharedSubscriptionUpdates(ctx context.Context, subscriptions []*QuerySubscription, frontier uint64, changedSet map[string]struct{}, resolver SourceResolver, options QueryOptions) ([]pendingQuerySubscriptionUpdate, error) {
+	updates := make([]pendingQuerySubscriptionUpdate, 0, len(subscriptions))
+	var sharedReads map[string]QueryResult
+	for _, subscription := range subscriptions {
+		currentFrontier, ok := subscription.currentFrontier()
+		if !ok {
+			continue
 		}
-		if update.subscription.definition.EmitProgress && frontier > 0 {
-			update.subscription.publishProgress(update.frontier, update.complete)
+		if frontier > 0 && frontier <= currentFrontier {
+			continue
 		}
-		if update.complete {
-			update.subscription.complete()
+		effectiveFrontier := frontier
+		complete := false
+		if frontier > 0 && subscription.definition.UpTo > 0 && frontier >= subscription.definition.UpTo {
+			effectiveFrontier = subscription.definition.UpTo
+			complete = true
 		}
+		if frontier == 0 {
+			effectiveFrontier = currentFrontier
+		}
+		if frontier > 0 && subscription.definition.UpTo > 0 && frontier > subscription.definition.UpTo {
+			updates = append(updates, pendingQuerySubscriptionUpdate{subscription: subscription, frontier: effectiveFrontier, complete: true})
+			continue
+		}
+		if !querySubscriptionDependsOn(subscription.definition, changedSet) {
+			updates = append(updates, pendingQuerySubscriptionUpdate{subscription: subscription, frontier: effectiveFrontier, complete: complete})
+			continue
+		}
+		queryResolver := resolver
+		if frontier > 0 && subscription.definition.AsOf > 0 {
+			var queryErr error
+			queryResolver, queryErr = querySubscriptionResolver(resolver, effectiveFrontier)
+			if queryErr != nil {
+				return nil, fmt.Errorf("refresh query subscription %d: %w", subscription.id, queryErr)
+			}
+		}
+		sharedKey := ""
+		if subscription.definition.ShareIdenticalReads {
+			sharedKey, _ = querySubscriptionSharedReadKey(subscription.definition, frontier, effectiveFrontier)
+			if sharedKey != "" {
+				if result, ok := sharedReads[sharedKey]; ok {
+					updates = append(updates, pendingQuerySubscriptionUpdate{subscription: subscription, result: cloneQueryResult(result), hasResult: true, frontier: effectiveFrontier, complete: complete})
+					continue
+				}
+			}
+		}
+		result, err := ExecuteQueryParameters(ctx, subscription.definition.Query, queryResolver, subscription.definition.Parameters, options)
+		if err != nil {
+			return nil, fmt.Errorf("refresh query subscription %d: %w", subscription.id, err)
+		}
+		if sharedKey != "" {
+			if sharedReads == nil {
+				sharedReads = make(map[string]QueryResult)
+			}
+			sharedReads[sharedKey] = result
+		}
+		updates = append(updates, pendingQuerySubscriptionUpdate{subscription: subscription, result: cloneQueryResult(result), hasResult: true, frontier: effectiveFrontier, complete: complete})
 	}
-	return nil
+	return updates, nil
 }
 
 // Updates receives coalesced latest snapshots. A subscription never blocks an
@@ -518,6 +604,17 @@ func querySubscriptionDependsOn(definition QuerySubscriptionDefinition, changed 
 		}
 	}
 	return false
+}
+
+func querySubscriptionSharedReadKey(definition QuerySubscriptionDefinition, frontier, effectiveFrontier uint64) (string, bool) {
+	parameters, err := parameterizedViewCacheKey(definition.Query, definition.Parameters)
+	if err != nil {
+		return "", false
+	}
+	if definition.AsOf == 0 || frontier == 0 {
+		effectiveFrontier = 0
+	}
+	return parameters + "\x00" + strconv.FormatUint(effectiveFrontier, 10), true
 }
 
 func sameQuerySubscriptionResult(left, right QueryResult) bool {

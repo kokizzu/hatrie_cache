@@ -40285,3 +40285,19 @@ importable and opt-in, so existing batch behavior and planner defaults are
 unchanged. Raw samples are in
 [`M037K_BENCHMARK_RAW.txt`](M037K_BENCHMARK_RAW.txt), with API and correctness
 details in [`M037K_STATEFUL_GROUP_COUNT.md`](M037K_STATEFUL_GROUP_COUNT.md).
+### M248: Reusable Maintained-Read Sharing
+
+The opt-in `ShareIdenticalReads` path was measured with 64 identical query
+subscriptions over a 1,024-row source. Each refresh changed one row. Results
+are five benchmark samples on the same host:
+
+| Case | Time/op | Bytes/op | Allocs/op | Source resolves/op | Relative time |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Base, sharing unavailable | 56.13 ms | 112,538,406 | 653,959 | 64 | 1.00x |
+| Feature, default-off | 56.68 ms | 112,538,406 | 653,959 | 64 | 0.99x |
+| Feature, opt-in sharing | 33.33 ms | 68,104,289 | 396,426 | 1 | 1.68x |
+
+The retained feature is default-off. Opt-in sharing reduces duplicate source
+evaluations by 64x, refresh time by about 1.68x, bytes by about 39%, and
+allocations by about 39%. The memoization is scoped to one refresh call and
+does not retain stale rows between calls. See [M248_SHARED_MAINTAINED_READS.md](M248_SHARED_MAINTAINED_READS.md).
