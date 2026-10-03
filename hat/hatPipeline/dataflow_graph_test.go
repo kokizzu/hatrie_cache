@@ -84,6 +84,61 @@ func TestDataflowGraphSnapshotQueriesAndOrder(t *testing.T) {
 	}
 }
 
+func TestDataflowGraphSnapshotRemainsDetachedAcrossCacheAndMutation(t *testing.T) {
+	graph, err := NewDataflowGraph(DataflowGraphOptions{MaxNodes: 8, MaxEdges: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"source", "sink"} {
+		if err := graph.AddNode(DataflowNode{ID: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := graph.AddEdge(DataflowEdge{From: "source", To: "sink"}); err != nil {
+		t.Fatal(err)
+	}
+
+	first := graph.Snapshot()
+	first.Nodes[0].ID = "caller-mutated"
+	first.Edges[0].From = "caller-mutated"
+	second := graph.Snapshot()
+	want := DataflowGraphSnapshot{
+		Nodes: []DataflowNode{{ID: "sink", Kind: "operator"}, {ID: "source", Kind: "operator"}},
+		Edges: []DataflowEdge{{From: "source", To: "sink"}},
+	}
+	if !reflect.DeepEqual(second, want) {
+		t.Fatalf("cached snapshot = %#v, want %#v", second, want)
+	}
+
+	if err := graph.AddNode(DataflowNode{ID: "extra"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := graph.AddEdge(DataflowEdge{From: "sink", To: "extra"}); err != nil {
+		t.Fatal(err)
+	}
+	third := graph.Snapshot()
+	if got := len(third.Nodes); got != 3 {
+		t.Fatalf("invalidated snapshot nodes = %d, want 3", got)
+	}
+	if got := len(third.Edges); got != 2 {
+		t.Fatalf("invalidated snapshot edges = %d, want 2", got)
+	}
+
+	large, err := NewDataflowGraph(DataflowGraphOptions{MaxNodes: DefaultDataflowGraphMaxNodes + 1, MaxEdges: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index <= DefaultDataflowGraphMaxNodes; index++ {
+		if err := large.AddNode(DataflowNode{ID: fmt.Sprintf("node-%d", index)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = large.Snapshot()
+	if large.snapshotValid {
+		t.Fatal("oversized graph retained a snapshot cache")
+	}
+}
+
 func TestDataflowGraphTopologicalOrderRemainsDetachedAcrossCacheAndMutation(t *testing.T) {
 	graph, err := NewDataflowGraph(DataflowGraphOptions{MaxNodes: 8, MaxEdges: 8})
 	if err != nil {
