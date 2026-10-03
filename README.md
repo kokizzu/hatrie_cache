@@ -236,6 +236,7 @@ security guidance before exposing it on a network.
 - ClickHouse-inspired compact schema-aware Enum8/Enum16 RowBinary values: [SQL_ENUM_TYPES.md](SQL_ENUM_TYPES.md)
 - ClickHouse-inspired fixed-width Decimal128/Decimal256 RowBinary values: [SQL_DECIMAL_TYPES.md](SQL_DECIMAL_TYPES.md)
 - Per-group SQL top-N selection: [SQL `LIMIT BY`](SQL_LIMIT_BY.md)
+- Automatic rolling `SUM`/`AVG` window state for bounded `ROWS` frames: [M065 SQL incremental window frames](M065_SQL_INCREMENTAL_WINDOW.md)
 - Materialize-inspired opt-in batched logical timestamps: [M033_LOGICAL_TIMESTAMP_ORACLE.md](M033_LOGICAL_TIMESTAMP_ORACLE.md)
 - Opt-in snapshot rotation and byte-budgeted backup retention: [TU36_SNAPSHOT_ROTATION.md](TU36_SNAPSHOT_ROTATION.md)
 - Tarantool-inspired opt-in replica applier throttling: [TU37_REPLICA_APPLIER_THROTTLE.md](TU37_REPLICA_APPLIER_THROTTLE.md)

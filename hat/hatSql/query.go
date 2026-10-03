@@ -12444,6 +12444,10 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 					rangeValues[position] = value
 				}
 			}
+			incrementalAggregate, err := sqlApplyIncrementalWindowAggregate(item.expr, indexes, out, result.Columns[column])
+			if err != nil {
+				return SQLQueryResult{}, err
+			}
 			rank := int64(1)
 			denseRank := int64(1)
 			for position, index := range indexes {
@@ -12477,6 +12481,9 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 				case "DENSE_RANK":
 					out[index].row[result.Columns[column]] = denseRank
 				case "SUM", "AVG", "MIN", "MAX":
+					if incrementalAggregate {
+						continue
+					}
 					if len(item.expr.args) != 1 {
 						return SQLQueryResult{}, fmt.Errorf("%s window function expects one argument", item.expr.name)
 					}

@@ -33319,3 +33319,28 @@ default-path allocation tradeoff. Periodic and disabled are not free
 durability improvements: they exchange crash-loss protection for roughly two
 orders of magnitude lower write latency. They are therefore explicit modes,
 while the default remains durable.
+
+<a id="m065-sql-incremental-window-frame"></a>
+## M065 SQL Incremental Window Frame
+
+This benchmark compares the existing SQL window evaluator with the automatic
+rolling-state path for `SUM(value) OVER (ORDER BY seq ROWS BETWEEN 127
+PRECEDING AND CURRENT ROW)` over 4,096 rows. Five samples were run with
+`-benchtime=100ms` on Linux `amd64` with an AMD Ryzen 9 5950X. The same query,
+rows, and benchmark harness were used before and after the change.
+
+| Variant | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Existing frame rescan | 26,958,357 | 12,729,048 | 65,420 | 1.00x |
+| Incremental rolling state | 4,895,394 | 4,461,154 | 32,775 | 5.51x faster / 2.85x lower bytes / 2.00x lower allocations |
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+before: 29391110 12729068 65420; 27945374 12729066 65420; 25990256 12729048 65420; 26958357 12727718 65419; 26636771 12727698 65418
+after:  4879342 4461400 32775; 4977468 4461154 32775; 4801380 4461394 32775; 4898539 4461147 32775; 4905194 4461145 32775
+```
+
+The optimization is automatic for the supported frame shape and has no
+configuration or result-format change. Excluded frames, `RANGE`, following
+bounds, and other window functions continue through the general evaluator.

@@ -22916,3 +22916,29 @@ commit-t018-wal-sync-policy:
 
 push-t018-wal-sync-policy:
 	bash scripts/push-t018-wal-sync-policy.sh
+test-m065-sql-window:
+	bash scripts/test-m065-sql-window.sh
+
+test-m065-sql-window-package:
+	bash scripts/test-m065-sql-window-package.sh
+
+benchmark-m065-sql-window:
+	bash scripts/benchmark-m065-sql-window.sh
+
+format-m065-sql-window:
+	bash scripts/format-m065-sql-window.sh
+
+race-m065-sql-window:
+	bash scripts/race-m065-sql-window.sh
+
+vet-m065-sql-window:
+	bash scripts/vet-m065-sql-window.sh
+
+stage-m065-sql-window:
+	bash scripts/stage-m065-sql-window.sh
+
+commit-m065-sql-window:
+	bash scripts/commit-m065-sql-window.sh
+
+push-m065-sql-window:
+	bash scripts/push-m065-sql-window.sh
