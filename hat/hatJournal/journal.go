@@ -88,6 +88,39 @@ const (
 	MaxIdempotencyCapacity                   = 1 << 20
 )
 
+// SyncMode controls when journal writes request filesystem durability.
+// Durable is the compatibility-safe default. Periodic and none are explicit
+// latency-oriented choices for callers that accept a larger crash-loss window.
+type SyncMode string
+
+const (
+	SyncModeDurable  SyncMode = "durable"
+	SyncModePeriodic SyncMode = "periodic"
+	SyncModeNone     SyncMode = "none"
+
+	DefaultSyncMode     = SyncModeDurable
+	DefaultSyncInterval = 100 * time.Millisecond
+	MinSyncInterval     = time.Millisecond
+	MaxSyncInterval     = time.Hour
+)
+
+var ErrSyncModeInvalid = errors.New("hatJournal: sync mode is invalid")
+
+// ParseSyncMode accepts the durable, periodic, and none journal policies.
+// An empty value preserves the durable zero-value configuration.
+func ParseSyncMode(value string) (SyncMode, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", string(SyncModeDurable), "sync", "synchronous":
+		return SyncModeDurable, nil
+	case string(SyncModePeriodic), "async-periodic":
+		return SyncModePeriodic, nil
+	case string(SyncModeNone), "disabled", "async":
+		return SyncModeNone, nil
+	default:
+		return "", fmt.Errorf("%w: %q", ErrSyncModeInvalid, value)
+	}
+}
+
 // Options configures journal encoding, durable group commit, and optional
 // bounded segment rotation. SegmentMaxBytes zero keeps one active file.
 type Options struct {
@@ -103,6 +136,8 @@ type Options struct {
 	RetainedBytes       int64
 	IdempotencyCapacity int
 	Encryption          EncryptionOptions
+	SyncMode            SyncMode
+	SyncInterval        time.Duration
 }
 
 // ValidateOptions verifies journal options and returns a copy with a
@@ -111,6 +146,23 @@ func ValidateOptions(options Options) (Options, error) {
 	format, err := ParseFormat(string(options.Format))
 	if err != nil {
 		return Options{}, err
+	}
+	syncMode, err := ParseSyncMode(string(options.SyncMode))
+	if err != nil {
+		return Options{}, err
+	}
+	if options.SyncInterval < 0 {
+		return Options{}, errors.New("hatJournal: sync interval must be non-negative")
+	}
+	if syncMode == SyncModePeriodic {
+		if options.SyncInterval == 0 {
+			options.SyncInterval = DefaultSyncInterval
+		}
+		if options.SyncInterval < MinSyncInterval || options.SyncInterval > MaxSyncInterval {
+			return Options{}, fmt.Errorf("hatJournal: sync interval must be between %s and %s", MinSyncInterval, MaxSyncInterval)
+		}
+	} else {
+		options.SyncInterval = 0
 	}
 	segmentCompression, err := ParseSegmentCompression(string(options.SegmentCompression))
 	if err != nil {
@@ -155,6 +207,7 @@ func ValidateOptions(options Options) (Options, error) {
 	}
 	options.Format = format
 	options.SegmentCompression = segmentCompression
+	options.SyncMode = syncMode
 	options.Encryption = encryption
 	return options, nil
 }

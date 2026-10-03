@@ -53,6 +53,7 @@ security guidance before exposing it on a network.
 - Projection refresh lag and failure status: [CH018_PROJECTION_REFRESH_STATUS.md](CH018_PROJECTION_REFRESH_STATUS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-018-projection-refresh-lag-and-failure-state)
 - Coordinated SQL projection retention and recovery: [PROJECTION_FRONTIERS.md](PROJECTION_FRONTIERS.md)
 - Bounded archived command-journal retention: [JOURNAL_RETENTION.md](JOURNAL_RETENTION.md)
+- Tarantool-inspired explicit WAL sync policy with durable-by-default periodic and disabled modes: [TG18_WAL_SYNC_POLICY.md](TG18_WAL_SYNC_POLICY.md), with measurements in [BENCHMARK.md](BENCHMARK.md#t-g18-wal-sync-policy)
 - Opt-in journal replay progress and ETA: [REPLAY_PROGRESS.md](REPLAY_PROGRESS.md)
 - SDK-neutral OpenTelemetry-compatible SQL query and operator spans: [QUERY_TRACING.md](QUERY_TRACING.md)
 - Opt-in bounded synchronous export of SDK-neutral query trace spans: [CHG44_QUERY_TRACE_EXPORT.md](CHG44_QUERY_TRACE_EXPORT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-g44-opt-in-query-trace-span-export)

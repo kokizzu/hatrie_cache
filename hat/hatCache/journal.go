@@ -59,6 +59,26 @@ const (
 	DefaultCommandJournalFormat = hatJournal.DefaultFormat
 )
 
+// CommandJournalSyncMode is retained for compatibility. New integrations can
+// import hat/hatJournal directly.
+type CommandJournalSyncMode = hatJournal.SyncMode
+
+const (
+	CommandJournalSyncModeDurable     = hatJournal.SyncModeDurable
+	CommandJournalSyncModePeriodic    = hatJournal.SyncModePeriodic
+	CommandJournalSyncModeNone        = hatJournal.SyncModeNone
+	DefaultCommandJournalSyncMode     = hatJournal.DefaultSyncMode
+	DefaultCommandJournalSyncInterval = hatJournal.DefaultSyncInterval
+	MinCommandJournalSyncInterval     = hatJournal.MinSyncInterval
+	MaxCommandJournalSyncInterval     = hatJournal.MaxSyncInterval
+)
+
+// ParseCommandJournalSyncMode is retained for compatibility. New
+// integrations can use hatJournal.ParseSyncMode directly.
+func ParseCommandJournalSyncMode(value string) (CommandJournalSyncMode, error) {
+	return hatJournal.ParseSyncMode(value)
+}
+
 // CommandJournalSegmentCompression is retained for compatibility. New
 // integrations can use hat/hatJournal.SegmentCompression directly.
 type CommandJournalSegmentCompression = hatJournal.SegmentCompression
@@ -222,6 +242,10 @@ type CommandJournal struct {
 	groupCommitWindow     time.Duration
 	groupCommitMaxBatch   int
 	adaptiveGroupCommit   bool
+	syncMode              CommandJournalSyncMode
+	syncInterval          time.Duration
+	lastSyncAt            time.Time
+	syncPending           bool
 	segmentMaxBytes       int64
 	segmentCompression    CommandJournalSegmentCompression
 	retainedSegments      int
@@ -347,6 +371,8 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 		groupCommitWindow:     options.GroupCommitWindow,
 		groupCommitMaxBatch:   options.GroupCommitMaxBatch,
 		adaptiveGroupCommit:   options.AdaptiveGroupCommit,
+		syncMode:              options.SyncMode,
+		syncInterval:          options.SyncInterval,
 		segmentMaxBytes:       options.SegmentMaxBytes,
 		segmentCompression:    options.SegmentCompression,
 		retainedSegments:      options.RetainedSegments,
@@ -407,6 +433,21 @@ func (journal *CommandJournal) Close() error {
 	})
 	<-journal.closeDone
 	return journal.closeErr
+}
+
+// Sync forces a filesystem durability barrier regardless of the configured
+// automatic sync mode. It is useful for periodic and disabled modes at an
+// application-defined commit boundary.
+func (journal *CommandJournal) Sync() error {
+	if journal == nil {
+		return ErrNilCommandJournal
+	}
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+	if journal.closed {
+		return ErrCommandJournalClosed
+	}
+	return journal.syncLockedForce()
 }
 
 func (journal *CommandJournal) groupCommitEnabled() bool {
@@ -1912,13 +1953,46 @@ func resolveJournalReplicationJobs(journal *CommandJournal, jobs []replicationJo
 }
 
 func (journal *CommandJournal) syncLocked() error {
+	switch journal.syncMode {
+	case CommandJournalSyncModePeriodic:
+		if !journal.syncPending {
+			return nil
+		}
+		if !journal.lastSyncAt.IsZero() && time.Since(journal.lastSyncAt) < journal.syncInterval {
+			return nil
+		}
+	case CommandJournalSyncModeNone:
+		return nil
+	}
+	return journal.syncFileLocked()
+}
+
+func (journal *CommandJournal) syncLockedForce() error {
+	return journal.syncFileLocked()
+}
+
+func (journal *CommandJournal) syncFileLocked() error {
 	if journal.syncHook != nil {
-		return journal.syncHook()
+		if err := journal.syncHook(); err != nil {
+			return err
+		}
+		if journal.syncMode == CommandJournalSyncModePeriodic {
+			journal.lastSyncAt = time.Now()
+			journal.syncPending = false
+		}
+		return nil
 	}
 	if journal.file == nil {
 		return ErrCommandJournalClosed
 	}
-	return journal.file.Sync()
+	if err := journal.file.Sync(); err != nil {
+		return err
+	}
+	if journal.syncMode == CommandJournalSyncModePeriodic {
+		journal.lastSyncAt = time.Now()
+		journal.syncPending = false
+	}
+	return nil
 }
 
 func (journal *CommandJournal) rollbackFailedAppendLocked(state commandJournalAppendState, cause error) error {
@@ -1932,7 +2006,7 @@ func (journal *CommandJournal) rollbackAppendLocked(state commandJournalAppendSt
 	if err := journal.rollbackAppendWithoutSyncLocked(state); err != nil {
 		return err
 	}
-	return journal.syncLocked()
+	return journal.syncLockedForce()
 }
 
 func (journal *CommandJournal) rollbackAppendWithoutSyncLocked(state commandJournalAppendState) error {
@@ -2139,9 +2213,13 @@ func (journal *CommandJournal) closeAppendFileLocked() error {
 	if journal.file == nil {
 		return nil
 	}
+	var syncErr error
+	if journal.syncMode != CommandJournalSyncModeNone && journal.syncPending {
+		syncErr = journal.syncLockedForce()
+	}
 	file := journal.file
 	journal.file = nil
-	return file.Close()
+	return errors.Join(syncErr, file.Close())
 }
 
 func openCommandJournalAppendFile(path string) (*os.File, error) {
@@ -2178,6 +2256,9 @@ func (journal *CommandJournal) nextAppendSequenceLocked() (uint64, error) {
 }
 
 func (journal *CommandJournal) markAppendedLocked(sequence uint64) {
+	if journal.syncMode == CommandJournalSyncModePeriodic {
+		journal.syncPending = true
+	}
 	if sequence == ^uint64(0) {
 		journal.sequenceExhausted = true
 		return

@@ -22881,3 +22881,38 @@ commit-chg44-query-trace-export:
 
 push-chg44-query-trace-export:
 	@bash ./scripts/push-chg44-query-trace-export.sh
+.PHONY: test-t018-wal-sync-policy format-t018-wal-sync-policy
+.PHONY: race-t018-wal-sync-policy vet-t018-wal-sync-policy
+.PHONY: benchmark-t018-wal-sync-policy benchmark-t018-wal-sync-policy-noop
+.PHONY: benchmark-t018-durable benchmark-t018-fast
+.PHONY: commit-t018-wal-sync-policy push-t018-wal-sync-policy
+
+test-t018-wal-sync-policy:
+	bash scripts/test-t018-wal-sync-policy.sh
+
+format-t018-wal-sync-policy:
+	bash scripts/format-t018-wal-sync-policy.sh
+
+race-t018-wal-sync-policy:
+	bash scripts/race-t018-wal-sync-policy.sh
+
+vet-t018-wal-sync-policy:
+	bash scripts/vet-t018-wal-sync-policy.sh
+
+benchmark-t018-wal-sync-policy:
+	bash scripts/benchmark-t018-wal-sync-policy.sh
+
+benchmark-t018-wal-sync-policy-noop:
+	bash scripts/benchmark-t018-wal-sync-policy-noop.sh
+
+benchmark-t018-durable:
+	bash scripts/benchmark-t018-durable.sh
+
+benchmark-t018-fast:
+	bash scripts/benchmark-t018-fast.sh
+
+commit-t018-wal-sync-policy:
+	bash scripts/commit-t018-wal-sync-policy.sh
+
+push-t018-wal-sync-policy:
+	bash scripts/push-t018-wal-sync-policy.sh

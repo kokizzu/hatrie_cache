@@ -33283,3 +33283,39 @@ The feature is retained for operational observability, not a claimed CPU
 improvement. It adds one `int64` accounting field per retained cache entry and
 reports an estimate rather than recursive AST memory; transient benchmark
 bytes and allocations did not increase.
+
+## T-G18 WAL Sync Policy
+
+The benchmark writes repeated `SETSTR` records to the same command journal on
+Linux/amd64, AMD Ryzen 9 5950X, Go 1.26.6. Each result is the median of three
+samples with `-benchtime=100ms` for real filesystem sync and five one-second
+samples for the no-op sync control. The pre-change durable control was run
+from commit `5ca95c8c`; the after samples use the T-G18 implementation.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative CPU | Durability behavior |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Durable before | 825,062 | 1,556 | 6 | 1.00x | fsync after append |
+| Durable after | 809,076 | 1,556 | 6 | 1.02x faster | unchanged default |
+| Periodic, 1h interval | 7,088 | 1,552 | 6 | 114.1x faster than durable after | first/interval/close sync |
+| Disabled | 7,024 | 1,552 | 6 | 115.2x faster than durable after | no automatic sync |
+| Durable no-op sync before | 7,084 | 1,552 | 6 | 1.00x | policy CPU control |
+| Durable no-op sync after | 6,952 | 1,552 | 6 | 1.02x faster | no default allocation cost |
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+before durable: 1350407 1560 6; 825062 1556 6; 789393 1556 6
+after durable:  740047 1557 6; 816044 1556 6; 809076 1556 6
+periodic:       7088 1552 6; 7181 1552 6; 6974 1552 6
+disabled:       7024 1552 6; 7023 1552 6; 7254 1552 6
+before no-op:   7338 1552 6; 7038 1552 6; 7129 1552 6; 7084 1552 6; 6986 1552 6
+after no-op:    6952 1552 6; 7026 1552 6; 6937 1552 6; 6897 1552 6; 7056 1552 6
+```
+
+The durable medians vary with filesystem latency; the paired median stayed
+within noise and bytes/allocations remained flat. The no-op control shows the
+policy bookkeeping is slightly faster after the fast-path cleanup, not a
+default-path allocation tradeoff. Periodic and disabled are not free
+durability improvements: they exchange crash-loss protection for roughly two
+orders of magnitude lower write latency. They are therefore explicit modes,
+while the default remains durable.

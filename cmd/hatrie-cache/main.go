@@ -141,6 +141,8 @@ type config struct {
 	snapshotFormat                       string
 	journalPath                          string
 	journalFormat                        string
+	journalSyncMode                      string
+	journalSyncInterval                  time.Duration
 	journalGroupCommitWindow             time.Duration
 	journalGroupCommitMaxBatch           int
 	journalSegmentMaxBytes               int64
@@ -571,6 +573,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		dbCompareBeforeWrite:           string(hatriecache.DefaultLevelDBCompareBeforeWriteMode),
 		snapshotFormat:                 string(hatriecache.DefaultSnapshotFormat),
 		journalFormat:                  string(hatriecache.DefaultCommandJournalFormat),
+		journalSyncMode:                string(hatriecache.DefaultCommandJournalSyncMode),
 		journalGroupCommitWindow:       hatriecache.DefaultJournalGroupCommitWindow,
 		journalGroupCommitMaxBatch:     hatriecache.DefaultJournalGroupCommitMaxBatch,
 		journalSegmentMaxBytes:         hatriecache.DefaultCommandJournalSegmentMaxBytes,
@@ -699,6 +702,8 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&cfg.snapshotFormat, "snapshot-format", cfg.snapshotFormat, "snapshot save format: gzip-best-binary, gzip-binary, binary, gzip-best-json, gzip-json, or json")
 	flags.StringVar(&cfg.journalPath, "journal-path", cfg.journalPath, "optional command journal path to replay on startup and append mutating commands")
 	flags.StringVar(&cfg.journalFormat, "journal-format", cfg.journalFormat, "command journal write format: binary or json")
+	flags.StringVar(&cfg.journalSyncMode, "journal-sync-mode", cfg.journalSyncMode, "journal durability policy: durable, periodic, or none; durable is the default")
+	flags.DurationVar(&cfg.journalSyncInterval, "journal-sync-interval", cfg.journalSyncInterval, "periodic journal sync interval; zero uses the default interval when mode=periodic")
 	flags.DurationVar(&cfg.journalGroupCommitWindow, "journal-group-commit-window", cfg.journalGroupCommitWindow, "maximum journal group commit wait; zero batches only already queued callers")
 	flags.IntVar(&cfg.journalGroupCommitMaxBatch, "journal-group-commit-max-batch", cfg.journalGroupCommitMaxBatch, "maximum commands per durable journal group commit; use 1 for immediate fsync")
 	flags.Int64Var(&cfg.journalSegmentMaxBytes, "journal-segment-max-bytes", cfg.journalSegmentMaxBytes, "rotate the active journal after this many bytes at the next durable batch boundary; use 0 for one file")
@@ -924,6 +929,24 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	if cfg.journalGroupCommitMaxBatch > hatriecache.MaxJournalGroupCommitBatch {
 		return config{}, fmt.Errorf("journal group commit max batch must be <= %d", hatriecache.MaxJournalGroupCommitBatch)
 	}
+	if cfg.journalSyncInterval < 0 {
+		return config{}, errors.New("journal sync interval must be non-negative")
+	}
+	journalSyncMode, err := hatriecache.ParseCommandJournalSyncMode(cfg.journalSyncMode)
+	if err != nil {
+		return config{}, err
+	}
+	if journalSyncMode == hatriecache.CommandJournalSyncModePeriodic {
+		if cfg.journalSyncInterval == 0 {
+			cfg.journalSyncInterval = hatriecache.DefaultCommandJournalSyncInterval
+		}
+		if cfg.journalSyncInterval < hatriecache.MinCommandJournalSyncInterval || cfg.journalSyncInterval > hatriecache.MaxCommandJournalSyncInterval {
+			return config{}, fmt.Errorf("journal sync interval must be between %s and %s", hatriecache.MinCommandJournalSyncInterval, hatriecache.MaxCommandJournalSyncInterval)
+		}
+	} else {
+		cfg.journalSyncInterval = 0
+	}
+	cfg.journalSyncMode = string(journalSyncMode)
 	if cfg.journalSegmentMaxBytes < 0 {
 		return config{}, errors.New("journal segment max bytes must be non-negative")
 	}
@@ -1363,6 +1386,8 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"snapshot_format":                          cfg.snapshotFormat,
 		"journal_path":                             cfg.journalPath,
 		"journal_format":                           cfg.journalFormat,
+		"journal_sync_mode":                        cfg.journalSyncMode,
+		"journal_sync_interval":                    cfg.journalSyncInterval.String(),
 		"journal_group_commit_window":              cfg.journalGroupCommitWindow.String(),
 		"journal_group_commit_max_batch":           cfg.journalGroupCommitMaxBatch,
 		"journal_segment_max_bytes":                cfg.journalSegmentMaxBytes,
@@ -1567,6 +1592,8 @@ func journalFormat(cfg config) hatriecache.CommandJournalFormat {
 func journalOptions(cfg config) hatriecache.CommandJournalOptions {
 	return hatriecache.CommandJournalOptions{
 		Format:              journalFormat(cfg),
+		SyncMode:            hatriecache.CommandJournalSyncMode(cfg.journalSyncMode),
+		SyncInterval:        cfg.journalSyncInterval,
 		GroupCommitWindow:   cfg.journalGroupCommitWindow,
 		GroupCommitMaxBatch: cfg.journalGroupCommitMaxBatch,
 		SegmentMaxBytes:     cfg.journalSegmentMaxBytes,
