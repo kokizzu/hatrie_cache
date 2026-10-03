@@ -1,6 +1,7 @@
 package hatTopology
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -43,6 +44,15 @@ var (
 	// ErrConfigWatchHistoryGap indicates that the requested cursor predates the
 	// retained history and needs a fresh snapshot.
 	ErrConfigWatchHistoryGap = errors.New("hatTopology: config watch history gap")
+	// ErrConfigWatchReplicationVersionRequired indicates that a replicated
+	// event did not carry the globally ordered version assigned by its source.
+	ErrConfigWatchReplicationVersionRequired = errors.New("hatTopology: replicated config watch version is required")
+	// ErrConfigWatchVersionGap indicates that a replicated event would skip an
+	// earlier event in the globally ordered stream.
+	ErrConfigWatchVersionGap = errors.New("hatTopology: replicated config watch version has a gap")
+	// ErrConfigWatchReplicationConflict indicates that a replayed version has
+	// different event contents than the retained event.
+	ErrConfigWatchReplicationConflict = errors.New("hatTopology: replicated config watch event conflicts")
 )
 
 const (
@@ -78,6 +88,7 @@ type ConfigWatchAction uint8
 const (
 	ConfigWatchPublish ConfigWatchAction = iota + 1
 	ConfigWatchRead
+	ConfigWatchReplicate
 )
 
 // String returns the stable action name.
@@ -87,6 +98,8 @@ func (action ConfigWatchAction) String() string {
 		return "publish"
 	case ConfigWatchRead:
 		return "read"
+	case ConfigWatchReplicate:
+		return "replicate"
 	default:
 		return "unknown"
 	}
@@ -119,7 +132,8 @@ type ConfigWatchOptions struct {
 // ConfigWatchEvent is one versioned configuration mutation. Version zero on
 // Publish is assigned as the next local version; distributed publishers
 // should provide a globally ordered version from their consensus/fencing
-// layer. Value is copied on publish and read.
+// layer. ApplyReplicated requires a non-zero version. Value is copied on
+// publish, replication, and read.
 type ConfigWatchEvent struct {
 	Version uint64 `json:"version"`
 	Source  string `json:"source"`
@@ -294,6 +308,51 @@ func (log *ConfigWatchLog) Publish(ctx context.Context, principal string, event 
 	if event.Version <= log.current {
 		return fmt.Errorf("%w: got=%d current=%d", ErrConfigWatchVersionStale, event.Version, log.current)
 	}
+	log.appendLocked(event)
+	return nil
+}
+
+// ApplyReplicated authenticates and applies one globally ordered event from a
+// peer. Replaying the exact retained event is an idempotent success and
+// returns applied=false. A conflicting replay or a version gap is rejected so
+// a reconnecting transport cannot silently fork configuration state.
+func (log *ConfigWatchLog) ApplyReplicated(ctx context.Context, principal string, event ConfigWatchEvent) (applied bool, err error) {
+	if log == nil {
+		return false, ErrConfigWatchNil
+	}
+	if _, err := log.authorize(ctx, principal, ConfigWatchReplicate, strings.TrimSpace(event.Key)); err != nil {
+		return false, err
+	}
+	if event.Version == 0 {
+		return false, ErrConfigWatchReplicationVersionRequired
+	}
+	event, err = log.validateEvent(event)
+	if err != nil {
+		return false, err
+	}
+	log.mu.Lock()
+	defer log.mu.Unlock()
+	if event.Version <= log.current {
+		for offset := 0; offset < log.historySize; offset++ {
+			existing := log.history[(log.historyStart+offset)%log.historyLimit]
+			if existing.Version != event.Version {
+				continue
+			}
+			if configWatchEventsEqual(existing, event) {
+				return false, nil
+			}
+			return false, fmt.Errorf("%w: version=%d", ErrConfigWatchReplicationConflict, event.Version)
+		}
+		return false, fmt.Errorf("%w: got=%d current=%d", ErrConfigWatchVersionStale, event.Version, log.current)
+	}
+	if log.current != 0 && event.Version != log.current+1 {
+		return false, fmt.Errorf("%w: got=%d expected=%d", ErrConfigWatchVersionGap, event.Version, log.current+1)
+	}
+	log.appendLocked(event)
+	return true, nil
+}
+
+func (log *ConfigWatchLog) appendLocked(event ConfigWatchEvent) {
 	index := (log.historyStart + log.historySize) % log.historyLimit
 	if log.historySize == log.historyLimit {
 		index = log.historyStart
@@ -307,7 +366,10 @@ func (log *ConfigWatchLog) Publish(ctx context.Context, principal string, event 
 	previousNotify := log.notify
 	log.notify = make(chan struct{})
 	close(previousNotify)
-	return nil
+}
+
+func configWatchEventsEqual(left, right ConfigWatchEvent) bool {
+	return left.Version == right.Version && left.Source == right.Source && left.Key == right.Key && left.Deleted == right.Deleted && bytes.Equal(left.Value, right.Value)
 }
 
 func (log *ConfigWatchLog) readLimit(limit int) (int, error) {

@@ -4791,3 +4791,12 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+
+## Cluster Configuration Watch Replay
+
+`hatTopology.ConfigWatchLog.ApplyReplicated` makes cross-node configuration
+replay authenticated and idempotent. Exact retained replays are ignored,
+conflicting versions and version gaps are rejected, and the existing local
+watch path remains unchanged. The transport, membership, consensus ordering,
+and snapshot recovery remain caller-owned. See
+[TU50_CLUSTER_CONFIG_WATCH.md](TU50_CLUSTER_CONFIG_WATCH.md).

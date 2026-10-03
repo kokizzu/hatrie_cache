@@ -33096,3 +33096,30 @@ admission in the current pointer-lease API. It should surround mutation
 operations at a safety boundary, not be placed inside an already protected
 inner loop. The implementation was retained because its value is blocking
 drain semantics and explicit origin policy, not raw speed.
+
+## T-U50 Cluster Configuration Watch Replay
+
+The baseline `ConfigWatchLog` publish/read path was measured before the
+replicated apply API. Five `-count=5` samples on Linux/amd64, AMD Ryzen 9
+5950X:
+
+| Workload | Median ns/op | B/op | Allocs/op | Relative | Interpretation |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Existing publish + read baseline | 337.9 | 216 | 5 | 1.00x | control path before change |
+| Existing publish + read after | 336.4 | 216 | 5 | 1.00x | no allocation or byte regression |
+| Existing wait baseline | 289.7 | 192 | 2 | 1.00x | control path before change |
+| Existing wait after | 289.7 | 192 | 2 | 1.00x | no allocation or byte regression |
+| Replicated apply, new event | 114.5 | 128 | 3 | 2.95x vs publish+read | explicit cross-node apply |
+| Replicated apply, exact duplicate | 66.55 | 8 | 1 | 5.08x vs publish+read | idempotent replay fast path |
+
+The replicated path is explicit and opt-in; ordinary local publishers and
+readers do not pay for it. Raw samples (`ns/op`, `B/op`, `allocs/op`) were:
+
+```text
+baseline publish_read: 333.8 216 5; 337.9 216 5; 339.0 216 5; 339.0 216 5; 337.7 216 5
+after publish_read:    336.4 216 5; 332.6 216 5; 332.7 216 5; 340.9 216 5; 337.7 216 5
+baseline wait:         285.0 192 2; 289.7 192 2; 288.0 192 2; 292.2 192 2; 290.9 192 2
+after wait:            286.7 192 2; 289.7 192 2; 288.3 192 2; 297.6 192 2; 297.0 192 2
+apply new:             116.2 128 3; 115.2 128 3; 112.1 128 3; 114.5 128 3; 114.1 128 3
+apply duplicate:        66.21 8 1; 66.47 8 1; 66.55 8 1; 66.78 8 1; 66.70 8 1
+```
