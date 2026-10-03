@@ -42,7 +42,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | CH-013 | Query condition cache | No cache of reusable predicate outcomes for stable part/key conditions. | Medium |
 | CH-014 | Uncompressed hot-data cache | No cache that stores decoded hot ranges while preserving compressed storage. | Medium |
 | CH-014b | Mutation dependency graph with resumable progress | Make overlapping maintenance mutations safe to schedule without re-running completed prerequisites; reverse dependency metadata enables targeted ready polling and restart after checkpoint restore. | Medium |
-| CH-015 | Filesystem cache admission | No admission/eviction policy for deciding which persistent ranges deserve RAM. | Medium |
+| CH-015 | Filesystem cache admission | Partially adopted as importable `hatDataStructure.FrequencyAdmissionCache`, a bounded recency cache with compact frequency admission; persistent filesystem wiring remains caller-owned. | Medium |
 | CH-016 | Asynchronous insert queue | Writes cannot be acknowledged before bounded background batching. | Medium |
 | CH-017 | Async-insert deduplication | No idempotency token ledger for safely retrying queued inserts. | Medium |
 | CH-018 | Insert quorum | No write acknowledgement policy requiring a configured replica quorum. | High |
@@ -155,7 +155,7 @@ Candidates remain listed for traceability. Implemented ideas are recorded in
 | TT-015 | Vinyl read/write thread tuning | Read and compaction workers lack independent bounded runtime configuration. | Medium |
 | TT-016 | Disk-space reserve admission | Implemented as an opt-in filesystem free-space reserve for LevelDB/Pebble full, key, dirty, and generation saves; default remains disabled. | Low |
 | TT-017 | Run-level Bloom filters | Implemented as an opt-in native LevelDB/Pebble Bloom prefilter for new persistent runs and replication-outbox tables; default remains `0` because the measured warm workload adds 11.7%-14.4% storage with no general CPU win. | Medium |
-| TT-018 | Page-index residency policy | Page indexes have no explicit memory budget and eviction metrics. | Medium |
+| TT-018 | Page-index residency policy | Partially adopted as importable `hatDataStructure.FrequencyAdmissionCache` with fixed capacity, scan-resistant admission, and hit/admission/eviction/memory stats; page-index wiring remains caller-owned. | Medium |
 | TT-019 | Covering secondary indexes | Secondary postings cannot retain selected payload fields to avoid primary lookups. | Medium |
 | TT-020 | Generic multi-part TREE ranges | Implemented as the allocation-free `OrderedIndex.Range` API, which binary-searches inclusive composite bounds and iterates only the bounded subslice; callers can express a partial-key prefix with the smallest and largest suffix values. | Medium |
 | TT-021 | RTREE spatial index | No multidimensional geographic index and bounding-box query API exists. | High |

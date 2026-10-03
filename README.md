@@ -9,6 +9,7 @@ security guidance before exposing it on a network.
 ## Start Here
 
 - New to the cache commands and value types: [DATA_STRUCTURE.md](DATA_STRUCTURE.md)
+- Opt-in scan-resistant bounded hot-range/page-index cache: [TT018_FREQUENCY_ADMISSION_CACHE.md](TT018_FREQUENCY_ADMISSION_CACHE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#tt-018--ch-015-frequency-admission-cache)
 - ClickHouse-style SQL RowBinary streaming export and bounded bulk import: [CH050_SQL_ROW_BINARY_STREAM.md](CH050_SQL_ROW_BINARY_STREAM.md)
 - New to the SQL interface: [SQL.md](SQL.md)
 - Opt-in Materialize-style SQL result subscriptions with automatic `CACHE(...)` dependency discovery: [MZ010_SQL_SUBSCRIPTIONS.md](MZ010_SQL_SUBSCRIPTIONS.md), with registration cost measurements in [BENCHMARK.md#mz-010-sql-result-subscription-entrypoints](BENCHMARK.md#mz-010-sql-result-subscription-entrypoints)

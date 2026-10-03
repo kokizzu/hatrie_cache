@@ -32580,3 +32580,49 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## TT-018 / CH-015 Frequency Admission Cache
+
+Commands:
+
+```sh
+make round77-frequency-admission-baseline-bench
+make round77-frequency-admission-bench
+```
+
+Five samples on Linux/amd64, AMD Ryzen 9 5950X. Both caches have capacity 8
+and execute the same 80-operation cycle: 16 hot operations over four keys,
+then 64 one-pass scan keys. The baseline is a fixed-capacity LRU with the same
+zero-allocation array/list shape.
+
+| Workload | Fixed LRU median | Frequency admission median | Relative result |
+| --- | ---: | ---: | ---: |
+| Mixed CPU | 36.36 ns/op | 36.15 ns/op | 1.01x faster |
+| Hit ratio | 0.1500 | 0.2000 | 1.33x more hits |
+| Per-operation heap | 0 B/op, 0 allocs/op | 0 B/op, 0 allocs/op | no allocation change |
+| Frequency sketch | not applicable | 2,048 bytes (`CounterCount=4096`) | fixed/bounded |
+| Resident-hit fast path | not measured | 5.84 ns/op | zero allocations |
+
+Raw samples (`ns/op`, `hit-ratio`, `B/op`, `allocs/op`):
+
+```text
+baseline: 36.10 0.1500 0 0
+baseline: 36.36 0.1500 0 0
+baseline: 36.27 0.1500 0 0
+baseline: 36.76 0.1500 0 0
+baseline: 37.28 0.1500 0 0
+admission: 35.31 0.2000 0 0
+admission: 37.47 0.2000 0 0
+admission: 36.15 0.2000 0 0
+admission: 36.76 0.2000 0 0
+admission: 36.07 0.2000 0 0
+resident-hit: 5.69 0 0 0
+resident-hit: 5.84 0 0 0
+resident-hit: 6.01 0 0 0
+resident-hit: 5.60 0 0 0
+resident-hit: 5.95 0 0 0
+```
+
+The feature is deliberately opt-in. It improves scan resistance at a small
+CPU cost on misses and a fixed sketch-memory cost; existing caches and page
+indexes do not change behavior until they explicitly construct this type.
