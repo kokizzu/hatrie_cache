@@ -34693,34 +34693,45 @@ benchmark and checks.
 
 ## T-U34 Per-Space WAL Sync Policy Registry
 
-The registry resolves a normalized named-space override with a bounded default
-policy. This is a control-plane benchmark; it does not measure fsync or claim
-that a journal write became faster.
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The direct writer
+is a control, not a production WAL writer; the sync callback is a no-op. All
+paths measured zero allocations.
 
-| Workload | Samples (ns/op) | Median | Memory | Relative CPU |
+| Workload | Samples (ns/op) | Median | Syncs/op | Relative CPU |
 | --- | --- | ---: | ---: | ---: |
-| Registry `Resolve("orders")` | 12.89, 13.04, 12.93, 12.76, 12.12 | 12.89 | 0 B/op, 0 allocs/op | 1.80x slower than direct-map control |
-| Direct map lookup control | 7.35, 7.20, 7.09, 7.15, 7.07 | 7.15 | 0 B/op, 0 allocs/op | control |
+| Direct writer control | 0.254, 0.252, 0.245, 0.247, 0.249 | 0.249 | 0 | control |
+| Appender, `disabled` | 14.49, 14.24, 14.69, 14.85, 14.86 | 14.69 | 0 | 59.0x control |
+| Appender, `periodic` pending | 62.38, 62.58, 61.00, 61.64, 63.55 | 62.38 | 0 | 250x control |
+| Appender, `immediate` | 58.22, 57.64, 57.58, 56.72, 57.53 | 57.58 | 1 | 231x control |
 
-The registry overhead buys bounded admission, trimmed names, policy validation,
-default fallback, replacement, and concurrent snapshot support. The feature is
-opt-in and leaves the existing journal default unchanged. The clean remote
-`hatCache` baseline could not compile because of unrelated missing SQL symbols,
-so no end-to-end before/after throughput ratio is reported here.
+The overhead is the intentional cost of policy lookup, serialization, and
+durability bookkeeping. It is opt-in; existing journal paths pay none of this
+cost. The separate registry lookup baseline measured 11.86 ns/op versus a
+6.809 ns/op direct-map control, both with zero allocations.
 
 Raw output:
 
 ```text
-BenchmarkSpaceSyncPolicyResolve/registry-32         87594738  12.89 ns/op  0 B/op  0 allocs/op
-BenchmarkSpaceSyncPolicyResolve/registry-32         94854348  13.04 ns/op  0 B/op  0 allocs/op
-BenchmarkSpaceSyncPolicyResolve/registry-32         92442630  12.93 ns/op  0 B/op  0 allocs/op
-BenchmarkSpaceSyncPolicyResolve/registry-32         99242912  12.76 ns/op  0 B/op  0 allocs/op
-BenchmarkSpaceSyncPolicyResolve/registry-32         95105528  12.12 ns/op  0 B/op  0 allocs/op
-BenchmarkSpaceSyncPolicyResolve/direct-map-control-32 154543262  7.35 ns/op  0 B/op  0 allocs/op
-BenchmarkSpaceSyncPolicyResolve/direct-map-control-32 168774327  7.20 ns/op  0 B/op  0 allocs/op
-BenchmarkSpaceSyncPolicyResolve/direct-map-control-32 167660011  7.09 ns/op  0 B/op  0 allocs/op
-BenchmarkSpaceSyncPolicyResolve/direct-map-control-32 169858632  7.15 ns/op  0 B/op  0 allocs/op
-BenchmarkSpaceSyncPolicyResolve/direct-map-control-32 166275471  7.07 ns/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncAppenderBoundary/direct-writer-control-32  431080826  0.2544 ns/op  0 syncs/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncAppenderBoundary/direct-writer-control-32  477072434  0.2521 ns/op  0 syncs/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncAppenderBoundary/direct-writer-control-32  484667482  0.2448 ns/op  0 syncs/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncAppenderBoundary/direct-writer-control-32  465052992  0.2466 ns/op  0 syncs/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncAppenderBoundary/direct-writer-control-32  415525917  0.2490 ns/op  0 syncs/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncAppenderBoundary/disabled-32             8078923 14.49 ns/op  0 syncs/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncAppenderBoundary/disabled-32             8459082 14.24 ns/op  0 syncs/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncAppenderBoundary/disabled-32             8417355 14.69 ns/op  0 syncs/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncAppenderBoundary/disabled-32             8494087 14.85 ns/op  0 syncs/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncAppenderBoundary/disabled-32             8552824 14.86 ns/op  0 syncs/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncAppenderBoundary/periodic-pending-32     1888737 62.38 ns/op  0 syncs/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncAppenderBoundary/periodic-pending-32     1896880 62.58 ns/op  0 syncs/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncAppenderBoundary/periodic-pending-32     1964508 61.00 ns/op  0 syncs/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncAppenderBoundary/periodic-pending-32     1958654 61.64 ns/op  0 syncs/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncAppenderBoundary/periodic-pending-32     1924887 63.55 ns/op  0 syncs/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncAppenderBoundary/immediate-32            2101359 58.22 ns/op  2101359 syncs/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncAppenderBoundary/immediate-32            2073331 57.64 ns/op  2073331 syncs/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncAppenderBoundary/immediate-32            1993172 57.58 ns/op  1993172 syncs/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncAppenderBoundary/immediate-32            1989454 56.72 ns/op  1989454 syncs/op  0 B/op  0 allocs/op
+BenchmarkSpaceSyncAppenderBoundary/immediate-32            2094052 57.53 ns/op  2094052 syncs/op  0 B/op  0 allocs/op
 ```
 
 Reproduce with `make benchmark-tu34` and `make verify-tu34`.
