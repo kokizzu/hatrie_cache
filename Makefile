@@ -22808,3 +22808,6 @@ commit-chg16-space-changefeed:
 
 push-chg16-space-changefeed:
 	bash ./scripts/push-chg16-space-changefeed.sh
+
+bench-chu06-delete-bitmap:
+	bash ./scripts/benchmark-chu06-delete-bitmap.sh

@@ -1,5 +1,41 @@
 # Benchmark
 
+## CH-U06 Persistent Delete Bitmap
+
+Five samples on Linux/amd64, AMD Ryzen 9 5950X, with
+`-benchtime=20ms -benchmem -count=5`. The fixture contains 4,096 typed-table
+rows and logical deletes; the compact format stores a 32-byte physical-key
+fingerprint and 64 packed bitmap words instead of copying all keys.
+
+| Operation | Existing full patch state | Compact delete bitmap | Relative |
+| --- | ---: | ---: | ---: |
+| Encoded bytes | 32,205 | 579 | 55.6x smaller |
+| Warm marshal | 22,465-24,946 ns/op; 32,768 B/op; 1 alloc | 341.0-379.4 ns/op; 640 B/op; 1 alloc | about 67x faster |
+| Warm restore | 24,503-26,404 ns/op; 520 B/op; 2 allocs | 312.4-326.0 ns/op; 520 B/op; 2 allocs | about 80x faster |
+| Cold compact marshal | 22,465-24,946 ns/op | 67,943-71,349 ns/op; 640 B/op; 1 alloc | about 2.8x slower |
+
+Raw compact samples:
+
+```text
+Marshal warm: 365.2, 341.0, 365.4, 379.4, 377.3 ns/op; 640 B/op; 1 alloc/op
+Restore warm: 312.4, 326.0, 315.7, 313.6, 322.5 ns/op; 520 B/op; 2 allocs/op
+Marshal cold: 67943, 71349, 69091, 70961, 71054 ns/op; 640 B/op; 1 alloc/op
+snapshot_bytes: 579
+full_snapshot_bytes: 32205
+```
+
+Raw full-state samples from the same run:
+
+```text
+Marshal full: 23759, 22465, 24946, 24875, 24554 ns/op; 32768 B/op; 1 alloc/op
+Restore full: 25891, 24503, 25126, 26404, 25672 ns/op; 520 B/op; 2 allocs/op
+```
+
+The cold path pays the SHA-256 fingerprint rebuild once after physical row
+order changes. Repeated backup/checkpoint writes reuse the cached fingerprint;
+ordinary logical deletes do not invalidate it. The feature is opt-in, so the
+existing full-key snapshot and default table writes are unchanged.
+
 ## T-U10 journal-wide synchronous write quorum
 
 Environment: Linux/amd64, AMD Ryzen 9 5950X 16-Core Processor. Five samples

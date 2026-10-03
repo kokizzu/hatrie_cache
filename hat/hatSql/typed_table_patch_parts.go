@@ -88,6 +88,7 @@ func (table *TypedTable) compactTypedTablePatchPartsLocked() {
 	if state == nil || state.deletedCount == 0 {
 		return
 	}
+	table.invalidateTypedTableDeleteBitmapFingerprintLocked()
 	physicalRowsBefore := len(table.keys)
 	deletedRows := state.deletedCount
 	started := time.Time{}

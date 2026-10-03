@@ -459,6 +459,8 @@ type TypedTable struct {
 	byName               map[string]int
 	keys                 []string
 	positions            map[string]int
+	deleteFP             [32]byte
+	deleteFPValid        bool
 	generated            bool
 	generatedOrder       []int
 	columnar             typedTableColumnarCache
@@ -741,6 +743,7 @@ func (table *TypedTable) Upsert(key string, values []TypedTableValue) (TypedTabl
 	} else {
 		change.Operation = "INSERT"
 		index = len(table.keys)
+		table.invalidateTypedTableDeleteBitmapFingerprintLocked()
 		table.positions[key] = index
 		table.keys = append(table.keys, key)
 		if table.patchParts != nil {
@@ -798,6 +801,7 @@ func (table *TypedTable) deleteIndexLocked(index int) TypedTableChange {
 		table.scheduleTypedTablePatchCompactionLocked()
 		return change
 	}
+	table.invalidateTypedTableDeleteBitmapFingerprintLocked()
 	last := len(table.keys) - 1
 	if index != last {
 		moved := table.keys[last]
