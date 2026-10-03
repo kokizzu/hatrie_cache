@@ -32580,3 +32580,31 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+## TR-053 Unique HashIndex Small Vector
+
+The unique `HashIndex` now keeps up to 32 entries in a compact slice before
+promoting to its existing maps. The benchmark compares the pre-change map-only
+implementation with the adaptive representation using `-benchmem -count=5` on
+an AMD Ryzen 9 5950X.
+
+| Benchmark | Before median | After median | Improvement | Before memory | After memory | Before allocs | After allocs |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `BenchmarkTR053UniqueSmallUpsert` | 30.22 ns/op | 13.54 ns/op | 2.23x faster | 0 B/op | 0 B/op | 0 | 0 |
+| `BenchmarkTR053UniqueLargeUpsert` | 31.06 ns/op | 30.93 ns/op | 1.00x, within noise | 0 B/op | 0 B/op | 0 | 0 |
+| `BenchmarkTR053UniqueSmallBuild` | 1,290 ns/op | 500.7 ns/op | 2.58x faster | 1,968 B/op | 608 B/op | 9 | 2 |
+
+Raw before samples:
+
+```text
+BenchmarkTR053UniqueSmallUpsert: 30.22 29.71 30.38 30.36 28.94 ns/op
+BenchmarkTR053UniqueLargeUpsert: 29.04 31.07 29.90 31.06 31.07 ns/op
+BenchmarkTR053UniqueSmallBuild:  1306 1302 1290 1290 1279 ns/op, 1968 B/op, 9 allocs/op
+```
+
+Raw after samples:
+
+```text
+BenchmarkTR053UniqueSmallUpsert: 13.78 14.16 13.47 12.93 13.54 ns/op
+BenchmarkTR053UniqueLargeUpsert: 31.45 30.93 30.99 30.59 30.35 ns/op
+BenchmarkTR053UniqueSmallBuild:  517.4 528.0 488.2 491.2 500.7 ns/op, 608 B/op, 2 allocs/op
+```
