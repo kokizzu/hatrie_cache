@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	"hatrie_cache/hat/hatSchema"
 	"hatrie_cache/hat/hatSql"
 )
 
@@ -33,6 +34,110 @@ func newTR027TestSource(t *testing.T) *hatSql.RTreeSpatialSource {
 		}
 	}
 	return source
+}
+
+func TestTR027RTreeSpatialSourceBuildsFromCatalogDefinition(t *testing.T) {
+	definition := hatSchema.SpaceDefinition{
+		Name:    "points",
+		Version: 1,
+		Source: hatSchema.Source{
+			Name: "points",
+			Columns: []hatSchema.Column{
+				{Name: "latitude", Type: hatSchema.TypeNumber},
+				{Name: "longitude", Type: hatSchema.TypeNumber},
+				{Name: "kind", Type: hatSchema.TypeText},
+			},
+		},
+		Indexes: []hatSchema.IndexDefinition{{
+			Name:    "geo",
+			Kind:    hatSchema.IndexKindRTree,
+			Columns: []string{"latitude", "longitude"},
+		}},
+	}
+	catalog, err := hatSchema.NewSpaceCatalog([]hatSchema.SpaceDefinition{definition})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := catalog.NewRTreeSpatialSource("points", hatSql.RTreeSpatialSourceOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := source.Upsert("jakarta", hatSql.Row{"latitude": -6.2088, "longitude": 106.8456, "kind": "city"}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := hatSql.ExecuteSQLQueryContext(context.Background(), `
+FROM CACHE('points') AS p
+WHERE GEO_WITHIN_RADIUS(p.latitude, p.longitude, -6.2088, 106.8456, 1000)
+SELECT p.kind`, source, hatSql.SQLQueryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []hatSql.Row{{"kind": "city"}}; !reflect.DeepEqual(result.Rows, want) {
+		t.Fatalf("catalog-backed spatial rows = %#v, want %#v", result.Rows, want)
+	}
+}
+
+func TestTR027RTreeSpatialSourceCatalogValidation(t *testing.T) {
+	base := hatSchema.SpaceDefinition{
+		Name: "points",
+		Source: hatSchema.Source{
+			Name: "points",
+			Columns: []hatSchema.Column{
+				{Name: "latitude", Type: hatSchema.TypeNumber},
+				{Name: "longitude", Type: hatSchema.TypeNumber},
+			},
+		},
+	}
+	tests := []struct {
+		name       string
+		definition hatSchema.SpaceDefinition
+		options    hatSql.RTreeSpatialSourceOptions
+	}{
+		{name: "missing index", definition: base},
+		{
+			name: "wrong arity",
+			definition: func() hatSchema.SpaceDefinition {
+				definition := base
+				definition.Indexes = []hatSchema.IndexDefinition{{Name: "geo", Kind: hatSchema.IndexKindRTree, Columns: []string{"latitude"}}}
+				return definition
+			}(),
+		},
+		{
+			name: "ambiguous indexes",
+			definition: func() hatSchema.SpaceDefinition {
+				definition := base
+				definition.Indexes = []hatSchema.IndexDefinition{
+					{Name: "geo-a", Kind: hatSchema.IndexKindRTree, Columns: []string{"latitude", "longitude"}},
+					{Name: "geo-b", Kind: hatSchema.IndexKindRTree, Columns: []string{"latitude", "longitude"}},
+				}
+				return definition
+			}(),
+		},
+		{
+			name: "field mismatch",
+			definition: func() hatSchema.SpaceDefinition {
+				definition := base
+				definition.Indexes = []hatSchema.IndexDefinition{{Name: "geo", Kind: hatSchema.IndexKindRTree, Columns: []string{"latitude", "longitude"}}}
+				return definition
+			}(),
+			options: hatSql.RTreeSpatialSourceOptions{LatitudeField: "longitude"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := hatSchema.NewRTreeSpatialSourceFromSpaceDefinition(test.definition, test.options); err == nil {
+				t.Fatal("catalog-backed spatial constructor unexpectedly succeeded")
+			}
+		})
+	}
+	base.Indexes = []hatSchema.IndexDefinition{{Name: "geo", Kind: hatSchema.IndexKindRTree, Columns: []string{"latitude", "longitude"}}}
+	if _, err := hatSchema.NewRTreeSpatialSourceFromSpaceDefinition(base, hatSql.RTreeSpatialSourceOptions{}); err != nil {
+		t.Fatalf("definition convenience constructor error = %v", err)
+	}
+	base.Indexes = append(base.Indexes, hatSchema.IndexDefinition{Name: "geo-alt", Kind: hatSchema.IndexKindRTree, Columns: []string{"latitude", "longitude"}})
+	if _, err := hatSchema.NewRTreeSpatialSourceFromSpaceDefinition(base, hatSql.RTreeSpatialSourceOptions{RTreeIndexName: "geo-alt"}); err != nil {
+		t.Fatalf("named R-tree selection error = %v", err)
+	}
 }
 
 func TestTR027RTreeSpatialSourceUsesIndexAndPreservesPredicates(t *testing.T) {

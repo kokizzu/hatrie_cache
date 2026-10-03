@@ -34,8 +34,11 @@ type SQLGeoPredicate struct {
 // Rows whose coordinate fields are NULL or not indexable remain candidates so
 // normal SQL NULL and evaluation-error behavior is preserved.
 type RTreeSpatialSourceOptions struct {
-	SourceName     string
-	Name           string
+	SourceName string
+	Name       string
+	// RTreeIndexName selects the catalog R-tree declaration when a space has
+	// more than one spatial index.
+	RTreeIndexName string
 	LatitudeField  string
 	LongitudeField string
 	MaxEntries     int

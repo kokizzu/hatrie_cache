@@ -31697,6 +31697,19 @@ the full raw output and build-cost tradeoff are in
 | Full scan | 32,574,123 | 31,618,254 | 200,040 | 1.00x |
 | R-tree candidates | 10,010 | 6,737 | 35 | 3,254x faster |
 | R-tree build, 50k rows | 146,309,264 | 39,435,496 | 158,874 | one-time cost |
+
+The catalog wiring is measured separately because it runs once when a source
+is constructed, not once per query:
+
+| Constructor | Median ns/op | B/op | allocs/op | Relative setup time |
+| --- | ---: | ---: | ---: | ---: |
+| Direct `NewRTreeSpatialSource` | 426 | 1,248 | 8 | 1.00x |
+| Existing `SpaceCatalog` | 510 | 1,248 | 8 | 1.20x |
+| Standalone definition helper | 1,389 | 2,752 | 16 | 3.26x |
+
+The existing-catalog path removes repeated name/coordinate configuration while
+preserving the direct constructor's allocation profile. The standalone helper
+also validates one definition and is intended for startup configuration.
 # CH-046 Kafka Table Source
 
 Benchmark command:

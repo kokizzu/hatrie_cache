@@ -31,6 +31,39 @@ WHERE GEO_WITHIN_RADIUS(p.latitude, p.longitude, -6.2088, 106.8456, 200000)
 SELECT p.id`, source, hatSql.SQLQueryOptions{})
 ```
 
+### Named-space catalog wiring
+
+When the space already has a validated `hatSchema.SpaceCatalog`, the catalog
+declaration supplies the source name and ordered coordinate columns:
+
+```go
+catalog, err := hatSchema.NewSpaceCatalog([]hatSchema.SpaceDefinition{
+    {
+        Name: "points",
+        Source: hatSchema.Source{
+            Name: "points",
+            Columns: []hatSchema.Column{
+                {Name: "latitude", Type: hatSchema.TypeNumber},
+                {Name: "longitude", Type: hatSchema.TypeNumber},
+            },
+        },
+        Indexes: []hatSchema.IndexDefinition{{
+            Name: "geo", Kind: hatSchema.IndexKindRTree,
+            Columns: []string{"latitude", "longitude"},
+        }},
+    },
+})
+if err != nil {
+    return err
+}
+source, err := catalog.NewRTreeSpatialSource("points", hatSql.RTreeSpatialSourceOptions{})
+```
+
+The index columns are ordered as latitude then longitude. A catalog with more
+than one R-tree requires `RTreeIndexName`; the standalone
+`hatSchema.NewRTreeSpatialSourceFromSpaceDefinition` helper validates one
+definition and is intended for configuration loading rather than a hot path.
+
 Updates use the same key and deletes remove the row from the R-tree:
 
 ```go
@@ -70,12 +103,29 @@ The index build benchmark for the same 50,000 rows is 146,309,264 ns/op,
 allocations, not a retained-heap measurement; build once and reuse the source
 for the query win to amortize that cost.
 
+Catalog wiring is setup-only and does not run during query execution. Five
+sample medians for source construction were:
+
+| Constructor | Median ns/op | B/op | allocs/op | Relative setup time |
+| --- | ---: | ---: | ---: | ---: |
+| Direct `NewRTreeSpatialSource` | 426 | 1,248 | 8 | 1.00x |
+| Existing `SpaceCatalog` | 510 | 1,248 | 8 | 1.20x |
+| Standalone definition helper | 1,389 | 2,752 | 16 | 3.26x |
+
+The existing-catalog path is the default recommendation: it removes repeated
+name/column configuration while adding only about 84 ns and no extra retained
+allocation profile per source construction. The standalone helper pays for
+one-time schema validation and should be called once during startup.
+
 Raw five-sample output (`ns/op`, `B/op`, `allocs/op`):
 
 ```text
 Full scan: 30618686/31617664/200039, 32679497/31618254/200040, 32720365/31618244/200040, 32230665/31618296/200040, 32574123/31617928/200039
 R-tree query: 9734/6737/35, 10024/6737/35, 9998/6737/35, 10070/6737/35, 10010/6737/35
 R-tree build: 145828531/39435490/158874, 146577974/39435496/158874, 146309264/39435500/158874, 145186483/39435489/158874, 148924510/39435558/158875
+Catalog setup direct: 412.2/1248/8, 426.4/1248/8, 426.1/1248/8, 439.1/1248/8, 424.5/1248/8
+Catalog setup existing catalog: 493.0/1248/8, 527.8/1248/8, 527.5/1248/8, 510.1/1248/8, 484.5/1248/8
+Catalog setup definition: 1364/2752/16, 1322/2752/16, 1415/2752/16, 1399/2752/16, 1389/2752/16
 ```
 
 Run the reproducible checks with:
