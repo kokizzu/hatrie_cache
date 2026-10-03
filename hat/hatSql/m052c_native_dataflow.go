@@ -32,6 +32,14 @@ func (query *CompiledSQLQuery) CompileNativeDataflow() (*SQLDataflowExecutor, er
 }
 
 func validateNativeSQLDataflowQuery(query *sqlQuery) error {
+	return validateNativeSQLDataflowQueryMode(query, false)
+}
+
+func validateNativeSQLDataflowAutomaticOrderedQuery(query *sqlQuery) error {
+	return validateNativeSQLDataflowQueryMode(query, true)
+}
+
+func validateNativeSQLDataflowQueryMode(query *sqlQuery, allowUnboundedOrder bool) error {
 	if query == nil || query.from == nil {
 		return fmt.Errorf("%w: one source is required", ErrSQLNativeDataflowUnsupported)
 	}
@@ -61,7 +69,13 @@ func validateNativeSQLDataflowQuery(query *sqlQuery) error {
 		return fmt.Errorf("%w: query requires materialized state", ErrSQLNativeDataflowUnsupported)
 	}
 	if len(query.orderBy) != 0 {
-		if _, ok := nativeSQLDataflowOrderedPlanFor(query); !ok {
+		var ok bool
+		if allowUnboundedOrder && query.limit < 0 {
+			_, ok = nativeSQLDataflowUnboundedOrderedPlanFor(query)
+		} else {
+			_, ok = nativeSQLDataflowOrderedPlanFor(query)
+		}
+		if !ok {
 			return fmt.Errorf("%w: ordered query shape", ErrSQLNativeDataflowUnsupported)
 		}
 		return nil
@@ -103,7 +117,7 @@ func validateNativeSQLDataflowQuery(query *sqlQuery) error {
 type nativeSQLDataflowGroupPlan struct {
 	group               sqlExpr
 	projectionAggregate []int
-	aggregates           []sqlStreamAggregate
+	aggregates          []sqlStreamAggregate
 }
 
 type nativeSQLDataflowCompositeGroupPlan struct {
@@ -138,7 +152,21 @@ type nativeSQLDataflowOrderedPlan struct {
 }
 
 func nativeSQLDataflowOrderedPlanFor(query *sqlQuery) (nativeSQLDataflowOrderedPlan, bool) {
-	if query == nil || query.limit < 0 || query.limitWithTies || len(query.orderBy) == 0 || query.distinct || len(query.groupBy) != 0 || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || query.where.window != nil || sqlExprHasAggregate(query.where) || sqlExprHasCustomFunction(query.where, nil) {
+	if query == nil || query.limit < 0 {
+		return nativeSQLDataflowOrderedPlan{}, false
+	}
+	return nativeSQLDataflowOrderedPlanForAnyLimit(query)
+}
+
+func nativeSQLDataflowUnboundedOrderedPlanFor(query *sqlQuery) (nativeSQLDataflowOrderedPlan, bool) {
+	if query == nil || query.limit >= 0 {
+		return nativeSQLDataflowOrderedPlan{}, false
+	}
+	return nativeSQLDataflowOrderedPlanForAnyLimit(query)
+}
+
+func nativeSQLDataflowOrderedPlanForAnyLimit(query *sqlQuery) (nativeSQLDataflowOrderedPlan, bool) {
+	if query == nil || query.limitWithTies || len(query.orderBy) == 0 || query.distinct || len(query.groupBy) != 0 || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || query.where.window != nil || sqlExprHasAggregate(query.where) || sqlExprHasCustomFunction(query.where, nil) {
 		return nativeSQLDataflowOrderedPlan{}, false
 	}
 	if len(query.selects) == 0 {
@@ -503,6 +531,9 @@ func executeNativeSQLDataflow(ctx context.Context, query *sqlQuery, initial []SQ
 	if plan, ok := nativeSQLDataflowGroupedOrderedPlanFor(query); ok {
 		return executeNativeSQLDataflowGroupedOrdered(ctx, query, initial, plan)
 	}
+	if plan, ok := nativeSQLDataflowUnboundedOrderedPlanFor(query); ok {
+		return executeNativeSQLDataflowOrdered(ctx, query, initial, plan)
+	}
 	if plan, ok := nativeSQLDataflowOrderedPlanFor(query); ok {
 		return executeNativeSQLDataflowOrdered(ctx, query, initial, plan)
 	}
@@ -641,7 +672,7 @@ func executeNativeSQLDataflowOrdered(ctx context.Context, query *sqlQuery, initi
 		start = len(candidates.items)
 	}
 	end := len(candidates.items)
-	if query.limit < end-start {
+	if query.limit >= 0 && query.limit < end-start {
 		end = start + query.limit
 	}
 	columns := sqlColumns(query.selects)
@@ -930,7 +961,7 @@ func executeNativeSQLDataflowGroups(ctx context.Context, query *sqlQuery, initia
 			groupIndex = len(groups)
 			if isNull {
 				nullGroup = groupIndex
-		} else if stringValue, stringOK := value.(string); stringOK {
+			} else if stringValue, stringOK := value.(string); stringOK {
 				if stringIndexes == nil {
 					stringIndexes = make(map[string]int, len(initial))
 				}

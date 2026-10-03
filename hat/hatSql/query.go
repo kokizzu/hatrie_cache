@@ -2972,7 +2972,13 @@ func sqlTopNStreamable(query *sqlQuery) bool {
 }
 
 func sqlTopNStreamCapacity(query *sqlQuery, maxRows int) int {
-	if query.limit <= 0 || maxRows <= 0 {
+	if maxRows <= 0 {
+		return 0
+	}
+	if query.limit < 0 {
+		return maxRows
+	}
+	if query.limit == 0 {
 		return 0
 	}
 	if query.offset >= maxRows || query.limit > maxRows-query.offset {

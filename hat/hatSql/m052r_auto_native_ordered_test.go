@@ -68,7 +68,7 @@ func TestCompiledSQLAutomaticNativeOrderedPreservesCompositeTies(t *testing.T) {
 	}
 }
 
-func TestCompiledSQLAutomaticNativeOrderedKeepsUnboundedOrderOnFallback(t *testing.T) {
+func TestCompiledSQLAutomaticNativeOrderedUsesSafeFullOrderPath(t *testing.T) {
 	rows := []SQLRow{{"id": int64(1), "score": int64(10)}, {"id": int64(2), "score": int64(20)}}
 	query := "FROM CACHE('items') AS src SELECT src.id ORDER BY src.score DESC"
 	result, err := ExecuteSQLQueryContext(context.Background(), query, SQLSourceResolverFunc(func(string, string) ([]SQLRow, error) {
@@ -77,8 +77,8 @@ func TestCompiledSQLAutomaticNativeOrderedKeepsUnboundedOrderOnFallback(t *testi
 	if err != nil {
 		t.Fatalf("unbounded ordered query: %v", err)
 	}
-	if m052qPlanHasNode(result.Plan, "NATIVE DATAFLOW") {
-		t.Fatalf("unbounded plan unexpectedly used automatic native dataflow: %#v", result.Plan)
+	if !m052qPlanHasNode(result.Plan, "NATIVE DATAFLOW") {
+		t.Fatalf("unbounded plan = %#v, want NATIVE DATAFLOW", result.Plan)
 	}
 }
 

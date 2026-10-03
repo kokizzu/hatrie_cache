@@ -1032,6 +1032,12 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   ordering, and finite `LIMIT`/`OFFSET` use composite group state plus a bounded
   Top-N heap. Unsupported or ambiguous shapes retain the established executor;
   see [SQL_AUTO_NATIVE_COMPOSITE_GROUPED_ORDERED.md](SQL_AUTO_NATIVE_COMPOSITE_GROUPED_ORDERED.md).
+- [x] M052z Automatic safe unbounded ordered dataflow selection. Plain scalar
+  `ORDER BY` queries without a finite `LIMIT` use the existing full-capacity
+  native ordering heap when ordinary row-resolver eligibility holds; specialized
+  resolvers, `WITH TIES`, and richer SQL retain their established paths. See
+  [M052Z_AUTO_NATIVE_UNBOUNDED_ORDER.md](M052Z_AUTO_NATIVE_UNBOUNDED_ORDER.md)
+  and [BENCHMARK.md](BENCHMARK.md#m052z-automatic-native-unbounded-order).
 - [x] M065t SQL packed boolean predicate kernel. Direct comparisons against
   validated packed boolean columns use value and validity bitmaps without
   per-row interface materialization; legacy and unsupported paths retain the

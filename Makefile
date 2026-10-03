@@ -28638,3 +28638,33 @@ vet-m090d-native-source-snapshots:
 .PHONY: benchmark-m090d-native-source-snapshots
 benchmark-m090d-native-source-snapshots:
 	bash scripts/m090d-native-source-snapshots.sh benchmark
+.PHONY: format-m052z-unbounded-order test-m052z-unbounded-order
+format-m052z-unbounded-order:
+	bash scripts/m052z-unbounded-order.sh format
+
+test-m052z-unbounded-order:
+	bash scripts/m052z-unbounded-order.sh test
+
+.PHONY: test-m052z-unbounded-order-package
+test-m052z-unbounded-order-package:
+	bash scripts/m052z-unbounded-order.sh package
+
+.PHONY: benchmark-m052z-unbounded-order
+benchmark-m052z-unbounded-order:
+	bash scripts/m052z-unbounded-order.sh benchmark
+
+.PHONY: race-m052z-unbounded-order
+race-m052z-unbounded-order:
+	bash scripts/m052z-unbounded-order.sh race
+
+.PHONY: vet-m052z-unbounded-order
+vet-m052z-unbounded-order:
+	bash scripts/m052z-unbounded-order.sh vet
+
+.PHONY: m052z-status
+m052z-status:
+	bash scripts/m052z-commit-push.sh status
+
+.PHONY: m052z-commit-push
+m052z-commit-push:
+	bash scripts/m052z-commit-push.sh commit-push

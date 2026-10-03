@@ -23537,6 +23537,36 @@ win is primarily reduced remote materialization and transfer work, not a
 local row-map memory reduction. Unsupported query shapes and legacy resolvers
 use the existing full-row path. Reproduce with `make benchmark-m090c-projected-source`.
 
+<a id="m052z-automatic-native-unbounded-order"></a>
+## M052z Automatic Native Unbounded ORDER BY
+
+This benchmark compares the existing general executor with automatic native
+full ordering for a 4,096-row scalar query with a `WHERE` predicate and
+descending `ORDER BY`, but no finite `LIMIT`. Five `-benchmem` samples were
+collected with `make benchmark-m052z-unbounded-order` on Linux/amd64 with an
+AMD Ryzen 9 5950X.
+
+### Raw Samples
+
+| Path | ns/op samples | B/op samples | allocs/op samples |
+| --- | --- | --- | --- |
+| Before, automatic fallback | 7,531,478; 7,876,480; 7,735,440; 7,380,924; 7,549,009 | 3,807,879; 3,807,841; 3,807,844; 3,807,842; 3,807,841 | 20,516; 20,516; 20,516; 20,516; 20,516 |
+| After, forced fallback control | 7,670,577; 7,885,932; 8,067,010; 8,275,319; 8,344,872 | 3,807,882; 3,807,879; 3,807,842; 3,807,841; 3,807,884 | 20,516; 20,516; 20,516; 20,516; 20,516 |
+| After, automatic native full order | 6,200,514; 6,031,425; 5,930,780; 5,960,180; 5,792,144 | 2,071,840; 2,071,843; 2,071,841; 2,071,839; 2,071,840 | 12,319; 12,319; 12,319; 12,319; 12,319 |
+
+### Median Comparison
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Before automatic fallback | 7,549,009 | 3,807,842 | 20,516 | `1.00x` |
+| After forced fallback control | 8,067,010 | 3,807,879 | 20,516 | `0.94x` versus the before median |
+| After automatic native full order | 5,960,180 | 2,071,840 | 12,319 | `1.27x` faster; `1.84x` lower bytes; `1.67x` fewer allocations |
+
+The correctness regression covers unlimited ordering and `OFFSET`, comparing
+automatic native output with the forced general executor. `LIMIT 0`, finite
+Top-N, specialized resolvers, and unsupported SQL shapes remain on their
+existing paths. See [M052Z_AUTO_NATIVE_UNBOUNDED_ORDER.md](M052Z_AUTO_NATIVE_UNBOUNDED_ORDER.md).
+
 <a id="m090d-native-dataflow-source-snapshots"></a>
 ## M090d Native Dataflow Source Snapshots
 

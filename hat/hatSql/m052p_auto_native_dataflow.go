@@ -242,6 +242,9 @@ func sqlAutoNativeDataflowPlanDetail(query *sqlQuery, resolver SQLSourceResolver
 		return "automatic grouped batch execution", true
 	}
 	if sqlAutoNativeOrderedEligible(query, resolver, options) {
+		if query.limit < 0 {
+			return "automatic full-order batch execution", true
+		}
 		return "automatic ordered top-N batch execution", true
 	}
 	return "", false
@@ -251,14 +254,19 @@ func sqlAutoNativeOrderedEligible(query *sqlQuery, resolver SQLSourceResolver, o
 	if !sqlAutoNativeDataflowBaseEligible(query, resolver, options) {
 		return false
 	}
-	if query.limit < 0 || query.limitWithTies || len(query.orderBy) == 0 || query.distinct || len(query.groupBy) != 0 || query.having.kind != "" || query.limitBy != nil || sqlQueryHasWithFill(query) {
+	if query.limitWithTies || len(query.orderBy) == 0 || query.distinct || len(query.groupBy) != 0 || query.having.kind != "" || query.limitBy != nil || sqlQueryHasWithFill(query) {
 		return false
 	}
 	if sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || query.where.window != nil || sqlExprHasAggregate(query.where) || sqlExprHasCustomFunction(query.where, nil) {
 		return false
 	}
-	_, ok := nativeSQLDataflowOrderedPlanFor(query)
-	return ok && validateNativeSQLDataflowQuery(query) == nil
+	var ok bool
+	if query.limit < 0 {
+		_, ok = nativeSQLDataflowUnboundedOrderedPlanFor(query)
+	} else {
+		_, ok = nativeSQLDataflowOrderedPlanFor(query)
+	}
+	return ok && validateNativeSQLDataflowAutomaticOrderedQuery(query) == nil
 }
 
 func sqlAutoNativeDataflowBaseEligible(query *sqlQuery, resolver SQLSourceResolver, options SQLQueryOptions) bool {
