@@ -1468,6 +1468,9 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 	if sqlIndexedOrderStreamable(query, resolver) {
 		return executeSQLIndexedOrderStream(ctx, query, resolver, control, visit)
 	}
+	if handled, err := executeSQLPartitionedOrderStream(ctx, query, resolver, control, visit); handled {
+		return err
+	}
 	if sqlExternalSortStreamable(query, resolver, control) {
 		return executeSQLExternalSortStream(ctx, query, resolver, control, visit)
 	}

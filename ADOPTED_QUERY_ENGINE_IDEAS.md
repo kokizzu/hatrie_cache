@@ -790,3 +790,13 @@ details for repair and never silently counts stale or unapplied responses.
 **Remaining:** The embedding service still owns peer transport,
 authentication, retries, ordering, rollback, and wiring the coordinator into a
 real journal commit path.
+
+## Materialize M-U39: Ordered Partition SQL Streaming
+
+`hatSql.ExecuteSQLQueryRows` can opt into a k-way merge of independently
+ordered physical partitions through `PartitionedOrderedSourceResolver`. Direct
+single-source `ORDER BY ... LIMIT` streams stop at the requested page instead
+of flattening and globally sorting the logical source. Unsupported query shapes,
+missing ordered partitions, and non-binary collations retain the existing
+fallback. See [MZ039_PARTITIONED_ORDER_STREAM.md](MZ039_PARTITIONED_ORDER_STREAM.md)
+and [BENCHMARK.md](BENCHMARK.md#m-u39-ordered-partition-sql-streaming).

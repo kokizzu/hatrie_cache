@@ -22811,3 +22811,6 @@ push-chg16-space-changefeed:
 
 bench-chu06-delete-bitmap:
 	bash ./scripts/benchmark-chu06-delete-bitmap.sh
+
+bench-mz039-partitioned-order:
+	bash ./scripts/benchmark-mz039-partitioned-order.sh

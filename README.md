@@ -4804,3 +4804,15 @@ conflicting versions and version gaps are rejected, and the existing local
 watch path remains unchanged. The transport, membership, consensus ordering,
 and snapshot recovery remain caller-owned. See
 [TU50_CLUSTER_CONFIG_WATCH.md](TU50_CLUSTER_CONFIG_WATCH.md).
+
+## Ordered Partition SQL Streaming
+
+Resolvers that expose immutable, independently ordered partitions through
+`hatSql.PartitionedOrderedSourceResolver` can let direct streamed
+`ORDER BY ... LIMIT` queries use a bounded k-way merge. The default remains the
+existing path: unsupported query shapes, unavailable ordered partitions, and
+non-binary collations fall back automatically. See
+[MZ039_PARTITIONED_ORDER_STREAM.md](MZ039_PARTITIONED_ORDER_STREAM.md).
+
+Run `make bench-mz039-partitioned-order` for the focused CPU and allocation
+comparison.

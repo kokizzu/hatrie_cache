@@ -20012,6 +20012,25 @@ The reuse path is 1.45x faster, uses 1.84x fewer transient bytes, and makes
 1.40x fewer allocations. The change is internal to metadata snapshot creation;
 topology JSON, routing, and write-validation semantics are unchanged.
 
+## M-U39 Ordered Partition SQL Streaming
+
+Command: `make bench-mz039-partitioned-order`.
+
+This compares the existing streamed top-N fallback with the opt-in ordered
+partition merge for 16 partitions and 65,536 total rows, `ORDER BY score LIMIT
+64`, and the same `ExecuteSQLQueryRows` API. Five samples were run on Linux/amd64
+with an AMD Ryzen 9 5950X.
+
+| Path | Raw ns/op (5 runs) | Median ns/op | Median B/op | Median allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Existing streamed top-N fallback | 18,946,103; 18,861,964; 18,841,807; 18,436,368; 18,329,873 | 18,841,807 | 29,390,871 | 197,089 |
+| Ordered partition merge | 1,589,182; 1,796,690; 1,830,891; 1,695,793; 1,517,262 | 1,695,793 | 62,751 | 872 |
+
+The ordered merge is 11.11x faster, uses 468.37x fewer transient allocation
+bytes, and makes 226.02x fewer allocations. `B/op` measures Go allocation
+traffic, not process RSS; resolver-owned partition storage is outside the timed
+region. Existing resolvers and unsupported query shapes are unchanged.
+
 ## TopologyStore Ownership Fast Path
 
 Command: `make benchmark-t079-store-local-clean`.
