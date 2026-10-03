@@ -92,6 +92,38 @@ func ExecuteClusterWriteCommit(
 	commit ClusterWriteCommitCommitFunc,
 	abort ClusterWriteCommitAbortFunc,
 ) (ClusterWriteCommitResult, error) {
+	return executeClusterWriteCommit(ctx, nodes, proposal, prepare, commit, abort, nil)
+}
+
+// ExecuteClusterWriteCommitDurable runs the same two-phase protocol while
+// persisting coordinator phase transitions through recorder. The recorder is
+// written before each phase starts, so a restarted coordinator can list the
+// last safe phase or reconcile an indeterminate commit by transaction ID.
+// Existing ExecuteClusterWriteCommit callers remain entirely in-memory.
+func ExecuteClusterWriteCommitDurable(
+	ctx context.Context,
+	nodes []string,
+	proposal ClusterWriteCommitProposal,
+	prepare ClusterWriteCommitPrepareFunc,
+	commit ClusterWriteCommitCommitFunc,
+	abort ClusterWriteCommitAbortFunc,
+	recorder ClusterWriteCommitDecisionRecorder,
+) (ClusterWriteCommitResult, error) {
+	if recorder == nil {
+		return ClusterWriteCommitResult{Proposal: proposal}, ErrClusterWriteCommitDecisionInvalid
+	}
+	return executeClusterWriteCommit(ctx, nodes, proposal, prepare, commit, abort, recorder)
+}
+
+func executeClusterWriteCommit(
+	ctx context.Context,
+	nodes []string,
+	proposal ClusterWriteCommitProposal,
+	prepare ClusterWriteCommitPrepareFunc,
+	commit ClusterWriteCommitCommitFunc,
+	abort ClusterWriteCommitAbortFunc,
+	recorder ClusterWriteCommitDecisionRecorder,
+) (ClusterWriteCommitResult, error) {
 	proposal.TransactionID = strings.TrimSpace(proposal.TransactionID)
 	result := ClusterWriteCommitResult{Proposal: proposal}
 	if ctx == nil || proposal.TransactionID == "" || prepare == nil || commit == nil || abort == nil {
@@ -107,6 +139,9 @@ func ExecuteClusterWriteCommit(
 	}
 	if err := ctx.Err(); err != nil {
 		return result, errors.Join(ErrClusterWriteCommitPrepareFailed, err)
+	}
+	if err := recordClusterWriteCommitDecision(ctx, recorder, proposal, normalizedNodes, ClusterWriteCommitDecisionPreparing); err != nil {
+		return result, err
 	}
 
 	var prepareGroup sync.WaitGroup
@@ -144,12 +179,39 @@ func ExecuteClusterWriteCommit(
 				result.AbortedCount++
 			}
 		}
+		if err := recordClusterWriteCommitDecisionAfterPhase(ctx, recorder, proposal, normalizedNodes, ClusterWriteCommitDecisionAborted); err != nil {
+			prepareErrors = append(prepareErrors, err)
+		}
 		if len(abortErrors) > 0 {
 			prepareErrors = append(prepareErrors, abortErrors...)
 		}
 		return result, errors.Join(append([]error{ErrClusterWriteCommitPrepareFailed}, prepareErrors...)...)
 	}
 	result.Prepared = true
+	if err := recordClusterWriteCommitDecision(ctx, recorder, proposal, normalizedNodes, ClusterWriteCommitDecisionPrepared); err != nil {
+		abortErrors := abortClusterWriteCommitPrepared(context.WithoutCancel(ctx), normalizedNodes, proposal, result.Attempts, abort)
+		for index := range result.Attempts {
+			if result.Attempts[index].Aborted {
+				result.AbortedCount++
+			}
+		}
+		if abortRecordErr := recordClusterWriteCommitDecisionAfterPhase(ctx, recorder, proposal, normalizedNodes, ClusterWriteCommitDecisionAborted); abortRecordErr != nil {
+			abortErrors = append(abortErrors, abortRecordErr)
+		}
+		return result, errors.Join(append([]error{ErrClusterWriteCommitPrepareFailed, err}, abortErrors...)...)
+	}
+	if err := recordClusterWriteCommitDecision(ctx, recorder, proposal, normalizedNodes, ClusterWriteCommitDecisionCommitting); err != nil {
+		abortErrors := abortClusterWriteCommitPrepared(context.WithoutCancel(ctx), normalizedNodes, proposal, result.Attempts, abort)
+		for index := range result.Attempts {
+			if result.Attempts[index].Aborted {
+				result.AbortedCount++
+			}
+		}
+		if abortRecordErr := recordClusterWriteCommitDecisionAfterPhase(ctx, recorder, proposal, normalizedNodes, ClusterWriteCommitDecisionAborted); abortRecordErr != nil {
+			abortErrors = append(abortErrors, abortRecordErr)
+		}
+		return result, errors.Join(append([]error{ErrClusterWriteCommitDecisionPersist, err}, abortErrors...)...)
+	}
 
 	var commitGroup sync.WaitGroup
 	commitGroup.Add(len(result.Attempts))
@@ -178,10 +240,51 @@ func ExecuteClusterWriteCommit(
 	}
 	if len(commitErrors) > 0 || result.CommittedCount != len(result.Attempts) {
 		result.OutcomeUnknown = true
+		if err := recordClusterWriteCommitDecisionAfterPhase(ctx, recorder, proposal, normalizedNodes, ClusterWriteCommitDecisionIndeterminate); err != nil {
+			commitErrors = append(commitErrors, err)
+		}
 		return result, errors.Join(append([]error{ErrClusterWriteCommitOutcomeUnknown}, commitErrors...)...)
 	}
 	result.Committed = true
+	if err := recordClusterWriteCommitDecisionAfterPhase(ctx, recorder, proposal, normalizedNodes, ClusterWriteCommitDecisionCommitted); err != nil {
+		result.OutcomeUnknown = true
+		return result, errors.Join(ErrClusterWriteCommitOutcomeUnknown, err)
+	}
 	return result, nil
+}
+
+func recordClusterWriteCommitDecision(
+	ctx context.Context,
+	recorder ClusterWriteCommitDecisionRecorder,
+	proposal ClusterWriteCommitProposal,
+	nodes []string,
+	phase ClusterWriteCommitDecisionPhase,
+) error {
+	if recorder == nil {
+		return nil
+	}
+	decision := ClusterWriteCommitDecision{
+		Proposal: proposal,
+		Nodes:    append([]string(nil), nodes...),
+		Phase:    phase,
+	}
+	if err := recorder.Record(ctx, decision); err != nil {
+		return errors.Join(ErrClusterWriteCommitDecisionPersist, err)
+	}
+	return nil
+}
+
+func recordClusterWriteCommitDecisionAfterPhase(
+	ctx context.Context,
+	recorder ClusterWriteCommitDecisionRecorder,
+	proposal ClusterWriteCommitProposal,
+	nodes []string,
+	phase ClusterWriteCommitDecisionPhase,
+) error {
+	if recorder == nil {
+		return nil
+	}
+	return recordClusterWriteCommitDecision(context.WithoutCancel(ctx), recorder, proposal, nodes, phase)
 }
 
 func normalizeClusterWriteCommitNodes(nodes []string) ([]string, error) {

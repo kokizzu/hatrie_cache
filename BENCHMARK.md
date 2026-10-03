@@ -38641,6 +38641,57 @@ BenchmarkTU047ParticipantFileStore/load-32             160782    7306 ns/op  155
 
 See [T047G_DURABLE_PARTICIPANT_STATE.md](T047G_DURABLE_PARTICIPANT_STATE.md).
 
+<a id="t047h-durable-coordinator-decisions"></a>
+## T047h Durable Coordinator Decisions
+
+Commands:
+
+```text
+make benchmark-tu47-coordinator-decision
+```
+
+The before run uses a clean detached `origin/master` worktree. The after run
+uses the same `hatReplication` benchmark with the durable benchmark added.
+Both use Linux/amd64 on an AMD Ryzen 9 5950X. The existing coordinator is
+measured with `-benchtime=200ms -count=5`; the durable path uses one fresh
+transaction per sample because every phase intentionally fsyncs its decision.
+
+| Path | Median time | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | ---: |
+| Existing coordinator, before | 2,466 ns | 1,248 | 18 | Baseline |
+| Existing coordinator, after | 2,641 ns | 1,248 | 18 | 0.93x baseline time, same memory |
+| Durable coordinator, one transaction | 6.60 ms | 14,480 | 125 | About 2,700x slower; opt-in correctness cost |
+
+Raw before output:
+
+```text
+BenchmarkTU047ClusterWriteCommit-32  89035  2327 ns/op  1249 B/op  18 allocs/op
+BenchmarkTU047ClusterWriteCommit-32  94927  2446 ns/op  1248 B/op  18 allocs/op
+BenchmarkTU047ClusterWriteCommit-32  98445  2492 ns/op  1248 B/op  18 allocs/op
+BenchmarkTU047ClusterWriteCommit-32  89220  2517 ns/op  1248 B/op  18 allocs/op
+BenchmarkTU047ClusterWriteCommit-32  86539  2466 ns/op  1248 B/op  18 allocs/op
+```
+
+Raw after output:
+
+```text
+BenchmarkTU047ClusterWriteCommit-32  85501  2663 ns/op  1249 B/op 18 allocs/op
+BenchmarkTU047ClusterWriteCommit-32  90176  2617 ns/op  1248 B/op 18 allocs/op
+BenchmarkTU047ClusterWriteCommit-32  93020  2566 ns/op  1248 B/op 18 allocs/op
+BenchmarkTU047ClusterWriteCommit-32  89082  2641 ns/op  1248 B/op 18 allocs/op
+BenchmarkTU047ClusterWriteCommit-32  89709  2646 ns/op  1248 B/op 18 allocs/op
+BenchmarkTU047DurableClusterWriteCommit-32 1 44572403 ns/op 15440 B/op 127 allocs/op
+BenchmarkTU047DurableClusterWriteCommit-32 1 25543225 ns/op 14960 B/op 126 allocs/op
+BenchmarkTU047DurableClusterWriteCommit-32 1  5728276 ns/op 14480 B/op 125 allocs/op
+BenchmarkTU047DurableClusterWriteCommit-32 1  6596839 ns/op 13904 B/op 124 allocs/op
+BenchmarkTU047DurableClusterWriteCommit-32 1  5461469 ns/op 13408 B/op 122 allocs/op
+```
+
+The ordinary coordinator remains allocation-equivalent after the feature. The
+durable path is not a throughput optimization: it is a crash-recovery control
+plane API and should not be enabled for ordinary data-plane writes. Filesystem
+sync variance is expected and is why the durable samples are reported raw.
+
 <a id="c153e-partition-ownership-wire"></a>
 ## C153e Partition-Ownership Vote Wire Codec
 

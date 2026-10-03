@@ -797,6 +797,18 @@ fence persistence, and failed-replica repair remain caller-owned. See
 [TU10_JOURNAL_WRITE_QUORUM.md](TU10_JOURNAL_WRITE_QUORUM.md) and
 [BENCHMARK.md](BENCHMARK.md#t-u10-journal-wide-synchronous-write-quorum).
 
+## T-U47h: Durable Coordinator Decision Records
+
+T-U47h adds the opt-in `hatReplication.ExecuteClusterWriteCommitDurable` path
+and its bounded `ClusterWriteCommitDecisionFileStore`. Coordinator phases are
+persisted as deterministic CRC32C/private atomic records, so restart recovery
+can list `Committed`, `Aborted`, and `Indeterminate` transactions and reconcile
+the latter through the existing participant API. The legacy coordinator and
+ordinary writes retain the same allocation profile; filesystem sync cost is
+intentionally paid only by callers that opt into crash-recovery evidence. See
+[T047H_COORDINATOR_DECISION_DURABILITY.md](T047H_COORDINATOR_DECISION_DURABILITY.md)
+and [BENCHMARK.md](BENCHMARK.md#t047h-durable-coordinator-decisions).
+
 ## T-U13: Durable Cluster Membership
 
 T-U13 is adopted as the opt-in `hatTopology.MembershipJournal`. It persists

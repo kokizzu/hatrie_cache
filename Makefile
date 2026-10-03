@@ -28611,3 +28611,10 @@ benchmark-t204:
 
 benchmark-t206:
 	@bash ./scripts/benchmark-t206.sh
+.PHONY: test-tu47-coordinator-decision
+test-tu47-coordinator-decision:
+	bash scripts/test-tu47-coordinator-decision.sh
+
+.PHONY: benchmark-tu47-coordinator-decision
+benchmark-tu47-coordinator-decision:
+	bash scripts/benchmark-tu47-coordinator-decision.sh
