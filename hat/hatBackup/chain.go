@@ -34,6 +34,7 @@ type BackupChainPlan struct {
 type BackupRetentionPlan struct {
 	Chain              BackupChainPlan
 	Retain             int
+	KeepObjectBytes    int64
 	KeepBackupIDs      []string
 	DeleteBackupIDs    []string
 	KeepObjectHashes   []string
