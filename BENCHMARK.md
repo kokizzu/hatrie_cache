@@ -32580,3 +32580,22 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## T-U28: Connection Pool And Schema Lifecycle Triggers
+
+Five `-count=5` samples were collected on Linux/amd64 with
+`GOMAXPROCS=1`, `-cpu=1`, and `-benchmem` on an AMD Ryzen 9 5950X. The
+baseline is the clean pre-feature `BenchmarkConnectionPoolDo`; the feature
+run uses the same benchmark plus the new explicit schema notification path.
+
+| Workload | Baseline median | Feature median | Before/after ratio | Memory |
+| --- | ---: | ---: | ---: | --- |
+| Existing `ConnectionPool.Do` | 47.41 ns/op | 45.97 ns/op | 1.03x | 0 B/op, 0 allocs/op both |
+| `NotifySchemaReloaded`, one no-op hook | Not available before | 53.62 ns/op | New capability | 0 B/op, 0 allocs/op |
+
+The default pool hot path has no measured allocation regression. Lifecycle work
+is opt-in and is paid only on physical connection lifecycle boundaries or when
+the schema owner explicitly publishes a reload. Raw output is retained in
+[T028_BENCHMARK_BASELINE_RAW.txt](T028_BENCHMARK_BASELINE_RAW.txt) and
+[T028_BENCHMARK_RAW.txt](T028_BENCHMARK_RAW.txt). See
+[T028_CONNECTION_POOL_LIFECYCLE.md](T028_CONNECTION_POOL_LIFECYCLE.md).

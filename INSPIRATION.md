@@ -964,3 +964,11 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   four normalized `GROUP BY` keys use an inline linear index and promote to the
   existing map for larger groups; see [CHG02_SMALL_GROUP_INDEX.md](CHG02_SMALL_GROUP_INDEX.md)
   and [BENCHMARK.md](BENCHMARK.md#chg02-small-cardinality-group-by-index).
+
+### T-U28: Connection/schema lifecycle triggers
+
+- [x] Adopted the existing bounded `PeerLifecycleRegistry` contract in
+  `ConnectionPool`. Physical connection admission, close, pool shutdown, and
+  explicit schema reload notifications now share the same opt-in event stream;
+  nil lifecycle configuration preserves the zero-allocation default path. See
+  [T028_CONNECTION_POOL_LIFECYCLE.md](T028_CONNECTION_POOL_LIFECYCLE.md).

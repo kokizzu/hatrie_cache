@@ -1,0 +1,22 @@
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatPeer
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkConnectionPoolDo 	24302818	        48.79 ns/op	       0 B/op	       0 allocs/op
+BenchmarkConnectionPoolDo 	27117970	        45.97 ns/op	       0 B/op	       0 allocs/op
+BenchmarkConnectionPoolDo 	22435321	        47.36 ns/op	       0 B/op	       0 allocs/op
+BenchmarkConnectionPoolDo 	27077686	        43.93 ns/op	       0 B/op	       0 allocs/op
+BenchmarkConnectionPoolDo 	27421078	        43.79 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatPeer	6.131s
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatPeer
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkT028ConnectionPoolLifecycleNotify 	19807771	        58.66 ns/op	       0 B/op	       0 allocs/op
+BenchmarkT028ConnectionPoolLifecycleNotify 	22646266	        53.45 ns/op	       0 B/op	       0 allocs/op
+BenchmarkT028ConnectionPoolLifecycleNotify 	22664322	        53.62 ns/op	       0 B/op	       0 allocs/op
+BenchmarkT028ConnectionPoolLifecycleNotify 	22646635	        53.18 ns/op	       0 B/op	       0 allocs/op
+BenchmarkT028ConnectionPoolLifecycleNotify 	22626879	        61.32 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatPeer	6.462s

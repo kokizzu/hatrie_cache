@@ -22292,3 +22292,27 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: verify-t028 verify-t028-package verify-t028-compile verify-t028-race verify-t028-vet format-t028
+
+verify-t028:
+	bash ./scripts/verify-t028.sh test
+
+verify-t028-package:
+	bash ./scripts/verify-t028.sh package
+
+verify-t028-compile:
+	bash ./scripts/verify-t028.sh compile
+
+verify-t028-race:
+	bash ./scripts/verify-t028.sh race
+
+verify-t028-vet:
+	bash ./scripts/verify-t028.sh vet
+
+format-t028:
+	bash ./scripts/verify-t028.sh format
+
+.PHONY: benchmark-t028
+
+benchmark-t028:
+	bash ./scripts/benchmark-t028.sh
