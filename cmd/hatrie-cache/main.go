@@ -64,6 +64,7 @@ type config struct {
 	monitoringAsyncCommands              bool
 	monitoringAsyncCommandStatusCapacity int
 	rbacPolicyPath                       string
+	rbacCatalogPath                      string
 	diagnosticsProfiling                 bool
 	auditLogPath                         string
 	auditSuccessSampleRate               float64
@@ -213,6 +214,10 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		return nil
 	}
 	rbacPolicy, err := loadRBACPolicy(cfg.rbacPolicyPath)
+	if err != nil {
+		return err
+	}
+	rbacCatalog, err := loadRBACRoleCatalog(cfg.rbacCatalogPath)
 	if err != nil {
 		return err
 	}
@@ -453,6 +458,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		AsyncCommands:                    cfg.monitoringAsyncCommands,
 		AsyncCommandStatusCapacity:       cfg.monitoringAsyncCommandStatusCapacity,
 		RBACPolicy:                       rbacPolicy,
+		RBACCatalog:                      rbacCatalog,
 		DiagnosticsProfiling:             cfg.diagnosticsProfiling,
 		ReplicationAuthToken:             cfg.replicationAuthToken,
 		ReplicationAuthPreviousToken:     cfg.replicationAuthPreviousToken,
@@ -622,6 +628,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags.BoolVar(&cfg.monitoringAsyncCommands, "monitoring-async-commands", cfg.monitoringAsyncCommands, "enable opt-in asynchronous HTTP command admission")
 	flags.IntVar(&cfg.monitoringAsyncCommandStatusCapacity, "monitoring-async-command-status-capacity", hatriecache.DefaultMonitoringAsyncCommandStatusCapacity, "maximum retained HTTP async command statuses")
 	flags.StringVar(&cfg.rbacPolicyPath, "rbac-policy", cfg.rbacPolicyPath, "optional JSON role-based access policy; requires monitoring authentication")
+	flags.StringVar(&cfg.rbacCatalogPath, "rbac-catalog", cfg.rbacCatalogPath, "optional JSON role catalog snapshot; requires monitoring authentication")
 	flags.BoolVar(&cfg.diagnosticsProfiling, "diagnostics-profiling", cfg.diagnosticsProfiling, "enable authenticated bounded runtime profile capture")
 	flags.StringVar(&cfg.auditLogPath, "audit-log-path", "", "optional JSONL audit log path for dangerous monitoring API actions")
 	flags.Float64Var(&cfg.auditSuccessSampleRate, "audit-success-sample-rate", cfg.auditSuccessSampleRate, "sample rate for successful audit events; use 0 to retain all successes; failures are always retained")
@@ -743,6 +750,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		return config{}, errors.New("monitoring journal cursor secret must be at least 16 bytes")
 	}
 	cfg.rbacPolicyPath = strings.TrimSpace(cfg.rbacPolicyPath)
+	cfg.rbacCatalogPath = strings.TrimSpace(cfg.rbacCatalogPath)
 	cfg.replicationAuthToken = strings.TrimSpace(cfg.replicationAuthToken)
 	cfg.replicationAuthPreviousToken = strings.TrimSpace(cfg.replicationAuthPreviousToken)
 	now := time.Now()
@@ -754,6 +762,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	}
 	if cfg.rbacPolicyPath != "" && cfg.monitoringAuthToken == "" {
 		return config{}, errors.New("RBAC policy requires -monitoring-auth-token")
+	}
+	if cfg.rbacCatalogPath != "" && cfg.monitoringAuthToken == "" {
+		return config{}, errors.New("RBAC catalog requires -monitoring-auth-token")
 	}
 	if cfg.monitoringAsyncCommands {
 		if strings.TrimSpace(cfg.journalPath) == "" {
@@ -1217,6 +1228,9 @@ func validateConfigReferences(cfg config) error {
 	if _, err := loadRBACPolicy(cfg.rbacPolicyPath); err != nil {
 		return err
 	}
+	if _, err := loadRBACRoleCatalog(cfg.rbacCatalogPath); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -1262,6 +1276,34 @@ func loadRBACPolicy(path string) (hatAuth.Policy, error) {
 	return policy, nil
 }
 
+func loadRBACRoleCatalog(path string) (*hatAuth.RoleCatalog, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read RBAC catalog %s: %w", path, err)
+	}
+	decoder := stdjson.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var snapshot hatAuth.RoleCatalogSnapshot
+	if err := decoder.Decode(&snapshot); err != nil {
+		return nil, fmt.Errorf("parse RBAC catalog %s: %w", path, err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return nil, fmt.Errorf("parse RBAC catalog %s: multiple JSON values", path)
+	}
+	catalog, err := hatAuth.NewRoleCatalog(hatAuth.RoleCatalogOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("create RBAC catalog %s: %w", path, err)
+	}
+	if err := catalog.Restore(snapshot, 0); err != nil {
+		return nil, fmt.Errorf("restore RBAC catalog %s: %w", path, err)
+	}
+	return catalog, nil
+}
+
 func writeRedactedConfig(writer io.Writer, cfg config) error {
 	data, err := stdjson.MarshalIndent(redactedConfig(cfg), "", "  ")
 	if err != nil {
@@ -1288,6 +1330,7 @@ func redactedConfig(cfg config) map[string]interface{} {
 		"monitoring_async_commands":                cfg.monitoringAsyncCommands,
 		"monitoring_async_command_status_capacity": cfg.monitoringAsyncCommandStatusCapacity,
 		"rbac_policy":                              cfg.rbacPolicyPath,
+		"rbac_catalog":                             cfg.rbacCatalogPath,
 		"diagnostics_profiling":                    cfg.diagnosticsProfiling,
 		"audit_log_path":                           cfg.auditLogPath,
 		"audit_success_sample_rate":                cfg.auditSuccessSampleRate,
@@ -1795,6 +1838,10 @@ func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.C
 	if err != nil {
 		return nil, nil, err
 	}
+	rbacCatalog, err := loadRBACRoleCatalog(cfg.rbacCatalogPath)
+	if err != nil {
+		return nil, nil, err
+	}
 	options, err := grpcServerOptions(cfg)
 	if err != nil {
 		return nil, nil, err
@@ -1810,6 +1857,7 @@ func newGRPCServer(cfg config, trie *hatriecache.HatTrie, journal *hatriecache.C
 		AuthPreviousToken:                cfg.monitoringAuthPreviousToken,
 		AuthPreviousExpiresAt:            cfg.monitoringAuthPreviousExpiry,
 		RBACPolicy:                       rbacPolicy,
+		RBACCatalog:                      rbacCatalog,
 		ReplicationAuthToken:             cfg.replicationAuthToken,
 		ReplicationAuthPreviousToken:     cfg.replicationAuthPreviousToken,
 		ReplicationAuthPreviousExpiresAt: cfg.replicationAuthPreviousExpiry,

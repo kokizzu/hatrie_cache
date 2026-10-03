@@ -25,6 +25,46 @@ type Policy struct {
 	Roles      []Role              `json:"roles,omitempty"`
 }
 
+// Authorizer composes the legacy policy with the optional role catalog. When
+// both are configured, both sources must authorize the request. A zero value
+// preserves the legacy empty-policy allow-all compatibility behavior.
+type Authorizer struct {
+	Policy      Policy
+	RoleCatalog *RoleCatalog
+}
+
+// Authorize reports whether every configured authorization source allows the
+// request. A role catalog is opt-in and an empty legacy policy remains
+// disabled for compatibility.
+func (authorizer Authorizer) Authorize(principal, command, namespace, source string) bool {
+	return authorizer.AuthorizeRequest(principal, AuthorizationRequest{
+		Command:   command,
+		Namespace: namespace,
+		Source:    source,
+	})
+}
+
+// AuthorizeObject reports whether every configured authorization source allows
+// the request including its object selector.
+func (authorizer Authorizer) AuthorizeObject(principal, command, namespace, source, object string) bool {
+	return authorizer.AuthorizeRequest(principal, AuthorizationRequest{
+		Command:   command,
+		Namespace: namespace,
+		Source:    source,
+		Object:    object,
+	})
+}
+
+// AuthorizeRequest applies the legacy policy first, then the optional role
+// catalog. Requiring both prevents a broader legacy rule from bypassing a
+// narrower catalog grant.
+func (authorizer Authorizer) AuthorizeRequest(principal string, request AuthorizationRequest) bool {
+	if !authorizer.Policy.AuthorizeRequest(principal, request) {
+		return false
+	}
+	return authorizer.RoleCatalog == nil || authorizer.RoleCatalog.Authorize(principal, request)
+}
+
 // AuthorizationRequest contains the dimensions used by a policy rule. Object
 // is optional for legacy callers but is required when a matching rule has an
 // object selector.

@@ -27,11 +27,14 @@ func init() {
 }
 
 type CacheGRPCOptions struct {
-	NodeName                         string
-	AuthToken                        string
-	AuthPreviousToken                string
-	AuthPreviousExpiresAt            time.Time
-	RBACPolicy                       hatAuth.Policy
+	NodeName              string
+	AuthToken             string
+	AuthPreviousToken     string
+	AuthPreviousExpiresAt time.Time
+	RBACPolicy            hatAuth.Policy
+	// RBACCatalog optionally adds hierarchical roles, namespaces, and grants.
+	// It is disabled when nil, preserving the legacy policy behavior.
+	RBACCatalog                      *hatAuth.RoleCatalog
 	ReplicationAuthToken             string
 	ReplicationAuthPreviousToken     string
 	ReplicationAuthPreviousExpiresAt time.Time
@@ -442,7 +445,7 @@ func (server *CacheGRPCServer) authorizeGRPCCommand(ctx context.Context, request
 		}
 		return true
 	}
-	return server.options.RBACPolicy.AuthorizeObject(server.authenticatedPrincipal(ctx), normalizedCommand(request.Command), strings.TrimSpace(request.Key), "", strings.TrimSpace(request.Key))
+	return (hatAuth.Authorizer{Policy: server.options.RBACPolicy, RoleCatalog: server.options.RBACCatalog}).AuthorizeObject(server.authenticatedPrincipal(ctx), normalizedCommand(request.Command), strings.TrimSpace(request.Key), "", strings.TrimSpace(request.Key))
 }
 
 func (server *CacheGRPCServer) Snapshot(ctx context.Context, _ *hatriecachev1.SnapshotRequest) (*hatriecachev1.CommandResponse, error) {

@@ -32638,3 +32638,31 @@ it is opt-in and does not replace the faster read-only context lookup. Raw
 samples are in
 [`T032_BENCHMARK_RAW.txt`](T032_BENCHMARK_RAW.txt) and
 [`T032_BENCHMARK_BASELINE_RAW.txt`](T032_BENCHMARK_BASELINE_RAW.txt).
+
+## T-U33 RBAC catalog authorization
+
+Commands:
+
+```sh
+make verify-t033-baseline
+make verify-t033-after
+```
+
+Five samples with Linux/amd64 on an AMD Ryzen 9 5950X. The baseline measures
+the existing legacy policy and direct role-catalog paths; the feature measures
+the opt-in catalog authorizer and strict composed policy-plus-catalog path.
+Every path retained `0 B/op` and `0 allocs/op`.
+
+| Path | Median ns/op | B/op | allocs/op | Relative to direct catalog |
+| --- | ---: | ---: | ---: | ---: |
+| Legacy policy only | 76.42 | 0 | 0 | 0.49x |
+| Role catalog only | 155.1 | 0 | 0 | 1.00x |
+| Catalog authorizer | 158.6 | 0 | 0 | 1.02x |
+| Composed policy + catalog | 220.6 | 0 | 0 | 1.42x |
+
+The catalog authorizer adds about 2% CPU over the direct catalog call in this
+sample and no allocation cost. The composed mode is intentionally more costly
+because it requires both policy sources; it prevents a broad legacy grant from
+bypassing a narrower catalog grant. Raw output is in
+[`T033_BENCHMARK_RAW.txt`](T033_BENCHMARK_RAW.txt) and
+[`T033_BENCHMARK_BASELINE_RAW.txt`](T033_BENCHMARK_BASELINE_RAW.txt).

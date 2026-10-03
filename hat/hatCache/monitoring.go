@@ -78,8 +78,11 @@ type MonitoringOptions struct {
 	AuthPreviousExpiresAt time.Time
 	// IdentityProvider optionally authenticates monitoring requests with an
 	// external identity system such as OIDC or a trusted reverse proxy.
-	IdentityProvider                 hatAuth.IdentityProvider
-	RBACPolicy                       hatAuth.Policy
+	IdentityProvider hatAuth.IdentityProvider
+	RBACPolicy       hatAuth.Policy
+	// RBACCatalog optionally adds hierarchical roles, namespaces, and grants.
+	// It is disabled when nil, preserving the legacy policy behavior.
+	RBACCatalog                      *hatAuth.RoleCatalog
 	DiagnosticsProfiling             bool
 	ReplicationAuthToken             string
 	ReplicationAuthPreviousToken     string
@@ -1990,13 +1993,13 @@ func (handler *MonitoringHandler) rejectSQLRBACHTTP(w http.ResponseWriter, r *ht
 	}
 	principal := handler.monitoringRequestPrincipal(r)
 	if len(sources) == 0 {
-		if handler.options.RBACPolicy.AuthorizeObject(principal, "SQL", "", "", "") {
+		if handler.rbacAuthorizer().AuthorizeObject(principal, "SQL", "", "", "") {
 			return false
 		}
 	} else {
 		allowed := true
 		for _, source := range sources {
-			if !handler.options.RBACPolicy.AuthorizeObject(principal, "SQL", source, source, source) {
+			if !handler.rbacAuthorizer().AuthorizeObject(principal, "SQL", source, source, source) {
 				allowed = false
 				break
 			}
@@ -2019,7 +2022,11 @@ func (handler *MonitoringHandler) authorizeCommand(principal string, request Cac
 		}
 		return true
 	}
-	return handler.options.RBACPolicy.AuthorizeObject(principal, normalizedCommand(request.Command), strings.TrimSpace(request.Key), "", strings.TrimSpace(request.Key))
+	return handler.rbacAuthorizer().AuthorizeObject(principal, normalizedCommand(request.Command), strings.TrimSpace(request.Key), "", strings.TrimSpace(request.Key))
+}
+
+func (handler *MonitoringHandler) rbacAuthorizer() hatAuth.Authorizer {
+	return hatAuth.Authorizer{Policy: handler.options.RBACPolicy, RoleCatalog: handler.options.RBACCatalog}
 }
 
 func (handler *MonitoringHandler) rejectReplicationAuthHTTP(w http.ResponseWriter, r *http.Request, request CacheCommandRequest) bool {

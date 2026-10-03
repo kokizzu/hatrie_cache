@@ -1,0 +1,15 @@
+Command: make verify-t033-after
+Environment: Linux/amd64, AMD Ryzen 9 5950X 16-Core Processor, Go benchmark count=5
+
+BenchmarkT33AfterRoleCatalogAuthorizer-32      7458374   158.8 ns/op    0 B/op    0 allocs/op
+BenchmarkT33AfterRoleCatalogAuthorizer-32      7438208   158.6 ns/op    0 B/op    0 allocs/op
+BenchmarkT33AfterRoleCatalogAuthorizer-32      7531210   160.5 ns/op    0 B/op    0 allocs/op
+BenchmarkT33AfterRoleCatalogAuthorizer-32      7490638   155.2 ns/op    0 B/op    0 allocs/op
+BenchmarkT33AfterRoleCatalogAuthorizer-32      8128184   146.3 ns/op    0 B/op    0 allocs/op
+BenchmarkT33AfterComposedAuthorizer-32         5501396   220.2 ns/op    0 B/op    0 allocs/op
+BenchmarkT33AfterComposedAuthorizer-32         5524652   231.6 ns/op    0 B/op    0 allocs/op
+BenchmarkT33AfterComposedAuthorizer-32         4888652   242.5 ns/op    0 B/op    0 allocs/op
+BenchmarkT33AfterComposedAuthorizer-32         5088964   218.2 ns/op    0 B/op    0 allocs/op
+BenchmarkT33AfterComposedAuthorizer-32         4720140   220.6 ns/op    0 B/op    0 allocs/op
+
+PASS

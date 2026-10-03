@@ -1278,6 +1278,21 @@ Each batch member and each SQL source must be allowed. Authenticated internal
 replication commands continue to use the separate replication token and are
 not treated as client traffic.
 
+For hierarchical roles and named-space/function grants, pass a validated
+`hatAuth.RoleCatalogSnapshot` JSON file with `-rbac-catalog`:
+
+```
+hatrie-cache -monitoring-server -monitoring-auth-token alice \
+  -rbac-catalog /etc/hatrie-cache/rbac-catalog.json
+```
+
+The catalog file is rejected without monitoring authentication and is parsed
+with unknown-field, multiple-value, hierarchy, limit, and grant validation.
+When both `-rbac-policy` and `-rbac-catalog` are set, both policies must allow
+the request. Go embedders can pass the same in-memory catalog through
+`MonitoringOptions.RBACCatalog` and `CacheGRPCOptions.RBACCatalog`; catalog
+mutation and snapshot rollout remain caller-owned.
+
 ### Restore And Recovery Runbook
 
 Restore snapshot+journal data to a clean data directory, then start the node

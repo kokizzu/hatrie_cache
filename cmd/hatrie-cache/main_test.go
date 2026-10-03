@@ -32,6 +32,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	hatriecache "hatrie_cache"
+	"hatrie_cache/hat/hatAuth"
 	hatriecachev1 "hatrie_cache/internal/gen/hatriecache/v1"
 )
 
@@ -116,6 +117,60 @@ func TestParseConfigRBACPolicyPath(t *testing.T) {
 	}
 	_, err = parseConfig([]string{"-rbac-policy", path}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "monitoring-auth-token") {
+		t.Fatalf("parseConfig() error = %v, want monitoring authentication requirement", err)
+	}
+}
+
+func TestParseConfigRBACCatalogPathAndLoad(t *testing.T) {
+	catalog, err := hatAuth.NewRoleCatalog(hatAuth.RoleCatalogOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := catalog.CreateRole("admin", hatAuth.RoleSpec{Name: "reader", Owner: "admin"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := catalog.CreateNamespace("admin", hatAuth.NamespaceSpec{Name: "tenant-eu:orders", Owner: "admin"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := catalog.Grant("admin", hatAuth.RoleGrantSpec{
+		Role: "reader",
+		Rule: hatAuth.Rule{Commands: []string{"GETSTR"}, Namespaces: []string{"tenant-eu:orders"}, Objects: []string{"tenant-eu:orders"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := catalog.GrantRole("admin", "alice", "reader"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "rbac-catalog.json")
+	data, err := json.Marshal(catalog.Snapshot())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := parseConfig([]string{"-monitoring-auth-token", "alice", "-rbac-catalog", path}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parseConfig() error = %v", err)
+	}
+	if cfg.rbacCatalogPath != path {
+		t.Fatalf("rbacCatalogPath = %q, want %q", cfg.rbacCatalogPath, path)
+	}
+	if err := validateConfigReferences(cfg); err != nil {
+		t.Fatalf("validateConfigReferences() error = %v", err)
+	}
+	loaded, err := loadRBACRoleCatalog(path)
+	if err != nil {
+		t.Fatalf("loadRBACRoleCatalog() error = %v", err)
+	}
+	if !loaded.Authorize("alice", hatAuth.AuthorizationRequest{Command: "GETSTR", Namespace: "tenant-eu:orders", Object: "tenant-eu:orders"}) {
+		t.Fatal("loaded catalog should preserve authorization")
+	}
+	if loaded.Authorize("alice", hatAuth.AuthorizationRequest{Command: "SETSTR", Namespace: "tenant-eu:orders", Object: "tenant-eu:orders"}) {
+		t.Fatal("loaded catalog should deny an ungranted command")
+	}
+	if _, err := parseConfig([]string{"-rbac-catalog", path}, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "monitoring-auth-token") {
 		t.Fatalf("parseConfig() error = %v, want monitoring authentication requirement", err)
 	}
 }

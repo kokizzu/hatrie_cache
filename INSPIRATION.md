@@ -987,3 +987,13 @@ across continuations, never inherit across reused slots, and are cleared on
 completion or cancellation. The measured path removes per-step context
 allocation and most allocated bytes, with an explicit CPU lookup tradeoff;
 see [`T032_FIBER_LOCAL_STORAGE.md`](T032_FIBER_LOCAL_STORAGE.md).
+
+## T-U33: Tarantool-style function and space grants
+
+Adopted as an opt-in `hatAuth.Authorizer` composition layer. Existing legacy
+RBAC remains compatible, while a restored `RoleCatalog` can add hierarchical
+roles, named-space grants, and default-deny enforcement to both HTTP and gRPC
+command paths. The cache binary accepts a validated snapshot through
+`-rbac-catalog`; when both policy sources are configured, both must authorize.
+See [`T033_RBAC_CATALOG_AUTHORIZATION.md`](T033_RBAC_CATALOG_AUTHORIZATION.md)
+for the file format, security defaults, and benchmark results.

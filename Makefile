@@ -1022,6 +1022,15 @@ push-sql-vectorized:
 verify-inspiration:
 	sh ./scripts/verify-inspiration.sh
 
+verify-t033-baseline:
+	bash ./scripts/benchmark-t033-rbac.sh baseline
+
+verify-t033-after:
+	bash ./scripts/benchmark-t033-rbac.sh after
+
+verify-t033-benchmark:
+	bash ./scripts/benchmark-t033-rbac.sh all
+
 test-sql-two-level:
 	sh ./scripts/test-sql-two-level.sh
 
