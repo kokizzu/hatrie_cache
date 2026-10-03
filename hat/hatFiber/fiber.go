@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -127,6 +128,9 @@ type fiber struct {
 	ctx           context.Context
 	id            uint64
 	slot          int
+	locals        map[any]any
+	localMu       sync.RWMutex
+	localID       atomic.Uint64
 	running       bool
 	parked        bool
 	wakePending   bool
@@ -256,6 +260,9 @@ func (scheduler *Scheduler) Spawn(parent context.Context, step Step) (uint64, er
 	fiber.step = step
 	fiber.ctx = parent
 	fiber.id = scheduler.nextID
+	fiber.localMu.Lock()
+	fiber.localID.Store(fiber.id)
+	fiber.localMu.Unlock()
 	scheduler.pushLocked(fiber)
 	scheduler.active++
 	scheduler.ready.Signal()
@@ -458,6 +465,16 @@ func (scheduler *Scheduler) finishCanceledLocked(fiber *fiber) {
 }
 
 func (scheduler *Scheduler) releaseFiberLocked(fiber *fiber) {
+	fiber.localMu.Lock()
+	if len(fiber.locals) > maxRetainedLocalEntries {
+		fiber.locals = nil
+	} else {
+		for key := range fiber.locals {
+			delete(fiber.locals, key)
+		}
+	}
+	fiber.localID.Store(0)
+	fiber.localMu.Unlock()
 	fiber.step = nil
 	fiber.ctx = nil
 	fiber.running = false

@@ -32614,3 +32614,27 @@ Parked-channel, condition, semaphore, wait-group, close, and cancellation
 behavior is covered by repeated package and race tests. Raw output is in
 [`T031_BENCHMARK_RAW.txt`](T031_BENCHMARK_RAW.txt) and
 [`T031_BENCHMARK_BASELINE_RAW.txt`](T031_BENCHMARK_BASELINE_RAW.txt).
+
+## T-U32 Fiber-local storage
+
+Commands:
+
+```sh
+make verify-t032-baseline
+make verify-t032-raw
+```
+
+Five samples with `GOMAXPROCS=1`, Linux/amd64, AMD Ryzen 9 5950X. The
+pre-change control uses `context.WithValue` for a per-step set plus lookup;
+the feature stores a typed value in the active fiber slot.
+
+| Workload | Pre-change context | Fiber local | Relative result |
+| --- | ---: | ---: | --- |
+| Set plus Get | 39.62 ns/op, 55 B/op, 1 alloc/op | 48.97 ns/op, 7 B/op, 0 alloc/op | 1.24x slower CPU, 7.86x lower bytes |
+| Warm Get | 4.391 ns/op, 0 B/op, 0 alloc/op | 16.20 ns/op, 0 B/op, 0 alloc/op | 3.69x slower CPU, equal memory |
+
+The feature is retained because its purpose is allocation/retention reduction;
+it is opt-in and does not replace the faster read-only context lookup. Raw
+samples are in
+[`T032_BENCHMARK_RAW.txt`](T032_BENCHMARK_RAW.txt) and
+[`T032_BENCHMARK_BASELINE_RAW.txt`](T032_BENCHMARK_BASELINE_RAW.txt).

@@ -4777,3 +4777,11 @@ For resumable workflows that need nonblocking waits, use the opt-in
 [`hat/hatFiber`](hat/hatFiber) coordination primitives. See
 [`T031_FIBER_COORDINATION.md`](T031_FIBER_COORDINATION.md) for channels,
 conditions, semaphores, wait groups, close semantics, and measurements.
+
+## Fiber-local storage
+
+Use the opt-in typed [`hatFiber.Local[T]`](hat/hatFiber) when continuation
+state should follow one fiber without allocating a new context value on every
+step. Values are isolated from other fibers and cleared before slot reuse. See
+[`T032_FIBER_LOCAL_STORAGE.md`](T032_FIBER_LOCAL_STORAGE.md) for lifecycle
+semantics and the measured CPU/memory tradeoff.

@@ -1,0 +1,16 @@
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatFiber
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkT032ContextWithValueSetGetBaseline 	27753357	        41.02 ns/op	      56 B/op	       1 allocs/op
+BenchmarkT032ContextWithValueSetGetBaseline 	28999796	        38.62 ns/op	      55 B/op	       1 allocs/op
+BenchmarkT032ContextWithValueSetGetBaseline 	31526943	        39.06 ns/op	      55 B/op	       1 allocs/op
+BenchmarkT032ContextWithValueSetGetBaseline 	25046592	        44.10 ns/op	      55 B/op	       1 allocs/op
+BenchmarkT032ContextWithValueSetGetBaseline 	31441099	        39.62 ns/op	      55 B/op	       1 allocs/op
+BenchmarkT032ContextValueGetBaseline        	289487886	         4.785 ns/op	       0 B/op	       0 allocs/op
+BenchmarkT032ContextValueGetBaseline        	288714428	         4.140 ns/op	       0 B/op	       0 allocs/op
+BenchmarkT032ContextValueGetBaseline        	290245664	         4.140 ns/op	       0 B/op	       0 allocs/op
+BenchmarkT032ContextValueGetBaseline        	267065389	         4.391 ns/op	       0 B/op	       0 allocs/op
+BenchmarkT032ContextValueGetBaseline        	251045458	         4.512 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatFiber	14.345s

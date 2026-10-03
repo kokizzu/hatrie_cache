@@ -979,3 +979,11 @@ buffered channels, conditions, semaphores, and wait groups park continuations
 without occupying workers; close and cancellation remove parked fibers. See
 [`T031_FIBER_COORDINATION.md`](T031_FIBER_COORDINATION.md) for semantics and
 benchmarks.
+
+## T-U32: Tarantool-style fiber-local storage
+
+Adopted as opt-in typed `hatFiber.Local[T]` state. Values follow one fiber
+across continuations, never inherit across reused slots, and are cleared on
+completion or cancellation. The measured path removes per-step context
+allocation and most allocated bytes, with an explicit CPU lookup tradeoff;
+see [`T032_FIBER_LOCAL_STORAGE.md`](T032_FIBER_LOCAL_STORAGE.md).

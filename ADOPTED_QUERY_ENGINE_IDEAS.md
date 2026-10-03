@@ -746,3 +746,13 @@ bounded FIFO queue, reuse fixed worker and fiber slots, and preserve existing
 coordination for resumable workflows, plus semaphores and wait groups. The
 primitive layer is separate from `hatPipeline.Channel`, and its atomic
 predicate-check plus park operation prevents lost wakeups.
+
+## T-U32: Fiber-local storage
+
+Adopted as opt-in typed `hatFiber.Local[T]` storage. Values are keyed by the
+Local pointer, isolated per fiber, cleared on completion/cancellation before
+slot reuse, and protected by per-fiber ownership generations. It reduces
+per-step `context.WithValue` allocation and bytes at the cost of slower lookup;
+existing context behavior remains unchanged. See
+[T032_FIBER_LOCAL_STORAGE.md](T032_FIBER_LOCAL_STORAGE.md) and
+[BENCHMARK.md](BENCHMARK.md#t-u32-fiber-local-storage).

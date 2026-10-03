@@ -1,0 +1,26 @@
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatFiber
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkT032ContextWithValueSetGetBaseline 	28997826	        41.17 ns/op	      55 B/op	       1 allocs/op
+BenchmarkT032ContextWithValueSetGetBaseline 	28223996	        39.96 ns/op	      56 B/op	       1 allocs/op
+BenchmarkT032ContextWithValueSetGetBaseline 	30268700	        37.21 ns/op	      56 B/op	       1 allocs/op
+BenchmarkT032ContextWithValueSetGetBaseline 	31809159	        40.03 ns/op	      56 B/op	       1 allocs/op
+BenchmarkT032ContextWithValueSetGetBaseline 	31703973	        39.97 ns/op	      56 B/op	       1 allocs/op
+BenchmarkT032ContextValueGetBaseline        	256403760	         4.302 ns/op	       0 B/op	       0 allocs/op
+BenchmarkT032ContextValueGetBaseline        	252589002	         4.484 ns/op	       0 B/op	       0 allocs/op
+BenchmarkT032ContextValueGetBaseline        	303641524	         4.247 ns/op	       0 B/op	       0 allocs/op
+BenchmarkT032ContextValueGetBaseline        	290982206	         4.272 ns/op	       0 B/op	       0 allocs/op
+BenchmarkT032ContextValueGetBaseline        	260951802	         3.938 ns/op	       0 B/op	       0 allocs/op
+BenchmarkT032FiberLocalSetGet               	23875767	        47.98 ns/op	       7 B/op	       0 allocs/op
+BenchmarkT032FiberLocalSetGet               	24199548	        48.97 ns/op	       7 B/op	       0 allocs/op
+BenchmarkT032FiberLocalSetGet               	19731159	        53.58 ns/op	       7 B/op	       0 allocs/op
+BenchmarkT032FiberLocalSetGet               	22636636	        48.93 ns/op	       7 B/op	       0 allocs/op
+BenchmarkT032FiberLocalSetGet               	23774042	        49.34 ns/op	       7 B/op	       0 allocs/op
+BenchmarkT032FiberLocalGet                  	75425488	        16.20 ns/op	       0 B/op	       0 allocs/op
+BenchmarkT032FiberLocalGet                  	75225100	        17.20 ns/op	       0 B/op	       0 allocs/op
+BenchmarkT032FiberLocalGet                  	76097433	        15.82 ns/op	       0 B/op	       0 allocs/op
+BenchmarkT032FiberLocalGet                  	76892305	        16.20 ns/op	       0 B/op	       0 allocs/op
+BenchmarkT032FiberLocalGet                  	76674160	        15.71 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatFiber	26.426s
