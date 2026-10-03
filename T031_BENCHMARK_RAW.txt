@@ -1,0 +1,13 @@
+T031 feature benchmark: fiber-aware channel round trip
+command: go test ./hat/hatFiber -run ^$ -bench ^BenchmarkT031FiberChannelRoundTrip$ -benchmem -count=5
+goos: linux
+goarch: amd64
+pkg: hatrie_cache/hat/hatFiber
+cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkT031FiberChannelRoundTrip-32    	76166073	        15.10 ns/op	       0 B/op	       0 allocs/op
+BenchmarkT031FiberChannelRoundTrip-32    	79550233	        15.07 ns/op	       0 B/op	       0 allocs/op
+BenchmarkT031FiberChannelRoundTrip-32    	78597336	        15.07 ns/op	       0 B/op	       0 allocs/op
+BenchmarkT031FiberChannelRoundTrip-32    	78214080	        15.09 ns/op	       0 B/op	       0 allocs/op
+BenchmarkT031FiberChannelRoundTrip-32    	80419876	        14.62 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	hatrie_cache/hat/hatFiber	5.978s

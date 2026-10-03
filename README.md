@@ -4771,3 +4771,9 @@ For many small resumable workflows with a bounded worker budget, use the
 opt-in [`hat/hatFiber`](hat/hatFiber) package. See
 [`T030_COOPERATIVE_FIBER_SCHEDULER.md`](T030_COOPERATIVE_FIBER_SCHEDULER.md)
 for the continuation API, cancellation semantics, and benchmark tradeoffs.
+## Fiber coordination
+
+For resumable workflows that need nonblocking waits, use the opt-in
+[`hat/hatFiber`](hat/hatFiber) coordination primitives. See
+[`T031_FIBER_COORDINATION.md`](T031_FIBER_COORDINATION.md) for channels,
+conditions, semaphores, wait groups, close semantics, and measurements.

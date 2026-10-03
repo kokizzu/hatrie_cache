@@ -32598,3 +32598,19 @@ The steady-state path is the intended service configuration: keep one
 scheduler alive and call `WaitIdle` between batches. Raw output is preserved in
 [`T030_BENCHMARK_RAW.txt`](T030_BENCHMARK_RAW.txt) and
 [`T030_BENCHMARK_BASELINE_RAW.txt`](T030_BENCHMARK_BASELINE_RAW.txt).
+## T-U31 Fiber Coordination
+
+Five-sample `-benchmem` run on AMD Ryzen 9 5950X, Linux amd64; one integer
+buffered round trip per iteration. The reference uses the existing
+`hatPipeline.Channel` with the same workload.
+
+| Operation | Hatrie fiber primitive | Existing pipeline channel | Hatrie / reference | Result |
+| --- | ---: | ---: | ---: | --- |
+| CPU | 15.07 ns/op | 89.58 ns/op | 0.17x | 5.95x faster |
+| Memory | 0 B/op | 0 B/op | 1.00x | unchanged |
+| Allocations | 0 allocs/op | 0 allocs/op | 1.00x | unchanged |
+
+Parked-channel, condition, semaphore, wait-group, close, and cancellation
+behavior is covered by repeated package and race tests. Raw output is in
+[`T031_BENCHMARK_RAW.txt`](T031_BENCHMARK_RAW.txt) and
+[`T031_BENCHMARK_BASELINE_RAW.txt`](T031_BENCHMARK_BASELINE_RAW.txt).

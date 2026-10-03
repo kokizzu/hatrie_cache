@@ -972,3 +972,10 @@ and `WaitIdle` reuse. It deliberately does not alter the existing pipeline
 schedulers or pretend to provide stackful suspension. See
 [`T030_COOPERATIVE_FIBER_SCHEDULER.md`](T030_COOPERATIVE_FIBER_SCHEDULER.md)
 for API, tests, and measured tradeoffs.
+## T-U31: Tarantool-style fiber coordination
+
+Adopted as opt-in `hat/hatFiber` coordination primitives. Signals, typed
+buffered channels, conditions, semaphores, and wait groups park continuations
+without occupying workers; close and cancellation remove parked fibers. See
+[`T031_FIBER_COORDINATION.md`](T031_FIBER_COORDINATION.md) for semantics and
+benchmarks.

@@ -48,9 +48,11 @@ type Options struct {
 // supplied to Spawn with the scheduler context. Context methods should be
 // checked by long-running steps before returning their next continuation.
 type Context struct {
-	scheduler context.Context
-	fiber     context.Context
-	id        uint64
+	schedulerCtx context.Context
+	fiberCtx     context.Context
+	scheduler    *Scheduler
+	fiberState   *fiber
+	id           uint64
 }
 
 // Context returns the context supplied to Spawn. Use Err to observe both this
@@ -59,24 +61,24 @@ func (ctx *Context) Context() context.Context {
 	if ctx == nil {
 		return nil
 	}
-	return ctx.fiber
+	return ctx.fiberCtx
 }
 
 // Deadline delegates to the context supplied to Spawn.
 func (ctx *Context) Deadline() (deadline time.Time, ok bool) {
-	if ctx == nil || ctx.fiber == nil {
+	if ctx == nil || ctx.fiberCtx == nil {
 		return time.Time{}, false
 	}
-	return ctx.fiber.Deadline()
+	return ctx.fiberCtx.Deadline()
 }
 
 // Done delegates to the context supplied to Spawn. Scheduler cancellation is
 // reported by Err at Step boundaries.
 func (ctx *Context) Done() <-chan struct{} {
-	if ctx == nil || ctx.fiber == nil {
+	if ctx == nil || ctx.fiberCtx == nil {
 		return nil
 	}
-	return ctx.fiber.Done()
+	return ctx.fiberCtx.Done()
 }
 
 // Err reports cancellation of either the fiber or its scheduler.
@@ -84,23 +86,23 @@ func (ctx *Context) Err() error {
 	if ctx == nil {
 		return nil
 	}
-	if ctx.fiber != nil {
-		if err := ctx.fiber.Err(); err != nil {
+	if ctx.fiberCtx != nil {
+		if err := ctx.fiberCtx.Err(); err != nil {
 			return err
 		}
 	}
-	if ctx.scheduler != nil {
-		return ctx.scheduler.Err()
+	if ctx.schedulerCtx != nil {
+		return ctx.schedulerCtx.Err()
 	}
 	return nil
 }
 
 // Value delegates value lookup to the context supplied to Spawn.
 func (ctx *Context) Value(key any) any {
-	if ctx == nil || ctx.fiber == nil {
+	if ctx == nil || ctx.fiberCtx == nil {
 		return nil
 	}
-	return ctx.fiber.Value(key)
+	return ctx.fiberCtx.Value(key)
 }
 
 // ID returns the stable identifier assigned by Spawn.
@@ -111,11 +113,26 @@ func (ctx *Context) ID() uint64 {
 	return ctx.id
 }
 
+// Await parks the current fiber until signal wakes it, then resumes next.
+// The current Step must return the result of Await immediately.
+func (ctx Context) Await(signal *Signal, next Step) (Step, error) {
+	if ctx.scheduler == nil || ctx.fiberState == nil || signal == nil || next == nil {
+		return nil, ErrCoordinationInvalid
+	}
+	return signal.wait(ctx, next)
+}
+
 type fiber struct {
-	step Step
-	ctx  context.Context
-	id   uint64
-	slot int
+	step          Step
+	ctx           context.Context
+	id            uint64
+	slot          int
+	running       bool
+	parked        bool
+	wakePending   bool
+	cancelPending bool
+	waitSignal    *Signal
+	waitNext      Step
 }
 
 // Stats is a point-in-time scheduler snapshot.
@@ -123,6 +140,7 @@ type Stats struct {
 	Active    int
 	Queued    int
 	Running   int
+	Parked    int
 	Completed uint64
 	Yielded   uint64
 	Canceled  uint64
@@ -197,7 +215,7 @@ func NewScheduler(parent context.Context, options Options) (*Scheduler, error) {
 		scheduler.fibers[index].slot = index
 	}
 	scheduler.ready = sync.NewCond(&scheduler.mu)
-	scheduler.stop = context.AfterFunc(ctx, scheduler.wake)
+	scheduler.stop = context.AfterFunc(ctx, scheduler.cancelParked)
 	for range options.Workers {
 		scheduler.workers.Add(1)
 		go scheduler.run()
@@ -255,6 +273,7 @@ func (scheduler *Scheduler) Stats() Stats {
 		Active:    scheduler.active,
 		Queued:    scheduler.size,
 		Running:   scheduler.running,
+		Parked:    scheduler.parkedCountLocked(),
 		Completed: scheduler.completed,
 		Yielded:   scheduler.yielded,
 		Canceled:  scheduler.canceled,
@@ -269,7 +288,7 @@ func (scheduler *Scheduler) Cancel() {
 		return
 	}
 	scheduler.cancel()
-	scheduler.wake()
+	scheduler.cancelParked()
 }
 
 // Close rejects new fibers and drains fibers already admitted.
@@ -280,6 +299,7 @@ func (scheduler *Scheduler) Close() {
 	scheduler.mu.Lock()
 	if !scheduler.closed {
 		scheduler.closed = true
+		scheduler.discardParkedLocked()
 		scheduler.ready.Broadcast()
 	}
 	scheduler.mu.Unlock()
@@ -361,13 +381,14 @@ func (scheduler *Scheduler) run() {
 			return
 		}
 		fiber := scheduler.popLocked()
+		fiber.running = true
 		scheduler.running++
 		scheduler.mu.Unlock()
 
 		var next Step
 		var err error
 		if scheduler.fiberErr(fiber) == nil {
-			next, err = fiber.step(Context{scheduler: scheduler.ctx, fiber: fiber.ctx, id: fiber.id})
+			next, err = fiber.step(Context{schedulerCtx: scheduler.ctx, fiberCtx: fiber.ctx, scheduler: scheduler, fiberState: fiber, id: fiber.id})
 		}
 		shouldCancel := scheduler.finishStep(fiber, next, err)
 		if shouldCancel {
@@ -384,9 +405,20 @@ func (scheduler *Scheduler) finishStep(fiber *fiber, next Step, err error) bool 
 		scheduler.mu.Unlock()
 	}()
 	scheduler.running--
+	fiber.running = false
 
-	if scheduler.fiberErr(fiber) != nil {
+	if fiber.cancelPending || scheduler.fiberErr(fiber) != nil || errors.Is(err, ErrSchedulerClosed) {
 		scheduler.finishCanceledLocked(fiber)
+		return false
+	}
+	if fiber.wakePending {
+		fiber.wakePending = false
+		scheduler.pushLocked(fiber)
+		scheduler.yielded++
+		scheduler.ready.Signal()
+		return false
+	}
+	if fiber.parked {
 		return false
 	}
 	if err != nil {
@@ -428,6 +460,12 @@ func (scheduler *Scheduler) finishCanceledLocked(fiber *fiber) {
 func (scheduler *Scheduler) releaseFiberLocked(fiber *fiber) {
 	fiber.step = nil
 	fiber.ctx = nil
+	fiber.running = false
+	fiber.parked = false
+	fiber.wakePending = false
+	fiber.cancelPending = false
+	fiber.waitSignal = nil
+	fiber.waitNext = nil
 	scheduler.free[scheduler.freeN] = fiber.slot
 	scheduler.freeN++
 }
@@ -439,6 +477,16 @@ func (scheduler *Scheduler) fiberErr(fiber *fiber) error {
 		}
 	}
 	return scheduler.ctx.Err()
+}
+
+func (scheduler *Scheduler) parkedCountLocked() int {
+	parked := 0
+	for index := range scheduler.fibers {
+		if scheduler.fibers[index].parked {
+			parked++
+		}
+	}
+	return parked
 }
 
 func (scheduler *Scheduler) discardLocked() {
@@ -467,4 +515,31 @@ func (scheduler *Scheduler) wake() {
 	scheduler.mu.Lock()
 	scheduler.ready.Broadcast()
 	scheduler.mu.Unlock()
+}
+
+func (scheduler *Scheduler) cancelParked() {
+	scheduler.mu.Lock()
+	scheduler.discardParkedLocked()
+	scheduler.ready.Broadcast()
+	scheduler.mu.Unlock()
+}
+
+func (scheduler *Scheduler) discardParkedLocked() {
+	for index := range scheduler.fibers {
+		fiber := &scheduler.fibers[index]
+		if !fiber.parked {
+			continue
+		}
+		if fiber.waitSignal != nil {
+			fiber.waitSignal.removeWaiter(fiber, fiber.id)
+		}
+		fiber.parked = false
+		fiber.waitSignal = nil
+		fiber.waitNext = nil
+		if fiber.running {
+			fiber.cancelPending = true
+			continue
+		}
+		scheduler.finishCanceledLocked(fiber)
+	}
 }

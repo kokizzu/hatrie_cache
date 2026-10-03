@@ -740,3 +740,9 @@ The new `hat/hatFiber` package adopts Tarantool's cooperative execution idea
 for resumable query-adjacent workflows. Continuations yield explicitly onto a
 bounded FIFO queue, reuse fixed worker and fiber slots, and preserve existing
 `hatPipeline` behavior by remaining opt-in.
+## T-U31: Fiber-aware coordination
+
+`hat/hatFiber` now supplies nonblocking typed channels and condition-like
+coordination for resumable workflows, plus semaphores and wait groups. The
+primitive layer is separate from `hatPipeline.Channel`, and its atomic
+predicate-check plus park operation prevents lost wakeups.

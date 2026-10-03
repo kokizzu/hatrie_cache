@@ -22311,3 +22311,22 @@ benchmark-t030-feature-raw:
 	bash ./scripts/verify-t030.sh benchmark-feature-raw
 benchmark-t030-reference-raw:
 	bash ./scripts/verify-t030.sh benchmark-reference-raw
+.PHONY: verify-t031 verify-t031-package verify-t031-race verify-t031-vet verify-t031-full format-t031 benchmark-t031 benchmark-t031-feature-raw benchmark-t031-reference-raw
+verify-t031:
+	bash ./scripts/verify-t031.sh unit
+verify-t031-package:
+	bash ./scripts/verify-t031.sh package
+verify-t031-race:
+	bash ./scripts/verify-t031.sh race
+verify-t031-vet:
+	bash ./scripts/verify-t031.sh vet
+verify-t031-full:
+	bash ./scripts/verify-t031.sh full
+format-t031:
+	bash ./scripts/verify-t031.sh format
+benchmark-t031:
+	bash ./scripts/verify-t031.sh benchmark
+benchmark-t031-feature-raw:
+	bash ./scripts/verify-t031.sh benchmark-feature-raw
+benchmark-t031-reference-raw:
+	bash ./scripts/verify-t031.sh benchmark-reference-raw
