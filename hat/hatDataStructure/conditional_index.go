@@ -101,27 +101,7 @@ func (index *ConditionalFunctionalIndex[T, K]) Contains(key K, id uint64) bool {
 	if index == nil {
 		return false
 	}
-	index.index.mu.RLock()
-	defer index.index.mu.RUnlock()
-	posting, ok := index.index.postings[key]
-	if !ok {
-		return false
-	}
-	if posting.first == id {
-		return true
-	}
-	if posting.rest == nil {
-		return false
-	}
-	if posting.rest.first == id {
-		return true
-	}
-	for _, candidate := range posting.rest.rest {
-		if candidate == id {
-			return true
-		}
-	}
-	return false
+	return index.index.containsFunctionalID(key, id)
 }
 
 // Len returns the number of admitted IDs.
