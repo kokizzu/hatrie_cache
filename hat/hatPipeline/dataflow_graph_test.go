@@ -84,6 +84,76 @@ func TestDataflowGraphSnapshotQueriesAndOrder(t *testing.T) {
 	}
 }
 
+func TestDataflowGraphTopologicalOrderRemainsDetachedAcrossCacheAndMutation(t *testing.T) {
+	graph, err := NewDataflowGraph(DataflowGraphOptions{MaxNodes: 8, MaxEdges: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"source", "sink", "later"} {
+		if err := graph.AddNode(DataflowNode{ID: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := graph.AddEdge(DataflowEdge{From: "source", To: "sink"}); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := graph.TopologicalOrder()
+	if err != nil {
+		t.Fatal(err)
+	}
+	first[0] = "caller-mutated"
+	second, err := graph.TopologicalOrder()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"later", "source", "sink"}; !reflect.DeepEqual(second, want) {
+		t.Fatalf("cached order = %v, want %v", second, want)
+	}
+
+	if err := graph.AddEdge(DataflowEdge{From: "sink", To: "later"}); err != nil {
+		t.Fatal(err)
+	}
+	third, err := graph.TopologicalOrder()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"source", "sink", "later"}; !reflect.DeepEqual(third, want) {
+		t.Fatalf("invalidated order = %v, want %v", third, want)
+	}
+
+	if err := graph.AddNode(DataflowNode{ID: "aaa"}); err != nil {
+		t.Fatal(err)
+	}
+	fourth, err := graph.TopologicalOrder()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"aaa", "source", "sink", "later"}; !reflect.DeepEqual(fourth, want) {
+		t.Fatalf("node-add order = %v, want %v", fourth, want)
+	}
+	if err := graph.RemoveEdge(DataflowEdge{From: "sink", To: "later"}); err != nil {
+		t.Fatal(err)
+	}
+	fifth, err := graph.TopologicalOrder()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"aaa", "later", "source", "sink"}; !reflect.DeepEqual(fifth, want) {
+		t.Fatalf("edge-remove order = %v, want %v", fifth, want)
+	}
+	if err := graph.RemoveNode("source"); err != nil {
+		t.Fatal(err)
+	}
+	sixth, err := graph.TopologicalOrder()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"aaa", "later", "sink"}; !reflect.DeepEqual(sixth, want) {
+		t.Fatalf("node-remove order = %v, want %v", sixth, want)
+	}
+}
+
 func TestDataflowGraphRejectsInvalidEdgesAndCapacity(t *testing.T) {
 	graph, err := NewDataflowGraph(DataflowGraphOptions{MaxNodes: 2, MaxEdges: 1})
 	if err != nil {
