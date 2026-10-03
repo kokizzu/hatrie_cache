@@ -22,6 +22,7 @@ security guidance before exposing it on a network.
 - Session-local `CREATE/DROP/REFRESH PROJECTION` with source-version-guarded exact hits: [CH011_PROJECTION_DDL.md](CH011_PROJECTION_DDL.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-011-projection-ddl)
 - Opt-in cost-based projection recommendations comparing observed query savings with caller-supplied build and refresh costs: [CH012_PROJECTION_ADVISOR_COST.md](CH012_PROJECTION_ADVISOR_COST.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-012-projection-advisor-cost)
 - SQL index-advisor observations and covering-index recommendations: [SQL_INDEX_ADVISOR.md](SQL_INDEX_ADVISOR.md)
+- Opt-in bounded index strategy hints and deterministic strategy inspection: [TU26_INDEX_HINTS.md](TU26_INDEX_HINTS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#t-u26-index-strategy-hints)
 - SQL index rebuild progress and cooperative retry: [SQL_INDEX_REBUILD_PROGRESS.md](SQL_INDEX_REBUILD_PROGRESS.md)
 - Opt-in background SQL index rebuild worker: [SQL_INDEX_REBUILD_PROGRESS.md](SQL_INDEX_REBUILD_PROGRESS.md)
 - Opt-in SQL multikey array membership indexes: [SQL_MULTIKEY_INDEX.md](SQL_MULTIKEY_INDEX.md)

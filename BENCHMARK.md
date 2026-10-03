@@ -32580,3 +32580,37 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## T-U26 Index Strategy Hints
+
+Commands:
+
+```sh
+make round33-index-hints-baseline-benchmark
+make round33-index-hints-benchmark
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is a
+manual linear scan over 64 strategy descriptors, targeting the last entry.
+The catalog is opt-in and already populated before the timer starts.
+
+| Workload | Baseline median ns/op | Catalog median ns/op | CPU improvement | Baseline B/op | Catalog B/op | Baseline allocs/op | Catalog allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Named resolve, owned result | 74.70 | 74.30 | 1.01x | 0 | 16 | 0 | 1 |
+| Named `ResolveInto`, reused result | 74.70 | 43.07 | 1.73x faster | 0 | 0 | 0 | 0 |
+
+Raw samples:
+
+| Workload | Samples ns/op |
+| --- | --- |
+| Manual scan | 72.85, 79.59, 80.20, 73.29, 74.70 |
+| Catalog `Resolve` | 80.46, 74.32, 72.29, 73.41, 74.30 |
+| Catalog `ResolveInto` | 43.18, 43.07, 40.80, 43.77, 40.95 |
+| Catalog `Suggest` | 993.1, 1002, 975.2, 1032, 1022 |
+| Catalog `SuggestInto` | 876.5, 939.1, 852.8, 964.0, 909.7 |
+
+`Suggest` measured 1,002 ns/op, 96 B/op, and 2 allocs/op for one matching
+candidate. Reusing the destination with `SuggestInto` measured 909.7 ns/op,
+0 B/op, and 0 allocs/op. These are planner/catalog operations, not ordinary
+index reads or writes; the feature remains disabled unless a caller registers
+and consults the catalog.
