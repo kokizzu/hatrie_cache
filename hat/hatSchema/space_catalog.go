@@ -37,6 +37,7 @@ type IndexDefinition struct {
 	Kind       IndexKind `json:"kind"`
 	Columns    []string  `json:"columns,omitempty"`
 	Expression string    `json:"expression,omitempty"`
+	Predicate  string    `json:"predicate,omitempty"`
 	Unique     bool      `json:"unique,omitempty"`
 }
 
@@ -208,7 +209,10 @@ func normalizeSpaceDefinition(definition SpaceDefinition) (SpaceDefinition, erro
 			if declared.Expression == "" {
 				return SpaceDefinition{}, fmt.Errorf("%w: functional index %q requires an expression", ErrSpaceCatalogInvalid, declared.Name)
 			}
+		} else if strings.TrimSpace(declared.Predicate) != "" {
+			return SpaceDefinition{}, fmt.Errorf("%w: conditional index %q must be functional", ErrSpaceCatalogInvalid, declared.Name)
 		}
+		declared.Predicate = strings.TrimSpace(declared.Predicate)
 		declared.Columns = normalizeIndexColumns(declared.Columns)
 		if declared.Kind != IndexKindFunctional && len(declared.Columns) == 0 {
 			return SpaceDefinition{}, fmt.Errorf("%w: index %q requires columns", ErrSpaceCatalogInvalid, declared.Name)

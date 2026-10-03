@@ -18,6 +18,8 @@ var (
 	ErrMaterializedSourceFunctionalIndexDependenciesRequired = errors.New("hatSchema: materialized source functional index dependencies are required")
 	ErrMaterializedSourceFunctionalIndexEvaluatorRequired    = errors.New("hatSchema: materialized source functional index evaluator is required")
 	ErrMaterializedSourceFunctionalIndexNameConflict         = errors.New("hatSchema: materialized source functional index name conflicts with an existing index")
+	ErrMaterializedSourceConditionalPredicateRequired        = errors.New("hatSchema: conditional functional index predicate is required")
+	ErrMaterializedSourceConditionalMatcherRequired          = errors.New("hatSchema: conditional functional index matcher is required")
 )
 
 type GeneratedValue func(Row) (interface{}, error)
@@ -26,6 +28,14 @@ type GeneratedValue func(Row) (interface{}, error)
 // Evaluators should be deterministic and read-only; the source passes a row
 // copy so an accidental mutation cannot alter stored data.
 type FunctionalIndexEvaluator func(Row) (interface{}, error)
+
+// ConditionalFunctionalIndexOptions declares the predicate metadata and
+// matcher for an opt-in conditional functional index. Predicate is descriptive
+// planner metadata; Matches is the authoritative row admission function.
+type ConditionalFunctionalIndexOptions struct {
+	Predicate string
+	Matches   func(Row) (bool, error)
+}
 
 type DerivedColumn struct {
 	Name      string
@@ -81,6 +91,20 @@ func (adapter SQLResolverAdapter) SQLJSONIndexStats(key string, fields ...string
 		return provider.SQLJSONIndexStats(key, fields...)
 	}
 	return hatSql.JSONIndexStats{}, false, nil
+}
+
+// SQLConditionalIndexMetadata exposes maintained conditional-index
+// declarations to planner and explain consumers without enabling an unsafe
+// automatic lookup path.
+func (adapter SQLResolverAdapter) SQLConditionalIndexMetadata(key string) ([]hatSql.SQLConditionalIndexMetadata, bool, error) {
+	if source := adapter.Sources[strings.ToLower(key)]; source != nil {
+		metadata := source.ConditionalIndexMetadata()
+		return metadata, len(metadata) > 0, nil
+	}
+	if provider, ok := adapter.Base.(hatSql.SQLConditionalIndexMetadataResolver); ok {
+		return provider.SQLConditionalIndexMetadata(key)
+	}
+	return nil, false, nil
 }
 
 // SQLJSONIndexValueEstimate exposes one exact posting-list size to the SQL
@@ -140,7 +164,9 @@ type CoveringIndexBuildReport struct {
 type FunctionalIndexBuildReport struct {
 	Name         string
 	Dependencies []string
+	Predicate    string
 	Rows         int
+	IndexedRows  int
 	Attempts     int
 }
 
@@ -154,6 +180,8 @@ type materializedCoveringIndex struct {
 type materializedFunctionalIndex struct {
 	dependencies []string
 	evaluator    FunctionalIndexEvaluator
+	predicate    string
+	matches      func(Row) (bool, error)
 	positions    map[string][]int
 }
 
@@ -227,7 +255,17 @@ func (source *MaterializedSource) Insert(row Row) (Row, error) {
 			if index == nil || index.evaluator == nil {
 				continue
 			}
-			value, err := index.evaluator(cloneRow(materialized))
+			candidate := cloneRow(materialized)
+			if index.matches != nil {
+				include, err := index.matches(candidate)
+				if err != nil {
+					return nil, fmt.Errorf("hatSchema: match conditional functional index %q: %w", name, err)
+				}
+				if !include {
+					continue
+				}
+			}
+			value, err := index.evaluator(candidate)
 			if err != nil {
 				return nil, fmt.Errorf("hatSchema: evaluate functional index %q: %w", name, err)
 			}
@@ -255,7 +293,10 @@ func (source *MaterializedSource) Insert(row Row) (Row, error) {
 		if index == nil {
 			continue
 		}
-		key := functionalKeys[name]
+		key, ok := functionalKeys[name]
+		if !ok {
+			continue
+		}
 		index.positions[key] = append(index.positions[key], position)
 	}
 	source.generation++
@@ -282,6 +323,61 @@ func (source *MaterializedSource) HasIndex(field string) bool {
 	}
 	source.mu.RUnlock()
 	return indexed
+}
+
+// DropIndex removes one maintained secondary, covering, or functional index.
+// It does not change stored rows and reports whether an index was removed.
+func (source *MaterializedSource) DropIndex(name string) bool {
+	if source == nil {
+		return false
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	source.mu.Lock()
+	defer source.mu.Unlock()
+	removed := false
+	if _, ok := source.indexedFields[name]; ok {
+		delete(source.indexedFields, name)
+		delete(source.indexes, name)
+		removed = true
+	}
+	if _, ok := source.coveringIndexes[name]; ok {
+		delete(source.coveringIndexes, name)
+		removed = true
+	}
+	if _, ok := source.functionalIndexes[name]; ok {
+		delete(source.functionalIndexes, name)
+		removed = true
+	}
+	if removed {
+		source.indexStatsCache = nil
+	}
+	return removed
+}
+
+// ConditionalIndexMetadata returns cloned planner metadata for maintained
+// conditional functional indexes in deterministic name order.
+func (source *MaterializedSource) ConditionalIndexMetadata() []hatSql.SQLConditionalIndexMetadata {
+	if source == nil {
+		return nil
+	}
+	source.mu.RLock()
+	metadata := make([]hatSql.SQLConditionalIndexMetadata, 0, len(source.functionalIndexes))
+	for name, index := range source.functionalIndexes {
+		if index == nil || index.predicate == "" {
+			continue
+		}
+		metadata = append(metadata, hatSql.SQLConditionalIndexMetadata{
+			Name:      name,
+			Fields:    append([]string(nil), index.dependencies...),
+			Predicate: index.predicate,
+		})
+	}
+	source.mu.RUnlock()
+	sort.Slice(metadata, func(left, right int) bool { return metadata[left].Name < metadata[right].Name })
+	return metadata
 }
 
 // IndexStats returns current cardinality and posting-distribution statistics
@@ -544,6 +640,25 @@ func (source *MaterializedSource) BuildSecondaryIndex(field string) (SecondaryIn
 // the source is scanned; a concurrent insert causes a generation-checked retry.
 // The index is maintained for subsequent inserts after publication.
 func (source *MaterializedSource) BuildFunctionalIndex(name string, dependencies []string, evaluator FunctionalIndexEvaluator) (FunctionalIndexBuildReport, error) {
+	return source.buildFunctionalIndex(name, dependencies, evaluator, ConditionalFunctionalIndexOptions{})
+}
+
+// BuildConditionalFunctionalIndex builds and atomically installs an equality
+// index that admits only rows matching options.Matches. The predicate string is
+// published as planner metadata, but this method never changes ordinary SQL
+// index selection; callers must prove predicate implication before use.
+func (source *MaterializedSource) BuildConditionalFunctionalIndex(name string, dependencies []string, options ConditionalFunctionalIndexOptions, evaluator FunctionalIndexEvaluator) (FunctionalIndexBuildReport, error) {
+	options.Predicate = strings.TrimSpace(options.Predicate)
+	if options.Predicate == "" {
+		return FunctionalIndexBuildReport{}, ErrMaterializedSourceConditionalPredicateRequired
+	}
+	if options.Matches == nil {
+		return FunctionalIndexBuildReport{}, ErrMaterializedSourceConditionalMatcherRequired
+	}
+	return source.buildFunctionalIndex(name, dependencies, evaluator, options)
+}
+
+func (source *MaterializedSource) buildFunctionalIndex(name string, dependencies []string, evaluator FunctionalIndexEvaluator, options ConditionalFunctionalIndexOptions) (FunctionalIndexBuildReport, error) {
 	if source == nil {
 		return FunctionalIndexBuildReport{}, ErrMaterializedSourceNil
 	}
@@ -558,7 +673,7 @@ func (source *MaterializedSource) BuildFunctionalIndex(name string, dependencies
 	if err != nil {
 		return FunctionalIndexBuildReport{}, err
 	}
-	report := FunctionalIndexBuildReport{Name: name, Dependencies: append([]string(nil), normalizedDependencies...)}
+	report := FunctionalIndexBuildReport{Name: name, Dependencies: append([]string(nil), normalizedDependencies...), Predicate: options.Predicate}
 	for {
 		source.mu.RLock()
 		if source.hasColumnLocked(name) {
@@ -584,13 +699,25 @@ func (source *MaterializedSource) BuildFunctionalIndex(name string, dependencies
 		source.mu.RUnlock()
 
 		positions := make(map[string][]int, len(rows))
+		indexedRows := 0
 		for position, row := range rows {
-			value, evaluateErr := evaluator(cloneRow(row))
+			candidate := cloneRow(row)
+			if options.Matches != nil {
+				include, matchErr := options.Matches(candidate)
+				if matchErr != nil {
+					return FunctionalIndexBuildReport{}, fmt.Errorf("hatSchema: match conditional functional index %q at row %d: %w", name, position, matchErr)
+				}
+				if !include {
+					continue
+				}
+			}
+			value, evaluateErr := evaluator(candidate)
 			if evaluateErr != nil {
 				return FunctionalIndexBuildReport{}, fmt.Errorf("hatSchema: evaluate functional index %q at row %d: %w", name, position, evaluateErr)
 			}
 			key := materializedIndexKey(value)
 			positions[key] = append(positions[key], position)
+			indexedRows++
 		}
 		report.Attempts++
 
@@ -605,11 +732,14 @@ func (source *MaterializedSource) BuildFunctionalIndex(name string, dependencies
 		source.functionalIndexes[name] = &materializedFunctionalIndex{
 			dependencies: append([]string(nil), normalizedDependencies...),
 			evaluator:    evaluator,
+			predicate:    options.Predicate,
+			matches:      options.Matches,
 			positions:    positions,
 		}
 		source.indexStatsCache = nil
 		source.mu.Unlock()
 		report.Rows = len(rows)
+		report.IndexedRows = indexedRows
 		return report, nil
 	}
 }

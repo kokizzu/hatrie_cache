@@ -1,0 +1,73 @@
+T-U24 conditional space index benchmark
+Date: 2026-10-04
+Platform: linux/amd64
+CPU: AMD Ryzen 9 5950X 16-Core Processor
+Command: make benchmark-t024
+Internal baseline command: make round112-benchmark-baseline
+Internal feature command: make round112-benchmark
+Fixture: 50,000 rows; 100 name keys; selected key tenant-040; active = (row_id % 7 == 0)
+
+Detached baseline, five samples:
+
+BenchmarkT024ConditionalSpaceIndex/functional_lookup_then_filter-32
+123976 ns/op 172162 B/op 1002 allocs/op
+124565 ns/op 172162 B/op 1002 allocs/op
+126240 ns/op 172162 B/op 1002 allocs/op
+120968 ns/op 172161 B/op 1002 allocs/op
+124507 ns/op 172161 B/op 1002 allocs/op
+Median: 124507 ns/op 172162 B/op 1002 allocs/op
+
+BenchmarkT024ConditionalSpaceIndex/functional_build-32
+20575955 ns/op 22373040 B/op 151141 allocs/op
+20959290 ns/op 22373064 B/op 151141 allocs/op
+21600580 ns/op 22373087 B/op 151142 allocs/op
+21581370 ns/op 22372965 B/op 151142 allocs/op
+20851011 ns/op 22373032 B/op 151141 allocs/op
+Median: 20959290 ns/op 22373064 B/op 151141 allocs/op
+
+Feature build after clone reuse, five samples:
+
+BenchmarkT024ConditionalSpaceIndex/conditional_lookup-32
+14687 ns/op 24859 B/op 146 allocs/op
+14112 ns/op 24859 B/op 146 allocs/op
+14698 ns/op 24859 B/op 146 allocs/op
+14251 ns/op 24859 B/op 146 allocs/op
+14452 ns/op 24859 B/op 146 allocs/op
+Median: 14452 ns/op 24859 B/op 146 allocs/op
+
+BenchmarkT024ConditionalSpaceIndex/functional_lookup_then_filter-32
+119090 ns/op 172142 B/op 1002 allocs/op
+120641 ns/op 172142 B/op 1002 allocs/op
+124874 ns/op 172142 B/op 1002 allocs/op
+123437 ns/op 172142 B/op 1002 allocs/op
+126875 ns/op 172142 B/op 1002 allocs/op
+Median: 123437 ns/op 172142 B/op 1002 allocs/op
+
+BenchmarkT024ConditionalSpaceIndex/conditional_build-32
+16859371 ns/op 20727999 B/op 108083 allocs/op
+17077454 ns/op 20727947 B/op 108082 allocs/op
+16886771 ns/op 20727937 B/op 108082 allocs/op
+16927856 ns/op 20727946 B/op 108082 allocs/op
+15687190 ns/op 20727924 B/op 108083 allocs/op
+Median: 16886771 ns/op 20727946 B/op 108082 allocs/op
+
+BenchmarkT024ConditionalSpaceIndex/functional_build-32
+19530166 ns/op 22373103 B/op 151142 allocs/op
+21277410 ns/op 22373174 B/op 151142 allocs/op
+21967786 ns/op 22373116 B/op 151142 allocs/op
+22478397 ns/op 22373007 B/op 151141 allocs/op
+20796031 ns/op 22373099 B/op 151142 allocs/op
+Median: 21277410 ns/op 22373116 B/op 151142 allocs/op
+
+Derived feature result:
+conditional lookup vs existing lookup/filter: 123437 / 14452 = 8.54x faster
+existing lookup/filter vs conditional heap: 172142 / 24859 = 6.93x lower
+existing lookup/filter vs conditional allocations: 1002 / 146 = 6.86x fewer
+conditional build vs existing functional build: 21277410 / 16886771 = 1.26x faster
+existing build heap vs conditional build heap: 22373116 / 20727946 = 1.08x lower
+existing build allocations vs conditional build allocations: 151142 / 108082 = 1.40x fewer
+
+The old functional lookup control was effectively unchanged by the feature:
+123437 ns/op in the feature build versus 124507 ns/op in the detached
+baseline. The conditional path is opt-in because using it without proving
+predicate implication would be semantically unsafe.

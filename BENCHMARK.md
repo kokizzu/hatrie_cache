@@ -1,5 +1,31 @@
 # Benchmark
 
+## T-U24 Conditional Space Indexes
+
+Command:
+
+~~~sh
+make benchmark-t024
+~~~
+
+Five -count=5 samples on Linux/amd64, AMD Ryzen 9 5950X. The fixture has
+50,000 rows and a selective conditional predicate. The existing functional
+lookup control is paired with post-lookup filtering; the conditional path
+returns only admitted rows.
+
+| Workload | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Conditional lookup | 14,452 | 24,859 | 146 | control feature |
+| Existing lookup then filter | 123,437 | 172,142 | 1,002 | conditional is 8.54x faster, 6.93x lower heap and allocations |
+| Conditional rebuild | 16,886,771 | 20,727,946 | 108,082 | control feature |
+| Existing functional rebuild | 21,277,410 | 22,373,103 | 151,142 | conditional is 1.26x faster, 1.08x lower heap, 1.40x fewer allocations |
+
+The existing functional lookup control stayed within noise of the detached
+baseline (123,437 versus 124,507 ns/op), so ordinary behavior did not regress.
+Conditional indexes remain opt-in because a planner must prove that a query
+predicate implies the stored predicate before using partial postings. Raw
+samples are in T024_BENCHMARK_RAW.txt.
+
 ## CH-U49 Skip-Index EXPLAIN Diagnostics
 
 This paired clean-worktree benchmark compares the pre-CH-U49 implementation

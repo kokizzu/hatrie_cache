@@ -1498,6 +1498,22 @@ type JSONIndexStatsResolver interface {
 	SQLJSONIndexStats(key string, fields ...string) (JSONIndexStats, bool, error)
 }
 
+// SQLConditionalIndexMetadataResolver exposes conditional-index declarations
+// to planners and explainers. A consumer must prove that its query predicate
+// implies the declared Predicate before using the index; metadata alone never
+// authorizes an index lookup.
+type SQLConditionalIndexMetadataResolver interface {
+	SQLConditionalIndexMetadata(key string) ([]SQLConditionalIndexMetadata, bool, error)
+}
+
+// SQLConditionalIndexMetadata describes one maintained conditional equality
+// index without exposing rows or evaluator implementation details.
+type SQLConditionalIndexMetadata struct {
+	Name      string
+	Fields    []string
+	Predicate string
+}
+
 // IndexValueEstimator exposes the exact current posting-list size for one
 // equality value. Implementations must return exact=false when a value cannot
 // be represented by the index and available=false when no such index exists.

@@ -5,6 +5,17 @@ comparing its current behavior with ClickHouse, Materialize, and Tarantool. It
 is intentionally broad: an unchecked item is a research candidate, not a
 promise to implement it.
 
+## T-U24: Conditional Space Indexes
+
+Tarantool-style partial index admission is now available through
+hatSchema.MaterializedSource.BuildConditionalFunctionalIndex. The matcher
+controls row membership, generation-checked rebuilds publish atomically, later
+inserts use the same predicate, and DropIndex provides lifecycle cleanup.
+IndexDefinition.Predicate and hatSql.SQLConditionalIndexMetadataResolver expose
+planner metadata, but the SQL resolver does not automatically use a partial
+index without proving predicate implication. See
+T024_CONDITIONAL_SPACE_INDEX.md and BENCHMARK.md#t-u24-conditional-space-indexes.
+
 ## How To Read This
 
 - `[x]` means the repository already has the capability, or a compatible local
