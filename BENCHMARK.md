@@ -17074,6 +17074,39 @@ filter setup and callback cost. See
 [SQL_RUNTIME_JOIN_FILTER.md](SQL_RUNTIME_JOIN_FILTER.md) for the API, fallback
 rules, and correctness guarantees.
 
+### CH-U14 extension: `WHERE` and scalar projections
+
+The CH-U14 extension keeps the runtime Bloom filter on the same direct
+streaming inner-join path when the query has a non-subquery `WHERE` predicate
+or scalar select expressions. The fallback path and the opt-in path were run
+against identical 100,000-left/512-right fixtures; the query returned 511
+rows after `WHERE l.id >= 1` and projected `l.id + 1`.
+
+Command: `make benchmark-chu14-runtime-filter`.
+
+Raw five-sample output from Linux on an AMD Ryzen 9 5950X:
+
+```text
+BenchmarkSQLRuntimeJoinFilterWhereProjection/baseline-32 5 43856377 ns/op 48938003 B/op 305966 allocs/op
+BenchmarkSQLRuntimeJoinFilterWhereProjection/baseline-32 6 41568144 ns/op 48934764 B/op 305952 allocs/op
+BenchmarkSQLRuntimeJoinFilterWhereProjection/baseline-32 5 44022326 ns/op 48934782 B/op 305953 allocs/op
+BenchmarkSQLRuntimeJoinFilterWhereProjection/baseline-32 5 46395853 ns/op 48934793 B/op 305953 allocs/op
+BenchmarkSQLRuntimeJoinFilterWhereProjection/baseline-32 5 42266659 ns/op 48934774 B/op 305952 allocs/op
+BenchmarkSQLRuntimeJoinFilterWhereProjection/runtime_filter-32 21 10598619 ns/op 3470617 B/op 107507 allocs/op
+BenchmarkSQLRuntimeJoinFilterWhereProjection/runtime_filter-32 20 11597509 ns/op 3470639 B/op 107508 allocs/op
+BenchmarkSQLRuntimeJoinFilterWhereProjection/runtime_filter-32 20 13109852 ns/op 3470674 B/op 107508 allocs/op
+BenchmarkSQLRuntimeJoinFilterWhereProjection/runtime_filter-32 18 11321080 ns/op 3470414 B/op 107507 allocs/op
+BenchmarkSQLRuntimeJoinFilterWhereProjection/runtime_filter-32 19 12198758 ns/op 3470678 B/op 107508 allocs/op
+```
+
+| Workload | Fallback median | Runtime-filter median | Relative time | Fallback heap | Runtime-filter heap | Relative heap | Fallback allocs | Runtime-filter allocs | Relative allocations |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Selective `WHERE` and projection | 43.856 ms | 11.598 ms | 3.78x faster | 48.93 MB | 3.47 MB | 14.10x lower | 305,953 | 107,508 | 2.85x fewer |
+
+The option remains disabled by default. Balanced and hot-key controls from the
+preceding section remain the guardrail because the Bloom setup and callback
+cost can outweigh skipped work when most probe keys match.
+
 ## SQL Compact Hash Aggregation
 
 Command: `make benchmark-sql-hash-aggregate-all`.

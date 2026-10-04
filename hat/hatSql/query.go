@@ -5058,17 +5058,12 @@ const sqlRuntimeJoinFilterFalsePositiveRate = 0.01
 // still in the resolver's streaming callback. The established materialized
 // executor remains authoritative for every other query shape.
 func sqlRuntimeJoinFilterStreamable(query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) (bool, error) {
-	if query == nil || resolver == nil || control == nil || !control.options.RuntimeJoinBloomFilter || control.options.MaxJoinBytes > 0 || control.options.Workers > 0 || query.from == nil || query.sample != nil || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 1 || query.where.kind != "" || query.having.kind != "" || query.distinct || len(query.groupBy) != 0 || len(query.orderBy) != 0 || query.offset != 0 || query.limit >= 0 || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || sqlQueryHasSubqueryExpression(query) || query.indexHint.Mode != "" {
+	if query == nil || resolver == nil || control == nil || !control.options.RuntimeJoinBloomFilter || control.options.MaxJoinBytes > 0 || control.options.Workers > 0 || query.from == nil || query.sample != nil || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 1 || query.having.kind != "" || query.qualify.kind != "" || query.distinct || len(query.groupBy) != 0 || len(query.orderBy) != 0 || query.offset != 0 || query.limit >= 0 || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || sqlQueryHasSubqueryExpression(query) || query.indexHint.Mode != "" {
 		return false, nil
 	}
 	join := query.joins[0]
 	if join.kind != "INNER" || join.source.lateral || query.from.kind != "CACHE" || join.source.kind != "CACHE" || len(query.from.fieldTypes) != 0 || len(join.source.fieldTypes) != 0 || len(query.selects) == 0 {
 		return false, nil
-	}
-	for _, selectItem := range query.selects {
-		if selectItem.expr.kind != "field" {
-			return false, nil
-		}
 	}
 	_, _, rightField, ok := sqlHashJoinFields(join.on, []string{query.from.alias}, join.source.alias)
 	if !ok {
@@ -5196,6 +5191,15 @@ func executeSQLRuntimeJoinFilter(query *sqlQuery, resolver SQLSourceResolver, co
 			combined := mergeSQLRows(left, candidate)
 			projected := SQLRow{}
 			evaluationGroup[0] = combined
+			if query.where.kind != "" {
+				whereValue := evalSQLExpr(query.where, evaluationGroup, combined)
+				if err := sqlExpressionError(whereValue); err != nil {
+					return err
+				}
+				if !sqlTruthy(whereValue) {
+					continue
+				}
+			}
 			for index, selectItem := range query.selects {
 				value := evalSQLExpr(selectItem.expr, evaluationGroup, combined)
 				if err := sqlExpressionError(value); err != nil {

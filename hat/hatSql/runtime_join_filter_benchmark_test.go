@@ -31,6 +31,44 @@ func BenchmarkSQLRuntimeJoinFilter(b *testing.B) {
 	}
 }
 
+func BenchmarkSQLRuntimeJoinFilterWhereProjection(b *testing.B) {
+	benchmark := struct {
+		name       string
+		leftRows   int
+		rightRows  int
+		hotKey     bool
+		resultRows int
+	}{
+		name:       "selective_100k_left_512_right",
+		leftRows:   100000,
+		rightRows:  512,
+		resultRows: 511,
+	}
+	query := "FROM CACHE('left') AS l JOIN CACHE('right') AS r ON l.k = r.k WHERE l.id >= 1 SELECT l.id + 1 AS left_id, r.id AS right_id"
+	for _, options := range []struct {
+		name string
+		opts hatSql.QueryOptions
+	}{
+		{name: "baseline"},
+		{name: "runtime_filter", opts: hatSql.QueryOptions{RuntimeJoinBloomFilter: true}},
+	} {
+		options := options
+		b.Run(options.name, func(b *testing.B) {
+			resolver := newRuntimeJoinFilterBenchmarkResolver(benchmark.leftRows, benchmark.rightRows, benchmark.hotKey)
+			b.ReportAllocs()
+			for b.Loop() {
+				result, err := hatSql.ExecuteSQLQueryContext(context.Background(), query, resolver, options.opts)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if len(result.Rows) != benchmark.resultRows {
+					b.Fatalf("result rows = %d, want %d", len(result.Rows), benchmark.resultRows)
+				}
+			}
+		})
+	}
+}
+
 func benchmarkSQLRuntimeJoinFilter(b *testing.B, benchmark struct {
 	name       string
 	leftRows   int
