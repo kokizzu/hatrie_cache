@@ -56,6 +56,9 @@ var (
 	// ErrSQLPublicationClosed indicates that a publication no longer accepts
 	// new batches.
 	ErrSQLPublicationClosed = errors.New("hatSql: SQL publication closed")
+	// ErrSQLPublicationCanceled indicates that a consumer explicitly canceled
+	// its historical replay without closing the publication.
+	ErrSQLPublicationCanceled = errors.New("hatSql: SQL publication subscription canceled")
 )
 
 // SQLPublicationOptions controls bounded history, batches, subscribers, and
@@ -261,6 +264,8 @@ func (publication *SQLPublication) Append(batch SQLPublicationBatch) error {
 
 // Subscribe creates a replay-plus-live subscription beginning after the
 // supplied checkpoint. A zero checkpoint starts at the oldest retained batch.
+// Cancellation of ctx terminates an active subscription with ctx.Err while
+// retaining its last acknowledged checkpoint for resumption.
 func (publication *SQLPublication) Subscribe(ctx context.Context, checkpoint SQLPublicationCheckpoint) (*SQLPublicationSubscription, error) {
 	if publication == nil {
 		return nil, fmt.Errorf("%w: nil publication", ErrSQLPublicationInvalid)
@@ -310,7 +315,9 @@ func (publication *SQLPublication) Subscribe(ctx context.Context, checkpoint SQL
 	publication.nextID++
 	subscriber.id = publication.nextID
 	publication.subscribers[subscriber.id] = subscriber
-	return &SQLPublicationSubscription{publication: publication, state: subscriber}, nil
+	subscription := &SQLPublicationSubscription{publication: publication, state: subscriber}
+	watchSQLPublicationContext(ctx, subscription)
+	return subscription, nil
 }
 
 // Snapshot returns bounded publication metadata and a copy of its schema.
@@ -406,7 +413,7 @@ func (subscription *SQLPublicationSubscription) Checkpoint() SQLPublicationCheck
 }
 
 // Err returns the terminal subscription error. Normal Close and Complete
-// termination return nil.
+// termination return nil; context cancellation and Cancel return an error.
 func (subscription *SQLPublicationSubscription) Err() error {
 	if subscription == nil || subscription.publication == nil || subscription.state == nil {
 		return nil
@@ -429,6 +436,23 @@ func (subscription *SQLPublicationSubscription) Close() {
 		return
 	}
 	publication.closeSubscriberLocked(subscription.state, nil)
+	delete(publication.subscribers, subscription.state.id)
+}
+
+// Cancel terminates the subscription with ErrSQLPublicationCanceled while
+// retaining its last acknowledged checkpoint for a later replay. It is
+// idempotent and does not close the publication.
+func (subscription *SQLPublicationSubscription) Cancel() {
+	if subscription == nil || subscription.publication == nil || subscription.state == nil {
+		return
+	}
+	publication := subscription.publication
+	publication.mu.Lock()
+	defer publication.mu.Unlock()
+	if subscription.state.closed {
+		return
+	}
+	publication.closeSubscriberLocked(subscription.state, ErrSQLPublicationCanceled)
 	delete(publication.subscribers, subscription.state.id)
 }
 
@@ -457,6 +481,36 @@ func (checkpoint *SQLPublicationCheckpoint) UnmarshalBinary(encoded []byte) erro
 	checkpoint.Revision = binary.BigEndian.Uint64(encoded[4:12])
 	checkpoint.Frontier = binary.BigEndian.Uint64(encoded[12:20])
 	return nil
+}
+
+func watchSQLPublicationContext(ctx context.Context, subscription *SQLPublicationSubscription) {
+	if ctx == nil || ctx.Done() == nil {
+		return
+	}
+	go func() {
+		select {
+		case <-ctx.Done():
+			subscription.cancelWithError(ctx.Err())
+		case <-subscription.Done():
+		}
+	}()
+}
+
+func (subscription *SQLPublicationSubscription) cancelWithError(err error) {
+	if subscription == nil || subscription.publication == nil || subscription.state == nil {
+		return
+	}
+	if err == nil {
+		err = ErrSQLPublicationCanceled
+	}
+	publication := subscription.publication
+	publication.mu.Lock()
+	defer publication.mu.Unlock()
+	if subscription.state.closed {
+		return
+	}
+	publication.closeSubscriberLocked(subscription.state, err)
+	delete(publication.subscribers, subscription.state.id)
 }
 
 func normalizeSQLPublicationOptions(options SQLPublicationOptions) (normalizedSQLPublicationOptions, error) {
