@@ -22,23 +22,36 @@ type SQLApproxTopKItem struct {
 	Error    uint64      `json:"error"`
 }
 
+// SQLApproxPercentileInfo is an approximate percentile with quality metadata.
+// Epsilon is the configured rank-error fraction; RankError is its conservative
+// absolute rank bound for the Count finite observations.
+type SQLApproxPercentileInfo struct {
+	Value     float64 `json:"value"`
+	Quantile  float64 `json:"quantile"`
+	Count     uint64  `json:"count"`
+	Epsilon   float64 `json:"epsilon"`
+	RankError uint64  `json:"rank_error"`
+}
+
 type sqlApproxTopKEntry struct {
 	SQLApproxTopKItem
 	key string
 }
 
 type sqlApproximateStreamState struct {
-	expr         sqlExpr
-	hll          *hatDataStructure.HyperLogLog
-	quantile     *hatDataStructure.QuantileSketch
-	quantileP    float64
-	tdigest      *hatDataStructure.TDigest
-	tdigestP     float64
-	tdigestState bool
-	tdigestMerge bool
-	auto         *sqlAutoDistinctState
-	hllState     bool
-	hllMerge     bool
+	expr            sqlExpr
+	hll             *hatDataStructure.HyperLogLog
+	quantile        *hatDataStructure.QuantileSketch
+	quantileP       float64
+	quantileEpsilon float64
+	quantileInfo    bool
+	tdigest         *hatDataStructure.TDigest
+	tdigestP        float64
+	tdigestState    bool
+	tdigestMerge    bool
+	auto            *sqlAutoDistinctState
+	hllState        bool
+	hllMerge        bool
 }
 
 func newSQLApproximateStreamState(expr sqlExpr) (*sqlApproximateStreamState, bool) {
@@ -90,17 +103,17 @@ func newSQLApproximateStreamState(expr sqlExpr) (*sqlApproximateStreamState, boo
 		}
 		state.hllMerge = true
 		return state, true
-	case "APPROX_PERCENTILE":
+	case "APPROX_PERCENTILE", "APPROX_PERCENTILE_INFO":
 		if len(expr.args) < 2 || len(expr.args) > 3 {
 			return nil, false
 		}
-		quantile, err := sqlApproximateNumberArgument(expr.args[1], "APPROX_PERCENTILE quantile")
+		quantile, err := sqlApproximateNumberArgument(expr.args[1], expr.name+" quantile")
 		if err != nil || quantile < 0 || quantile > 1 {
 			return nil, false
 		}
 		epsilon := hatDataStructure.DefaultQuantileSketchEpsilon
 		if len(expr.args) == 3 {
-			epsilon, err = sqlApproximateNumberArgument(expr.args[2], "APPROX_PERCENTILE epsilon")
+			epsilon, err = sqlApproximateNumberArgument(expr.args[2], expr.name+" epsilon")
 			if err != nil {
 				return nil, false
 			}
@@ -109,7 +122,8 @@ func newSQLApproximateStreamState(expr sqlExpr) (*sqlApproximateStreamState, boo
 		if err != nil {
 			return nil, false
 		}
-		state.quantile, state.quantileP = &sketch, quantile
+		state.quantile, state.quantileP, state.quantileEpsilon = &sketch, quantile, epsilon
+		state.quantileInfo = expr.name == "APPROX_PERCENTILE_INFO"
 		return state, true
 	case "APPROX_TDIGEST_PERCENTILE":
 		if len(expr.args) < 2 || len(expr.args) > 3 {
@@ -278,6 +292,15 @@ func (state *sqlApproximateStreamState) result() interface{} {
 	if state.quantile != nil {
 		estimate, ok := state.quantile.Estimate(state.quantileP)
 		if ok {
+			if state.quantileInfo {
+				return SQLApproxPercentileInfo{
+					Value:     estimate.Value,
+					Quantile:  estimate.Quantile,
+					Count:     estimate.Count,
+					Epsilon:   state.quantileEpsilon,
+					RankError: estimate.RankError,
+				}
+			}
 			return estimate.Value
 		}
 	}
@@ -294,6 +317,8 @@ func evalSQLApproximateAggregate(expr sqlExpr, group []sqlExecRow) interface{} {
 		return evalSQLApproximateDistinctState(expr, group)
 	case "APPROX_PERCENTILE":
 		return evalSQLApproxPercentile(expr, group)
+	case "APPROX_PERCENTILE_INFO":
+		return evalSQLApproxPercentileInfo(expr, group)
 	case "APPROX_TDIGEST_PERCENTILE":
 		return evalSQLApproxTDigestPercentile(expr, group)
 	case "APPROX_TDIGEST_PERCENTILE_STATE", "APPROX_TDIGEST_PERCENTILE_MERGE":
@@ -342,41 +367,67 @@ func evalSQLApproxCountDistinct(expr sqlExpr, group []sqlExecRow) interface{} {
 }
 
 func evalSQLApproxPercentile(expr sqlExpr, group []sqlExecRow) interface{} {
-	if len(expr.args) < 2 || len(expr.args) > 3 {
-		return sqlApproximateAggregateError(expr, "APPROX_PERCENTILE expects a value expression, quantile, and optional epsilon")
-	}
-	quantile, err := sqlApproximateNumberArgument(expr.args[1], "APPROX_PERCENTILE quantile")
-	if err != nil || quantile < 0 || quantile > 1 {
-		if err == nil {
-			err = fmt.Errorf("APPROX_PERCENTILE quantile must be between 0 and 1")
-		}
-		return sqlApproximateAggregateError(expr, err.Error())
-	}
-	epsilon := hatDataStructure.DefaultQuantileSketchEpsilon
-	if len(expr.args) == 3 {
-		epsilon, err = sqlApproximateNumberArgument(expr.args[2], "APPROX_PERCENTILE epsilon")
-		if err != nil {
-			return sqlApproximateAggregateError(expr, err.Error())
-		}
-	}
-	sketch, err := hatDataStructure.NewQuantileSketch(epsilon)
-	if err != nil {
-		return sqlApproximateAggregateError(expr, err.Error())
-	}
-	for _, row := range group {
-		value := evalSQLExpr(expr.args[0], nil, row)
-		if err := sqlExpressionError(value); err != nil {
-			return sqlEvaluationFailure(err)
-		}
-		if number, ok := sqlNumber(value); ok && !math.IsNaN(number) && !math.IsInf(number, 0) {
-			sketch.Add(number)
-		}
+	sketch, quantile, _, failure := sqlApproxPercentileSketch(expr, group)
+	if failure != nil {
+		return failure
 	}
 	estimate, ok := sketch.Estimate(quantile)
 	if !ok {
 		return nil
 	}
 	return estimate.Value
+}
+
+func evalSQLApproxPercentileInfo(expr sqlExpr, group []sqlExecRow) interface{} {
+	sketch, quantile, epsilon, failure := sqlApproxPercentileSketch(expr, group)
+	if failure != nil {
+		return failure
+	}
+	estimate, ok := sketch.Estimate(quantile)
+	if !ok {
+		return nil
+	}
+	return SQLApproxPercentileInfo{
+		Value:     estimate.Value,
+		Quantile:  quantile,
+		Count:     estimate.Count,
+		Epsilon:   epsilon,
+		RankError: estimate.RankError,
+	}
+}
+
+func sqlApproxPercentileSketch(expr sqlExpr, group []sqlExecRow) (hatDataStructure.QuantileSketch, float64, float64, interface{}) {
+	if len(expr.args) < 2 || len(expr.args) > 3 {
+		return hatDataStructure.QuantileSketch{}, 0, 0, sqlApproximateAggregateError(expr, expr.name+" expects a value expression, quantile, and optional epsilon")
+	}
+	quantile, err := sqlApproximateNumberArgument(expr.args[1], expr.name+" quantile")
+	if err != nil || quantile < 0 || quantile > 1 {
+		if err == nil {
+			err = fmt.Errorf("%s quantile must be between 0 and 1", expr.name)
+		}
+		return hatDataStructure.QuantileSketch{}, 0, 0, sqlApproximateAggregateError(expr, err.Error())
+	}
+	epsilon := hatDataStructure.DefaultQuantileSketchEpsilon
+	if len(expr.args) == 3 {
+		epsilon, err = sqlApproximateNumberArgument(expr.args[2], expr.name+" epsilon")
+		if err != nil {
+			return hatDataStructure.QuantileSketch{}, 0, 0, sqlApproximateAggregateError(expr, err.Error())
+		}
+	}
+	sketch, err := hatDataStructure.NewQuantileSketch(epsilon)
+	if err != nil {
+		return hatDataStructure.QuantileSketch{}, 0, 0, sqlApproximateAggregateError(expr, err.Error())
+	}
+	for _, row := range group {
+		value := evalSQLExpr(expr.args[0], nil, row)
+		if err := sqlExpressionError(value); err != nil {
+			return hatDataStructure.QuantileSketch{}, 0, 0, sqlEvaluationFailure(err)
+		}
+		if number, ok := sqlNumber(value); ok && !math.IsNaN(number) && !math.IsInf(number, 0) {
+			sketch.Add(number)
+		}
+	}
+	return sketch, quantile, epsilon, nil
 }
 
 func evalSQLApproxTDigestPercentile(expr sqlExpr, group []sqlExecRow) interface{} {

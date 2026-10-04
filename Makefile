@@ -28668,3 +28668,25 @@ m052z-status:
 .PHONY: m052z-commit-push
 m052z-commit-push:
 	bash scripts/m052z-commit-push.sh commit-push
+
+.PHONY: test-m092-quantile-info
+test-m092-quantile-info:
+	bash scripts/test-m092-quantile-info.sh
+
+.PHONY: format-m092-quantile-info
+format-m092-quantile-info:
+	bash scripts/format-m092-quantile-info.sh
+
+.PHONY: benchmark-m092-quantile-info
+benchmark-m092-quantile-info:
+	bash scripts/benchmark-m092-quantile-info.sh
+
+.PHONY: test-m092-package race-m092-quantile-info vet-m092-quantile-info
+test-m092-package:
+	bash scripts/test-m092-package.sh
+
+race-m092-quantile-info:
+	bash scripts/race-m092-quantile-info.sh
+
+vet-m092-quantile-info:
+	bash scripts/vet-m092-quantile-info.sh

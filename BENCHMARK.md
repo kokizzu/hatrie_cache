@@ -25385,6 +25385,38 @@ at these medians:
 The paired rerun is included because the control varied between benchmark
 invocations; both paths in each table use the same workload shape.
 
+## CH-G18 approximate percentile metadata
+
+`APPROX_PERCENTILE_INFO` exposes the existing Greenwald-Khanna percentile
+estimate together with its requested quantile, finite-observation count,
+configured epsilon, and conservative absolute rank error. The default scalar
+`APPROX_PERCENTILE` result remains unchanged.
+
+Five `-benchmem` samples were run on an AMD Ryzen 9 5950X, Linux amd64. The
+mixed-query comparison used a clean baseline worktree from
+`origin/codex/next-inspiration-m091-20261004`.
+
+| Workload | Baseline | Final | Result |
+| --- | ---: | ---: | --- |
+| 10,000-row mixed approximate query, time | 8,271,192 ns/op | 8,087,230 ns/op | 1.02x faster |
+| 10,000-row mixed approximate query, heap | 5,126,638 B/op | 5,126,614 B/op | effectively unchanged |
+| 10,000-row mixed approximate query, allocations | 60,060 | 60,063 | +3, within noise |
+| Percentile-only scalar, time | 2,633,617 ns/op | control | paired control |
+| Percentile-only metadata, time | control | 2,660,383 ns/op | CPU-neutral within run noise |
+| Percentile-only metadata, heap | control | 18,588 B/op | +39 B/op versus scalar |
+| Percentile-only metadata, allocations | control | 38 allocs/op | unchanged versus scalar |
+
+Reproduce the paired measurement with:
+
+```sh
+make benchmark-m092-quantile-info
+```
+
+The metadata variant is intentionally opt-in. It adds no measured steady-state
+allocation cost to the scalar path; callers requesting metadata pay only the
+small result-shape cost. Full API details are in
+[CHG18_APPROX_PERCENTILE_INFO.md](CHG18_APPROX_PERCENTILE_INFO.md).
+
 ## CH-040 t-digest percentile
 
 This benchmark compares the existing GK-style `APPROX_PERCENTILE` aggregate

@@ -392,16 +392,21 @@ GROUP BY e.region;
 `precision` reduces relative error and increases its fixed register memory per
 group. `APPROX_PERCENTILE(value, quantile [, epsilon])` uses the quantile
 sketch: `quantile` is in `0..1`, and a smaller `epsilon` tightens rank error at
-the cost of a larger summary. `APPROX_TOP_K(value [, capacity])` uses a bounded
+the cost of a larger summary. Use
+`APPROX_PERCENTILE_INFO(value, quantile [, epsilon])` when the result must also
+report the estimated value's `count`, configured `epsilon`, and conservative
+absolute `rank_error`; it returns a `SQLApproxPercentileInfo` value and remains
+opt-in. `APPROX_TOP_K(value [, capacity])` uses a bounded
 Space-Saving summary. Its output is ordered `SQLApproxTopKItem` values with
 `value`, `estimate`, and an overcount `error` bound; memory is linear in
 `capacity`, which must be `1..65536`.
 
 All optional controls must be finite numeric literals or bound parameters. Null
 values are ignored. The percentile sketch also ignores non-numeric values, as
-the numeric aggregates do. These aggregates retain their bounded per-group
-state and currently use the general materialized grouping path, so ordinary
-query row, group-memory, timeout, and result-byte limits still apply.
+the numeric aggregates do. These aggregates retain bounded per-group state.
+Direct source expressions use the streaming state path; expressions that cannot
+be streamed use the general grouping fallback. Ordinary query row, group-memory,
+timeout, and result-byte limits still apply.
 
 ### Table sampling
 
