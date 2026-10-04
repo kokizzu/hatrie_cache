@@ -28690,3 +28690,31 @@ race-m092-quantile-info:
 
 vet-m092-quantile-info:
 	bash scripts/vet-m092-quantile-info.sh
+
+.PHONY: benchmark-m093-consumer-group
+benchmark-m093-consumer-group:
+	bash scripts/benchmark-m093-consumer-group.sh
+
+.PHONY: test-m093-consumer-group
+test-m093-consumer-group:
+	bash scripts/test-m093-consumer-group.sh
+
+.PHONY: format-m093-consumer-group
+format-m093-consumer-group:
+	bash scripts/format-m093-consumer-group.sh
+
+.PHONY: test-m093-package
+test-m093-package:
+	bash scripts/test-m093-package.sh
+
+.PHONY: race-m093-consumer-group
+race-m093-consumer-group:
+	bash scripts/race-m093-consumer-group.sh
+
+.PHONY: vet-m093-consumer-group
+vet-m093-consumer-group:
+	bash scripts/vet-m093-consumer-group.sh
+
+.PHONY: test-m093-all
+test-m093-all:
+	bash scripts/test-m093-all.sh

@@ -1,5 +1,9 @@
 # hatrie_cache
 
+Consumer-group partition ownership, visibility leases, acknowledgements, and
+retry-safe handoff are available through the opt-in
+[`hatPipeline.ConsumerGroupQueue`](TG43_CONSUMER_GROUP_QUEUE.md) API.
+
 Hatrie Cache is an In-memory cache and data-structure server built around a C
 HAT-trie. It provides typed cache values, TTLs, snapshots/backups, optional
 durable storage, replication, HTTP/2 and gRPC APIs, and an opt-in monitoring

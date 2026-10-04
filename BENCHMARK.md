@@ -39514,3 +39514,23 @@ difference is within normal benchmark noise. Existing join/leave behavior is
 preserved. See [T207_REPLICA_EVICTION_REJOIN.md](T207_REPLICA_EVICTION_REJOIN.md)
 for the recovery sequence, API contract, security boundaries, and verification
 commands.
+
+## TG43 Consumer-Group Queue
+
+The pre-implementation manual-composition baseline was measured first with five
+`-benchmem` samples on an AMD Ryzen 9 5950X, linux/amd64:
+`116.0, 109.9, 114.5, 114.9, 112.1 ns/op`, median `114.5 ns/op`, `0 B/op`,
+and `0 allocs/op`. The final same-fixture run was measured after adding the
+typed wrapper.
+
+| Path | Raw ns/op samples | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Manual fence + visibility queue | 117.7, 119.4, 121.7, 120.1, 122.6 | 120.1 | 0 | 0 | baseline |
+| `ConsumerGroupQueue` lease/ack/re-enqueue | 134.5, 131.4, 138.4, 132.7, 131.6 | 132.7 | 0 | 0 | 1.11x CPU |
+
+The feature is opt-in and does not change existing fence or visibility-queue
+paths. Its steady-state loop remains allocation-free; the measured cost is the
+typed wrapper and its ownership/token checks. Use the lower-level primitives if
+the caller already provides equivalent fencing and needs the absolute minimum
+CPU. See [TG43_CONSUMER_GROUP_QUEUE.md](TG43_CONSUMER_GROUP_QUEUE.md) for API
+semantics and the reproducible `make benchmark-m093-consumer-group` command.
