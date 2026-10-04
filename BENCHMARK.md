@@ -32580,3 +32580,40 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## T-U17 Selectable Vinyl-Style Space Engine
+
+Command:
+
+```sh
+make bench-tu17-space-engine
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. `memtx` is the
+default in-memory engine. `vinyl` is an opt-in adapter over the existing
+checksummed spillable arrangement. The benchmark uses the same logical
+operations and 4,096 keys for both engines.
+
+| Workload | memtx median ns/op | vinyl median ns/op | vinyl / memtx | memtx B/op | vinyl B/op | memtx allocs/op | vinyl allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Set/Get | 132.1 | 213.1 | 1.61x slower | 37 | 117 | 3 | 4 |
+| Lookup, 4,096 keys | 92.16 | 646.2 | 7.01x slower | 55 | 75 | 2 | 2 |
+
+After population, `memtx` reported 190,336 logical key-plus-value bytes and 0
+disk bytes; `vinyl` reported 65,520 hot value-payload bytes and 172,342 disk
+bytes for the same 4,096 entries. The vinyl hot value-payload metric is
+therefore 2.91x smaller, but it excludes resident key/index metadata. The disk
+arrangement and its read amplification are the explicit cost of persistence.
+
+Raw samples:
+
+```text
+BenchmarkSpaceEngineSetGet/memtx-32   135.6 132.1 131.8 140.4 128.7 ns/op, 37 B/op, 3 allocs/op
+BenchmarkSpaceEngineSetGet/vinyl-32   213.1 202.0 209.7 213.6 229.3 ns/op, 117 B/op, 4 allocs/op
+BenchmarkSpaceEngineLookup4096/memtx-32 93.10 91.40 91.43 92.34 92.16 ns/op, 0 disk-bytes, 190336 hot-bytes, 55 B/op, 2 allocs/op
+BenchmarkSpaceEngineLookup4096/vinyl-32 644.7 646.2 649.5 645.5 670.1 ns/op, 172342 disk-bytes, 65520 hot-bytes, 75 B/op, 2 allocs/op
+```
+
+The result supports keeping `memtx` as the sane default. `vinyl` is useful
+when restart persistence and bounded hot memory are worth the additional disk
+I/O, compaction work, and lookup latency; it is not a general-purpose speedup.
