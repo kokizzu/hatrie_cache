@@ -43,6 +43,7 @@ type HashIndex[T any, K comparable] struct {
 	entries     map[uint64]hashIndexEntry[T, K]
 	uniqueByKey map[K]uint64
 	postings    map[K]u64PostingList
+	stats       indexStatsBinding[K]
 }
 
 // NewHashIndex creates an empty typed hash index.
@@ -99,6 +100,9 @@ func (index *HashIndex[T, K]) Upsert(id uint64, value T) error {
 		}
 	}
 	index.entries[id] = hashIndexEntry[T, K]{key: key, value: value}
+	if index.stats.collector != nil {
+		index.stats.observeKey(key)
+	}
 	return nil
 }
 
@@ -125,21 +129,40 @@ func (index *HashIndex[T, K]) LookupOne(key K) (HashIndexEntry[T, K], bool) {
 		return HashIndexEntry[T, K]{}, false
 	}
 	index.mu.RLock()
-	defer index.mu.RUnlock()
+	var binding indexStatsBinding[K]
+	if index.stats.collector != nil {
+		binding = index.stats
+	}
 	if index.unique {
 		id, ok := index.uniqueByKey[key]
 		if !ok {
+			index.mu.RUnlock()
+			if binding.collector != nil {
+				binding.observeLookup(key, 0)
+			}
 			return HashIndexEntry[T, K]{}, false
 		}
 		entry := index.entries[id]
+		index.mu.RUnlock()
+		if binding.collector != nil {
+			binding.observeLookup(key, 1)
+		}
 		return HashIndexEntry[T, K]{ID: id, Key: entry.key, Value: entry.value}, true
 	}
 	posting, ok := index.postings[key]
 	if !ok {
+		index.mu.RUnlock()
+		if binding.collector != nil {
+			binding.observeLookup(key, 0)
+		}
 		return HashIndexEntry[T, K]{}, false
 	}
 	id := posting.first
 	entry := index.entries[id]
+	index.mu.RUnlock()
+	if binding.collector != nil {
+		binding.observeLookup(key, posting.length())
+	}
 	return HashIndexEntry[T, K]{ID: id, Key: entry.key, Value: entry.value}, true
 }
 
@@ -149,12 +172,35 @@ func (index *HashIndex[T, K]) Contains(key K) bool {
 		return false
 	}
 	index.mu.RLock()
-	defer index.mu.RUnlock()
+	var binding indexStatsBinding[K]
+	if index.stats.collector != nil {
+		binding = index.stats
+	}
 	if index.unique {
 		_, ok := index.uniqueByKey[key]
+		index.mu.RUnlock()
+		if ok {
+			if binding.collector != nil {
+				binding.observeLookup(key, 1)
+			}
+		} else {
+			if binding.collector != nil {
+				binding.observeLookup(key, 0)
+			}
+		}
 		return ok
 	}
-	_, ok := index.postings[key]
+	posting, ok := index.postings[key]
+	index.mu.RUnlock()
+	if ok {
+		if binding.collector != nil {
+			binding.observeLookup(key, posting.length())
+		}
+	} else {
+		if binding.collector != nil {
+			binding.observeLookup(key, 0)
+		}
+	}
 	return ok
 }
 
@@ -172,21 +218,41 @@ func (index *HashIndex[T, K]) LookupInto(key K, dst []T) []T {
 		return dst
 	}
 	index.mu.RLock()
-	defer index.mu.RUnlock()
+	var binding indexStatsBinding[K]
+	if index.stats.collector != nil {
+		binding = index.stats
+	}
 	if index.unique {
 		id, ok := index.uniqueByKey[key]
 		if !ok {
+			index.mu.RUnlock()
+			if binding.collector != nil {
+				binding.observeLookup(key, 0)
+			}
 			return dst
 		}
-		return append(dst, index.entries[id].value)
+		dst = append(dst, index.entries[id].value)
+		index.mu.RUnlock()
+		if binding.collector != nil {
+			binding.observeLookup(key, 1)
+		}
+		return dst
 	}
 	posting, ok := index.postings[key]
 	if !ok {
+		index.mu.RUnlock()
+		if binding.collector != nil {
+			binding.observeLookup(key, 0)
+		}
 		return dst
 	}
 	if posting.rest == nil {
 		if entry, ok := index.entries[posting.first]; ok {
 			dst = append(dst, entry.value)
+		}
+		index.mu.RUnlock()
+		if binding.collector != nil {
+			binding.observeLookup(key, posting.length())
 		}
 		return dst
 	}
@@ -200,6 +266,10 @@ func (index *HashIndex[T, K]) LookupInto(key K, dst []T) []T {
 		if entry, ok := index.entries[id]; ok {
 			dst = append(dst, entry.value)
 		}
+	}
+	index.mu.RUnlock()
+	if binding.collector != nil {
+		binding.observeLookup(key, posting.length())
 	}
 	return dst
 }
@@ -216,18 +286,40 @@ func (index *HashIndex[T, K]) LookupIDsInto(key K, dst []uint64) []uint64 {
 		return dst
 	}
 	index.mu.RLock()
-	defer index.mu.RUnlock()
+	var binding indexStatsBinding[K]
+	if index.stats.collector != nil {
+		binding = index.stats
+	}
 	if index.unique {
 		if id, ok := index.uniqueByKey[key]; ok {
 			dst = append(dst, id)
+		}
+		index.mu.RUnlock()
+		if len(dst) == 0 {
+			if binding.collector != nil {
+				binding.observeLookup(key, 0)
+			}
+		} else {
+			if binding.collector != nil {
+				binding.observeLookup(key, 1)
+			}
 		}
 		return dst
 	}
 	posting, ok := index.postings[key]
 	if !ok {
+		index.mu.RUnlock()
+		if binding.collector != nil {
+			binding.observeLookup(key, 0)
+		}
 		return dst
 	}
-	return posting.values(dst)
+	dst = posting.values(dst)
+	index.mu.RUnlock()
+	if binding.collector != nil {
+		binding.observeLookup(key, posting.length())
+	}
+	return dst
 }
 
 // Len returns the number of indexed IDs.
