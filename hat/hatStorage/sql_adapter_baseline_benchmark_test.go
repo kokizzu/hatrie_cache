@@ -48,3 +48,25 @@ func BenchmarkSQLAdapterRegistryExecuteResolverOnly(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkSQLAdapterRegistryExecuteResolverOnlyNoCache(b *testing.B) {
+	registry, err := hatStorage.NewSQLAdapterRegistryWithOptions(hatStorage.SQLAdapterRegistryOptions{
+		DisableCompiledCache: true,
+	}, hatStorage.SQLResolverAdapter{
+		NamespaceName: "remote",
+		Resolver: hatSql.SourceResolverFunc(func(string, string) ([]hatSql.Row, error) {
+			return nil, nil
+		}),
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	ctx := context.Background()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		if _, err := registry.Execute(ctx, "remote", "SELECT * FROM CACHE('items')", nil, hatSql.SQLQueryOptions{}); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

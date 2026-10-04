@@ -19,6 +19,10 @@ var ErrUnknownSQLNamespace = errors.New("storage SQL namespace is not registered
 // return this error because their data is owned by another process or tier.
 var ErrSQLAdapterStorageUnavailable = errors.New("storage engine is unavailable for SQL adapter")
 
+// ErrSQLAdapterRegistryOptionsInvalid reports contradictory registry cache
+// options.
+var ErrSQLAdapterRegistryOptionsInvalid = errors.New("SQL adapter registry options are invalid")
+
 // SQLAdapter binds a storage engine and relational source resolver to one
 // namespace. SQLResolverAdapter is the explicit resolver-only variant for a
 // compute process whose data is owned by another process or storage tier.
@@ -63,22 +67,54 @@ func (adapter SQLResolverAdapter) StorageEngine() Engine { return nil }
 
 func (adapter SQLResolverAdapter) sqlResolverOnly() {}
 
+// SQLAdapterRegistryOptions controls shared execution resources for a
+// namespace registry. The default constructor enables the bounded compiled
+// query cache; callers with a different memory policy can inject a cache or
+// disable registry-owned caching explicitly.
+type SQLAdapterRegistryOptions struct {
+	Governor             *hatSql.NamespaceQueryGovernor
+	CompiledCache        *hatSql.SQLCompiledQueryCache
+	DisableCompiledCache bool
+}
+
 // SQLAdapterRegistry dispatches namespace-scoped queries to registered storage
 // adapters. Registration is concurrency-safe; each execution still goes
 // through the single hatSql execution layer.
 type SQLAdapterRegistry struct {
-	governor *hatSql.NamespaceQueryGovernor
+	governor      *hatSql.NamespaceQueryGovernor
+	compiledCache *hatSql.SQLCompiledQueryCache
 
 	mu       sync.RWMutex
 	adapters map[string]SQLAdapter
 }
 
 // NewSQLAdapterRegistry creates a registry and atomically validates every
-// supplied adapter before returning it.
+// supplied adapter before returning it. It uses the bounded default compiled
+// query cache.
 func NewSQLAdapterRegistry(governor *hatSql.NamespaceQueryGovernor, adapters ...SQLAdapter) (*SQLAdapterRegistry, error) {
+	return NewSQLAdapterRegistryWithOptions(SQLAdapterRegistryOptions{Governor: governor}, adapters...)
+}
+
+// NewSQLAdapterRegistryWithOptions creates a registry with explicit execution
+// resource policy and atomically validates every supplied adapter before
+// returning it. A nil CompiledCache selects the bounded hatSql defaults unless
+// DisableCompiledCache is true.
+func NewSQLAdapterRegistryWithOptions(options SQLAdapterRegistryOptions, adapters ...SQLAdapter) (*SQLAdapterRegistry, error) {
+	if options.DisableCompiledCache && options.CompiledCache != nil {
+		return nil, ErrSQLAdapterRegistryOptionsInvalid
+	}
+	compiledCache := options.CompiledCache
+	if !options.DisableCompiledCache && compiledCache == nil {
+		var err error
+		compiledCache, err = hatSql.NewSQLCompiledQueryCache(hatSql.DefaultSQLCompiledQueryCacheOptions())
+		if err != nil {
+			return nil, fmt.Errorf("create SQL adapter compiled cache: %w", err)
+		}
+	}
 	registry := &SQLAdapterRegistry{
-		governor: governor,
-		adapters: make(map[string]SQLAdapter, len(adapters)),
+		governor:      options.Governor,
+		compiledCache: compiledCache,
+		adapters:      make(map[string]SQLAdapter, len(adapters)),
 	}
 	for _, adapter := range adapters {
 		if err := registry.register(adapter); err != nil {
@@ -86,6 +122,15 @@ func NewSQLAdapterRegistry(governor *hatSql.NamespaceQueryGovernor, adapters ...
 		}
 	}
 	return registry, nil
+}
+
+// CompiledQueryCacheStats reports the registry-owned compiled-plan cache. A
+// zero value means registry-owned caching is disabled.
+func (registry *SQLAdapterRegistry) CompiledQueryCacheStats() hatSql.SQLCompiledQueryCacheStats {
+	if registry == nil || registry.compiledCache == nil {
+		return hatSql.SQLCompiledQueryCacheStats{}
+	}
+	return registry.compiledCache.Stats()
 }
 
 // Register validates and registers a new namespace. Namespace names are exact
@@ -162,6 +207,9 @@ func (registry *SQLAdapterRegistry) Execute(ctx context.Context, namespace, sour
 	adapter, err := registry.adapter(namespace)
 	if err != nil {
 		return hatSql.SQLQueryResult{}, err
+	}
+	if options.CompiledCache == nil {
+		options.CompiledCache = registry.compiledCache
 	}
 	if registry.governor != nil {
 		return registry.governor.Execute(ctx, namespace, source, adapter.SQLSourceResolver(), parameters, options)

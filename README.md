@@ -220,7 +220,7 @@ security guidance before exposing it on a network.
 - Materialize-inspired exact weighted incremental percentile maintenance: [MZ040_INCREMENTAL_PERCENTILE.md](MZ040_INCREMENTAL_PERCENTILE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-040-incremental-percentile)
 - ClickHouse-inspired statistics-driven join ordering with deterministic fallback: [C211_STATISTICS_JOIN_ORDER.md](C211_STATISTICS_JOIN_ORDER.md)
 - ClickHouse-inspired precomputed typed join probe keys with allocation-free numeric and boolean hot paths: [C212_PRECOMPUTED_JOIN_HASH.md](C212_PRECOMPUTED_JOIN_HASH.md)
-- ClickHouse/Materialize/Tarantool-inspired bounded compiled SQL plan cache: [C213_COMPILED_PLAN_CACHE.md](C213_COMPILED_PLAN_CACHE.md)
+- ClickHouse/Materialize/Tarantool-inspired bounded compiled SQL plan cache: [C213_COMPILED_PLAN_CACHE.md](C213_COMPILED_PLAN_CACHE.md); `SQLAdapterRegistry` enables the bounded cache by default, with measured service-path results in [BENCHMARK.md](BENCHMARK.md#sql-adapter-registry-default-compiled-plan-cache)
 - Hundreds-item ClickHouse/Materialize/Tarantool research checklist: [INSPIRATION.md](INSPIRATION.md)
 - Selective bounded compact-peer payload compression: [BENCHMARK.md](BENCHMARK.md#tr-044-selective-compact-peer-payload-compression)
 - Compact peer compression configuration: [TR044_COMPACT_PEER_COMPRESSION.md](TR044_COMPACT_PEER_COMPRESSION.md)

@@ -8,8 +8,9 @@ those handles by exact SQL source and optional schema-version namespace.
 
 ## Default And API
 
-The feature is opt-in. Existing calls do not allocate or consult this cache.
-Use the package-native API when the same query source is compiled repeatedly:
+Direct `hatSql` calls remain opt-in: existing calls do not allocate or consult
+this cache. Use the package-native API when the same query source is compiled
+repeatedly:
 
 ```go
 cache, err := hatSql.NewSQLCompiledQueryCache(
@@ -78,3 +79,40 @@ high-cardinality query text.
 
 The full raw result is also recorded in
 [`BENCHMARK.md`](BENCHMARK.md#bounded-compiled-sql-plan-cache).
+
+### SQL Adapter Registry
+
+`hatStorage.NewSQLAdapterRegistry` now supplies the same bounded cache to
+queries executed through a namespace registry. This covers the common service
+path without changing direct `hatSql` defaults:
+
+```go
+registry, err := hatStorage.NewSQLAdapterRegistry(nil, adapter)
+if err != nil {
+	return err
+}
+
+result, err := registry.Execute(ctx, "remote", source, parameters, hatSql.SQLQueryOptions{})
+stats := registry.CompiledQueryCacheStats()
+```
+
+Use `NewSQLAdapterRegistryWithOptions` to inject a cache with a different
+bound, or set `DisableCompiledCache: true` for a one-shot/high-cardinality
+workload. A per-request `SQLQueryOptions.CompiledCache` still takes precedence.
+The registry cache is bounded to 64 entries and 8 MiB by default and retains
+only immutable query templates, never bound parameter values.
+
+The registry benchmark used the same short resolver query on Linux/amd64 with
+an AMD Ryzen 9 5950X and five `-benchmem` samples. The cached default reduced
+both compile overhead and execution-path allocations; the explicit no-cache
+variant stayed on the old behavior:
+
+| Registry path | Median ns/op | B/op | Allocs/op | Improvement vs pre-change registry |
+| --- | ---: | ---: | ---: | ---: |
+| Before: no compiled cache | 6,095 | 4,832 | 21 | baseline |
+| After: bounded cache default | 4,203 | 2,480 | 17 | 1.45x faster; 1.95x lower transient bytes; 1.24x fewer allocations |
+| After: explicit `DisableCompiledCache` | 5,805 | 4,832 | 21 | within benchmark variance; no retained plan |
+
+The cache retains bounded plan metadata, so its process memory is not zero even
+though the hit path reports 2,480 transient bytes/op. `Stats().Bytes` is the
+conservative cache accounting value, not RSS.

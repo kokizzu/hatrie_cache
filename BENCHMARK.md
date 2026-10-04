@@ -19808,8 +19808,38 @@ BenchmarkC213CompilePlanCached 68264565 17.67 ns/op 0 B/op 0 allocs/op
 
 The cache does not make execution 212.6x faster: the benchmark isolates
 compilation. A retained plan is the explicit memory cost, and cold misses still
-compile normally. Default behavior remains unchanged because callers must set
-`SQLQueryOptions.CompiledCache`.
+compile normally. Direct `hatSql` behavior remains unchanged because callers
+must set `SQLQueryOptions.CompiledCache`; `hatStorage.SQLAdapterRegistry` opts
+into the same bounded cache by default for repeated service queries.
+
+<a id="sql-adapter-registry-default-compiled-plan-cache"></a>
+## SQL Adapter Registry Default Compiled Plan Cache
+
+Command: `make goal-m094-plan-cache-benchmark`.
+
+Five `-benchmem` samples on Linux/amd64, AMD Ryzen 9 5950X, executing the same
+short resolver-only SQL query through `hatStorage.SQLAdapterRegistry`:
+
+| Path | Median ns/op | B/op | Allocs/op | Improvement |
+| --- | ---: | ---: | ---: | --- |
+| Before: registry without compiled cache | 6,095 | 4,832 | 21 | baseline |
+| After: registry bounded cache default | 4,203 | 2,480 | 17 | 1.45x faster; 1.95x lower transient bytes; 1.24x fewer allocations |
+| After: explicit `DisableCompiledCache` | 5,805 | 4,832 | 21 | 1.05x faster; no retained plan; within run-to-run variance |
+
+Raw samples:
+
+```text
+Before resolver-only: 6095, 6084, 5963, 6471, 6523 ns/op; 4832 B/op; 21 allocs/op
+After cached default: 4248, 4203, 4284, 4184, 4171 ns/op; 2480 B/op; 17 allocs/op
+After no cache: 5800, 5773, 5976, 5912, 5805 ns/op; 4832 B/op; 21 allocs/op
+```
+
+The default cache retains immutable compiled templates under the existing
+64-entry and 8 MiB bounds. `SQLAdapterRegistryOptions.DisableCompiledCache`
+keeps the old memory behavior for one-shot or high-cardinality query text;
+`CompiledQueryCacheStats` exposes hit/miss and retained-byte accounting for
+operational verification. The reported `B/op` values are transient benchmark
+allocations, not process RSS.
 ## SQL Trigger Definition Parsing
 
 The strict row-level `CREATE TRIGGER` parser was measured independently from
