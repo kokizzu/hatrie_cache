@@ -734,3 +734,13 @@ Adopted as opt-in `hatStorage.CompactionDiagnostics`: bounded arrangement regist
 ## Materialize M-U41: Webhook Event Idempotency
 
 Adopted as opt-in `hatSql.WebhookEventDeduplicator`: bounded source/event-ID admission, payload-fingerprint conflict detection, expiry, deterministic CRC-protected HWE1 snapshots, and atomic restore. The caller owns application, durable storage, acknowledgement, and HTTP/webhook wiring; existing defaults remain unchanged. See [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md) and [BENCHMARK.md](BENCHMARK.md#m-u41-webhook-event-idempotency).
+
+## Tarantool T-U39: Named-Space Changefeed
+
+Adopted as opt-in `hatReplication.SpaceChangefeed`: a bounded fixed-slot ring
+for one named space with immutable schema metadata, ordered insert/update/delete
+events, HCP1-compatible checkpoints, owned reconnect batches, explicit
+compaction, and non-blocking full-buffer backpressure. The existing write path,
+transport/authentication, snapshot rebuild, and live space wiring remain
+caller-owned. See [TU39_SPACE_CHANGEFEED.md](TU39_SPACE_CHANGEFEED.md) and
+[BENCHMARK.md](BENCHMARK.md#t-u39-named-space-changefeed).
