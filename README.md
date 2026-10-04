@@ -4765,3 +4765,9 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+
+### Arrangement recovery
+
+- [`MU036_HYDRATION_PROGRESS.md`](MU036_HYDRATION_PROGRESS.md): opt-in
+  hydration progress, readiness admission, failure recovery, and measured
+  overhead for typed-table arrangements.

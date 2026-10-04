@@ -22292,3 +22292,5 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+benchmark-mu036-hydration-admission:
+	@bash scripts/benchmark-mu036-hydration-admission.sh

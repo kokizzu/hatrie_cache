@@ -32580,3 +32580,49 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## M-U36 Hydration Progress And Admission
+
+This benchmark measures the opt-in Materialize-inspired hydration readiness
+contract. The ready-state reader fast path is compared with the existing
+arrangement `Freshness` probe; the batch wrapper is compared with direct
+no-op `Hydrate`. Both benchmarks report zero allocations. The permanent
+command is `make benchmark-mu036-hydration-admission`.
+
+AMD Ryzen 9 5950X, Go benchmark count 5:
+
+```text
+BenchmarkMU036ArrangementReadinessBaseline-32     100000000  12.01 ns/op  0 B/op  0 allocs/op
+BenchmarkMU036ArrangementReadinessBaseline-32      99995850  12.08 ns/op  0 B/op  0 allocs/op
+BenchmarkMU036ArrangementReadinessBaseline-32     100000000  11.69 ns/op  0 B/op  0 allocs/op
+BenchmarkMU036ArrangementReadinessBaseline-32      96062540  11.69 ns/op  0 B/op  0 allocs/op
+BenchmarkMU036ArrangementReadinessBaseline-32      99738352  12.30 ns/op  0 B/op  0 allocs/op
+BenchmarkMU036ArrangementReadinessAdmission-32     69508208  17.14 ns/op  0 B/op  0 allocs/op
+BenchmarkMU036ArrangementReadinessAdmission-32     69863804  17.10 ns/op  0 B/op  0 allocs/op
+BenchmarkMU036ArrangementReadinessAdmission-32     69671898  16.71 ns/op  0 B/op  0 allocs/op
+BenchmarkMU036ArrangementReadinessAdmission-32     67994377  17.03 ns/op  0 B/op  0 allocs/op
+BenchmarkMU036ArrangementReadinessAdmission-32     71362021  15.76 ns/op  0 B/op  0 allocs/op
+BenchmarkMU036HydrateBaseline-32                   42487756  27.67 ns/op  0 B/op  0 allocs/op
+BenchmarkMU036HydrateBaseline-32                   45675681  26.38 ns/op  0 B/op  0 allocs/op
+BenchmarkMU036HydrateBaseline-32                   37576623  27.35 ns/op  0 B/op  0 allocs/op
+BenchmarkMU036HydrateBaseline-32                   44426119  29.63 ns/op  0 B/op  0 allocs/op
+BenchmarkMU036HydrateBaseline-32                   40456651  29.43 ns/op  0 B/op  0 allocs/op
+BenchmarkMU036HydrateWithAdmission-32              17147252  63.84 ns/op  0 B/op  0 allocs/op
+BenchmarkMU036HydrateWithAdmission-32              17845684  62.68 ns/op  0 B/op  0 allocs/op
+BenchmarkMU036HydrateWithAdmission-32              19089270  69.51 ns/op  0 B/op  0 allocs/op
+BenchmarkMU036HydrateWithAdmission-32              18751110  62.09 ns/op  0 B/op  0 allocs/op
+BenchmarkMU036HydrateWithAdmission-32              19683176  60.21 ns/op  0 B/op  0 allocs/op
+```
+
+Median summary:
+
+| Path | Median ns/op | B/op | Allocs/op | Relative |
+| --- | ---: | ---: | ---: | ---: |
+| Direct `Freshness` | 12.01 | 0 | 0 | 1.00x |
+| Ready-state `WaitReady` | 17.03 | 0 | 0 | 1.42x time |
+| Direct no-op `Hydrate` | 27.35 | 0 | 0 | 1.00x |
+| `HydrateWithAdmission` | 62.68 | 0 | 0 | 2.29x time |
+
+The admission controller is deliberately off by default. Its value is a
+shared, observable recovery boundary and safe reader blocking; its cost is
+paid only by callers that opt into the contract.
