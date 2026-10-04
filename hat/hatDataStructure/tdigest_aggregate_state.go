@@ -16,7 +16,13 @@ const (
 // fixed-width centroid payload. It avoids JSON object and float formatting
 // overhead while retaining the envelope's kind, version, length, and CRC.
 func (digest TDigest) MarshalAggregateState() ([]byte, error) {
-	snapshot := digest.Snapshot()
+	// Encoding only reads the digest, so validate a view of the existing
+	// centroid slice instead of allocating a defensive snapshot copy.
+	snapshot := TDigestSnapshot{
+		Compression: digest.compression,
+		Count:       digest.count,
+		Centroids:   digest.centroids,
+	}
 	if err := ValidateTDigestSnapshot(snapshot); err != nil {
 		return nil, err
 	}
