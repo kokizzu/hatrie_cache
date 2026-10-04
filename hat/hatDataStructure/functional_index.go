@@ -26,6 +26,7 @@ type FunctionalIndex[T any, K comparable] struct {
 	extractor func(T) K
 	entries   map[uint64]functionalIndexEntry[T, K]
 	postings  map[K]u64PostingList
+	stats     indexStatsBinding[K]
 }
 
 // NewFunctionalIndex creates an index using extractor to derive each key.
@@ -65,10 +66,16 @@ func (index *FunctionalIndex[T, K]) Upsert(id uint64, value T) error {
 			index.appendFunctionalPostingLocked(key, id)
 		}
 		index.entries[id] = functionalIndexEntry[T, K]{key: key, value: value}
+		if index.stats.collector != nil {
+			index.stats.observeKey(key)
+		}
 		return nil
 	}
 	index.entries[id] = functionalIndexEntry[T, K]{key: key, value: value}
 	index.appendFunctionalPostingLocked(key, id)
+	if index.stats.collector != nil {
+		index.stats.observeKey(key)
+	}
 	return nil
 }
 
@@ -101,14 +108,25 @@ func (index *FunctionalIndex[T, K]) LookupInto(key K, dst []T) []T {
 		return dst
 	}
 	index.mu.RLock()
-	defer index.mu.RUnlock()
+	var binding indexStatsBinding[K]
+	if index.stats.collector != nil {
+		binding = index.stats
+	}
 	posting, ok := index.postings[key]
 	if !ok {
+		index.mu.RUnlock()
+		if binding.collector != nil {
+			binding.observeLookup(key, 0)
+		}
 		return dst
 	}
 	if posting.rest == nil {
 		if entry, ok := index.entries[posting.first]; ok {
 			dst = append(dst, entry.value)
+		}
+		index.mu.RUnlock()
+		if binding.collector != nil {
+			binding.observeLookup(key, posting.length())
 		}
 		return dst
 	}
@@ -126,6 +144,10 @@ func (index *FunctionalIndex[T, K]) LookupInto(key K, dst []T) []T {
 			dst = append(dst, entry.value)
 		}
 	}
+	index.mu.RUnlock()
+	if binding.collector != nil {
+		binding.observeLookup(key, posting.length())
+	}
 	return dst
 }
 
@@ -142,12 +164,24 @@ func (index *FunctionalIndex[T, K]) LookupIDsInto(key K, dst []uint64) []uint64 
 		return dst
 	}
 	index.mu.RLock()
-	defer index.mu.RUnlock()
+	var binding indexStatsBinding[K]
+	if index.stats.collector != nil {
+		binding = index.stats
+	}
 	posting, ok := index.postings[key]
 	if !ok {
+		index.mu.RUnlock()
+		if binding.collector != nil {
+			binding.observeLookup(key, 0)
+		}
 		return dst
 	}
-	return posting.values(dst)
+	dst = posting.values(dst)
+	index.mu.RUnlock()
+	if binding.collector != nil {
+		binding.observeLookup(key, posting.length())
+	}
+	return dst
 }
 
 // Len returns the number of indexed IDs.

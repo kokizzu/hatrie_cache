@@ -8,6 +8,10 @@ import (
 )
 
 var (
+	// ErrIndexStatsCollectorRequired indicates that an index stats collector was not supplied.
+	ErrIndexStatsCollectorRequired = errors.New("hatDataStructure: index stats collector is required")
+	// ErrIndexStatsHasherRequired indicates that an index stats key hasher was not supplied.
+	ErrIndexStatsHasherRequired = errors.New("hatDataStructure: index stats key hasher is required")
 	// ErrIndexStatsHotKeyCapacityInvalid indicates an unsupported hot-key bound.
 	ErrIndexStatsHotKeyCapacityInvalid = errors.New("hatDataStructure: index stats hot-key capacity is invalid")
 	// ErrIndexStatsPrecisionInvalid indicates an unsupported cardinality precision.
@@ -60,8 +64,9 @@ type indexHotKey struct {
 }
 
 // IndexStats collects bounded cardinality, posting-length, and hot-key
-// diagnostics for an index. It does not modify or automatically instrument an
-// index; callers opt in by observing index keys and lookups.
+// diagnostics for an index. Callers can observe hashes directly, or attach it
+// to a HashIndex or FunctionalIndex; OrderedIndex callers observe operations
+// explicitly to keep its default seek path unchanged.
 type IndexStats struct {
 	mu sync.Mutex
 

@@ -1,5 +1,53 @@
 # Benchmark
 
+## T-U46 Index Cardinality And Hot-Key Statistics
+
+This paired clean-worktree benchmark compares the same typed-index fixture at
+the last accepted baseline and with T-U46. Seven samples used
+`-benchtime=500ms`, `-benchmem`, and Go 1.26.5. Lower `ns/op` is better; the
+ratio is `after / before`, so values below 1.00x are faster. All measured
+paths reported `0 B/op` and `0 allocs/op`.
+
+| Operation | Before median | After median | Relative result |
+| --- | ---: | ---: | ---: |
+| Hash lookup, stats detached | 29.38 ns/op | 28.96 ns/op | 0.986x, 1.4% faster |
+| Functional lookup, stats detached | 41.54 ns/op | 37.70 ns/op | 0.908x, 9.2% faster |
+| Ordered seek, no automatic stats | 99.77 ns/op | 103.3 ns/op | 1.04x, noisy unchanged path |
+| Hash lookup, stats attached | n/a | 76.45 ns/op | 2.64x versus detached after |
+| Functional lookup, stats attached | n/a | 77.70 ns/op | 2.06x versus detached after |
+| Ordered seek plus manual observation | n/a | 151.3 ns/op | 1.46x versus detached after |
+
+The ordered implementation intentionally has no observer field or branch. Its
+small difference is process noise between separate benchmark processes, not a
+feature path; the implementation is kept unchanged. Attached/manual statistics
+cost CPU because they hash the key and update a mutex-protected HLL and
+Space-Saving table. The benchmarked query paths allocate nothing. Hash and
+functional index bindings add two machine words per index on 64-bit systems,
+not per element.
+
+Raw default samples (`ns/op`):
+
+```text
+hash before: 30.07 29.46 29.17 29.38 28.69 28.95 32.54
+hash after:  28.38 28.79 28.96 29.52 28.93 29.36 31.50
+functional before: 42.68 41.54 42.42 40.74 43.05 41.31 39.00
+functional after:  40.05 40.57 41.65 37.70 35.17 37.40 36.69
+ordered before: 94.47 94.56 98.89 102.7 99.77 103.2 112.0
+ordered after:  97.66 113.8 101.3 112.1 104.5 102.1 103.3
+```
+
+Raw enabled-statistics samples (`ns/op`):
+
+```text
+hash attached: 76.54 77.09 76.38 77.07 76.45 75.58 75.95
+functional attached: 78.44 83.11 78.08 77.70 75.15 74.94 71.86
+ordered manual: 137.9 154.2 151.3 151.3 151.7 150.0 150.9
+```
+
+Reproduce through the repository command API with
+`make codex-tu46-targeted-benchmark`; its raw files are written under `/tmp`
+and are removed by the normal Codex cleanup target.
+
 ## CH-U49 Skip-Index EXPLAIN Diagnostics
 
 This paired clean-worktree benchmark compares the pre-CH-U49 implementation
