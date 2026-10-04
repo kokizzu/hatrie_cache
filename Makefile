@@ -22292,3 +22292,5 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+benchmark-mu40-source-schema-registry:
+	bash scripts/benchmark-mu40-source-schema-registry.sh

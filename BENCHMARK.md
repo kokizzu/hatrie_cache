@@ -32586,7 +32586,7 @@ existing JSON and data-bearing subscription paths are not changed.
 Benchmark command:
 
 ```text
-make codex-mu40-benchmark-short
+make benchmark-mu40-source-schema-registry
 ```
 
 Workload: one `orders` source with three columns; the baseline repeats
@@ -32598,18 +32598,18 @@ an AMD Ryzen 9 5950X.
 Raw output:
 
 ```text
-BenchmarkSourceSchemaRegistryBaseline-32       121124 907.2 ns/op 224 B/op 3 allocs/op
-BenchmarkSourceSchemaRegistryBaseline-32       140160 924.8 ns/op 224 B/op 3 allocs/op
-BenchmarkSourceSchemaRegistryBaseline-32       130424 897.6 ns/op 224 B/op 3 allocs/op
-BenchmarkSourceSchemaRegistryHotPath-32       9604905 11.78 ns/op 0 B/op 0 allocs/op
-BenchmarkSourceSchemaRegistryHotPath-32      10333288 11.64 ns/op 0 B/op 0 allocs/op
-BenchmarkSourceSchemaRegistryHotPath-32      10436589 11.70 ns/op 0 B/op 0 allocs/op
-BenchmarkSourceSchemaRegistryRegister-32       86923 1286 ns/op 1160 B/op 20 allocs/op
-BenchmarkSourceSchemaRegistryRegister-32       93984 1274 ns/op 1160 B/op 20 allocs/op
-BenchmarkSourceSchemaRegistryRegister-32       86421 1345 ns/op 1160 B/op 20 allocs/op
-BenchmarkSourceSchemaRegistrySnapshot64-32     13465 8998 ns/op 21120 B/op 65 allocs/op
-BenchmarkSourceSchemaRegistrySnapshot64-32     13612 9370 ns/op 21120 B/op 65 allocs/op
-BenchmarkSourceSchemaRegistrySnapshot64-32     13310 8954 ns/op 21120 B/op 65 allocs/op
+BenchmarkSourceSchemaRegistryBaseline-32       121406 928.1 ns/op 224 B/op 3 allocs/op
+BenchmarkSourceSchemaRegistryBaseline-32       134016 893.7 ns/op 224 B/op 3 allocs/op
+BenchmarkSourceSchemaRegistryBaseline-32       122962 905.7 ns/op 224 B/op 3 allocs/op
+BenchmarkSourceSchemaRegistryHotPath-32      10444082 11.73 ns/op 0 B/op 0 allocs/op
+BenchmarkSourceSchemaRegistryHotPath-32      10307629 11.99 ns/op 0 B/op 0 allocs/op
+BenchmarkSourceSchemaRegistryHotPath-32      10434810 11.62 ns/op 0 B/op 0 allocs/op
+BenchmarkSourceSchemaRegistryRegister-32       86769 1279 ns/op 1160 B/op 20 allocs/op
+BenchmarkSourceSchemaRegistryRegister-32       84590 1301 ns/op 1160 B/op 20 allocs/op
+BenchmarkSourceSchemaRegistryRegister-32       91437 1281 ns/op 1160 B/op 20 allocs/op
+BenchmarkSourceSchemaRegistrySnapshot64-32     15010 7831 ns/op 21120 B/op 65 allocs/op
+BenchmarkSourceSchemaRegistrySnapshot64-32     15032 7922 ns/op 21120 B/op 65 allocs/op
+BenchmarkSourceSchemaRegistrySnapshot64-32     15601 7974 ns/op 21120 B/op 65 allocs/op
 ```
 
 The registry hot path is about 77x faster and removes

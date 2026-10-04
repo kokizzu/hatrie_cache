@@ -55,10 +55,10 @@ Values are medians of three 100 ms runs on the local AMD Ryzen 9 5950X:
 
 | Path | Time | Heap | Allocs |
 | --- | ---: | ---: | ---: |
-| Full `CheckRollingCompatibility` | 897.6-924.8 ns/op | 224 B/op | 3/op |
-| Registry `Validate` hot path | 11.64-11.78 ns/op | 0 B/op | 0/op |
-| First registration, including registry creation | 1,274-1,345 ns/op | 1,160 B/op | 20/op |
-| Snapshot of 64 retained versions | 8,954-9,370 ns/op | 21,120 B/op | 65/op |
+| Full `CheckRollingCompatibility` | 893.7-928.1 ns/op | 224 B/op | 3/op |
+| Registry `Validate` hot path | 11.62-11.99 ns/op | 0 B/op | 0/op |
+| First registration, including registry creation | 1,279-1,301 ns/op | 1,160 B/op | 20/op |
+| Snapshot of 64 retained versions | 7,831-7,974 ns/op | 21,120 B/op | 65/op |
 
 That is approximately 77x lower CPU for repeated validation and removes the
 three hot-path allocations. The cost is retained cloned schema history and
