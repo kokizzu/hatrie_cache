@@ -32580,3 +32580,30 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## M-G45: Named Connection and Secret Resources
+
+The `hatResource.Registry` benchmark measures the cost of owner-scoped secret
+resolution and connection metadata resolution against a raw map lookup. It is
+a security/control-plane feature, not a hot-path map replacement.
+
+Environment: AMD Ryzen 9 5950X, linux/amd64. Five samples per benchmark.
+
+```text
+DirectMapLookupBaseline       7.822  8.821  8.795  7.729  7.478 ns/op
+RegistryCreateAndRegister   371.9  356.3  360.0  362.3  362.3 ns/op
+RegistryResolveSecret        67.99  68.76  68.26  69.41  72.26 ns/op
+RegistryVerifySecret         68.36  71.51  73.72  73.67  76.20 ns/op
+RegistryResolveConnection   102.2  113.0  95.92 100.7  111.3 ns/op
+```
+
+| Operation | Median ns/op | B/op | allocs/op | CPU vs direct lookup |
+| --- | ---: | ---: | ---: | ---: |
+| Direct map lookup | 7.822 | 0 | 0 | 1.00x |
+| Create and register | 362.3 | 704 | 5 | 46.3x |
+| Resolve secret | 68.76 | 0 | 0 | 8.79x |
+| Verify secret | 73.67 | 0 | 0 | 9.42x |
+| Resolve connection | 102.2 | 0 | 0 | 13.1x |
+
+The registry remains opt-in; existing SQL, peer, and transport paths are
+unchanged.

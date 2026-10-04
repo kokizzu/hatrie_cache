@@ -4765,3 +4765,4 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+- Opt-in named connection and secret resources with owner-scoped access and bounded rotation: [MG45_NAMED_RESOURCES.md](MG45_NAMED_RESOURCES.md)

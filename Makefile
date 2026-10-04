@@ -22292,3 +22292,17 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+tg-mg45-named-resources-format:
+	bash scripts/mg45-named-resources.sh format
+
+tg-mg45-named-resources-test:
+	bash scripts/mg45-named-resources.sh test
+
+tg-mg45-named-resources-race:
+	bash scripts/mg45-named-resources.sh race
+
+tg-mg45-named-resources-vet:
+	bash scripts/mg45-named-resources.sh vet
+
+tg-mg45-named-resources-benchmark:
+	bash scripts/mg45-named-resources.sh benchmark

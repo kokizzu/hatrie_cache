@@ -964,3 +964,4 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   four normalized `GROUP BY` keys use an inline linear index and promote to the
   existing map for larger groups; see [CHG02_SMALL_GROUP_INDEX.md](CHG02_SMALL_GROUP_INDEX.md)
   and [BENCHMARK.md](BENCHMARK.md#chg02-small-cardinality-group-by-index).
+- [x] M-G45 Named connection and secret resources. `hatResource.Registry` provides bounded namespace/owner-scoped named secrets and connections, metadata-only snapshots, constant-time verification, and versioned rotation with a bounded grace period; it is opt-in and not on existing hot paths. See [MG45_NAMED_RESOURCES.md](MG45_NAMED_RESOURCES.md).
