@@ -1,5 +1,36 @@
 # Benchmark
 
+## T-U38 Conflict Decision Log
+
+Linux/amd64, AMD Ryzen 9 5950X, five repetitions. The existing baseline is
+`ResolveConflictVersion`; the opt-in path hashes one 12-byte key and records
+one event in a 1,024-entry ring. Snapshot measures 128 retained events.
+
+| Operation | Existing baseline | Opt-in log | Tradeoff |
+| --- | ---: | ---: | ---: |
+| Winner selection/record | 2.15 ns/op, 0 B/op, 0 allocs | 100.7 ns/op, 0 B/op, 0 allocs | 46.8x CPU overhead only when recording |
+| Snapshot of 128 events | N/A | 9.95 us/op, 7,187 bytes, 32,952 B/op, 14 allocs | Caller controls snapshot frequency |
+
+Raw output:
+
+```text
+BenchmarkConflictDecisionResolveBaseline-32  495867140  2.395 ns/op  0 B/op  0 allocs/op
+BenchmarkConflictDecisionResolveBaseline-32  498061281  2.433 ns/op  0 B/op  0 allocs/op
+BenchmarkConflictDecisionResolveBaseline-32  508493704  2.391 ns/op  0 B/op  0 allocs/op
+BenchmarkConflictDecisionResolveBaseline-32  483286915  2.351 ns/op  0 B/op  0 allocs/op
+BenchmarkConflictDecisionResolveBaseline-32  499345419  2.395 ns/op  0 B/op  0 allocs/op
+BenchmarkConflictDecisionLogRecord-32       11507788    99.82 ns/op 0 B/op  0 allocs/op
+BenchmarkConflictDecisionLogRecord-32       12457466    96.16 ns/op 0 B/op  0 allocs/op
+BenchmarkConflictDecisionLogRecord-32       12219385   100.7 ns/op  0 B/op  0 allocs/op
+BenchmarkConflictDecisionLogRecord-32       11591118   102.9 ns/op  0 B/op  0 allocs/op
+BenchmarkConflictDecisionLogRecord-32       11758569   102.5 ns/op  0 B/op  0 allocs/op
+BenchmarkConflictDecisionLogSnapshot-32     130345     9952 ns/op   7187 snapshot-bytes 32952 B/op 14 allocs/op
+BenchmarkConflictDecisionLogSnapshot-32     115108    10600 ns/op   7187 snapshot-bytes 32952 B/op 14 allocs/op
+BenchmarkConflictDecisionLogSnapshot-32     118564     9795 ns/op   7187 snapshot-bytes 32952 B/op 14 allocs/op
+BenchmarkConflictDecisionLogSnapshot-32     128649    10222 ns/op   7187 snapshot-bytes 32952 B/op 14 allocs/op
+BenchmarkConflictDecisionLogSnapshot-32     115636     9329 ns/op   7187 snapshot-bytes 32952 B/op 14 allocs/op
+```
+
 ## CH-U49 Skip-Index EXPLAIN Diagnostics
 
 This paired clean-worktree benchmark compares the pre-CH-U49 implementation

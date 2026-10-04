@@ -22292,3 +22292,18 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: format-conflict-decision-log test-conflict-decision-log test-conflict-decision-log-package benchmark-conflict-decision-log race-conflict-decision-log vet-conflict-decision-log fuzz-conflict-decision-log
+format-conflict-decision-log:
+	sh ./scripts/format-conflict-decision-log.sh
+test-conflict-decision-log:
+	sh ./scripts/test-conflict-decision-log.sh
+test-conflict-decision-log-package:
+	sh ./scripts/test-conflict-decision-log-package.sh
+benchmark-conflict-decision-log:
+	sh ./scripts/benchmark-conflict-decision-log.sh
+race-conflict-decision-log:
+	sh ./scripts/race-conflict-decision-log.sh
+vet-conflict-decision-log:
+	sh ./scripts/vet-conflict-decision-log.sh
+fuzz-conflict-decision-log:
+	sh ./scripts/fuzz-conflict-decision-log.sh
