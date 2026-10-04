@@ -116,6 +116,19 @@ func (scheduler *ResizableScheduler) Submit(ctx context.Context, task Task) erro
 	}
 }
 
+// SubmitWithOptions queues task with the same opt-in context policy as the
+// fixed-worker Scheduler. The zero-value options preserve Submit behavior.
+func (scheduler *ResizableScheduler) SubmitWithOptions(ctx context.Context, options TaskOptions, task Task) error {
+	if task == nil {
+		return scheduler.Submit(ctx, task)
+	}
+	wrapped, err := wrapTaskWithOptions(ctx, options, task)
+	if err != nil {
+		return err
+	}
+	return scheduler.Submit(ctx, wrapped)
+}
+
 // Resize changes the target worker count. Workers that are already executing
 // finish their current task before retiring. A positive worker count is
 // required; callers that want to stop the scheduler should use Close or Wait.

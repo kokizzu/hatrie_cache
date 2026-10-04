@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestSchedulerRunsTasksAndReturnsFirstTaskError(t *testing.T) {
@@ -66,5 +67,120 @@ func TestSchedulerHonorsSubmitCancellationAndRejectsInvalidLifecycle(t *testing.
 	}
 	if err := scheduler.Wait(); err != nil {
 		t.Fatalf("empty scheduler Wait() error = %v", err)
+	}
+}
+
+func TestSchedulerSubmitWithOptionsPropagatesDeadline(t *testing.T) {
+	scheduler, err := NewScheduler(context.Background(), 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	if err := scheduler.SubmitWithOptions(context.Background(), TaskOptions{Timeout: 20 * time.Millisecond}, func(ctx context.Context) error {
+		close(started)
+		<-ctx.Done()
+		return ctx.Err()
+	}); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	if err := scheduler.Wait(); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Wait() error = %v, want deadline exceeded", err)
+	}
+}
+
+func TestSchedulerSubmitWithOptionsForwardsCallerCancellation(t *testing.T) {
+	scheduler, err := NewScheduler(context.Background(), 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	if err := scheduler.SubmitWithOptions(caller, TaskOptions{PropagateCaller: true}, func(ctx context.Context) error {
+		close(started)
+		<-ctx.Done()
+		return ctx.Err()
+	}); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	cancel()
+	if err := scheduler.Wait(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Wait() error = %v, want canceled", err)
+	}
+}
+
+func TestSchedulerSubmitWithOptionsDoesNotPropagateCallerWithoutOptIn(t *testing.T) {
+	scheduler, err := NewScheduler(context.Background(), 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	release := make(chan struct{})
+	observed := make(chan error, 1)
+	if err := scheduler.SubmitWithOptions(caller, TaskOptions{Deadline: time.Now().Add(time.Hour)}, func(ctx context.Context) error {
+		close(started)
+		<-release
+		observed <- ctx.Err()
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	cancel()
+	close(release)
+	if err := <-observed; err != nil {
+		t.Fatalf("task context error = %v, want nil", err)
+	}
+	if err := scheduler.Wait(); err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
+}
+
+func TestSchedulerSubmitWithOptionsDeadlineIncludesQueueWait(t *testing.T) {
+	scheduler, err := NewScheduler(context.Background(), 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstStarted := make(chan struct{})
+	release := make(chan struct{})
+	if err := scheduler.Submit(context.Background(), func(context.Context) error {
+		close(firstStarted)
+		<-release
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	<-firstStarted
+	secondStarted := make(chan struct{})
+	if err := scheduler.SubmitWithOptions(context.Background(), TaskOptions{Timeout: 20 * time.Millisecond}, func(ctx context.Context) error {
+		close(secondStarted)
+		return ctx.Err()
+	}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(40 * time.Millisecond)
+	close(release)
+	<-secondStarted
+	if err := scheduler.Wait(); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Wait() error = %v, want queued deadline exceeded", err)
+	}
+}
+
+func TestSchedulerSubmitWithOptionsRejectsNegativeTimeout(t *testing.T) {
+	scheduler, err := NewScheduler(context.Background(), 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := scheduler.SubmitWithOptions(context.Background(), TaskOptions{Timeout: time.Second}, nil); !errors.Is(err, ErrSchedulerInvalid) {
+		t.Fatalf("nil task error = %v, want %v", err, ErrSchedulerInvalid)
+	}
+	if err := scheduler.SubmitWithOptions(context.Background(), TaskOptions{Timeout: -time.Millisecond}, func(context.Context) error { return nil }); !errors.Is(err, ErrSchedulerTaskOptionsInvalid) {
+		t.Fatalf("negative timeout error = %v, want %v", err, ErrSchedulerTaskOptionsInvalid)
+	}
+	scheduler.Close()
+	if err := scheduler.Wait(); err != nil {
+		t.Fatalf("Wait() error = %v", err)
 	}
 }

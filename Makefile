@@ -22292,3 +22292,26 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: format-tr039-scheduler-task-deadlines
+format-tr039-scheduler-task-deadlines:
+	bash scripts/tr039-scheduler-task-deadlines.sh format
+
+.PHONY: test-tr039-scheduler-task-deadlines
+test-tr039-scheduler-task-deadlines:
+	bash scripts/tr039-scheduler-task-deadlines.sh test
+
+.PHONY: test-tr039-scheduler-task-deadlines-all
+test-tr039-scheduler-task-deadlines-all:
+	bash scripts/tr039-scheduler-task-deadlines.sh full
+
+.PHONY: race-tr039-scheduler-task-deadlines
+race-tr039-scheduler-task-deadlines:
+	bash scripts/tr039-scheduler-task-deadlines.sh race
+
+.PHONY: vet-tr039-scheduler-task-deadlines
+vet-tr039-scheduler-task-deadlines:
+	bash scripts/tr039-scheduler-task-deadlines.sh vet
+
+.PHONY: benchmark-tr039-scheduler-task-deadlines
+benchmark-tr039-scheduler-task-deadlines:
+	bash scripts/tr039-scheduler-task-deadlines.sh benchmark

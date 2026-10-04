@@ -62,6 +62,7 @@ security guidance before exposing it on a network.
 - Opt-in retractable and binary-serializable SQL aggregate capabilities: [MU031_RETRACTABLE_AGGREGATES.md](MU031_RETRACTABLE_AGGREGATES.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mu-031-retractable-aggregate-capabilities)
 - Explicit deterministic, monotonic, and retractable UDF capability metadata: [MU032_UDF_CAPABILITIES.md](MU032_UDF_CAPABILITIES.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mu-032-udf-capability-classification)
 - Opt-in nested worker scopes for structured dataflow tasks: [WORKER_SCOPE.md](WORKER_SCOPE.md)
+- Opt-in cooperative scheduler task deadlines and caller-cancellation propagation: [TR039_SCHEDULER_TASK_DEADLINES.md](TR039_SCHEDULER_TASK_DEADLINES.md), with allocation measurements in [BENCHMARK.md](BENCHMARK.md#tr039-scheduler-task-deadlines)
 - Opt-in Materialize-style worker-local exchange batching: [MZ037_WORKER_LOCAL_EXCHANGE.md](MZ037_WORKER_LOCAL_EXCHANGE.md)
 - Opt-in Materialize-style operator yield budgets: [MZ039_OPERATOR_YIELD.md](MZ039_OPERATOR_YIELD.md)
 - Materialize-style signed session snapshot tokens: [MZ044_SNAPSHOT_TOKENS.md](MZ044_SNAPSHOT_TOKENS.md), with measured opt-in overhead in [BENCHMARK.md](BENCHMARK.md#mz-044-session-snapshot-tokens)

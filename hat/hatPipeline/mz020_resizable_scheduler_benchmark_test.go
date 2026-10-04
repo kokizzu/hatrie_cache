@@ -3,6 +3,7 @@ package hatPipeline
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 func BenchmarkFixedSchedulerNoopBatch(b *testing.B) {
@@ -17,6 +18,28 @@ func BenchmarkFixedSchedulerNoopBatch(b *testing.B) {
 		}
 		for range tasks {
 			if err := scheduler.Submit(context.Background(), noOp); err != nil {
+				b.Fatal(err)
+			}
+		}
+		if err := scheduler.Wait(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkFixedSchedulerDeadlineNoopBatch(b *testing.B) {
+	const tasks = 256
+	noOp := func(context.Context) error { return nil }
+	options := TaskOptions{Deadline: time.Now().Add(time.Hour)}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		scheduler, err := NewScheduler(context.Background(), 4, tasks)
+		if err != nil {
+			b.Fatal(err)
+		}
+		for range tasks {
+			if err := scheduler.SubmitWithOptions(context.Background(), options, noOp); err != nil {
 				b.Fatal(err)
 			}
 		}

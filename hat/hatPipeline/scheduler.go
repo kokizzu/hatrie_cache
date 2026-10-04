@@ -88,6 +88,21 @@ func (scheduler *Scheduler) Submit(ctx context.Context, task Task) error {
 	return err
 }
 
+// SubmitWithOptions queues task with an explicit, opt-in context policy. The
+// zero-value options take the same path as Submit. A task cannot be
+// preempted; it must observe the context, and a nil task error is still
+// rejected before admission.
+func (scheduler *Scheduler) SubmitWithOptions(ctx context.Context, options TaskOptions, task Task) error {
+	if task == nil {
+		return scheduler.Submit(ctx, task)
+	}
+	wrapped, err := wrapTaskWithOptions(ctx, options, task)
+	if err != nil {
+		return err
+	}
+	return scheduler.Submit(ctx, wrapped)
+}
+
 // Cancel stops workers from accepting more tasks. Running tasks must observe
 // the context themselves; Wait returns context.Canceled if no task failed.
 func (scheduler *Scheduler) Cancel() {

@@ -770,6 +770,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T090 TTL queue expiration.
 - [x] T091 Scheduled refresh and maintenance tasks.
 - [x] T092 Fiber-style cooperative scheduler. `hat/hatPipeline.Scheduler` provides fixed workers, bounded cooperative task submission, cancellation, fail-fast errors, and close/drain lifecycle semantics. See [SCHEDULER.md](SCHEDULER.md).
+- [x] T092a Tarantool-style cooperative task deadlines and caller cancellation. `Scheduler` and `ResizableScheduler` expose opt-in `TaskOptions` with admission-time timeout/deadline handling and explicit caller-cancellation propagation; existing `Submit` behavior remains unchanged. See [TR039_SCHEDULER_TASK_DEADLINES.md](TR039_SCHEDULER_TASK_DEADLINES.md) and [BENCHMARK.md](BENCHMARK.md#tr039-scheduler-task-deadlines).
 - [x] T093 Cooperative yielding in bounded worker loops.
 - [x] T094 Channels for typed producer-consumer exchange. `hat/hatPipeline.Channel[T]` provides bounded buffering, context-aware send/receive, and idempotent close with drain semantics. See [CHANNELS.md](CHANNELS.md).
 - [x] T095 Net.box-like binary client path.

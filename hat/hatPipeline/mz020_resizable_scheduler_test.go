@@ -8,6 +8,25 @@ import (
 	"time"
 )
 
+func TestResizableSchedulerSubmitWithOptionsPropagatesDeadline(t *testing.T) {
+	scheduler, err := NewResizableScheduler(context.Background(), 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	if err := scheduler.SubmitWithOptions(context.Background(), TaskOptions{Timeout: 20 * time.Millisecond}, func(ctx context.Context) error {
+		close(started)
+		<-ctx.Done()
+		return ctx.Err()
+	}); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	if err := scheduler.Wait(); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Wait() error = %v, want deadline exceeded", err)
+	}
+}
+
 func TestResizableSchedulerResizeRunsEveryQueuedTask(t *testing.T) {
 	scheduler, err := NewResizableScheduler(context.Background(), 4, 16)
 	if err != nil {

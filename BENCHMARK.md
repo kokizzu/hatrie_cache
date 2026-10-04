@@ -32580,3 +32580,36 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+<a id="tr039-scheduler-task-deadlines"></a>
+## TR-039 Scheduler Task Deadlines
+
+Commands:
+
+```sh
+make format-tr039-scheduler-task-deadlines
+make test-tr039-scheduler-task-deadlines
+make race-tr039-scheduler-task-deadlines
+make vet-tr039-scheduler-task-deadlines
+make benchmark-tr039-scheduler-task-deadlines
+```
+
+Five `-benchmem` samples ran on Linux/amd64 with an AMD Ryzen 9 5950X. The
+workload submits 256 no-op tasks to four fixed workers. The deadline case uses
+an absolute deadline one hour in the future, so it measures the opt-in context
+and timer machinery rather than expiry handling.
+
+| Path | Raw ns/op samples | Median ns/op | B/op | Allocs/op | Result |
+| --- | --- | ---: | ---: | ---: | --- |
+| Existing submit, clean baseline | 68,932; 63,149; 63,564; 66,039; 63,664 | 63,664 | 2,951 | 12 | control |
+| Deadline options, first implementation | 220,190; 217,472; 215,271; 228,489; 269,334 | 220,190 | 248,965 | 3,086 | initial cost |
+| Deadline options, optimized | 169,623; 179,442; 166,736; 182,293; 176,456 | 176,456 | 97,413 | 1,294 | 2.56x fewer bytes and 2.39x fewer allocations than first implementation |
+
+The default submit path does not construct task contexts or timers. The
+deadline path remains intentionally opt-in and has higher CPU cost than the
+plain path because deadline-aware tasks require per-task cancellation state.
+The optimization removes an unnecessary caller-cancellation hook from
+deadline-only tasks and uses one deadline context instead of layering an
+additional cancel context. The final control run measured the unchanged
+submit path at 55,754 ns/op, 2,950 B/op, and 12 allocations/op. Full semantics and the caller contract are in
+[TR039_SCHEDULER_TASK_DEADLINES.md](TR039_SCHEDULER_TASK_DEADLINES.md).
