@@ -22292,3 +22292,17 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+mg37-durable-query-history-format:
+	bash scripts/mg37-durable-query-history.sh format
+
+mg37-durable-query-history-test:
+	bash scripts/mg37-durable-query-history.sh test
+
+mg37-durable-query-history-race:
+	bash scripts/mg37-durable-query-history.sh race
+
+mg37-durable-query-history-vet:
+	bash scripts/mg37-durable-query-history.sh vet
+
+mg37-durable-query-history-benchmark:
+	bash scripts/mg37-durable-query-history.sh benchmark

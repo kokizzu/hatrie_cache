@@ -4765,3 +4765,4 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+- Opt-in durable redacted query history with bounded JSONL rotation: [MG37_DURABLE_QUERY_HISTORY.md](MG37_DURABLE_QUERY_HISTORY.md)

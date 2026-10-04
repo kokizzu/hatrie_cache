@@ -32580,3 +32580,27 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+## M-G37: Durable Redacted Query History
+
+The clean-base SQL package could not provide a valid baseline because it already
+fails to compile on unrelated missing typed-date and dataflow symbols. The
+feature benchmark uses an in-memory ring append as the lower bound.
+
+Environment: AMD Ryzen 9 5950X, linux/amd64. Five samples per benchmark.
+
+```text
+InMemoryAppendBaseline  2.476  2.600  2.482  2.303  2.481 ns/op
+DurableAppend        2247    2278    2251    2233    2236 ns/op
+DurableAppendSync  685408 650361 691529 668901 645628 ns/op
+DurableSnapshot     21020  22642  21762  26380  23351 ns/op
+```
+
+| Operation | Median ns/op | B/op | allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| In-memory append baseline | 2.481 | 0 | 0 | 1.00x |
+| Durable append, no fsync | 2,247 | 369 | 4 | 906x |
+| Durable append, `Sync: true` | 668,901 | 374 | 4 | 269,609x |
+| Snapshot of 1,024 records | 22,642 | 98,304 | 1 | not comparable |
+
+The feature is opt-in and belongs at query-completion or audit boundaries, not
+inside per-row execution.

@@ -964,3 +964,4 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   four normalized `GROUP BY` keys use an inline linear index and promote to the
   existing map for larger groups; see [CHG02_SMALL_GROUP_INDEX.md](CHG02_SMALL_GROUP_INDEX.md)
   and [BENCHMARK.md](BENCHMARK.md#chg02-small-cardinality-group-by-index).
+- [x] M-G37 durable redacted query-history primitive. `hatQueryHistory` stores only bounded status fields in mode-0600 JSONL, rotates one bounded file, rejects corrupt/unsafe records, and supports reopen recovery; SQL-manager wiring remains opt-in at the caller boundary. See [MG37_DURABLE_QUERY_HISTORY.md](MG37_DURABLE_QUERY_HISTORY.md).
