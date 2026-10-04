@@ -22292,3 +22292,7 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+
+.PHONY: benchmark-chu06-persistent-delete-bitmap
+benchmark-chu06-persistent-delete-bitmap:
+	bash scripts/benchmark-chu06-persistent-delete-bitmap.sh

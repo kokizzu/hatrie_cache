@@ -734,3 +734,7 @@ Adopted as opt-in `hatStorage.CompactionDiagnostics`: bounded arrangement regist
 ## Materialize M-U41: Webhook Event Idempotency
 
 Adopted as opt-in `hatSql.WebhookEventDeduplicator`: bounded source/event-ID admission, payload-fingerprint conflict detection, expiry, deterministic CRC-protected HWE1 snapshots, and atomic restore. The caller owns application, durable storage, acknowledgement, and HTTP/webhook wiring; existing defaults remain unchanged. See [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md) and [BENCHMARK.md](BENCHMARK.md#m-u41-webhook-event-idempotency).
+
+## ClickHouse CH-U06: Persistent Delete Bitmap
+
+Adopted as opt-in `hatStorage.PersistentDeleteBitmap`: bounded CRC-protected PDB1 frames, sparse delta/run encoding, dense-word fallback, row-bound validation, and ordered restore inspection. Storage-part manifest publication, compaction, and lifecycle integration remain caller-owned. See [CHU06_PERSISTENT_DELETE_BITMAP.md](CHU06_PERSISTENT_DELETE_BITMAP.md) and [BENCHMARK.md](BENCHMARK.md#ch-u06-persistent-delete-bitmap).

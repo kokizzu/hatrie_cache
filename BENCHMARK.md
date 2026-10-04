@@ -32580,3 +32580,34 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## CH-U06 Persistent Delete Bitmap
+
+Command:
+
+```sh
+make benchmark-chu06-persistent-delete-bitmap
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X, with one million
+physical rows. The baseline is a dense 64-bit word frame with the same fixed
+header and CRC32C checksum.
+
+| Workload | Baseline median | Candidate median | CPU | Wire size | Temporary bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1,000 sparse deletes | 35,738 ns/op, 131,072 B/op, 1 alloc | 9,382 ns/op, 12,288 B/op, 4 allocs | 3.81x faster | 125,024 B -> 3,023 B, 41.4x smaller | 10.7x lower |
+| 200,000 contiguous deletes | 34,159 ns/op, 131,072 B/op, 1 alloc | 34,296 ns/op, 131,072 B/op, 1 alloc | 1.00x | 125,024 B -> 125,024 B | neutral |
+| 249,293 random deletes | 35,077 ns/op, 131,072 B/op, 1 alloc | 35,390 ns/op, 131,072 B/op, 1 alloc | 0.99x | 125,024 B -> 125,024 B | neutral |
+
+Raw samples:
+
+```text
+BenchmarkCHU06BaselineSparseEncode: 35738, 35252, 36390, 36270, 35377 ns/op
+BenchmarkCHU06CandidateSparseEncode: 9546, 9272, 9266, 9558, 9382 ns/op
+BenchmarkCHU06BaselineDenseEncode: 34033, 34159, 34514, 34122, 34647 ns/op
+BenchmarkCHU06CandidateDenseEncode: 35010, 33517, 32526, 34428, 34296 ns/op
+BenchmarkCHU06BaselineRandomEncode: 35215, 34025, 36604, 35077, 34409 ns/op
+BenchmarkCHU06CandidateRandomEncode: 34242, 34657, 35459, 35812, 35390 ns/op
+```
+
+Sparse size is 3,023 bytes versus 125,024 bytes for the baseline; dense and random patterns intentionally fall back to the dense frame. See [CHU06_PERSISTENT_DELETE_BITMAP.md](CHU06_PERSISTENT_DELETE_BITMAP.md).
