@@ -32580,3 +32580,39 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## Materialize-style source schema registry
+
+Benchmark command:
+
+```text
+make codex-mu40-benchmark-short
+```
+
+Workload: one `orders` source with three columns; the baseline repeats
+`hatSchema.CheckRollingCompatibility` for each event, while the candidate
+registers the source once and repeats `SourceSchemaRegistry.Validate` with the
+registered version and fingerprint. The short run uses three 100 ms samples on
+an AMD Ryzen 9 5950X.
+
+Raw output:
+
+```text
+BenchmarkSourceSchemaRegistryBaseline-32       121124 907.2 ns/op 224 B/op 3 allocs/op
+BenchmarkSourceSchemaRegistryBaseline-32       140160 924.8 ns/op 224 B/op 3 allocs/op
+BenchmarkSourceSchemaRegistryBaseline-32       130424 897.6 ns/op 224 B/op 3 allocs/op
+BenchmarkSourceSchemaRegistryHotPath-32       9604905 11.78 ns/op 0 B/op 0 allocs/op
+BenchmarkSourceSchemaRegistryHotPath-32      10333288 11.64 ns/op 0 B/op 0 allocs/op
+BenchmarkSourceSchemaRegistryHotPath-32      10436589 11.70 ns/op 0 B/op 0 allocs/op
+BenchmarkSourceSchemaRegistryRegister-32       86923 1286 ns/op 1160 B/op 20 allocs/op
+BenchmarkSourceSchemaRegistryRegister-32       93984 1274 ns/op 1160 B/op 20 allocs/op
+BenchmarkSourceSchemaRegistryRegister-32       86421 1345 ns/op 1160 B/op 20 allocs/op
+BenchmarkSourceSchemaRegistrySnapshot64-32     13465 8998 ns/op 21120 B/op 65 allocs/op
+BenchmarkSourceSchemaRegistrySnapshot64-32     13612 9370 ns/op 21120 B/op 65 allocs/op
+BenchmarkSourceSchemaRegistrySnapshot64-32     13310 8954 ns/op 21120 B/op 65 allocs/op
+```
+
+The registry hot path is about 77x faster and removes
+all per-event heap work, at the cost of bounded retained definitions and
+explicit snapshot-copy work. See [M-U40_SOURCE_SCHEMA_REGISTRY.md](M-U40_SOURCE_SCHEMA_REGISTRY.md)
+for the API and compatibility boundaries.
