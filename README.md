@@ -4516,6 +4516,16 @@ calling the injected publication store. Discovery, retries, and rollback remain
 caller-owned. See [CHU33_REMOTE_PART_PUBLICATION.md](CHU33_REMOTE_PART_PUBLICATION.md)
 and the [CH-U33 benchmark](BENCHMARK.md#ch-u33-quorum-remote-part-publication).
 
+### Mmap-backed read-only parts
+
+The importable `hat/hatMappedPart` package provides an explicit, bounded
+read-only mmap view for immutable regular files. It validates the file type,
+size budget, optional exact size, and optional SHA-256 before returning the
+view. The default storage and backup paths do not use it automatically; the
+caller owns immutable publication and the `Close` lifetime. See
+[CHG38_MMAP_READ_ONLY_PARTS.md](CHG38_MMAP_READ_ONLY_PARTS.md) for the API,
+security contract, and benchmark tradeoff.
+
 ### Idempotent SQL mutation retries
 
 `POST /api/sql` is read-only by default. Add a stable `mutation_id` to opt into

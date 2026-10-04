@@ -15169,6 +15169,31 @@ make test-sql-index-snapshots
 make bench-sql-index-generation
 ```
 
+## CH-G38 Mmap-backed Read-only Parts
+
+The importable `hat/hatMappedPart` package provides an explicit bounded mmap
+view for immutable regular files. It rejects symlinks and non-regular files,
+enforces `MaxBytes`, and can verify an exact size and SHA-256 before returning
+the read-only view. The default storage and backup paths remain unchanged.
+
+The focused benchmark reads 16 deterministic offsets from a 1 MiB file on
+Linux/amd64. Five samples were collected with `-benchmem`:
+
+| Path | Raw ns/op samples | Median ns/op | Go heap B/op | allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Read file for every iteration | 241826, 250344, 236835, 237225, 201856 | 237225 | 1,057,193 | 5 |
+| Reuse one mapped view | 483.7, 483.6, 473.5, 500.8, 496.7 | 483.7 | 0 | 0 |
+| Open and close mapped view | 37802, 37892, 37014, 37942, 37636 | 37802 | 824 | 7 |
+
+Reusing one mapped view measured about 490.4x lower CPU time than rereading
+the file and eliminated the measured Go heap allocation. Mapping and unmapping
+per operation measured about 6.28x lower CPU time and 1,283x lower Go heap
+bytes, at the cost of two additional allocations per operation. `B/op` is Go
+heap accounting; it does not include the file-backed pages in RSS. The
+tradeoff is explicit lifetime and immutability discipline, so this remains an
+opt-in API rather than a default storage change. Full details and commands are
+in [CHG38_MMAP_READ_ONLY_PARTS.md](CHG38_MMAP_READ_ONLY_PARTS.md).
+
 ## SQL In-Memory Byte Source View
 
 SQL index reads now borrow an in-memory `RAW_BYTES` value as a read-only string

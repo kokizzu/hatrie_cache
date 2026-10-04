@@ -22292,3 +22292,26 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: format-chg38-mmap-readonly
+format-chg38-mmap-readonly:
+	bash scripts/chg38-mmap-readonly.sh format
+
+.PHONY: baseline-chg38-mmap-readonly
+baseline-chg38-mmap-readonly:
+	bash scripts/chg38-mmap-readonly.sh baseline
+
+.PHONY: test-chg38-mmap-readonly
+test-chg38-mmap-readonly:
+	bash scripts/chg38-mmap-readonly.sh test
+
+.PHONY: race-chg38-mmap-readonly
+race-chg38-mmap-readonly:
+	bash scripts/chg38-mmap-readonly.sh race
+
+.PHONY: vet-chg38-mmap-readonly
+vet-chg38-mmap-readonly:
+	bash scripts/chg38-mmap-readonly.sh vet
+
+.PHONY: benchmark-chg38-mmap-readonly
+benchmark-chg38-mmap-readonly:
+	bash scripts/chg38-mmap-readonly.sh benchmark

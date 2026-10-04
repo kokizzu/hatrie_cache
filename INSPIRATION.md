@@ -100,6 +100,7 @@ name.
 - [x] C038 TTL-driven rollup or recompression. `TimeBucketRollup` supports verified bucket retention and boundary-only expiration without silently discarding partial buckets; see [TTL_ROLLUP.md](TTL_ROLLUP.md).
 - [x] C039 Partition pruning for local partitions.
 - [x] C040 Sampling key with deterministic SAMPLE semantics across partitions. `SampleSQLRows` hashes a caller-selected logical key with a seed, preserving selection across order and partition boundaries; see [DETERMINISTIC_SAMPLE.md](DETERMINISTIC_SAMPLE.md).
+- [x] CH-G38 Mmap-backed read-only parts. `hat/hatMappedPart` provides an explicit, bounded, checksum-capable read-only view for immutable regular files; it remains opt-in and does not alter default storage or backup behavior. See [CHG38_MMAP_READ_ONLY_PARTS.md](CHG38_MMAP_READ_ONLY_PARTS.md).
 - [x] C040a Deterministic key-hash sampling across partition boundaries.
 - [x] C041 Multiple disk policies with placement rules. `DiskPlacementPolicy` provides immutable weighted rules with deterministic key selection; see [DISK_PLACEMENT.md](DISK_PLACEMENT.md).
 - [x] C041a Immutable weighted deterministic disk placement policy with duplicate/overflow validation.
