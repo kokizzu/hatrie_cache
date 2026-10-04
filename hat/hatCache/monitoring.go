@@ -2234,6 +2234,16 @@ func executePublicCommandBatch(ctx context.Context, trie *HatTrie, request Cache
 		trie.commandTransactionMu.RLock()
 		defer trie.commandTransactionMu.RUnlock()
 	}
+	return executePublicCommandBatchLocked(ctx, trie, request, options)
+}
+
+// executePublicCommandBatchLocked runs a public batch while the caller holds
+// commandTransactionMu. SQL journal-backed transactions use this form when a
+// serializable transaction already owns the lock.
+func executePublicCommandBatchLocked(ctx context.Context, trie *HatTrie, request CacheCommandRequest, options commandExecutionOptions) (CacheCommandResponse, bool) {
+	if err := ctx.Err(); err != nil {
+		return commandError(err.Error()), false
+	}
 	payloads, err := publicCommandBatchRequests(request)
 	if err != nil {
 		return commandError(err.Error()), false
