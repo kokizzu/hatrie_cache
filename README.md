@@ -84,6 +84,7 @@ security guidance before exposing it on a network.
 - ClickHouse-inspired external-source `DISTINCT` spill: [CHU04_EXTERNAL_DISTINCT_SPILL.md](CHU04_EXTERNAL_DISTINCT_SPILL.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u04-external-distinct-spill)
 - ClickHouse-inspired external-source bounded window streaming: [CHU05_EXTERNAL_WINDOW_STREAM.md](CHU05_EXTERNAL_WINDOW_STREAM.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u05-external-window-streaming)
 - ClickHouse-inspired opt-in streaming runtime join filters for `CACHE` and `EXTERNAL`: [CHU14_RUNTIME_JOIN_FILTER.md](CHU14_RUNTIME_JOIN_FILTER.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u14-streaming-runtime-join-filter)
+- Tarantool-inspired opt-in atomic cross-index unique constraints: [TU22_CROSS_INDEX_UNIQUE.md](TU22_CROSS_INDEX_UNIQUE.md)
 - ClickHouse-inspired mutation lifecycle IDs and status lookup: [CHU07_MUTATION_LIFECYCLE.md](CHU07_MUTATION_LIFECYCLE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u07-mutation-lifecycle)
 - ClickHouse-inspired automatic SQL result-cache wiring: [CHU08_AUTOMATIC_SQL_RESULT_CACHE.md](CHU08_AUTOMATIC_SQL_RESULT_CACHE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u08-automatic-sql-result-cache-wiring)
 - ClickHouse-inspired materialized-view storage admission budgets: [CH019_MATERIALIZED_VIEW_BUDGET.md](CH019_MATERIALIZED_VIEW_BUDGET.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-019-materialized-view-storage-admission)

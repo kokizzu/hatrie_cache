@@ -1,5 +1,35 @@
 # Benchmark
 
+## T-U22 atomic cross-index unique set
+
+Environment: Linux/amd64, AMD Ryzen 9 5950X 16-Core Processor. Five samples
+were collected with `-count=5 -benchmem`, replacing 1,024 existing rows while
+checking two unique string projections under one uncontended mutex.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Hand-written two-map baseline | 139.0 | 0 | 0 | 1.00x |
+| `CrossIndexUniqueSet.Upsert` | 286.9 | 0 | 0 | 2.06x slower |
+
+Raw successful samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+baseline: 129.2 0 0
+baseline: 139.0 0 0
+baseline: 131.3 0 0
+baseline: 142.0 0 0
+baseline: 139.0 0 0
+cross_index_unique_set: 289.4 0 0
+cross_index_unique_set: 290.9 0 0
+cross_index_unique_set: 282.8 0 0
+cross_index_unique_set: 276.9 0 0
+cross_index_unique_set: 286.9 0 0
+```
+
+This is a correctness/maintenance feature, not a speed optimization. It is
+opt-in and provides atomic validation across projections without changing any
+existing write path.
+
 ## T-U10 journal-wide synchronous write quorum
 
 Environment: Linux/amd64, AMD Ryzen 9 5950X 16-Core Processor. Five samples
