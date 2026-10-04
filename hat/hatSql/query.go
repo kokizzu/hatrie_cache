@@ -8450,18 +8450,31 @@ func (metrics *sqlExecutionMetrics) recordIndexDiagnostics(source sqlSource, con
 	if metrics == nil || len(metrics.steps) == 0 || source.kind != "CACHE" {
 		return
 	}
-	field, value, matched := sqlIndexDiagnosticEquality(source, condition)
-	if !matched {
+	if field, value, matched := sqlIndexDiagnosticEquality(source, condition); matched {
+		if diagnosticsResolver, ok := resolver.(SQLIndexDiagnosticsResolver); ok {
+			diagnostics, available, err := diagnosticsResolver.ResolveSQLIndexDiagnostics(source.kind, source.key, field, value)
+			if err == nil && available {
+				metrics.attachIndexDiagnostics(condition, diagnostics)
+				return
+			}
+		}
+	}
+	fields, values := sqlCompositeIndexedEqualities(source, condition)
+	if len(fields) < 2 {
 		return
 	}
-	diagnosticsResolver, ok := resolver.(SQLIndexDiagnosticsResolver)
+	diagnosticsResolver, ok := resolver.(SQLCompositeIndexDiagnosticsResolver)
 	if !ok {
 		return
 	}
-	diagnostics, available, err := diagnosticsResolver.ResolveSQLIndexDiagnostics(source.kind, source.key, field, value)
+	diagnostics, available, err := diagnosticsResolver.ResolveSQLCompositeIndexDiagnostics(source.kind, source.key, fields, values)
 	if err != nil || !available {
 		return
 	}
+	metrics.attachIndexDiagnostics(condition, diagnostics)
+}
+
+func (metrics *sqlExecutionMetrics) attachIndexDiagnostics(condition sqlExpr, diagnostics SQLIndexDiagnostics) {
 	step := &metrics.steps[len(metrics.steps)-1]
 	copyDiagnostics := diagnostics
 	step.Index = &copyDiagnostics

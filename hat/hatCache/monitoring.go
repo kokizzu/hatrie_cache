@@ -289,6 +289,14 @@ func (resolver monitoringSQLResolver) ResolveSQLIndexDiagnostics(name, key, fiel
 	return diagnostics.ResolveSQLIndexDiagnostics(name, key, field, value)
 }
 
+func (resolver monitoringSQLResolver) ResolveSQLCompositeIndexDiagnostics(name, key string, fields []string, values []interface{}) (hatSql.SQLIndexDiagnostics, bool, error) {
+	diagnostics, ok := resolver.source.(hatSql.SQLCompositeIndexDiagnosticsResolver)
+	if !ok {
+		return hatSql.SQLIndexDiagnostics{}, false, nil
+	}
+	return diagnostics.ResolveSQLCompositeIndexDiagnostics(name, key, fields, values)
+}
+
 func (resolver monitoringSQLResolver) ResolveSQLIndexedRangeSource(name, key, field, operator string, value interface{}) ([]SQLRow, bool, error) {
 	indexed, ok := resolver.source.(SQLRangeIndexedSourceResolver)
 	if !ok {

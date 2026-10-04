@@ -1340,6 +1340,14 @@ type SQLIndexDiagnosticsResolver interface {
 	ResolveSQLIndexDiagnostics(name, key, field string, value interface{}) (SQLIndexDiagnostics, bool, error)
 }
 
+// SQLCompositeIndexDiagnosticsResolver optionally reports bounded work for a
+// composite equality probe during EXPLAIN ANALYZE. It is never required for
+// indexed execution and must not change the candidate rows returned by the
+// composite index.
+type SQLCompositeIndexDiagnosticsResolver interface {
+	ResolveSQLCompositeIndexDiagnostics(name, key string, fields []string, values []interface{}) (SQLIndexDiagnostics, bool, error)
+}
+
 // MultikeyIndexedSourceResolver optionally resolves ARRAY_CONTAINS predicates
 // against an index that stores one posting per distinct array element. It
 // returns candidates only; the executor evaluates ARRAY_CONTAINS again before

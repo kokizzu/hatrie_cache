@@ -32820,3 +32820,34 @@ BenchmarkCHU49ExplainFieldIndex: 3826464 3497920 3399841 3442042 3452818 ns/op; 
 BenchmarkCHU49ExplainTypedInt64Index: 3581326 3385365 3432155 3397843 3414547 ns/op; 1896054 1894942 1894953 1894931 1894940 B/op; 36159 36158 36158 36158 36158 allocs/op
 BenchmarkCHU49ExplainBitmapIndex: 3543578 3429880 3520728 3683599 3537331 ns/op; 1900373 1899225 1899235 1899230 1899244 B/op; 36169 36168 36168 36168 36168 allocs/op
 ```
+
+## CH-U49 Composite Index EXPLAIN Diagnostics
+
+Workload: Linux amd64, AMD Ryzen 9 5950X 16-Core Processor, four JSON rows,
+and a two-field `team_id, enabled` composite index. Each value is the median
+of five `-benchmem` samples. Baseline uses clean commit `47c33ed8` with the
+same benchmark file before composite diagnostics; after uses the feature
+branch. `EXPLAIN ANALYZE` is the only path that asks for diagnostics.
+
+| Path | Baseline ns/op | After ns/op | Speed x | Baseline B/op | After B/op | Memory x | Baseline allocs/op | After allocs/op |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `EXPLAIN ANALYZE` composite equality | 35,704 | 37,799 | 0.945x | 24,118 | 24,915 | 0.968x | 267 | 283 |
+| normal composite query | 12,763 | 12,905 | 0.989x | 10,152 | 10,152 | 1.000x | 63 | 63 |
+
+The new EXPLAIN report costs about 5.9% CPU, 3.3% logical allocation bytes,
+and 6.0% allocations on this tiny workload. Normal query allocations are
+unchanged; the 1.1% wall-time movement is within benchmark noise.
+
+Raw baseline samples:
+
+```text
+BenchmarkHatTrieSQLCompositeJSONIndexDiagnostics: 35704 36019 35904 34955 35350 ns/op; 24118 24119 24118 24118 24119 B/op; 267 267 267 267 267 allocs/op
+BenchmarkHatTrieSQLCompositeJSONIndexQuery: 12663 12710 12812 13052 12763 ns/op; 10152 10152 10152 10152 10152 B/op; 63 63 63 63 63 allocs/op
+```
+
+Raw post-change samples:
+
+```text
+BenchmarkHatTrieSQLCompositeJSONIndexDiagnostics: 39208 38417 37673 37718 37799 ns/op; 24915 24915 24915 24915 24917 B/op; 283 283 283 283 283 allocs/op
+BenchmarkHatTrieSQLCompositeJSONIndexQuery: 12855 12907 12905 12750 12950 ns/op; 10152 10152 10152 10152 10152 B/op; 63 63 63 63 63 allocs/op
+```

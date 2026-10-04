@@ -142,6 +142,7 @@ type SQLSnapshotLocker = hatSql.SnapshotLocker
 type SQLIndexedSourceResolver = hatSql.IndexedSourceResolver
 type SQLIndexDiagnostics = hatSql.SQLIndexDiagnostics
 type SQLIndexDiagnosticsResolver = hatSql.SQLIndexDiagnosticsResolver
+type SQLCompositeIndexDiagnosticsResolver = hatSql.SQLCompositeIndexDiagnosticsResolver
 type SQLMultikeyIndexedSourceResolver = hatSql.MultikeyIndexedSourceResolver
 type SQLRangeIndexedSourceResolver = hatSql.RangeIndexedSourceResolver
 type SQLPrefixIndexedSourceResolver = hatSql.PrefixIndexedSourceResolver

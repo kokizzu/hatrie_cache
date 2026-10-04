@@ -325,6 +325,20 @@ func (resolver CatalogResolver) ResolveSQLIndexDiagnostics(name, key, field stri
 	return diagnostics.ResolveSQLIndexDiagnostics(name, key, field, value)
 }
 
+// ResolveSQLCompositeIndexDiagnostics forwards optional application composite
+// index diagnostics while leaving information-schema sources owned by the
+// catalog resolver.
+func (resolver CatalogResolver) ResolveSQLCompositeIndexDiagnostics(name, key string, fields []string, values []interface{}) (SQLIndexDiagnostics, bool, error) {
+	if catalogOwnsVirtualSource(name, key) || resolver.Source == nil {
+		return SQLIndexDiagnostics{}, false, nil
+	}
+	diagnostics, ok := resolver.Source.(SQLCompositeIndexDiagnosticsResolver)
+	if !ok {
+		return SQLIndexDiagnostics{}, false, nil
+	}
+	return diagnostics.ResolveSQLCompositeIndexDiagnostics(name, key, fields, values)
+}
+
 // ResolveSQLArrangementMetadata forwards optional application arrangement
 // metadata while leaving information-schema sources owned by the catalog
 // resolver.
