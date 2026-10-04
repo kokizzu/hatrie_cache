@@ -22292,3 +22292,15 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+format-stored-function-registry:
+	sh ./scripts/format-stored-function-registry.sh
+test-stored-function-registry:
+	sh ./scripts/test-stored-function-registry.sh
+test-stored-function-registry-package:
+	sh ./scripts/test-stored-function-registry-package.sh
+benchmark-stored-function-registry:
+	sh ./scripts/benchmark-stored-function-registry.sh
+race-stored-function-registry:
+	sh ./scripts/race-stored-function-registry.sh
+vet-stored-function-registry:
+	sh ./scripts/vet-stored-function-registry.sh

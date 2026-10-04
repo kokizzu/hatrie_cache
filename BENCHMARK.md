@@ -1,5 +1,36 @@
 # Benchmark
 
+## T-U03 Stored Function Registry
+
+Linux/amd64, AMD Ryzen 9 5950X, five repetitions. The fair baseline copies a
+one-element `[]any` and calls the same handler shape without registry lookup.
+
+| Path | Median | Memory | Relative cost |
+| --- | ---: | ---: | ---: |
+| Direct handler, inlined scalar | 0.2408 ns/op | 0 B/op, 0 allocs | reference only |
+| Direct handler with owned args | 27.38 ns/op | 16 B/op, 1 alloc | reference |
+| Registry call | 77.67 ns/op | 31 B/op, 2 allocs | 2.84x slower than fair baseline; +15 B and +1 alloc |
+
+Raw output:
+
+```text
+BenchmarkStoredFunctionDirectBaseline-32              1000000000  0.2728 ns/op  0 B/op  0 allocs/op
+BenchmarkStoredFunctionDirectBaseline-32              1000000000  0.2552 ns/op  0 B/op  0 allocs/op
+BenchmarkStoredFunctionDirectBaseline-32              1000000000  0.2183 ns/op  0 B/op  0 allocs/op
+BenchmarkStoredFunctionDirectBaseline-32              1000000000  0.2378 ns/op  0 B/op  0 allocs/op
+BenchmarkStoredFunctionDirectBaseline-32              1000000000  0.2408 ns/op  0 B/op  0 allocs/op
+BenchmarkStoredFunctionRegistryCall-32                15322234     77.54 ns/op  31 B/op  2 allocs/op
+BenchmarkStoredFunctionRegistryCall-32                15262920     76.90 ns/op  31 B/op  2 allocs/op
+BenchmarkStoredFunctionRegistryCall-32                15627229     77.67 ns/op  31 B/op  2 allocs/op
+BenchmarkStoredFunctionRegistryCall-32                15383622     78.45 ns/op  31 B/op  2 allocs/op
+BenchmarkStoredFunctionRegistryCall-32                15629386     82.56 ns/op  31 B/op  2 allocs/op
+BenchmarkStoredFunctionDirectOwnedArgsBaseline-32     42817837     27.24 ns/op  16 B/op  1 allocs/op
+BenchmarkStoredFunctionDirectOwnedArgsBaseline-32     43810801     27.07 ns/op  16 B/op  1 allocs/op
+BenchmarkStoredFunctionDirectOwnedArgsBaseline-32     41777286     27.38 ns/op  16 B/op  1 allocs/op
+BenchmarkStoredFunctionDirectOwnedArgsBaseline-32     40931367     27.38 ns/op  16 B/op  1 allocs/op
+BenchmarkStoredFunctionDirectOwnedArgsBaseline-32     43313583     27.53 ns/op  16 B/op  1 allocs/op
+```
+
 ## CH-U49 Skip-Index EXPLAIN Diagnostics
 
 This paired clean-worktree benchmark compares the pre-CH-U49 implementation
