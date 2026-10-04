@@ -22294,3 +22294,29 @@ push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
 bench-tu17-space-engine:
 	bash scripts/benchmark-tu17-space-engine.sh
+test-tu19:
+	bash scripts/test-tu19.sh
+# codex-tu19-format
+format-tu19:
+	bash scripts/format-tu19.sh
+# codex-tu19-verification
+benchmark-tu19:
+	bash scripts/benchmark-tu19.sh
+
+test-tu19-package:
+	bash scripts/test-tu19-package.sh
+
+test-all-tu19:
+	bash scripts/test-all-tu19.sh
+
+verify-tu19:
+	bash scripts/verify-tu19.sh
+
+stage-tu19:
+	bash scripts/stage-tu19.sh
+
+commit-tu19:
+	bash scripts/commit-tu19.sh
+
+push-tu19:
+	bash scripts/push-tu19.sh

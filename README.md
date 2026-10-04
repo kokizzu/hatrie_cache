@@ -4769,3 +4769,11 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+# Tuple update journal
+
+The importable `hatDataStructure.TupleFieldUpdateJournalRecord` provides a
+bounded HTJ1 binary frame for durable tuple field-operation journals. It gives
+callers length framing, CRC32C validation, deep-copy decoding, stream
+read/write, and replay through `TupleFieldOffsetCache.ApplyUpdates`; callers
+still own append/fsync, sequence and deduplication policy, routing, and
+recovery orchestration. See [TU019_TUPLE_UPDATE_JOURNAL.md](TU019_TUPLE_UPDATE_JOURNAL.md).

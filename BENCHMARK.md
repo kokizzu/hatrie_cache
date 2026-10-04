@@ -32726,3 +32726,33 @@ The build allocation is transient and should not be read as retained index
 size. This is a good tradeoff for repeated selective reads, but not for a
 single lookup; conditional indexes are therefore opt-in and are not built
 automatically.
+# T-U19 tuple update journal
+
+Measured on `AMD Ryzen 9 5950X 16-Core Processor`, Linux amd64, with five
+`go test -benchmem` samples per case. The baseline is the same tuple-update
+fixture serialized as JSON; the feature adds HTJ1 binary framing and leaves the
+JSON control unchanged.
+
+| Operation | Baseline JSON median | HTJ1 median | Improvement | Baseline memory | HTJ1 memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Encode | 767.4 ns/op | 167.1 ns/op | 4.59x faster | 368 B/op, 2 allocs | 144 B/op, 2 allocs |
+| Decode | 4,866 ns/op | 272.8 ns/op | 17.84x faster | 1,008 B/op, 14 allocs | 336 B/op, 5 allocs |
+
+The encoded fixture is 295 bytes as JSON and 53 bytes as HTJ1: 5.57x smaller,
+or 82.0% less wire/storage payload. HTJ1 therefore lowers CPU and memory for
+this record shape without changing the JSON fallback available to callers.
+
+Raw samples:
+
+```text
+JSON encode: 745.4, 768.4, 780.4, 765.8, 767.4 ns/op
+JSON decode: 4807, 4918, 4837, 4883, 4866 ns/op
+HTJ1 encode: 170.1, 161.0, 166.9, 171.5, 167.1 ns/op
+HTJ1 decode: 267.6, 274.8, 272.8, 275.8, 271.8 ns/op
+JSON wire: 295 bytes
+HTJ1 wire: 53 bytes
+```
+
+The benchmark is a serialization primitive benchmark, not an end-to-end disk
+or replicated-cluster benchmark. It does not claim fsync latency, storage
+engine throughput, or network behavior beyond the measured payload size.

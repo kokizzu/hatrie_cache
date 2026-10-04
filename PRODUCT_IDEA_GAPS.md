@@ -189,3 +189,10 @@ generic `hat*` primitives are preferred when they provide a real reusable
 contract rather than an unintegrated placeholder. Large or irreversible ideas
 such as VShard migration, a new scripting runtime, or a consensus log remain
 proposal-only until their recovery and security contracts are complete.
+# T-U19 status update
+
+T-U19 is partially adopted as the importable
+`hatDataStructure.TupleFieldUpdateJournalRecord`. HTJ1 provides bounded length
+framing, CRC32C corruption detection, deep-copy decode, stream read/write, and
+atomic replay through `TupleFieldOffsetCache.ApplyUpdates`. Durable append,
+fsync, sequence policy, deduplication, and key routing remain caller-owned.
