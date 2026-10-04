@@ -250,6 +250,19 @@ func (session *SQLSession) ResolveSQLSource(name, key string) ([]Row, error) {
 	return session.source.ResolveSQLSource(name, key)
 }
 
+// ResolveSQLConditionalIndexedSource forwards conditional index candidates
+// unless a session-local source shadows the underlying source.
+func (session *SQLSession) ResolveSQLConditionalIndexedSource(name, key string, fields []string, values []interface{}) ([]Row, bool, error) {
+	if session == nil || session.hasLocalSQLSource(name, key) || session.source == nil {
+		return nil, false, nil
+	}
+	indexed, ok := session.source.(SQLConditionalIndexedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return indexed.ResolveSQLConditionalIndexedSource(name, key, fields, values)
+}
+
 func (session *SQLSession) hasLocalSQLSource(name, key string) bool {
 	if session == nil || !strings.EqualFold(name, "CACHE") {
 		return false

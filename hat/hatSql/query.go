@@ -14010,6 +14010,19 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 	if condition.kind != "binary" || condition.left == nil || condition.right == nil {
 		return nil, false, nil
 	}
+	if indexed, ok := resolver.(SQLConditionalIndexedSourceResolver); ok {
+		fields, values := sqlConditionalIndexedEqualities(source, condition)
+		if len(fields) >= 2 && sqlIndexHintAllowsFields(hint, source, fields) {
+			started := time.Now()
+			rows, available, err := indexed.ResolveSQLConditionalIndexedSource(source.kind, source.key, fields, values)
+			if available || err != nil {
+				if available && metrics != nil {
+					metrics.record("CONDITIONAL INDEX SCAN", sqlExplainSource(source)+" fields="+strings.Join(fields, ","), len(fields), len(rows), started)
+				}
+				return rows, available, err
+			}
+		}
+	}
 	fields, values, rangeField, operator, rangeValue, matched := sqlCompositeIndexedRange(source, condition)
 	if matched {
 		allFields := append(append([]string(nil), fields...), rangeField)
@@ -14534,6 +14547,42 @@ func sqlCompositeIndexedEqualities(source sqlSource, condition sqlExpr) ([]strin
 			values[left.name] = right.value
 		}
 		if right.kind == "field" && right.qualifier == source.alias && left.kind == "literal" {
+			values[right.name] = left.value
+		}
+	}
+	collect(condition)
+	fields := make([]string, 0, len(values))
+	for field := range values {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+	orderedValues := make([]interface{}, len(fields))
+	for index, field := range fields {
+		orderedValues[index] = values[field]
+	}
+	return fields, orderedValues
+}
+
+func sqlConditionalIndexedEqualities(source sqlSource, condition sqlExpr) ([]string, []interface{}) {
+	values := map[string]interface{}{}
+	var collect func(sqlExpr)
+	collect = func(expression sqlExpr) {
+		if expression.kind != "binary" {
+			return
+		}
+		if expression.op == "AND" && expression.left != nil && expression.right != nil {
+			collect(*expression.left)
+			collect(*expression.right)
+			return
+		}
+		if expression.op != "=" || expression.left == nil || expression.right == nil {
+			return
+		}
+		left, right := *expression.left, *expression.right
+		if left.kind == "field" && (left.qualifier == "" || left.qualifier == source.alias) && right.kind == "literal" {
+			values[left.name] = right.value
+		}
+		if right.kind == "field" && (right.qualifier == "" || right.qualifier == source.alias) && left.kind == "literal" {
 			values[right.name] = left.value
 		}
 	}

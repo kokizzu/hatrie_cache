@@ -1317,6 +1317,14 @@ type IndexedSourceResolver interface {
 	ResolveSQLIndexedSource(name, key, field string, value interface{}) ([]Row, bool, error)
 }
 
+// SQLConditionalIndexedSourceResolver optionally resolves equality predicates
+// through a schema-declared conditional index. The resolver receives all
+// simple equality fields from one conjunctive predicate so it can verify the
+// index admission condition before returning candidates.
+type SQLConditionalIndexedSourceResolver interface {
+	ResolveSQLConditionalIndexedSource(name, key string, fields []string, values []interface{}) ([]Row, bool, error)
+}
+
 // GeoIndexedSourceResolver optionally resolves GEO_WITHIN_* predicates through
 // a spatial candidate index. The SQL executor evaluates the original
 // predicate again, so implementations may return false positives but must not

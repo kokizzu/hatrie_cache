@@ -26,6 +26,7 @@ security guidance before exposing it on a network.
 - SQL index rebuild progress and cooperative retry: [SQL_INDEX_REBUILD_PROGRESS.md](SQL_INDEX_REBUILD_PROGRESS.md)
 - Opt-in background SQL index rebuild worker: [SQL_INDEX_REBUILD_PROGRESS.md](SQL_INDEX_REBUILD_PROGRESS.md)
 - Opt-in SQL multikey array membership indexes: [SQL_MULTIKEY_INDEX.md](SQL_MULTIKEY_INDEX.md)
+- Opt-in schema-declared conditional space indexes: [TU24_CONDITIONAL_SPACE_INDEXES.md](TU24_CONDITIONAL_SPACE_INDEXES.md), with query/build tradeoffs in [BENCHMARK.md](BENCHMARK.md#t-u24-conditional-space-indexes)
 - Opt-in SQL query cancellation and bounded operator history: [SQL_QUERY_MANAGER.md](SQL_QUERY_MANAGER.md)
 - Opt-in namespace SQL quotas, admission, and resource budgets: [SQL_RESOURCE_GOVERNANCE.md](SQL_RESOURCE_GOVERNANCE.md)
 - Opt-in typed-table logical memory budgets with atomic write admission: [CHU24_TYPED_TABLE_MEMORY_BUDGET.md](CHU24_TYPED_TABLE_MEMORY_BUDGET.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u24-typed-table-memory-budget)

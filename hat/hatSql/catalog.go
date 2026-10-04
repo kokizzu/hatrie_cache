@@ -274,6 +274,19 @@ func (resolver CatalogResolver) SQLSourceCardinality(name, key string) (int, boo
 	return cardinality.SQLSourceCardinality(name, key)
 }
 
+// ResolveSQLConditionalIndexedSource forwards conditional index candidates for
+// application sources while keeping catalog-owned virtual sources local.
+func (resolver CatalogResolver) ResolveSQLConditionalIndexedSource(name, key string, fields []string, values []interface{}) ([]Row, bool, error) {
+	if catalogOwnsVirtualSource(name, key) || resolver.Source == nil {
+		return nil, false, nil
+	}
+	indexed, ok := resolver.Source.(SQLConditionalIndexedSourceResolver)
+	if !ok {
+		return nil, false, nil
+	}
+	return indexed.ResolveSQLConditionalIndexedSource(name, key, fields, values)
+}
+
 // ResolveSQLSourcePartitions forwards partitioned application sources while
 // leaving information-schema sources owned by the catalog resolver.
 func (resolver CatalogResolver) ResolveSQLSourcePartitions(name, key string) ([]SQLSourcePartition, bool, error) {

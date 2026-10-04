@@ -18,6 +18,9 @@ var (
 	ErrMaterializedSourceFunctionalIndexDependenciesRequired = errors.New("hatSchema: materialized source functional index dependencies are required")
 	ErrMaterializedSourceFunctionalIndexEvaluatorRequired    = errors.New("hatSchema: materialized source functional index evaluator is required")
 	ErrMaterializedSourceFunctionalIndexNameConflict         = errors.New("hatSchema: materialized source functional index name conflicts with an existing index")
+	ErrMaterializedSourceConditionalIndexDefinitionRequired  = errors.New("hatSchema: materialized source conditional index definition is required")
+	ErrMaterializedSourceConditionalIndexConditionRequired   = errors.New("hatSchema: materialized source conditional index condition is required")
+	ErrMaterializedSourceConditionalIndexNameConflict        = errors.New("hatSchema: materialized source conditional index name conflicts with an existing index")
 )
 
 type GeneratedValue func(Row) (interface{}, error)
@@ -64,6 +67,25 @@ func (adapter SQLResolverAdapter) ResolveSQLIndexedSource(name, key, field strin
 	}
 	if indexed, ok := adapter.Base.(hatSql.IndexedSourceResolver); ok {
 		return indexed.ResolveSQLIndexedSource(name, key, field, value)
+	}
+	return nil, false, nil
+}
+
+// ResolveSQLConditionalIndexedSource forwards conjunctive equality predicates
+// to a source-declared conditional index. The SQL executor rechecks the full
+// predicate after the candidate lookup.
+func (adapter SQLResolverAdapter) ResolveSQLConditionalIndexedSource(name, key string, fields []string, values []interface{}) ([]hatSql.Row, bool, error) {
+	if strings.EqualFold(name, "CACHE") {
+		if source := adapter.Sources[strings.ToLower(key)]; source != nil {
+			rows, available := source.LookupConditional(fields, values)
+			if !available {
+				return nil, false, nil
+			}
+			return sqlRows(rows), true, nil
+		}
+	}
+	if indexed, ok := adapter.Base.(hatSql.SQLConditionalIndexedSourceResolver); ok {
+		return indexed.ResolveSQLConditionalIndexedSource(name, key, fields, values)
 	}
 	return nil, false, nil
 }
@@ -144,6 +166,26 @@ type FunctionalIndexBuildReport struct {
 	Attempts     int
 }
 
+// ConditionalIndexBuildReport describes one atomically published conditional
+// equality index.
+type ConditionalIndexBuildReport struct {
+	Name           string
+	Field          string
+	ConditionField string
+	Rows           int
+	Attempts       int
+}
+
+// ConditionalIndexStats is a detached summary of one maintained conditional
+// index. Rows counts admitted source rows, not the complete source size.
+type ConditionalIndexStats struct {
+	Name           string
+	Field          string
+	ConditionField string
+	ConditionValue interface{}
+	Rows           int
+}
+
 type materializedCoveringIndex struct {
 	fields    []string
 	fieldSet  map[string]struct{}
@@ -157,17 +199,26 @@ type materializedFunctionalIndex struct {
 	positions    map[string][]int
 }
 
+type materializedConditionalIndex struct {
+	field          string
+	conditionField string
+	conditionValue interface{}
+	conditionKey   string
+	positions      map[string][]int
+}
+
 type MaterializedSource struct {
-	mu                sync.RWMutex
-	columns           []DerivedColumn
-	nextID            map[string]int64
-	rows              []Row
-	indexes           map[string]map[string][]int
-	indexedFields     map[string]struct{}
-	coveringIndexes   map[string]*materializedCoveringIndex
-	functionalIndexes map[string]*materializedFunctionalIndex
-	indexStatsCache   map[string]hatSql.JSONIndexStats
-	generation        uint64
+	mu                 sync.RWMutex
+	columns            []DerivedColumn
+	nextID             map[string]int64
+	rows               []Row
+	indexes            map[string]map[string][]int
+	indexedFields      map[string]struct{}
+	coveringIndexes    map[string]*materializedCoveringIndex
+	functionalIndexes  map[string]*materializedFunctionalIndex
+	conditionalIndexes map[string]*materializedConditionalIndex
+	indexStatsCache    map[string]hatSql.JSONIndexStats
+	generation         uint64
 }
 
 func NewMaterializedSource(columns []DerivedColumn) *MaterializedSource {
@@ -178,12 +229,13 @@ func NewMaterializedSource(columns []DerivedColumn) *MaterializedSource {
 		}
 	}
 	return &MaterializedSource{
-		columns:           append([]DerivedColumn(nil), columns...),
-		nextID:            map[string]int64{},
-		indexes:           map[string]map[string][]int{},
-		indexedFields:     indexedFields,
-		coveringIndexes:   map[string]*materializedCoveringIndex{},
-		functionalIndexes: map[string]*materializedFunctionalIndex{},
+		columns:            append([]DerivedColumn(nil), columns...),
+		nextID:             map[string]int64{},
+		indexes:            map[string]map[string][]int{},
+		indexedFields:      indexedFields,
+		coveringIndexes:    map[string]*materializedCoveringIndex{},
+		functionalIndexes:  map[string]*materializedFunctionalIndex{},
+		conditionalIndexes: map[string]*materializedConditionalIndex{},
 	}
 }
 
@@ -234,6 +286,16 @@ func (source *MaterializedSource) Insert(row Row) (Row, error) {
 			functionalKeys[name] = materializedIndexKey(value)
 		}
 	}
+	var conditionalKeys map[string]string
+	if len(source.conditionalIndexes) > 0 {
+		conditionalKeys = make(map[string]string, len(source.conditionalIndexes))
+		for name, index := range source.conditionalIndexes {
+			if index == nil || materializedIndexKey(materialized[index.conditionField]) != index.conditionKey {
+				continue
+			}
+			conditionalKeys[name] = materializedIndexKey(materialized[index.field])
+		}
+	}
 	position := len(source.rows)
 	source.rows = append(source.rows, cloneRow(materialized))
 	for field := range source.indexedFields {
@@ -257,6 +319,11 @@ func (source *MaterializedSource) Insert(row Row) (Row, error) {
 		}
 		key := functionalKeys[name]
 		index.positions[key] = append(index.positions[key], position)
+	}
+	for name, key := range conditionalKeys {
+		if index := source.conditionalIndexes[name]; index != nil {
+			index.positions[key] = append(index.positions[key], position)
+		}
 	}
 	source.generation++
 	source.indexStatsCache = nil
@@ -612,6 +679,187 @@ func (source *MaterializedSource) BuildFunctionalIndex(name string, dependencies
 		report.Rows = len(rows)
 		return report, nil
 	}
+}
+
+// BuildConditionalIndex builds and atomically installs a one-column equality
+// index admitted by one scalar equality condition. Rows that do not satisfy
+// the condition are never inserted into the posting lists. The build retries
+// when a concurrent insert advances the source generation.
+func (source *MaterializedSource) BuildConditionalIndex(definition IndexDefinition) (ConditionalIndexBuildReport, error) {
+	if source == nil {
+		return ConditionalIndexBuildReport{}, ErrMaterializedSourceNil
+	}
+	if definition.Kind != IndexKindConditional || definition.Condition == nil || len(definition.Columns) != 1 {
+		return ConditionalIndexBuildReport{}, ErrMaterializedSourceConditionalIndexDefinitionRequired
+	}
+	name := strings.TrimSpace(definition.Name)
+	field := strings.TrimSpace(definition.Columns[0])
+	conditionField := strings.TrimSpace(definition.Condition.Field)
+	if name == "" || field == "" {
+		return ConditionalIndexBuildReport{}, ErrMaterializedSourceConditionalIndexDefinitionRequired
+	}
+	if conditionField == "" {
+		return ConditionalIndexBuildReport{}, ErrMaterializedSourceConditionalIndexConditionRequired
+	}
+	if field == conditionField || !validIndexConditionValue(definition.Condition.Value) {
+		return ConditionalIndexBuildReport{}, ErrMaterializedSourceConditionalIndexDefinitionRequired
+	}
+	conditionKey := materializedIndexKey(definition.Condition.Value)
+	report := ConditionalIndexBuildReport{Name: name, Field: field, ConditionField: conditionField}
+	for {
+		source.mu.RLock()
+		if source.hasColumnLocked(field) == false || source.hasColumnLocked(conditionField) == false {
+			source.mu.RUnlock()
+			return ConditionalIndexBuildReport{}, fmt.Errorf("%w: conditional index %q references an unknown column", ErrMaterializedSourceConditionalIndexDefinitionRequired, name)
+		}
+		if source.hasColumnLocked(name) {
+			source.mu.RUnlock()
+			return ConditionalIndexBuildReport{}, fmt.Errorf("%w: %s", ErrMaterializedSourceConditionalIndexNameConflict, name)
+		}
+		if _, exists := source.indexedFields[name]; exists {
+			source.mu.RUnlock()
+			return ConditionalIndexBuildReport{}, fmt.Errorf("%w: %s", ErrMaterializedSourceConditionalIndexNameConflict, name)
+		}
+		if _, exists := source.coveringIndexes[name]; exists {
+			source.mu.RUnlock()
+			return ConditionalIndexBuildReport{}, fmt.Errorf("%w: %s", ErrMaterializedSourceConditionalIndexNameConflict, name)
+		}
+		if _, exists := source.functionalIndexes[name]; exists {
+			source.mu.RUnlock()
+			return ConditionalIndexBuildReport{}, fmt.Errorf("%w: %s", ErrMaterializedSourceConditionalIndexNameConflict, name)
+		}
+		if _, exists := source.conditionalIndexes[name]; exists {
+			source.mu.RUnlock()
+			return ConditionalIndexBuildReport{}, fmt.Errorf("%w: %s", ErrMaterializedSourceConditionalIndexNameConflict, name)
+		}
+		generation := source.generation
+		rows := append([]Row(nil), source.rows...)
+		source.mu.RUnlock()
+
+		positions := make(map[string][]int)
+		admitted := 0
+		for position, row := range rows {
+			if materializedIndexKey(row[conditionField]) != conditionKey {
+				continue
+			}
+			key := materializedIndexKey(row[field])
+			positions[key] = append(positions[key], position)
+			admitted++
+		}
+		report.Attempts++
+
+		source.mu.Lock()
+		if source.generation != generation {
+			source.mu.Unlock()
+			continue
+		}
+		if source.conditionalIndexes == nil {
+			source.conditionalIndexes = make(map[string]*materializedConditionalIndex)
+		}
+		source.conditionalIndexes[name] = &materializedConditionalIndex{
+			field:          field,
+			conditionField: conditionField,
+			conditionValue: definition.Condition.Value,
+			conditionKey:   conditionKey,
+			positions:      positions,
+		}
+		source.indexStatsCache = nil
+		source.mu.Unlock()
+		report.Rows = admitted
+		return report, nil
+	}
+}
+
+// DropConditionalIndex removes one conditional index and releases its
+// postings. It returns false when the named index is absent.
+func (source *MaterializedSource) DropConditionalIndex(name string) bool {
+	if source == nil {
+		return false
+	}
+	name = strings.TrimSpace(name)
+	source.mu.Lock()
+	defer source.mu.Unlock()
+	if _, exists := source.conditionalIndexes[name]; !exists {
+		return false
+	}
+	delete(source.conditionalIndexes, name)
+	source.generation++
+	source.indexStatsCache = nil
+	return true
+}
+
+// HasConditionalIndex reports whether name is an installed conditional index.
+func (source *MaterializedSource) HasConditionalIndex(name string) bool {
+	if source == nil {
+		return false
+	}
+	source.mu.RLock()
+	_, exists := source.conditionalIndexes[strings.TrimSpace(name)]
+	source.mu.RUnlock()
+	return exists
+}
+
+// ConditionalIndexStats returns a detached summary of one conditional index.
+func (source *MaterializedSource) ConditionalIndexStats(name string) ConditionalIndexStats {
+	if source == nil {
+		return ConditionalIndexStats{}
+	}
+	source.mu.RLock()
+	defer source.mu.RUnlock()
+	index := source.conditionalIndexes[strings.TrimSpace(name)]
+	if index == nil {
+		return ConditionalIndexStats{}
+	}
+	rows := 0
+	for _, positions := range index.positions {
+		rows += len(positions)
+	}
+	return ConditionalIndexStats{
+		Name:           strings.TrimSpace(name),
+		Field:          index.field,
+		ConditionField: index.conditionField,
+		ConditionValue: index.conditionValue,
+		Rows:           rows,
+	}
+}
+
+// LookupConditional returns candidates only when fields and values contain a
+// matching declared condition and lookup key. The SQL executor must evaluate
+// the original predicate again before publishing rows.
+func (source *MaterializedSource) LookupConditional(fields []string, values []interface{}) ([]Row, bool) {
+	if source == nil || len(fields) != len(values) || len(fields) < 2 {
+		return nil, false
+	}
+	source.mu.RLock()
+	defer source.mu.RUnlock()
+	names := make([]string, 0, len(source.conditionalIndexes))
+	for name := range source.conditionalIndexes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		index := source.conditionalIndexes[name]
+		var lookupValue, conditionValue interface{}
+		lookupFound, conditionFound := false, false
+		for position, field := range fields {
+			switch strings.TrimSpace(field) {
+			case index.field:
+				lookupValue, lookupFound = values[position], true
+			case index.conditionField:
+				conditionValue, conditionFound = values[position], true
+			}
+		}
+		if !lookupFound || !conditionFound || materializedIndexKey(conditionValue) != index.conditionKey {
+			continue
+		}
+		positions := index.positions[materializedIndexKey(lookupValue)]
+		rows := make([]Row, 0, len(positions))
+		for _, position := range positions {
+			rows = append(rows, cloneRow(source.rows[position]))
+		}
+		return rows, true
+	}
+	return nil, false
 }
 
 func (source *MaterializedSource) Lookup(field string, value interface{}) []Row {

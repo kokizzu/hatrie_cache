@@ -734,3 +734,17 @@ Adopted as opt-in `hatStorage.CompactionDiagnostics`: bounded arrangement regist
 ## Materialize M-U41: Webhook Event Idempotency
 
 Adopted as opt-in `hatSql.WebhookEventDeduplicator`: bounded source/event-ID admission, payload-fingerprint conflict detection, expiry, deterministic CRC-protected HWE1 snapshots, and atomic restore. The caller owns application, durable storage, acknowledgement, and HTTP/webhook wiring; existing defaults remain unchanged. See [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md) and [BENCHMARK.md](BENCHMARK.md#m-u41-webhook-event-idempotency).
+
+## T-U24: Conditional Space Indexes
+
+Adopted as an opt-in schema/runtime contract. `hatSchema.IndexKindConditional`
+declares one indexed field plus a scalar equality condition;
+`MaterializedSource.BuildConditionalIndex` publishes matching postings
+atomically, maintains later inserts, exposes stats, and the SQL planner uses
+the index only when both equalities are present before rechecking the complete
+predicate. Drop, fallback, durable posting persistence, and automatic
+background rebuild remain caller-owned. The 10,000-row selective fixture is
+669x faster with 923x fewer transient bytes and 786x fewer allocations; the
+one-time build costs 11.6 ms and 8.1 MB transient allocation. See
+[TU24_CONDITIONAL_SPACE_INDEXES.md](TU24_CONDITIONAL_SPACE_INDEXES.md) and
+[BENCHMARK.md](BENCHMARK.md#t-u24-conditional-space-indexes).

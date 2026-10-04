@@ -32617,3 +32617,34 @@ BenchmarkSpaceEngineLookup4096/vinyl-32 644.7 646.2 649.5 645.5 670.1 ns/op, 172
 The result supports keeping `memtx` as the sane default. `vinyl` is useful
 when restart persistence and bounded hot memory are worth the additional disk
 I/O, compaction work, and lookup latency; it is not a general-purpose speedup.
+
+## T-U24 Conditional Space Indexes
+
+Command:
+
+```sh
+make codex-tu24-benchmark
+```
+
+Five samples on Linux/amd64, AMD Ryzen 9 5950X, using 10,000 rows with 10%
+`active` status values. The baseline scans all rows. The indexed query uses a
+schema-declared `id` index conditioned on `status = 'active'`.
+
+| Workload | Median ns/op | B/op | Allocs/op | Comparison |
+| --- | ---: | ---: | ---: | --- |
+| Full scan query | 6,536,811 | 8,754,676 | 40,061 | baseline |
+| Conditional indexed query | 9,764 | 9,481 | 51 | 669x faster; 923x fewer bytes; 786x fewer allocations |
+| Conditional index build | 11,614,805 | 8,137,138 | 101,560 | one-time fixture cost |
+
+Raw samples:
+
+```text
+BenchmarkTU24ConditionalQueryBaseline-32  6349850 6536811 6498493 6676691 6648389 ns/op, 8754676-ish B/op, 40061 allocs/op
+BenchmarkTU24ConditionalQueryIndexed-32    9606 9764 10071 9258 9942 ns/op, 9481 B/op, 51 allocs/op
+BenchmarkTU24ConditionalIndexBuild-32      11054024 10996958 11755154 11614805 11827121 ns/op, 8137138-ish B/op, 101560-ish allocs/op
+```
+
+The build allocation is transient and should not be read as retained index
+size. This is a good tradeoff for repeated selective reads, but not for a
+single lookup; conditional indexes are therefore opt-in and are not built
+automatically.

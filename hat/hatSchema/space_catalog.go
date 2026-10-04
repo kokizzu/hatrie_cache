@@ -24,20 +24,29 @@ const (
 type IndexKind string
 
 const (
-	IndexKindHash       IndexKind = "hash"
-	IndexKindTree       IndexKind = "tree"
-	IndexKindRTree      IndexKind = "rtree"
-	IndexKindFunctional IndexKind = "functional"
+	IndexKindHash        IndexKind = "hash"
+	IndexKindTree        IndexKind = "tree"
+	IndexKindRTree       IndexKind = "rtree"
+	IndexKindFunctional  IndexKind = "functional"
+	IndexKindConditional IndexKind = "conditional"
 )
+
+// IndexCondition describes the equality predicate that admits rows into a
+// conditional index. Values are restricted to scalar index-key types.
+type IndexCondition struct {
+	Field string      `json:"field"`
+	Value interface{} `json:"value"`
+}
 
 // IndexDefinition describes one named-space index. Columns are ordered and
 // refer to fields in SpaceDefinition.Source.
 type IndexDefinition struct {
-	Name       string    `json:"name"`
-	Kind       IndexKind `json:"kind"`
-	Columns    []string  `json:"columns,omitempty"`
-	Expression string    `json:"expression,omitempty"`
-	Unique     bool      `json:"unique,omitempty"`
+	Name       string          `json:"name"`
+	Kind       IndexKind       `json:"kind"`
+	Columns    []string        `json:"columns,omitempty"`
+	Expression string          `json:"expression,omitempty"`
+	Unique     bool            `json:"unique,omitempty"`
+	Condition  *IndexCondition `json:"condition,omitempty"`
 }
 
 // SpaceDefinition combines a versioned source schema, constraints, and named
@@ -210,6 +219,28 @@ func normalizeSpaceDefinition(definition SpaceDefinition) (SpaceDefinition, erro
 			}
 		}
 		declared.Columns = normalizeIndexColumns(declared.Columns)
+		if declared.Kind == IndexKindConditional {
+			if len(declared.Columns) != 1 || declared.Condition == nil {
+				return SpaceDefinition{}, fmt.Errorf("%w: conditional index %q requires one column and one condition", ErrSpaceCatalogInvalid, declared.Name)
+			}
+			condition := *declared.Condition
+			condition.Field = strings.TrimSpace(condition.Field)
+			if condition.Field == "" {
+				return SpaceDefinition{}, fmt.Errorf("%w: conditional index %q requires a condition field", ErrSpaceCatalogInvalid, declared.Name)
+			}
+			if _, exists := columnNames[condition.Field]; !exists {
+				return SpaceDefinition{}, fmt.Errorf("%w: conditional index %q references unknown condition field %q", ErrSpaceCatalogInvalid, declared.Name, condition.Field)
+			}
+			if condition.Field == declared.Columns[0] {
+				return SpaceDefinition{}, fmt.Errorf("%w: conditional index %q condition field must differ from key field", ErrSpaceCatalogInvalid, declared.Name)
+			}
+			if !validIndexConditionValue(condition.Value) {
+				return SpaceDefinition{}, fmt.Errorf("%w: conditional index %q has an unsupported condition value", ErrSpaceCatalogInvalid, declared.Name)
+			}
+			declared.Condition = &condition
+		} else if declared.Condition != nil {
+			return SpaceDefinition{}, fmt.Errorf("%w: index %q condition requires kind conditional", ErrSpaceCatalogInvalid, declared.Name)
+		}
 		if declared.Kind != IndexKindFunctional && len(declared.Columns) == 0 {
 			return SpaceDefinition{}, fmt.Errorf("%w: index %q requires columns", ErrSpaceCatalogInvalid, declared.Name)
 		}
@@ -243,7 +274,19 @@ func normalizeIndexColumns(columns []string) []string {
 
 func validIndexKind(kind IndexKind) bool {
 	switch kind {
-	case IndexKindHash, IndexKindTree, IndexKindRTree, IndexKindFunctional:
+	case IndexKindHash, IndexKindTree, IndexKindRTree, IndexKindFunctional, IndexKindConditional:
+		return true
+	default:
+		return false
+	}
+}
+
+func validIndexConditionValue(value interface{}) bool {
+	switch value.(type) {
+	case nil, bool, string,
+		int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64,
+		float32, float64:
 		return true
 	default:
 		return false
@@ -255,6 +298,10 @@ func cloneSpaceDefinition(definition SpaceDefinition) SpaceDefinition {
 	indexes := make([]IndexDefinition, len(definition.Indexes))
 	for index, declared := range definition.Indexes {
 		declared.Columns = append([]string(nil), declared.Columns...)
+		if declared.Condition != nil {
+			condition := *declared.Condition
+			declared.Condition = &condition
+		}
 		indexes[index] = declared
 	}
 	definition.Indexes = indexes
