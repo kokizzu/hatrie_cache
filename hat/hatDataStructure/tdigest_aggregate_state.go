@@ -84,11 +84,14 @@ func NewTDigestFromAggregateState(data []byte) (TDigest, error) {
 			Count: binary.LittleEndian.Uint64(payload[offset+8 : offset+16]),
 		}
 	}
-	digest, err := NewTDigestFromSnapshot(snapshot)
-	if err != nil {
+	if err := ValidateTDigestSnapshot(snapshot); err != nil {
 		return TDigest{}, fmt.Errorf("%w: %v", ErrAggregateStateEnvelopeInvalid, err)
 	}
-	return digest, nil
+	return TDigest{
+		compression: snapshot.Compression,
+		count:       snapshot.Count,
+		centroids:   snapshot.Centroids,
+	}, nil
 }
 
 // MergeAggregateState decodes and merges one compact digest atomically. The
