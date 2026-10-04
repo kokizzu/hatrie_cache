@@ -1,5 +1,29 @@
 # Benchmark
 
+## T-U26 Regular Explain Index Strategy Diagnostics
+
+This paired clean-worktree benchmark compares regular `EXPLAIN` before and
+after structured metadata-backed index alternatives were added to the `SCAN`
+step. Five samples used `-benchtime=200ms`, `-benchmem`, and Go 1.26.5 on the
+same AMD Ryzen 9 5950X host. Lower `ns/op`, `B/op`, and `allocs/op` are better;
+the ratio is `after / before`.
+
+| Operation | Before median | After median | Relative result |
+| --- | ---: | ---: | ---: |
+| Indexed regular `EXPLAIN` | 11,574 ns/op; 13,312 B/op; 80 allocs/op | 13,860 ns/op; 14,178 B/op; 102 allocs/op | 1.20x CPU, 1.07x bytes, 1.28x allocs |
+| No-index regular `EXPLAIN` control | 5,216 ns/op; 8,256 B/op; 35 allocs/op | 5,316 ns/op; 8,256 B/op; 35 allocs/op | 1.02x CPU, unchanged bytes/allocs |
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+| Operation | Before samples | After samples |
+| --- | --- | --- |
+| Indexed regular `EXPLAIN` | 10,891/13,311/80; 11,799/13,312/80; 11,801/13,312/80; 11,574/13,312/80; 11,291/13,312/80 | 13,733/14,179/102; 13,811/14,178/102; 13,860/14,178/102; 14,181/14,178/102; 14,542/14,178/102 |
+| No-index regular `EXPLAIN` control | 5,137/8,256/35; 5,260/8,256/35; 5,216/8,256/35; 5,315/8,256/35; 5,127/8,256/35 | 5,650/8,256/35; 5,150/8,256/35; 5,243/8,256/35; 5,316/8,256/35; 5,794/8,256/35 |
+
+The indexed overhead is the explicit cost of returning two candidate records
+and rejection notices. It is limited to diagnostic `EXPLAIN`; normal query
+execution and no-index explains keep their previous behavior.
+
 ## T-U46 Index Cardinality And Hot-Key Statistics
 
 This paired clean-worktree benchmark compares the same typed-index fixture at

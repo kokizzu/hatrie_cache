@@ -13043,6 +13043,7 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		}
 	}
 	hasArrangementMetadata := sqlExplainHasArrangementMetadata(steps)
+	hasIndexStrategy := sqlExplainHasIndexStrategy(steps)
 	hasExplainCost := sqlExplainHasCost(steps)
 	columns := []string{"node", "detail", "estimated_rows"}
 	if hasExplainCost {
@@ -13050,6 +13051,9 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 	}
 	if hasArrangementMetadata {
 		columns = append(columns, "arrangements")
+	}
+	if hasIndexStrategy {
+		columns = append(columns, "alternatives", "notices")
 	}
 	result := SQLQueryResult{
 		Columns: columns,
@@ -13069,6 +13073,12 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		}
 		if hasArrangementMetadata && len(step.Arrangements) > 0 {
 			row["arrangements"] = cloneSQLArrangementMetadata(step.Arrangements)
+		}
+		if hasIndexStrategy && len(step.Alternatives) > 0 {
+			row["alternatives"] = append([]SQLExplainAlternative(nil), step.Alternatives...)
+		}
+		if hasIndexStrategy && len(step.Notices) > 0 {
+			row["notices"] = append([]SQLExplainNotice(nil), step.Notices...)
 		}
 		result.Rows = append(result.Rows, row)
 	}
@@ -13207,6 +13217,9 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 		currentEstimate = whereEstimate
 	}
 	scanStep := sqlExplainSourceStep(prefix+"SCAN", *query.from, resolver)
+	if len(query.joins) == 0 && query.where.kind != "" {
+		scanStep.Alternatives, scanStep.Notices = sqlExplainIndexStrategy(*query.from, query.where, resolver, query.indexHint)
+	}
 	sqlMarkArrangementRecommendation(scanStep.Arrangements, sqlArrangementWorkloadForQuery(query))
 	sqlSetExplainCardinalityEstimate(&scanStep, sourceEstimate)
 	*steps = append(*steps, scanStep)
