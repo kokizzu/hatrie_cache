@@ -4650,6 +4650,12 @@ Connector startup can use an opt-in bounded retry and quarantine policy without 
 
 The opt-in T-U44 report exposes portable Go heap placement, reusable idle bytes, allocator metadata, and stack footprint without adding background work. See [T044_SLAB_FRAGMENTATION.md](T044_SLAB_FRAGMENTATION.md) for field semantics, cost, and verification.
 
+The opt-in T-U52 adaptive peer breaker adds bounded failure-class cooldown
+growth and recovery-based threshold relaxation through `hatReplication`; the
+existing fixed breaker and default replication path remain unchanged. See
+[TU52_ADAPTIVE_BREAKER.md](TU52_ADAPTIVE_BREAKER.md) and the measured tradeoff
+in [BENCHMARK.md](BENCHMARK.md#t-u52-adaptive-peer-circuit-breaker).
+
 - Dependency-aware SQL catalog migration planning and rollback orchestration: [M049_CATALOG_MIGRATION.md](M049_CATALOG_MIGRATION.md)
 
 - Durable logical backup manifests joining storage, source offsets, frontiers, and subscriptions: [M050_DURABLE_FRONTIER_BACKUP.md](M050_DURABLE_FRONTIER_BACKUP.md)

@@ -32580,3 +32580,45 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+## T-U52 adaptive peer circuit breaker
+
+The opt-in adaptive admission path keeps the existing fixed breaker unchanged
+and adds no default-path work. It was measured with
+`go test ./hat/hatReplication -run '^$' -bench '^BenchmarkTU52' -benchmem -benchtime=200ms -count=5` on an AMD Ryzen 9 5950X.
+
+| Path | Median ns/op | B/op | allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Fixed admission | 4.24 | 0 | 0 | 1.00x |
+| Adaptive admission | 26.24 | 0 | 0 | 6.20x |
+| Fixed failure record | 57.37 | 40 | 1 | 1.00x |
+| Adaptive failure record | 97.41 | 40 | 1 | 1.70x |
+
+Raw samples:
+
+```text
+BenchmarkTU52StaticBeforeAttempt-32 57979108 3.643 ns/op 0 B/op 0 allocs/op
+BenchmarkTU52StaticBeforeAttempt-32 58162345 4.194 ns/op 0 B/op 0 allocs/op
+BenchmarkTU52StaticBeforeAttempt-32 52206894 4.235 ns/op 0 B/op 0 allocs/op
+BenchmarkTU52StaticBeforeAttempt-32 58471824 4.465 ns/op 0 B/op 0 allocs/op
+BenchmarkTU52StaticBeforeAttempt-32 55269013 4.510 ns/op 0 B/op 0 allocs/op
+BenchmarkTU52AdaptiveBeforeAttempt-32 9169399 26.85 ns/op 0 B/op 0 allocs/op
+BenchmarkTU52AdaptiveBeforeAttempt-32 8613436 23.41 ns/op 0 B/op 0 allocs/op
+BenchmarkTU52AdaptiveBeforeAttempt-32 8294544 26.24 ns/op 0 B/op 0 allocs/op
+BenchmarkTU52AdaptiveBeforeAttempt-32 8815687 23.30 ns/op 0 B/op 0 allocs/op
+BenchmarkTU52AdaptiveBeforeAttempt-32 9138972 26.50 ns/op 0 B/op 0 allocs/op
+BenchmarkTU52AdaptiveFailure-32 2516175 92.12 ns/op 40 B/op 1 allocs/op
+BenchmarkTU52AdaptiveFailure-32 2760975 97.41 ns/op 40 B/op 1 allocs/op
+BenchmarkTU52AdaptiveFailure-32 2410240 101.3 ns/op 40 B/op 1 allocs/op
+BenchmarkTU52AdaptiveFailure-32 2556463 101.4 ns/op 40 B/op 1 allocs/op
+BenchmarkTU52AdaptiveFailure-32 2635987 87.92 ns/op 40 B/op 1 allocs/op
+BenchmarkTU52StaticFailure-32 4024848 56.26 ns/op 40 B/op 1 allocs/op
+BenchmarkTU52StaticFailure-32 3990786 57.17 ns/op 40 B/op 1 allocs/op
+BenchmarkTU52StaticFailure-32 3758539 57.65 ns/op 39 B/op 1 allocs/op
+BenchmarkTU52StaticFailure-32 4180650 57.37 ns/op 40 B/op 1 allocs/op
+BenchmarkTU52StaticFailure-32 4168339 57.67 ns/op 40 B/op 1 allocs/op
+```
+
+The measured cost is acceptable for this opt-in network policy: adaptive
+admission remains allocation-free and the default fixed path is unchanged.
+See [TU52_ADAPTIVE_BREAKER.md](TU52_ADAPTIVE_BREAKER.md) for configuration and
+state semantics.
