@@ -125,6 +125,7 @@ security guidance before exposing it on a network.
 - ClickHouse-style post-window `QUALIFY` filtering: [C220_QUALIFY.md](C220_QUALIFY.md)
 - Tarantool-inspired mutual TLS peer authentication with restart-free certificate rotation: [T243_MTLS_CERTIFICATE_ROTATION.md](T243_MTLS_CERTIFICATE_ROTATION.md)
 - ClickHouse-inspired bounded WebAssembly UDF memory with opt-in execution deadlines: [C214_BOUNDED_WASM_UDF.md](C214_BOUNDED_WASM_UDF.md)
+- Tarantool-inspired bounded Lua UDF runtime (opt-in `-tags luajit`): [TU04_SANDBOXED_LUA.md](TU04_SANDBOXED_LUA.md)
 - Materialize-inspired snapshot-free command-journal subscriptions: [M203_SNAPSHOT_FREE_SUBSCRIPTIONS.md](M203_SNAPSHOT_FREE_SUBSCRIPTIONS.md)
 - Materialize-inspired point-read and subscription consistency fences: [M249_READ_FENCE.md](M249_READ_FENCE.md)
 - Materialize-inspired bounded journal subscriptions: [M204_BOUNDED_SUBSCRIPTIONS.md](M204_BOUNDED_SUBSCRIPTIONS.md)

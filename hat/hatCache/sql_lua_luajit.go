@@ -17,7 +17,47 @@ import (
 type sqlLuaFunction struct {
 	definition SQLFunctionDefinition
 	state      *lua.State
+	maxBatch   int
+	budget     sqlLuaBudget
 	mu         sync.Mutex
+}
+
+const sqlLuaHookInterval = 100_000
+
+type sqlLuaBudget struct {
+	maxInstructions  int
+	memoryLimit      uint64
+	hookInterval     int
+	memoryCheckEvery int
+	instructions     int
+	hookCount        int
+}
+
+func (budget *sqlLuaBudget) hook(state *lua.State) {
+	budget.instructions += budget.hookInterval
+	budget.hookCount++
+	if budget.maxInstructions > 0 && budget.instructions >= budget.maxInstructions {
+		state.RaiseError(lua.ExecutionQuantumExceeded)
+	}
+	if budget.memoryLimit > 0 && budget.hookCount%budget.memoryCheckEvery == 0 && sqlLuaMemoryBytes(state) > budget.memoryLimit {
+		state.RaiseError("Lua memory limit exceeded")
+	}
+}
+
+func sqlLuaMemoryBytes(state *lua.State) uint64 {
+	kilobytes := state.GC(lua.LUA_GCCOUNT, 0)
+	if kilobytes < 0 {
+		return 0
+	}
+	return uint64(kilobytes) * 1024
+}
+
+func sqlLuaAddEstimate(total *uint64, extra uint64) {
+	if ^uint64(0)-*total < extra {
+		*total = ^uint64(0)
+		return
+	}
+	*total += extra
 }
 
 func (function *sqlLuaFunction) Close() {
@@ -29,8 +69,24 @@ func (function *sqlLuaFunction) Close() {
 	}
 }
 
-func newSQLLuaFunction(definition SQLFunctionDefinition) (_ sqlFunctionRuntime, err error) {
-	function := &sqlLuaFunction{definition: definition, state: lua.NewState()}
+func newSQLLuaFunction(definition SQLFunctionDefinition, options SQLFunctionRegistryOptions) (_ sqlFunctionRuntime, err error) {
+	hookInterval := sqlLuaHookInterval
+	if options.LuaExecutionLimit > 0 && options.LuaExecutionLimit < hookInterval {
+		hookInterval = options.LuaExecutionLimit
+	}
+	if options.LuaMemoryLimitBytes > 0 && options.LuaMemoryLimitBytes < 1<<20 && hookInterval > 10_000 {
+		hookInterval = 10_000
+	}
+	memoryCheckEvery := 16
+	if options.LuaMemoryLimitBytes > 0 && options.LuaMemoryLimitBytes < 1<<20 {
+		memoryCheckEvery = 2
+	}
+	function := &sqlLuaFunction{
+		definition: definition,
+		maxBatch:   options.LuaMaxBatchCalls,
+		budget:     sqlLuaBudget{maxInstructions: options.LuaExecutionLimit, memoryLimit: options.LuaMemoryLimitBytes, hookInterval: hookInterval, memoryCheckEvery: memoryCheckEvery},
+		state:      lua.NewState(),
+	}
 	if function.state == nil {
 		return nil, fmt.Errorf("SQL function %q could not create a LuaJIT state", definition.Name)
 	}
@@ -44,6 +100,7 @@ func newSQLLuaFunction(definition SQLFunctionDefinition) (_ sqlFunctionRuntime, 
 		function.state.Close()
 		return nil, &SQLFunctionError{Definition: definition, Message: "LuaJIT source error: " + luaErr.Error(), Line: 1, Column: 1}
 	}
+	function.state.SetHook(function.budget.hook, function.budget.hookInterval)
 	return function, nil
 }
 
@@ -65,15 +122,30 @@ func (function *sqlLuaFunction) Evaluate(calls []SQLFunctionCall) (_ []interface
 			err = &SQLFunctionError{Definition: function.definition, Message: fmt.Sprintf("LuaJIT runtime error: %v", recovered), Line: 1, Column: 1}
 		}
 	}()
+	if function.maxBatch > 0 && len(calls) > function.maxBatch {
+		return nil, &SQLFunctionError{Definition: function.definition, Message: fmt.Sprintf("LuaJIT batch contains %d calls, maximum is %d", len(calls), function.maxBatch), Line: 1, Column: 1}
+	}
+	function.budget.instructions = 0
+	function.budget.hookCount = 0
+	var estimatedInputBytes uint64
 	for _, call := range calls {
 		if len(call.Arguments) != len(function.definition.Arguments) {
 			return nil, &SQLFunctionError{Definition: function.definition, Message: fmt.Sprintf("expects %d arguments, got %d", len(function.definition.Arguments), len(call.Arguments)), Line: 1, Column: 1}
 		}
 		for index, value := range call.Arguments {
+			switch typed := value.(type) {
+			case string:
+				sqlLuaAddEstimate(&estimatedInputBytes, uint64(len(typed)))
+			case []byte:
+				sqlLuaAddEstimate(&estimatedInputBytes, uint64(len(typed)))
+			}
 			if typeErr := sqlFunctionTypeError(function.definition, index, value); typeErr != nil {
 				return nil, typeErr
 			}
 		}
+	}
+	if function.budget.memoryLimit > 0 && estimatedInputBytes > function.budget.memoryLimit {
+		return nil, &SQLFunctionError{Definition: function.definition, Message: fmt.Sprintf("LuaJIT input exceeds memory limit of %d bytes", function.budget.memoryLimit), Line: 1, Column: 1}
 	}
 	state := function.state
 	if state == nil {

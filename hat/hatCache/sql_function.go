@@ -62,10 +62,29 @@ type SQLFunctionRegistryOptions struct {
 	// WASMMemoryLimitPages limits each WebAssembly memory to 64 KiB pages. A
 	// zero value uses the 256-page (16 MiB) default.
 	WASMMemoryLimitPages uint32
+
+	// LuaExecutionLimit bounds Lua VM instructions per evaluated batch. A zero
+	// value uses the bounded default; negative values are also normalized to the
+	// default so the Lua runtime cannot be accidentally made unbounded.
+	LuaExecutionLimit int
+	// LuaMemoryLimitBytes bounds observed Lua VM memory during evaluation,
+	// including the input and result tables. The check runs at the instruction
+	// hook interval; a zero value uses the bounded default.
+	LuaMemoryLimitBytes uint64
+	// LuaMaxBatchCalls bounds the number of rows evaluated by one Lua call. A
+	// zero value uses the bounded default.
+	LuaMaxBatchCalls int
+	// LuaMaxSourceBytes bounds persisted or newly registered Lua source size.
+	// A zero value uses the bounded default.
+	LuaMaxSourceBytes int
 }
 
 const (
 	defaultSQLWASMMemoryLimitPages = 256
+	defaultSQLLuaExecutionLimit    = 10_000_000
+	defaultSQLLuaMemoryLimitBytes  = 64 << 20
+	defaultSQLLuaMaxBatchCalls     = 100_000
+	defaultSQLLuaMaxSourceBytes    = 64 << 10
 )
 
 func NewSQLFunctionRegistry() *SQLFunctionRegistry {
@@ -81,6 +100,18 @@ func NewSQLFunctionRegistryWithOptions(options SQLFunctionRegistryOptions) *SQLF
 	}
 	if options.WASMMemoryLimitPages == 0 {
 		options.WASMMemoryLimitPages = defaultSQLWASMMemoryLimitPages
+	}
+	if options.LuaExecutionLimit <= 0 {
+		options.LuaExecutionLimit = defaultSQLLuaExecutionLimit
+	}
+	if options.LuaMemoryLimitBytes == 0 {
+		options.LuaMemoryLimitBytes = defaultSQLLuaMemoryLimitBytes
+	}
+	if options.LuaMaxBatchCalls <= 0 {
+		options.LuaMaxBatchCalls = defaultSQLLuaMaxBatchCalls
+	}
+	if options.LuaMaxSourceBytes <= 0 {
+		options.LuaMaxSourceBytes = defaultSQLLuaMaxSourceBytes
 	}
 	registry := &SQLFunctionRegistry{options: options}
 	registry.core = hatSql.NewRegistry(func(definition hatSql.FunctionDefinition) (hatSql.FunctionDefinition, hatSql.FunctionRuntime, error) {
@@ -130,7 +161,10 @@ func (registry *SQLFunctionRegistry) compile(definition SQLFunctionDefinition) (
 	case "GO":
 		compiled, err = newSQLGoFunction(definition)
 	case "LUA":
-		compiled, err = newSQLLuaFunction(definition)
+		if len(definition.Source) > registry.options.LuaMaxSourceBytes {
+			return sqlCompiledFunction{}, fmt.Errorf("SQL function %q Lua source exceeds %d bytes", definition.Name, registry.options.LuaMaxSourceBytes)
+		}
+		compiled, err = newSQLLuaFunction(definition, registry.options)
 	case "WASM":
 		compiled, err = newSQLWASMFunction(definition, registry.options)
 	case "JS":

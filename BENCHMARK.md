@@ -475,6 +475,36 @@ copies. Full details, key rotation usage, compatibility, and raw samples are
 in [BACKUP_ENCRYPTION.md](BACKUP_ENCRYPTION.md). Reproduce with
 `make benchmark-ch049-before` and `make benchmark-ch049-after`.
 
+## T-U04: bounded Lua UDF runtime
+
+Command: the isolated `codex-tu04-benchmark` harness, equivalent to
+`go test -tags luajit -run '^$' -bench
+'^BenchmarkSQLLuaFunctionBatch/(1000|10000|100000)$' -benchmem -benchtime=200ms
+-count=5`. The baseline is clean commit `e0867f88`; the feature run adds the
+bounded Lua instruction, observed-memory, source, and batch checks. Both runs
+used Go 1.26.5, LuaJIT, Linux amd64, and the same AMD Ryzen 9 5950X host.
+
+| Batch | Before ns/op | After ns/op | After / before | Before B/op | After B/op | Allocs before / after |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 402,637 | 407,242 | 1.01x | 16,394 | 16,394 | 2 / 2 |
+| 10,000 | 4,265,219 | 3,945,631 | 0.93x | 163,868 | 163,867 | 2 / 2 |
+| 100,000 | 45,643,895 | 42,736,013 | 0.94x | 1,606,966 | 1,605,851 | 12 / 10 |
+
+The raw five-run samples were retained during verification and are summarized
+here by median. The normal `GO` UDF path is unchanged. Lua is build-tag
+optional, so deployments that do not need it pay no runtime cost.
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+before 1000:   379309/16393/2  393726/16394/2  414142/16394/2  410710/16394/2  402637/16394/2
+before 10000: 4374740/163869/2 4367845/163869/2 4265219/163868/2 3836684/163866/2 3715688/163866/2
+before 100000:42868547/1606966/12 45643895/1606976/12 46097560/1606980/12 45663408/1605868/11 43722253/1605856/10
+after 1000:    410467/16414/2  416183/16394/2  407242/16394/2  368076/16393/2  364567/16393/2
+after 10000:  3835587/163866/2 3876243/163870/2 3945631/163867/2 4410811/163869/2 4177890/163964/2
+after 100000:47230940/1605870/11 45591924/1606980/12 37961752/1605845/9 42736013/1605851/10 38972060/1605826/9
+```
+
 ## C232 SQL intermediate row guard
 
 This is a safety benchmark, not a throughput feature. It compares the existing
