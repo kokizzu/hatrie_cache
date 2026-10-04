@@ -32726,3 +32726,17 @@ The build allocation is transient and should not be read as retained index
 size. This is a good tradeoff for repeated selective reads, but not for a
 single lookup; conditional indexes are therefore opt-in and are not built
 automatically.
+## M-U34 Durable Publication Checkpoints
+
+Workload: one publication batch, replay, acknowledgement, and close/cancel;
+five samples per path on the same host. The durable path used an in-memory
+checkpoint store to isolate protocol overhead from storage I/O.
+
+| Path | ns/op samples | B/op | allocs/op |
+| --- | --- | ---: | ---: |
+| Existing in-memory subscription | 3043, 2943, 2866, 2934, 2760 | 7,224 | 21 |
+| Durable subscription | 3058, 2943, 2968, 2981, 3099 | 7,240 | 22 |
+
+The opt-in durability protocol measured one additional allocation and 16
+additional bytes per cycle. Existing subscriptions do not call a checkpoint
+store and retain their previous path.
