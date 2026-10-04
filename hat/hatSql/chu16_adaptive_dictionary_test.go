@@ -55,6 +55,70 @@ func TestTypedTableAdaptiveDictionaryRejectsHighCardinalityValues(t *testing.T) 
 	}
 }
 
+func TestTypedTableAdaptiveDictionaryDemotesAfterCardinalityGrowth(t *testing.T) {
+	table, err := NewTypedTable(TypedTableSchema{
+		Name:    "events",
+		Columns: []TypedTableColumn{{Name: "value", Kind: TypedTableString, DictionaryAdaptive: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < typedTableDictionaryProbeRows; index++ {
+		if _, err := table.Upsert(fmt.Sprintf("key-%d", index), []TypedTableValue{TypedString("team-a")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !table.columns[0].dictionary {
+		t.Fatal("adaptive dictionary did not promote before churn")
+	}
+	for index := 0; index < typedTableDictionaryRuntimeMaxDistinct+1; index++ {
+		if _, err := table.Upsert(fmt.Sprintf("key-%d", index), []TypedTableValue{TypedString(fmt.Sprintf("value-%d", index))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if table.columns[0].dictionary {
+		t.Fatal("adaptive dictionary remained enabled after cardinality growth")
+	}
+	if len(table.columns[0].strings) != typedTableDictionaryProbeRows {
+		t.Fatalf("demoted string rows = %d, want %d", len(table.columns[0].strings), typedTableDictionaryProbeRows)
+	}
+	rows := table.Rows()
+	if len(rows) != typedTableDictionaryProbeRows || rows[0]["value"] != "value-0" || rows[typedTableDictionaryRuntimeMaxDistinct+1]["value"] != "team-a" {
+		t.Fatalf("demoted rows = %#v", rows)
+	}
+}
+
+func TestTypedTableExplicitDictionaryTakesPrecedenceOverAdaptiveDemotion(t *testing.T) {
+	table, err := NewTypedTable(TypedTableSchema{
+		Name: "events",
+		Columns: []TypedTableColumn{{
+			Name:               "value",
+			Kind:               TypedTableString,
+			DictionaryEncoded:  true,
+			DictionaryAdaptive: true,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < typedTableDictionaryProbeRows; index++ {
+		if _, err := table.Upsert(fmt.Sprintf("key-%d", index), []TypedTableValue{TypedString("team-a")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for index := 0; index < typedTableDictionaryRuntimeMaxDistinct+1; index++ {
+		if _, err := table.Upsert(fmt.Sprintf("key-%d", index), []TypedTableValue{TypedString(fmt.Sprintf("value-%d", index))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !table.columns[0].dictionary {
+		t.Fatal("explicit dictionary was demoted by adaptive flag")
+	}
+	if rows := table.Rows(); len(rows) != typedTableDictionaryProbeRows || rows[0]["value"] != "value-0" {
+		t.Fatalf("explicit dictionary rows = %#v", rows)
+	}
+}
+
 func TestTypedTableDictionaryAdaptiveIsOffByDefault(t *testing.T) {
 	table, err := NewTypedTable(TypedTableSchema{
 		Name:    "events",

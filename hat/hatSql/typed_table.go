@@ -72,9 +72,11 @@ type TypedTableColumn struct {
 }
 
 const (
-	typedTableDictionaryProbeRows                = 256
-	typedTableDictionaryProbeDistinctDenominator = 8
-	typedTableDictionaryProbeMaxDistinct         = typedTableDictionaryProbeRows / typedTableDictionaryProbeDistinctDenominator
+	typedTableDictionaryProbeRows                  = 256
+	typedTableDictionaryProbeDistinctDenominator   = 8
+	typedTableDictionaryProbeMaxDistinct           = typedTableDictionaryProbeRows / typedTableDictionaryProbeDistinctDenominator
+	typedTableDictionaryRuntimeDistinctDenominator = 2
+	typedTableDictionaryRuntimeMaxDistinct         = typedTableDictionaryProbeRows / typedTableDictionaryRuntimeDistinctDenominator
 )
 
 const (
@@ -181,6 +183,7 @@ type typedTableColumnStorage struct {
 	kind                TypedTableKind
 	strings             []string
 	dictionary          bool
+	dictionaryAdaptive  bool
 	adaptiveDictionary  *typedTableDictionaryProbe
 	dictionaryValues    []string
 	dictionaryCodes     []uint32
@@ -225,7 +228,11 @@ func (storage *typedTableColumnStorage) append(value TypedTableValue) {
 		if storage.dictionary {
 			storage.dictionaryCodes = append(storage.dictionaryCodes, 0)
 			if value.Valid {
-				storage.dictionaryCodes[len(storage.dictionaryCodes)-1] = storage.retainDictionaryValue(value.String)
+				code, added := storage.retainDictionaryValue(value.String)
+				storage.dictionaryCodes[len(storage.dictionaryCodes)-1] = code
+				if added {
+					storage.maybeDemoteAdaptiveDictionary()
+				}
 			}
 		} else {
 			storage.strings = append(storage.strings, value.String)
@@ -250,7 +257,11 @@ func (storage *typedTableColumnStorage) set(index int, value TypedTableValue) {
 				storage.releaseDictionaryValue(storage.dictionaryCodes[index])
 			}
 			if value.Valid {
-				storage.dictionaryCodes[index] = storage.retainDictionaryValue(value.String)
+				code, added := storage.retainDictionaryValue(value.String)
+				storage.dictionaryCodes[index] = code
+				if added {
+					storage.maybeDemoteAdaptiveDictionary()
+				}
 			} else {
 				storage.dictionaryCodes[index] = 0
 			}
@@ -344,10 +355,10 @@ func (storage *typedTableColumnStorage) truncate(length int) {
 	}
 }
 
-func (storage *typedTableColumnStorage) retainDictionaryValue(value string) uint32 {
+func (storage *typedTableColumnStorage) retainDictionaryValue(value string) (uint32, bool) {
 	if code, found := storage.dictionaryPositions[value]; found {
 		storage.dictionaryCounts[code]++
-		return code
+		return code, false
 	}
 	var code uint32
 	if length := len(storage.dictionaryFree); length > 0 {
@@ -361,7 +372,35 @@ func (storage *typedTableColumnStorage) retainDictionaryValue(value string) uint
 		storage.dictionaryCounts = append(storage.dictionaryCounts, 1)
 	}
 	storage.dictionaryPositions[value] = code
-	return code
+	return code, true
+}
+
+// maybeDemoteAdaptiveDictionary leaves dictionary mode once a promoted column
+// no longer has the low-cardinality shape that justified it. The one-way
+// transition avoids repeated promotion/demotion work while preserving the
+// existing opt-in behavior for future rows.
+func (storage *typedTableColumnStorage) maybeDemoteAdaptiveDictionary() {
+	if !storage.dictionaryAdaptive || !storage.dictionary || len(storage.dictionaryCodes) < typedTableDictionaryProbeRows {
+		return
+	}
+	if len(storage.dictionaryPositions)*typedTableDictionaryRuntimeDistinctDenominator <= len(storage.dictionaryCodes) {
+		return
+	}
+	values := make([]string, len(storage.dictionaryCodes))
+	for index, code := range storage.dictionaryCodes {
+		if storage.valid[index] {
+			values[index] = storage.dictionaryValues[code]
+		}
+	}
+	storage.dictionary = false
+	storage.dictionaryAdaptive = false
+	storage.adaptiveDictionary = nil
+	storage.strings = values
+	storage.dictionaryValues = nil
+	storage.dictionaryCodes = nil
+	storage.dictionaryPositions = nil
+	storage.dictionaryCounts = nil
+	storage.dictionaryFree = nil
 }
 
 func (storage *typedTableColumnStorage) releaseDictionaryValue(code uint32) {
@@ -546,6 +585,7 @@ func NewTypedTable(schema TypedTableSchema) (*TypedTable, error) {
 			table.generated = true
 		}
 		table.columns[index].dictionary = column.Kind == TypedTableString && column.DictionaryEncoded
+		table.columns[index].dictionaryAdaptive = column.Kind == TypedTableString && column.DictionaryAdaptive && !table.columns[index].dictionary
 		if table.columns[index].dictionary {
 			table.columns[index].dictionaryPositions = make(map[string]uint32)
 		} else if column.Kind == TypedTableString && column.DictionaryAdaptive {

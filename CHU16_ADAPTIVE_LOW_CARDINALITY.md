@@ -30,10 +30,14 @@ existing dictionary representation: each row stores a `uint32` code and the
 distinct values are retained once. If the sample exceeds 32 values, the probe
 is discarded and the column stays plain for its lifetime.
 
-The decision is deliberately one-shot and conservative. It does not run an
-ongoing eviction or demotion policy, so high-churn workloads do not pay a
-background re-encoding cost. Updates before admission add observed values to
-the bounded probe; they can only make promotion less likely.
+The admission decision is deliberately bounded. After promotion, an adaptive
+column watches only new distinct values. If distinct values grow beyond half
+of the current row-code count, it demotes once to the plain `[]string`
+representation and releases the dictionary maps and code slices. The
+transition is one-way for that column, so oscillating workloads do not pay
+repeated re-encoding costs. Explicit `DictionaryEncoded` columns are
+unchanged. Updates before admission add observed values to the bounded probe;
+they can only make promotion less likely.
 
 NULL values remain NULL and do not become dictionary entries. `DictionaryEncoded`
 columns with only NULL values are also readable without indexing an empty
@@ -78,8 +82,32 @@ one 4-byte code per row instead of one string slot and backing value per row.
 The benchmark's precomputed inputs intentionally keep string backing arrays
 alive, so its `B/op` difference is not a retained-heap measurement.
 
+### Runtime Demotion After Cardinality Growth
+
+The post-churn benchmark first promotes 256 repeated rows, changes 129 rows to
+distinct values, then measures later updates. The transition benchmark measures
+the 129 updates that cause the one-time demotion with `-benchtime=100x`; table
+setup is outside the timed interval.
+
+| Workload | Before | After | Change |
+|---|---:|---:|---:|
+| Post-churn updates | 575.2 ns/op; 735 B/op; 4 allocs/op | 511.3 ns/op; 647 B/op; 4 allocs/op | 1.12x faster; 12.0% lower B/op |
+| Demotion transition | 93,736 ns/op; 95,763 B/op; 801 allocs/op | 99,153 ns/op; 100,712 B/op; 802 allocs/op | 5.8% slower; one extra allocation |
+
+Raw post-churn samples, before then after:
+
+```text
+before: 510.8 580.6 607.9 561.4 575.2 ns/op; 735 737 740 688 690 B/op
+after:  446.0 511.3 489.1 545.0 517.0 ns/op; 643 633 679 647 683 B/op
+```
+
+The feature is opt-in through `DictionaryAdaptive`, and the transition cost is
+paid only when cardinality actually crosses the memory-oriented threshold.
+The existing repeated and high-cardinality admission paths keep their prior
+representation behavior.
+
 ## Scope
 
-This covers adaptive admission for typed-table string columns. It does not
-change the default representation, automatically alter schemas, add runtime
-demotion, or replace the separate immutable low-cardinality column API.
+This covers adaptive admission and one-way runtime demotion for typed-table
+string columns. It does not change the default representation, automatically
+alter schemas, or replace the separate immutable low-cardinality column API.

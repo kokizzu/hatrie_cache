@@ -55,3 +55,69 @@ func BenchmarkCHU16TypedTableStringStorage(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkCHU16AdaptiveDictionaryPostChurn(b *testing.B) {
+	const rows = typedTableDictionaryProbeRows
+	const churn = typedTableDictionaryProbeRows/2 + 1
+	table, err := NewTypedTable(TypedTableSchema{
+		Name:    "events",
+		Columns: []TypedTableColumn{{Name: "value", Kind: TypedTableString, DictionaryAdaptive: true}},
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	for index := 0; index < rows; index++ {
+		if _, err := table.Upsert(fmt.Sprintf("key-%d", index), []TypedTableValue{TypedString("team-a")}); err != nil {
+			b.Fatal(err)
+		}
+	}
+	for index := 0; index < churn; index++ {
+		if _, err := table.Upsert(fmt.Sprintf("key-%d", index), []TypedTableValue{TypedString(fmt.Sprintf("value-%d", index))}); err != nil {
+			b.Fatal(err)
+		}
+	}
+	keys := make([]string, rows)
+	values := make([]TypedTableValue, churn)
+	for index := range keys {
+		keys[index] = fmt.Sprintf("key-%d", index)
+	}
+	for index := range values {
+		values[index] = TypedString(fmt.Sprintf("value-%d", index))
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		index := iteration % rows
+		if _, err := table.Upsert(keys[index], []TypedTableValue{values[index%churn]}); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkCHU16AdaptiveDictionaryDemotion(b *testing.B) {
+	const rows = typedTableDictionaryProbeRows
+	const churn = typedTableDictionaryProbeRows/2 + 1
+	b.ReportAllocs()
+	b.StopTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		table, err := NewTypedTable(TypedTableSchema{
+			Name:    "events",
+			Columns: []TypedTableColumn{{Name: "value", Kind: TypedTableString, DictionaryAdaptive: true}},
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+		for index := 0; index < rows; index++ {
+			if _, err := table.Upsert(fmt.Sprintf("key-%d", index), []TypedTableValue{TypedString("team-a")}); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.StartTimer()
+		for index := 0; index < churn; index++ {
+			if _, err := table.Upsert(fmt.Sprintf("key-%d", index), []TypedTableValue{TypedString(fmt.Sprintf("value-%d", index))}); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.StopTimer()
+	}
+}

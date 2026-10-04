@@ -29544,6 +29544,29 @@ adaptive-unique:      162729 163393 167420 166593 161480
 
 Adaptive mode avoids the static dictionary's 1.32x CPU and 1.26x cumulative-allocation penalty on unique values. Its one-time probe is approximately 1.02x the repeated plain CPU median and 1.01x the unique plain allocation median. A promoted column stores one dictionary value plus one 4-byte code per row; the benchmark keeps precomputed input strings alive, so these `B/op` figures do not represent the full retained-backing reduction possible with independently allocated repeated inputs. See [CHU16_ADAPTIVE_LOW_CARDINALITY.md](CHU16_ADAPTIVE_LOW_CARDINALITY.md).
 
+### Runtime Demotion After Cardinality Growth
+
+This comparison promotes 256 repeated rows, changes 129 rows to distinct
+values, and measures both the later steady-state updates and the one-time
+demotion. The transition benchmark uses `-benchtime=100x` with setup outside
+the timed interval.
+
+| Workload | Before | After | Improvement / cost |
+|---|---:|---:|---:|
+| Post-churn updates | 575.2 ns/op; 735 B/op; 4 allocs/op | 511.3 ns/op; 647 B/op; 4 allocs/op | 1.12x faster; 12.0% lower B/op |
+| Demotion transition | 93,736 ns/op; 95,763 B/op; 801 allocs/op | 99,153 ns/op; 100,712 B/op; 802 allocs/op | 5.8% slower; one extra allocation |
+
+Raw post-churn samples, before then after:
+
+```text
+before: 510.8 580.6 607.9 561.4 575.2 ns/op; 735 737 740 688 690 B/op
+after:  446.0 511.3 489.1 545.0 517.0 ns/op; 643 633 679 647 683 B/op
+```
+
+The behavior is opt-in and one-way per promoted adaptive column. It pays the
+transition cost only after distinct values exceed half of the row-code count;
+the default path and explicit `DictionaryEncoded` columns are unchanged.
+
 Raw benchmark samples before shape capture:
 
 ```text
