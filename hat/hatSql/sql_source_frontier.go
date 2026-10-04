@@ -1,6 +1,7 @@
 package hatSql
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -60,6 +61,8 @@ type SQLSourceFrontierTracker struct {
 	indexes       map[sqlSourceFrontierKey]int
 	frontierHeap  []int
 	observedCount int
+	notify        chan struct{}
+	waiters       int
 }
 
 // NewSQLSourceFrontierTracker creates a tracker for the supplied fixed source
@@ -120,7 +123,11 @@ func (tracker *SQLSourceFrontierTracker) Observe(frontier SQLSourceFrontier) (bo
 	if !known {
 		return false, fmt.Errorf("%w: %s/%s", ErrSQLSourceFrontierUnknownPartition, normalized.Source, normalized.Partition)
 	}
-	return tracker.observeLocked(index, normalized.Frontier), nil
+	changed := tracker.observeLocked(index, normalized.Frontier)
+	if changed {
+		tracker.signalWaitersLocked()
+	}
+	return changed, nil
 }
 
 // ObserveBatch validates and observes distinct partitions atomically. Stale
@@ -164,6 +171,9 @@ func (tracker *SQLSourceFrontierTracker) ObserveBatch(frontiers []SQLSourceFront
 			changed++
 		}
 	}
+	if changed > 0 {
+		tracker.signalWaitersLocked()
+	}
 	return changed, nil
 }
 
@@ -184,8 +194,48 @@ func (tracker *SQLSourceFrontierTracker) CommonFrontier() (frontier uint64, read
 
 // ReadyAt reports whether every configured partition has reached frontier.
 func (tracker *SQLSourceFrontierTracker) ReadyAt(frontier uint64) bool {
-	common, ready := tracker.CommonFrontier()
-	return ready && common >= frontier
+	if tracker == nil {
+		return false
+	}
+	tracker.mu.RLock()
+	defer tracker.mu.RUnlock()
+	return tracker.readyAtLocked(frontier)
+}
+
+// WaitReady blocks until every configured partition has reached frontier or
+// ctx is canceled. It is an opt-in admission barrier for snapshot-dependent
+// readers; ordinary observation and readiness checks remain allocation-free.
+func (tracker *SQLSourceFrontierTracker) WaitReady(ctx context.Context, frontier uint64) error {
+	if tracker == nil {
+		return ErrSQLSourceFrontierTrackerNil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for {
+		tracker.mu.Lock()
+		if tracker.readyAtLocked(frontier) {
+			tracker.mu.Unlock()
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			tracker.mu.Unlock()
+			return err
+		}
+		if tracker.notify == nil {
+			tracker.notify = make(chan struct{})
+		}
+		wait := tracker.notify
+		tracker.waiters++
+		tracker.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			tracker.removeWaiter()
+			return ctx.Err()
+		case <-wait:
+			tracker.removeWaiter()
+		}
+	}
 }
 
 // Frontier returns one partition's latest observed frontier.
@@ -238,6 +288,27 @@ func (tracker *SQLSourceFrontierTracker) observeLocked(index int, frontier uint6
 	state.frontier = frontier
 	tracker.frontierDown(state.heapIndex)
 	return true
+}
+
+func (tracker *SQLSourceFrontierTracker) readyAtLocked(frontier uint64) bool {
+	return tracker.observedCount == len(tracker.states) && len(tracker.frontierHeap) > 0 && tracker.states[tracker.frontierHeap[0]].frontier >= frontier
+}
+
+func (tracker *SQLSourceFrontierTracker) signalWaitersLocked() {
+	if tracker.notify == nil || tracker.waiters == 0 {
+		return
+	}
+	close(tracker.notify)
+	tracker.notify = make(chan struct{})
+}
+
+func (tracker *SQLSourceFrontierTracker) removeWaiter() {
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
+	tracker.waiters--
+	if tracker.waiters == 0 {
+		tracker.notify = nil
+	}
 }
 
 func (tracker *SQLSourceFrontierTracker) frontierDown(index int) {
