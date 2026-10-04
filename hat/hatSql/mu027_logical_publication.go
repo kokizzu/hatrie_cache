@@ -56,6 +56,18 @@ var (
 	// ErrSQLPublicationClosed indicates that a publication no longer accepts
 	// new batches.
 	ErrSQLPublicationClosed = errors.New("hatSql: SQL publication closed")
+	// ErrSQLPublicationCheckpointStoreRequired indicates that a durable
+	// subscription operation was requested without a checkpoint store.
+	ErrSQLPublicationCheckpointStoreRequired = errors.New("hatSql: SQL publication checkpoint store is required")
+	// ErrSQLPublicationCheckpointStoreLoad indicates that a persisted cursor
+	// could not be loaded.
+	ErrSQLPublicationCheckpointStoreLoad = errors.New("hatSql: SQL publication checkpoint load failed")
+	// ErrSQLPublicationCheckpointStoreSave indicates that a persisted cursor
+	// could not be saved.
+	ErrSQLPublicationCheckpointStoreSave = errors.New("hatSql: SQL publication checkpoint save failed")
+	// ErrSQLPublicationSubscriptionNotDurable indicates that a checkpoint-store
+	// operation was attempted on a subscription created by Subscribe.
+	ErrSQLPublicationSubscriptionNotDurable = errors.New("hatSql: SQL publication subscription is not durable")
 )
 
 // SQLPublicationOptions controls bounded history, batches, subscribers, and
@@ -107,6 +119,16 @@ type SQLPublicationCheckpoint struct {
 	Frontier uint64 `json:"frontier"`
 }
 
+// SQLPublicationCheckpointStore persists one consumer's acknowledged
+// publication cursor. Implementations should make Save monotonic for each
+// publication/consumer pair and should durably commit it before returning.
+// The publication remains in-memory; this interface only makes replay cursors
+// restart-safe.
+type SQLPublicationCheckpointStore interface {
+	Load(ctx context.Context, publication, consumer string) (SQLPublicationCheckpoint, bool, error)
+	Save(ctx context.Context, publication, consumer string, checkpoint SQLPublicationCheckpoint) error
+}
+
 // SQLPublicationSnapshot describes a publication without exposing mutable
 // history or subscriber state.
 type SQLPublicationSnapshot struct {
@@ -154,6 +176,7 @@ type SQLPublication struct {
 type SQLPublicationSubscription struct {
 	publication *SQLPublication
 	state       *sqlPublicationSubscriber
+	consumer    string
 }
 
 // NewSQLPublication creates a named publication with one fixed column schema.
@@ -313,6 +336,38 @@ func (publication *SQLPublication) Subscribe(ctx context.Context, checkpoint SQL
 	return &SQLPublicationSubscription{publication: publication, state: subscriber}, nil
 }
 
+// SubscribeDurable loads one consumer's last acknowledged cursor before
+// replaying retained history. A missing cursor starts at the oldest retained
+// batch. The consumer key must be stable across restarts and distinct for
+// independent consumers of the same publication.
+func (publication *SQLPublication) SubscribeDurable(ctx context.Context, consumer string, store SQLPublicationCheckpointStore) (*SQLPublicationSubscription, error) {
+	if publication == nil {
+		return nil, fmt.Errorf("%w: nil publication", ErrSQLPublicationInvalid)
+	}
+	if store == nil {
+		return nil, ErrSQLPublicationCheckpointStoreRequired
+	}
+	if consumer == "" {
+		return nil, fmt.Errorf("%w: empty consumer", ErrSQLPublicationInvalid)
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	checkpoint, found, err := store.Load(ctx, publication.name, consumer)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrSQLPublicationCheckpointStoreLoad, err)
+	}
+	if !found {
+		checkpoint = SQLPublicationCheckpoint{}
+	}
+	subscription, err := publication.Subscribe(ctx, checkpoint)
+	if err != nil {
+		return nil, err
+	}
+	subscription.consumer = consumer
+	return subscription, nil
+}
+
 // Snapshot returns bounded publication metadata and a copy of its schema.
 func (publication *SQLPublication) Snapshot() SQLPublicationSnapshot {
 	if publication == nil {
@@ -395,6 +450,31 @@ func (subscription *SQLPublicationSubscription) Ack(checkpoint SQLPublicationChe
 	return nil
 }
 
+// AckWithStore advances the in-memory cursor and then durably saves the same
+// acknowledged cursor. If saving fails, callers may retry the same checkpoint;
+// equal checkpoints remain valid and no history is skipped.
+func (subscription *SQLPublicationSubscription) AckWithStore(ctx context.Context, store SQLPublicationCheckpointStore, checkpoint SQLPublicationCheckpoint) error {
+	if subscription == nil || subscription.publication == nil || subscription.state == nil {
+		return fmt.Errorf("%w: nil subscription", ErrSQLPublicationInvalid)
+	}
+	if subscription.consumer == "" {
+		return ErrSQLPublicationSubscriptionNotDurable
+	}
+	if store == nil {
+		return ErrSQLPublicationCheckpointStoreRequired
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := subscription.Ack(checkpoint); err != nil {
+		return err
+	}
+	if err := store.Save(ctx, subscription.publication.name, subscription.consumer, checkpoint); err != nil {
+		return fmt.Errorf("%w: %v", ErrSQLPublicationCheckpointStoreSave, err)
+	}
+	return nil
+}
+
 // Checkpoint returns the last acknowledged consumer checkpoint.
 func (subscription *SQLPublicationSubscription) Checkpoint() SQLPublicationCheckpoint {
 	if subscription == nil || subscription.publication == nil || subscription.state == nil {
@@ -403,6 +483,29 @@ func (subscription *SQLPublicationSubscription) Checkpoint() SQLPublicationCheck
 	subscription.publication.mu.Lock()
 	defer subscription.publication.mu.Unlock()
 	return subscription.state.checkpoint
+}
+
+// Cancel persists the last acknowledged cursor and only then removes the
+// subscription. A store failure leaves the live subscription open so the
+// caller can retry without losing the replay position.
+func (subscription *SQLPublicationSubscription) Cancel(ctx context.Context, store SQLPublicationCheckpointStore) error {
+	if subscription == nil || subscription.publication == nil || subscription.state == nil {
+		return fmt.Errorf("%w: nil subscription", ErrSQLPublicationInvalid)
+	}
+	if subscription.consumer == "" {
+		return ErrSQLPublicationSubscriptionNotDurable
+	}
+	if store == nil {
+		return ErrSQLPublicationCheckpointStoreRequired
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := store.Save(ctx, subscription.publication.name, subscription.consumer, subscription.Checkpoint()); err != nil {
+		return fmt.Errorf("%w: %v", ErrSQLPublicationCheckpointStoreSave, err)
+	}
+	subscription.Close()
+	return nil
 }
 
 // Err returns the terminal subscription error. Normal Close and Complete
