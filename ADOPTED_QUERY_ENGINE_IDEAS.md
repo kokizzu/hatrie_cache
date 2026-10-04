@@ -734,3 +734,7 @@ Adopted as opt-in `hatStorage.CompactionDiagnostics`: bounded arrangement regist
 ## Materialize M-U41: Webhook Event Idempotency
 
 Adopted as opt-in `hatSql.WebhookEventDeduplicator`: bounded source/event-ID admission, payload-fingerprint conflict detection, expiry, deterministic CRC-protected HWE1 snapshots, and atomic restore. The caller owns application, durable storage, acknowledgement, and HTTP/webhook wiring; existing defaults remain unchanged. See [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md) and [BENCHMARK.md](BENCHMARK.md#m-u41-webhook-event-idempotency).
+
+## Tarantool T-U22: Cross-Index Unique Constraints
+
+Adopted as opt-in `hatDataStructure.UniqueConstraintSet`. It atomically reserves one key per named constraint, rejects conflicts before mutation, and reuses flat row slots for allocation-light replacement and delete paths. It is a constraint sidecar, not a replacement for caller-owned query indexes or SQL-space wiring. See [TU22_CROSS_INDEX_UNIQUE.md](TU22_CROSS_INDEX_UNIQUE.md) and [BENCHMARK.md](BENCHMARK.md#t-u22-cross-index-unique-constraints).

@@ -32580,3 +32580,34 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## T-U22 Cross-Index Unique Constraints
+
+Commands:
+
+```sh
+make benchmark-tu22-cross-index-unique
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
+two independent unique `HashIndex` instances with caller rollback after the
+second index rejects a write. The candidate is one atomic
+`UniqueConstraintSet` with two string projections and a pre-sized capacity of
+10,000 rows.
+
+| Workload | Baseline median | Candidate median | Improvement |
+| --- | ---: | ---: | ---: |
+| Steady upsert | 142.5 ns/op, 0 B/op, 0 allocs/op | 64.8 ns/op, 0 B/op, 0 allocs/op | 2.20x faster |
+| Build 10,000 rows | 2,595,054 ns/op, 2,972,524 B/op, 139 allocs/op | 1,378,792 ns/op, 1,497,297 B/op, 106 allocs/op | 1.88x faster, 1.98x lower bytes, 1.31x fewer allocs |
+
+Raw samples:
+
+```text
+BenchmarkTU22BaselineUpsert: 148.5, 142.5, 137.2, 136.6, 145.2 ns/op
+BenchmarkTU22CandidateUpsert: 65.13, 62.33, 60.83, 66.45, 64.80 ns/op
+BenchmarkTU22BaselineBuild10000: 2.722501, 2.757510, 2.569512, 2.595054, 2.464627 ms/op
+BenchmarkTU22CandidateBuild10000: 1.371853, 1.357972, 1.378792, 1.386710, 1.399252 ms/op
+```
+
+The candidate measures constraint ownership only; normal query indexes and
+full row storage remain caller-owned. See [TU22_CROSS_INDEX_UNIQUE.md](TU22_CROSS_INDEX_UNIQUE.md).
