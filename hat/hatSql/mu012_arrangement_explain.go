@@ -22,6 +22,7 @@ type SQLArrangementMetadata struct {
 	Recommended    bool     `json:"recommended,omitempty"`
 	MatchScore     int      `json:"match_score,omitempty"`
 	Recommendation string   `json:"recommendation,omitempty"`
+	Layout         *SQLSourceLayout `json:"layout,omitempty"`
 }
 
 // SQLArrangementMetadataResolver optionally supplies bounded arrangement
@@ -68,6 +69,7 @@ func cloneSQLArrangementMetadata(arrangements []SQLArrangementMetadata) []SQLArr
 		cloned[index].Kind = cloneSQLExplainArrangementText(cloned[index].Kind)
 		cloned[index].Locality = cloneSQLExplainArrangementText(cloned[index].Locality)
 		cloned[index].Fields = cloneSQLExplainArrangementFields(cloned[index].Fields)
+		cloned[index].Layout = cloneSQLSourceLayout(cloned[index].Layout)
 	}
 	return cloned
 }

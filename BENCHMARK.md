@@ -1,5 +1,37 @@
 # Benchmark
 
+## M-U39 Source Partition/Order Declarations
+
+This benchmark compares the accepted pre-feature baseline with the isolated
+M-U39 implementation. Each row is five samples from the regular `EXPLAIN`
+benchmark. The resolver without layout represents the default path; the layout
+case measures the explicit opt-in diagnostic metadata.
+
+### Raw samples
+
+| Case | ns/op samples | B/op | allocs/op |
+| --- | --- | ---: | ---: |
+| Before, resolver without layout | 7620, 7951, 7935, 8115, 8229 | 9760 | 51 |
+| After, resolver without layout | 8362, 8058, 8028, 8194, 8499 | 9760 | 51 |
+| After, resolver with layout | 9445, 9496, 9347, 9545, 9569 | 10440 | 69 |
+
+### Tradeoff
+
+The default path retains the exact same measured memory and allocation profile:
+`9760 B/op` and `51 allocs/op`. The opt-in layout path costs `+680 B/op` and
+`+18 allocs/op` for the explanation response, with a median of `9496 ns/op`
+versus `8194 ns/op` for the same-tree no-layout run. This metadata is not used
+to rewrite or execute queries, so no query-runtime speedup is claimed.
+
+The benchmark was run with:
+
+```text
+make codex-mu39-benchmark
+```
+
+The implementation and contract are described in
+[MU039_PARTITION_ORDER_DECLARATIONS.md](MU039_PARTITION_ORDER_DECLARATIONS.md).
+
 ## CH-U49 Skip-Index EXPLAIN Diagnostics
 
 This paired clean-worktree benchmark compares the pre-CH-U49 implementation

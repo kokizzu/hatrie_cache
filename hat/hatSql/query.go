@@ -13314,6 +13314,14 @@ func sqlAppendExplainSteps(steps *[]SQLExplainStep, query *sqlQuery, prefix stri
 func sqlExplainSourceStep(node string, source sqlSource, resolver SQLSourceResolver) SQLExplainStep {
 	step := SQLExplainStep{Node: node, Detail: sqlExplainSource(source)}
 	step.Arrangements = resolveSQLArrangementMetadata(resolver, source)
+	if layout := resolveSQLSourceLayout(resolver, source); layout != nil {
+		step.Arrangements = append(step.Arrangements, SQLArrangementMetadata{
+			Key:            "source_layout",
+			Kind:           "partition_order",
+			Recommendation: "declared source partition/order",
+			Layout:         layout,
+		})
+	}
 	if source.kind == "VALUES" {
 		estimate := len(source.values)
 		step.EstimatedRows = &estimate

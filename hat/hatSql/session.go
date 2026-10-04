@@ -378,6 +378,22 @@ func (session *SQLSession) ResolveSQLSourcePartitions(name, key string) ([]SQLSo
 	return partitioned.ResolveSQLSourcePartitions(name, key)
 }
 
+// ResolveSQLSourceLayout forwards optional partition/order metadata from the
+// underlying resolver without changing temporary-table precedence.
+func (session *SQLSession) ResolveSQLSourceLayout(name, key string) (SQLSourceLayout, bool, error) {
+	if session == nil {
+		return SQLSourceLayout{}, false, nil
+	}
+	if session.hasLocalSQLSource(name, key) || session.source == nil {
+		return SQLSourceLayout{}, false, nil
+	}
+	layout, ok := session.source.(SQLSourceLayoutResolver)
+	if !ok {
+		return SQLSourceLayout{}, false, nil
+	}
+	return layout.ResolveSQLSourceLayout(name, key)
+}
+
 // ResolveSQLOrderedSourcePartitions forwards ordered physical partitions to
 // the external source after preserving session-local source precedence.
 func (session *SQLSession) ResolveSQLOrderedSourcePartitions(name, key, field string, desc, nullsFirst, nullsLast bool) ([]SQLSourcePartition, bool, error) {

@@ -293,6 +293,19 @@ func (resolver CatalogResolver) ResolveSQLSourcePartitions(name, key string) ([]
 	return partitioned.ResolveSQLSourcePartitions(name, key)
 }
 
+// ResolveSQLSourceLayout forwards optional partition/order metadata for
+// application sources while leaving information-schema sources catalog-owned.
+func (resolver CatalogResolver) ResolveSQLSourceLayout(name, key string) (SQLSourceLayout, bool, error) {
+	if catalogOwnsVirtualSource(name, key) || resolver.Source == nil {
+		return SQLSourceLayout{}, false, nil
+	}
+	layout, ok := resolver.Source.(SQLSourceLayoutResolver)
+	if !ok {
+		return SQLSourceLayout{}, false, nil
+	}
+	return layout.ResolveSQLSourceLayout(name, key)
+}
+
 // ResolveSQLIndexDiagnostics forwards optional application index diagnostics
 // while leaving information-schema sources owned by the catalog resolver.
 func (resolver CatalogResolver) ResolveSQLIndexDiagnostics(name, key, field string, value interface{}) (SQLIndexDiagnostics, bool, error) {
