@@ -22292,3 +22292,7 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+
+.PHONY: benchmark-tu23-functional-multikey
+benchmark-tu23-functional-multikey:
+	bash scripts/benchmark-tu23-functional-multikey.sh
