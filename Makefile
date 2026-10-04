@@ -22292,3 +22292,19 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+
+.PHONY: format-tuple-field-update-journal test-tuple-field-update-journal test-tuple-field-update-journal-package test-tuple-field-update-journal-all benchmark-tuple-field-update-journal race-tuple-field-update-journal vet-tuple-field-update-journal
+format-tuple-field-update-journal:
+	sh ./scripts/format-tuple-field-update-journal.sh
+test-tuple-field-update-journal:
+	sh ./scripts/test-tuple-field-update-journal.sh
+test-tuple-field-update-journal-package:
+	sh ./scripts/test-tuple-field-update-journal-package.sh
+test-tuple-field-update-journal-all:
+	sh ./scripts/test-tuple-field-update-journal-all.sh
+benchmark-tuple-field-update-journal:
+	sh ./scripts/benchmark-tuple-field-update-journal.sh
+race-tuple-field-update-journal:
+	sh ./scripts/race-tuple-field-update-journal.sh
+vet-tuple-field-update-journal:
+	sh ./scripts/vet-tuple-field-update-journal.sh

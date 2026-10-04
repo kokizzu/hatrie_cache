@@ -1,5 +1,41 @@
 # Benchmark
 
+## T-U19 Durable Tuple Field-Operation Journal
+
+Representative record: one `SET`, one `ADD_INT64`, and one `SPLICE` for
+`orders/42`. Five runs per benchmark on Linux/amd64, AMD Ryzen 9 5950X.
+JSON is the equivalent `encoding/json` envelope.
+
+| Operation | Binary median | JSON median | Improvement | Wire size |
+| --- | ---: | ---: | ---: | ---: |
+| Marshal | 91.03 ns/op, 48 B/op, 1 alloc | 763.3 ns/op, 368 B/op, 2 allocs | 8.39x faster; 7.67x fewer bytes/op; 2x fewer allocs | 46 B vs 290 B, 6.30x smaller |
+| Unmarshal | 202.5 ns/op, 336 B/op, 5 allocs | 4,655 ns/op, 992 B/op, 14 allocs | 22.99x faster; 2.95x fewer bytes/op; 2.8x fewer allocs | 46 B vs 290 B, 6.30x smaller |
+
+Raw output:
+
+```text
+BenchmarkTupleFieldUpdateJournalMarshal-32                 13054234  91.03 ns/op    46.00 wire-bytes   48 B/op    1 allocs/op
+BenchmarkTupleFieldUpdateJournalMarshal-32                 13608393  90.65 ns/op    46.00 wire-bytes   48 B/op    1 allocs/op
+BenchmarkTupleFieldUpdateJournalMarshal-32                 12964018  91.88 ns/op    46.00 wire-bytes   48 B/op    1 allocs/op
+BenchmarkTupleFieldUpdateJournalMarshal-32                 12574632  91.16 ns/op    46.00 wire-bytes   48 B/op    1 allocs/op
+BenchmarkTupleFieldUpdateJournalMarshal-32                 13248675  89.25 ns/op    46.00 wire-bytes   48 B/op    1 allocs/op
+BenchmarkTupleFieldUpdateJournalUnmarshal-32                5988529 202.5 ns/op    336 B/op    5 allocs/op
+BenchmarkTupleFieldUpdateJournalUnmarshal-32                5754166 201.9 ns/op    336 B/op    5 allocs/op
+BenchmarkTupleFieldUpdateJournalUnmarshal-32                6014308 206.9 ns/op    336 B/op    5 allocs/op
+BenchmarkTupleFieldUpdateJournalUnmarshal-32                5986662 198.7 ns/op    336 B/op    5 allocs/op
+BenchmarkTupleFieldUpdateJournalUnmarshal-32                6044778 202.6 ns/op    336 B/op    5 allocs/op
+BenchmarkTupleFieldUpdateJournalJSONBaselineMarshal-32      1595102 766.1 ns/op    290.0 wire-bytes 368 B/op    2 allocs/op
+BenchmarkTupleFieldUpdateJournalJSONBaselineMarshal-32      1549597 763.3 ns/op    290.0 wire-bytes 368 B/op    2 allocs/op
+BenchmarkTupleFieldUpdateJournalJSONBaselineMarshal-32      1508332 783.2 ns/op    290.0 wire-bytes 368 B/op    2 allocs/op
+BenchmarkTupleFieldUpdateJournalJSONBaselineMarshal-32      1587246 754.4 ns/op    290.0 wire-bytes 368 B/op    2 allocs/op
+BenchmarkTupleFieldUpdateJournalJSONBaselineMarshal-32      1576687 753.7 ns/op    290.0 wire-bytes 368 B/op    2 allocs/op
+BenchmarkTupleFieldUpdateJournalJSONBaselineUnmarshal-32     250012 4665 ns/op     992 B/op   14 allocs/op
+BenchmarkTupleFieldUpdateJournalJSONBaselineUnmarshal-32     258345 4638 ns/op     992 B/op   14 allocs/op
+BenchmarkTupleFieldUpdateJournalJSONBaselineUnmarshal-32     247638 4703 ns/op     992 B/op   14 allocs/op
+BenchmarkTupleFieldUpdateJournalJSONBaselineUnmarshal-32     251230 4655 ns/op     992 B/op   14 allocs/op
+BenchmarkTupleFieldUpdateJournalJSONBaselineUnmarshal-32     248275 4630 ns/op     992 B/op   14 allocs/op
+```
+
 ## CH-U49 Skip-Index EXPLAIN Diagnostics
 
 This paired clean-worktree benchmark compares the pre-CH-U49 implementation

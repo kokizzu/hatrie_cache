@@ -195,6 +195,12 @@ explicitly opt-in operational control.
 | ClickHouse | Direct columnar append ingestion | Partially adopted as `hatSql.TypedTable.AppendColumnar`; complete scalar batches are validated before mutation and appended column-wise with plain and packed layouts supported. SQL `INSERT` routing remains caller-owned. | [CHU22_DIRECT_COLUMNAR_APPEND.md](CHU22_DIRECT_COLUMNAR_APPEND.md), [BENCHMARK.md#ch-u22-direct-columnar-append](BENCHMARK.md#ch-u22-direct-columnar-append) |
 | ClickHouse | Async-insert queue status and explicit flush | Adopted as the bounded importable `AsyncInsertQueueRegistry` with payload-free status snapshots and authenticated targeted/all-queue flush endpoints. It is disabled unless explicitly configured. | [CHU23_ASYNC_INSERT_QUEUE.md](CHU23_ASYNC_INSERT_QUEUE.md), [BENCHMARK.md#ch-u23-async-insert-queue-status-and-flush](BENCHMARK.md#ch-u23-async-insert-queue-status-and-flush) |
 
+## T-U19: Durable Tuple Field-Operation Journal
+
+| Source | Idea | Status | Evidence |
+| --- | --- | --- | --- |
+| Tarantool | Durable tuple field-operation journal | Adopted as an importable opt-in binary codec | `hatDataStructure.MarshalTupleFieldUpdateJournal` and `UnmarshalTupleFieldUpdateJournal` provide bounded `HTU1` records with CRC32C and caller-owned atomic replay through `TupleFieldOffsetCache.ApplyUpdates`. See [TUPLE_FIELD_UPDATE_JOURNAL.md](TUPLE_FIELD_UPDATE_JOURNAL.md). |
+
 ## Measured Results
 
 | Feature | Result |
