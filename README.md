@@ -4760,6 +4760,14 @@ Typed-table planners can reuse exact aggregate and join arrangements, classify
 stale checkpoints, and estimate incremental memory with
 [M-U11](MU11_ARRANGEMENT_REUSE_ADVISOR.md).
 
+For changing join predicates, `hatSql.TypedTableJoinArrangements.AcquireBest`
+selects the smallest compatible candidate and keeps only that arrangement
+incrementally maintained. It is opt-in and requires caller-supplied estimates;
+fixed-definition `Acquire` remains unchanged. See
+[MU045_INCREMENTAL_JOIN_INDEX_SELECTION.md](MU045_INCREMENTAL_JOIN_INDEX_SELECTION.md)
+and the measured control-plane cost in
+[BENCHMARK.md](BENCHMARK.md#m-u45-incremental-join-index-selection).
+
 ## Arrangement metadata in EXPLAIN
 
 Use the opt-in [M-U12 enriched explain format](MU12_EXPLAIN_ARRANGEMENTS.md)

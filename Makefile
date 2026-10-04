@@ -22294,3 +22294,11 @@ push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
 bench-tu17-space-engine:
 	bash scripts/benchmark-tu17-space-engine.sh
+test-mu45:
+	bash scripts/test-mu45.sh
+
+verify-mu45:
+	bash scripts/verify-mu45.sh
+
+benchmark-mu45:
+	bash scripts/benchmark-mu45.sh

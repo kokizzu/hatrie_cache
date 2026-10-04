@@ -32556,6 +32556,29 @@ construct a coordinator or pay per-row bookkeeping. See
 [M-U44_TRANSACTION_VISIBILITY.md](M-U44_TRANSACTION_VISIBILITY.md) for the
 API contract and limitations.
 
+## M-U45 Incremental Join Index Selection
+
+Command:
+
+```sh
+make benchmark-mu45
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. Both workloads reuse
+one live arrangement. The baseline is the existing exact-definition `Acquire`;
+the feature scans two compatible candidates and acquires the smallest estimate.
+
+| Workload | Clean c840 median ns/op | Feature median ns/op | Feature B/op | Feature allocs/op | Result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Existing exact `Acquire` | 90.3 | 95.0 | 53 | 2 | 1.05x; no allocation change |
+| `AcquireBest`, two candidates | n/a | 175.7 | 53 | 2 | 1.85x versus feature exact acquire |
+
+The cost is paid only at adaptive arrangement acquisition time. There is no
+additional allocation or retained arrangement state, and subsequent ordered
+updates use the same maintained join implementation. Raw samples and the
+correctness/limitation contract are in
+[MU045_INCREMENTAL_JOIN_INDEX_SELECTION.md](MU045_INCREMENTAL_JOIN_INDEX_SELECTION.md).
+
 ## M-U46 Differential Checkpoint Export/Import
 
 Commands:

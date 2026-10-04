@@ -70,9 +70,17 @@ func (arrangements *TypedTableJoinArrangements) Acquire(definition TypedTableJoi
 	if arrangements == nil {
 		return nil, fmt.Errorf("typed table join arrangements are nil")
 	}
-	key := definition.LeftField + "\x00" + definition.RightField
 	arrangements.mu.Lock()
 	defer arrangements.mu.Unlock()
+	return arrangements.acquireLocked(definition)
+}
+
+func (arrangements *TypedTableJoinArrangements) acquireLocked(definition TypedTableJoinDefinition) (*TypedTableJoinArrangement, error) {
+	key := definition.LeftField + "\x00" + definition.RightField
+	return arrangements.acquireLockedKey(definition, key)
+}
+
+func (arrangements *TypedTableJoinArrangements) acquireLockedKey(definition TypedTableJoinDefinition, key string) (*TypedTableJoinArrangement, error) {
 	entry := arrangements.entries[key]
 	if entry == nil {
 		join, err := NewTypedTableJoinWithOptions(arrangements.left, arrangements.right, definition, arrangements.options)
