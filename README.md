@@ -9,6 +9,7 @@ security guidance before exposing it on a network.
 ## Start Here
 
 - New to the cache commands and value types: [DATA_STRUCTURE.md](DATA_STRUCTURE.md)
+- Reusable SQL transaction defaults and opt-in journal durability: [TU05_SESSION_TRANSACTION_SETTINGS.md](TU05_SESSION_TRANSACTION_SETTINGS.md)
 - Per-space volatile or disk-backed engine selection: [TU17_SELECTABLE_VINYL_ENGINE.md](TU17_SELECTABLE_VINYL_ENGINE.md), with measured latency and memory tradeoffs in [BENCHMARK.md](BENCHMARK.md#t-u17-selectable-vinyl-style-space-engine)
 - ClickHouse-style SQL RowBinary streaming export and bounded bulk import: [CH050_SQL_ROW_BINARY_STREAM.md](CH050_SQL_ROW_BINARY_STREAM.md)
 - New to the SQL interface: [SQL.md](SQL.md)

@@ -20,6 +20,8 @@ type SQLTransaction struct {
 	snapshot             *HatTrie
 	epoch                uint64
 	isolation            SQLTransactionIsolation
+	durability           SQLTransactionDurability
+	journal              *CommandJournal
 	readOnly             bool
 	deadline             time.Time
 	timedOut             bool
@@ -101,6 +103,8 @@ func BeginSQLTransactionWithOptions(trie *HatTrie, options SQLTransactionOptions
 		snapshot:             snapshot,
 		epoch:                epoch,
 		isolation:            options.Isolation,
+		durability:           options.Durability,
+		journal:              options.Journal,
 		readOnly:             options.ReadOnly,
 		deadline:             deadline,
 		serializableLockHeld: serializableLockHeld,
@@ -120,6 +124,15 @@ func (transaction *SQLTransaction) Isolation() SQLTransactionIsolation {
 // transaction reports the backward-compatible writable default.
 func (transaction *SQLTransaction) ReadOnly() bool {
 	return transaction != nil && transaction.readOnly
+}
+
+// Durability reports the publication policy selected when the transaction
+// began. A nil transaction reports the backward-compatible memory default.
+func (transaction *SQLTransaction) Durability() SQLTransactionDurability {
+	if transaction == nil {
+		return DefaultSQLTransactionDurability
+	}
+	return transaction.durability
 }
 
 // Execute stages one or more scalar command-SQL mutations. SELECT and CALL
@@ -201,12 +214,42 @@ func (transaction *SQLTransaction) Commit() error {
 	if err := transaction.checkTimeoutLocked(); err != nil {
 		return err
 	}
-	response := transaction.live.executeSQLTransactionBatch(transaction.epoch, transaction.staged)
+	var response CacheCommandResponse
+	if transaction.durability == SQLTransactionDurabilityJournal {
+		response = transaction.commitJournalBatchLocked()
+	} else {
+		response = transaction.live.executeSQLTransactionBatch(transaction.epoch, transaction.staged)
+	}
 	transaction.closeLocked()
 	if !response.OK {
 		return fmt.Errorf("%s", response.Message)
 	}
 	return nil
+}
+
+func (transaction *SQLTransaction) commitJournalBatchLocked() CacheCommandResponse {
+	if transaction.journal == nil {
+		return commandError(ErrSQLTransactionJournalRequired.Error())
+	}
+	request := CacheCommandRequest{
+		Command: "BATCH",
+		Atomic:  true,
+		Batch:   append([]CacheCommandRequest(nil), transaction.staged...),
+	}
+	if !transaction.serializableLockHeld {
+		transaction.live.commandTransactionMu.Lock()
+		defer transaction.live.commandTransactionMu.Unlock()
+	}
+	transaction.live.mu.RLock()
+	epochMatches := transaction.live.mutationEpoch == transaction.epoch
+	transaction.live.mu.RUnlock()
+	if !epochMatches {
+		return commandError("SQL transaction conflict: cache changed after its snapshot")
+	}
+	response, _ := executePublicCommandBatchLocked(context.Background(), transaction.live, request, commandExecutionOptions{
+		Journal: transaction.journal,
+	})
+	return response
 }
 
 // Rollback drops all private changes. It is safe to call repeatedly.

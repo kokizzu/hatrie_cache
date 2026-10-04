@@ -32617,3 +32617,44 @@ BenchmarkSpaceEngineLookup4096/vinyl-32 644.7 646.2 649.5 645.5 670.1 ns/op, 172
 The result supports keeping `memtx` as the sane default. `vinyl` is useful
 when restart persistence and bounded hot memory are worth the additional disk
 I/O, compaction work, and lookup latency; it is not a general-purpose speedup.
+## T-U05 Session Transaction Settings
+
+Command: `make benchmark-tu05-session`
+
+Environment: Linux/amd64, AMD Ryzen 9 5950X. The command runs three samples of
+100 iterations with `-benchmem`. The session wrapper is intentionally not a
+performance fast path; its value is one validated policy for future
+transactions. Journal durability is opt-in and therefore its sync cost is not
+paid by existing callers.
+
+Representative raw output:
+
+```text
+BenchmarkTU05DirectTransactionBegin-32       100  2463076 ns/op  79917 B/op  94 allocs/op
+BenchmarkTU05DirectTransactionBegin-32       100  2119877 ns/op  79917 B/op  94 allocs/op
+BenchmarkTU05DirectTransactionBegin-32       100  1993707 ns/op  79914 B/op  94 allocs/op
+BenchmarkTU05SessionTransactionBegin-32      100  2029450 ns/op  79641 B/op  94 allocs/op
+BenchmarkTU05SessionTransactionBegin-32      100  2048405 ns/op  79667 B/op  94 allocs/op
+BenchmarkTU05SessionTransactionBegin-32      100  2037835 ns/op  79997 B/op  94 allocs/op
+BenchmarkTU05SessionOptions-32                100        5.600 ns/op      0 B/op   0 allocs/op
+BenchmarkTU05SessionOptions-32                100        5.700 ns/op      0 B/op   0 allocs/op
+BenchmarkTU05SessionOptions-32                100        5.400 ns/op      0 B/op   0 allocs/op
+BenchmarkTU05MemoryTransactionCommit-32      100  2144743 ns/op 204071 B/op 468 allocs/op
+BenchmarkTU05MemoryTransactionCommit-32      100  2224257 ns/op 203757 B/op 468 allocs/op
+BenchmarkTU05MemoryTransactionCommit-32      100  2184329 ns/op 203873 B/op 468 allocs/op
+BenchmarkTU05JournalTransactionCommit-32     100  3073014 ns/op 205255 B/op 478 allocs/op
+BenchmarkTU05JournalTransactionCommit-32     100  3138891 ns/op 205312 B/op 478 allocs/op
+BenchmarkTU05JournalTransactionCommit-32     100  3294134 ns/op 205257 B/op 478 allocs/op
+```
+
+| Benchmark | Median time | Memory | Allocs | Comparison |
+| --- | ---: | ---: | ---: | --- |
+| Direct transaction begin | 2.12 ms/op | 79.9 KB/op | 94 | baseline |
+| Session transaction begin | 2.04 ms/op | 79.7 KB/op | 94 | within noise, same alloc count |
+| Session `Options()` | 5.6 ns/op | 0 B/op | 0 | zero-allocation read |
+| Memory transaction commit | 2.18 ms/op | 203.9 KB/op | 468 | default |
+| Journal transaction commit | 3.14 ms/op | 205.3 KB/op | 478 | 1.44x time, +1.4 KB, +10 allocs |
+
+The session default path has no measurable allocation cost. Journal mode pays
+for durable append and sync, which is the expected tradeoff and is explicitly
+selected rather than becoming a default regression.

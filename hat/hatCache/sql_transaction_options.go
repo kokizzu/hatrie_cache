@@ -15,6 +15,10 @@ var ErrSQLTransactionReadOnly = errors.New("SQL transaction is read-only")
 // clock timeout expires before an operation can complete.
 var ErrSQLTransactionTimeout = errors.New("SQL transaction timed out")
 
+// ErrSQLTransactionJournalRequired is returned when journal durability is
+// selected without a command journal.
+var ErrSQLTransactionJournalRequired = errors.New("SQL transaction journal durability requires a command journal")
+
 // SQLTransactionIsolation controls how a SQLTransaction coordinates with
 // concurrent command-path mutations.
 type SQLTransactionIsolation uint8
@@ -31,6 +35,46 @@ const (
 // DefaultSQLTransactionIsolation is used when SQLTransactionOptions.Isolation
 // is left at its zero value.
 const DefaultSQLTransactionIsolation = SQLTransactionIsolationSnapshot
+
+// SQLTransactionDurability controls how a transaction publishes writes.
+type SQLTransactionDurability uint8
+
+const (
+	// SQLTransactionDurabilityMemory preserves the existing in-memory commit
+	// path and is the zero-value default.
+	SQLTransactionDurabilityMemory SQLTransactionDurability = iota
+	// SQLTransactionDurabilityJournal appends and syncs the transaction as one
+	// atomic journal batch before reporting commit success.
+	SQLTransactionDurabilityJournal
+)
+
+// DefaultSQLTransactionDurability is the backward-compatible in-memory mode.
+const DefaultSQLTransactionDurability = SQLTransactionDurabilityMemory
+
+// String returns the stable configuration spelling for a durability mode.
+func (durability SQLTransactionDurability) String() string {
+	switch durability {
+	case SQLTransactionDurabilityMemory:
+		return "memory"
+	case SQLTransactionDurabilityJournal:
+		return "journal"
+	default:
+		return "unknown"
+	}
+}
+
+// ParseSQLTransactionDurability parses memory or journal. An empty value
+// selects the backward-compatible in-memory default.
+func ParseSQLTransactionDurability(value string) (SQLTransactionDurability, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "memory", "default":
+		return SQLTransactionDurabilityMemory, nil
+	case "journal":
+		return SQLTransactionDurabilityJournal, nil
+	default:
+		return SQLTransactionDurabilityMemory, fmt.Errorf("unsupported SQL transaction durability %q", value)
+	}
+}
 
 // String returns the stable configuration spelling for an isolation level.
 func (isolation SQLTransactionIsolation) String() string {
@@ -66,6 +110,11 @@ type SQLTransactionOptions struct {
 	// Timeout bounds the transaction after its private snapshot is captured. A
 	// zero value disables the timeout and preserves the default fast path.
 	Timeout time.Duration
+	// Durability selects the commit publication path. Journal durability
+	// requires Journal and is opt-in; memory is the zero-value default.
+	Durability SQLTransactionDurability
+	// Journal supplies the command journal used by journal durability.
+	Journal *CommandJournal
 }
 
 func (options SQLTransactionOptions) normalized() (SQLTransactionOptions, error) {
@@ -74,6 +123,15 @@ func (options SQLTransactionOptions) normalized() (SQLTransactionOptions, error)
 	}
 	if options.Timeout < 0 {
 		return SQLTransactionOptions{}, fmt.Errorf("SQL transaction timeout cannot be negative")
+	}
+	if options.Durability > SQLTransactionDurabilityJournal {
+		return SQLTransactionOptions{}, fmt.Errorf("unsupported SQL transaction durability %d", options.Durability)
+	}
+	if options.Durability == SQLTransactionDurabilityJournal && options.Journal == nil {
+		return SQLTransactionOptions{}, ErrSQLTransactionJournalRequired
+	}
+	if options.Durability != SQLTransactionDurabilityJournal && options.Journal != nil {
+		return SQLTransactionOptions{}, fmt.Errorf("SQL transaction journal is configured but durability is %s", options.Durability)
 	}
 	return options, nil
 }
