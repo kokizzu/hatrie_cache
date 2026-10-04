@@ -19815,7 +19815,7 @@ into the same bounded cache by default for repeated service queries.
 <a id="sql-adapter-registry-default-compiled-plan-cache"></a>
 ## SQL Adapter Registry Default Compiled Plan Cache
 
-Command: `make goal-m094-plan-cache-benchmark`.
+Command: `make benchmark-sql-adapter-registry-cache`.
 
 Five `-benchmem` samples on Linux/amd64, AMD Ryzen 9 5950X, executing the same
 short resolver-only SQL query through `hatStorage.SQLAdapterRegistry`:

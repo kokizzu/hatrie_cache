@@ -28718,3 +28718,5 @@ vet-m093-consumer-group:
 .PHONY: test-m093-all
 test-m093-all:
 	bash scripts/test-m093-all.sh
+benchmark-sql-adapter-registry-cache:
+	bash scripts/benchmark-sql-adapter-registry-cache.sh
