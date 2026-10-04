@@ -132,6 +132,17 @@ func marshalAggregateStateEnvelopeFields(kind string, version uint64, payloadLen
 // envelope. It rejects truncation, trailing bytes, unsupported wire versions,
 // invalid kinds, oversized payloads, and checksum failures.
 func UnmarshalAggregateStateEnvelope(data []byte) (AggregateStateEnvelope, error) {
+	return unmarshalAggregateStateEnvelope(data, true)
+}
+
+// unmarshalAggregateStateEnvelopeView validates an envelope while borrowing
+// its payload. The returned payload is only safe for immediate internal use;
+// callers must copy it before retaining it beyond the input buffer lifetime.
+func unmarshalAggregateStateEnvelopeView(data []byte) (AggregateStateEnvelope, error) {
+	return unmarshalAggregateStateEnvelope(data, false)
+}
+
+func unmarshalAggregateStateEnvelope(data []byte, copyPayload bool) (AggregateStateEnvelope, error) {
 	if len(data) > MaxAggregateStateEnvelopeBytes || len(data) < len(aggregateStateEnvelopeMagic)+1 {
 		return AggregateStateEnvelope{}, fmt.Errorf("%w: payload length %d is outside bounds", ErrAggregateStateEnvelopeWire, len(data))
 	}
@@ -172,7 +183,11 @@ func UnmarshalAggregateStateEnvelope(data []byte) (AggregateStateEnvelope, error
 		return AggregateStateEnvelope{}, fmt.Errorf("%w: checksum mismatch", ErrAggregateStateEnvelopeWire)
 	}
 
-	envelope := AggregateStateEnvelope{Kind: kind, Version: version, Payload: append([]byte(nil), data[offset:payloadEnd]...)}
+	payload := data[offset:payloadEnd]
+	if copyPayload {
+		payload = append([]byte(nil), payload...)
+	}
+	envelope := AggregateStateEnvelope{Kind: kind, Version: version, Payload: payload}
 	if err := validateAggregateStateEnvelope(envelope); err != nil {
 		return AggregateStateEnvelope{}, fmt.Errorf("%w: %v", ErrAggregateStateEnvelopeWire, err)
 	}

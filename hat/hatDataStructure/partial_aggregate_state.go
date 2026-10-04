@@ -27,7 +27,7 @@ func (hll HyperLogLog) MarshalAggregateState() ([]byte, error) {
 // NewHyperLogLogFromAggregateState reconstructs a HyperLogLog from a checked
 // versioned partial aggregate payload.
 func NewHyperLogLogFromAggregateState(data []byte) (HyperLogLog, error) {
-	envelope, err := UnmarshalAggregateStateEnvelope(data)
+	envelope, err := unmarshalAggregateStateEnvelopeView(data)
 	if err != nil {
 		return HyperLogLog{}, err
 	}
