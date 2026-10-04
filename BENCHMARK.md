@@ -32335,6 +32335,28 @@ storage/transfer control paths rather than row-update or query hot paths. See
 [MU05_ARRANGEMENT_ONLY_RECOVERY.md](MU05_ARRANGEMENT_ONLY_RECOVERY.md) for the
 validation contract and operational guidance.
 
+### Sorted Arrangement Checkpoints
+
+The sorted-arrangement comparison used five samples with
+`-benchtime=100ms` on Linux/amd64, AMD Ryzen 9 5950X. The baseline is clean
+commit `c84021f2`; the feature run includes sorted checkpoint capture and
+restore. Existing `ORDER BY` maintenance stayed within normal run-to-run
+variance.
+
+| Workload | Baseline median | Feature median | Feature B/op | Feature allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Sorted arrangement build, legacy scalar | 4,919,906 ns | 4,986,523 ns | 2,163,448 | 8,267 | 1.01x |
+| Sorted arrangement apply, 256-row batch | 768,767 ns | 688,350 ns | 407,020 | 278 | 0.90x |
+| Sorted arrangement rows page | 919.1 ns | 858.9 ns | 1,376 | 11 | 0.93x |
+| Capture checkpoint, 1,024 rows | N/A | 218,840 ns | 139,385 | 1,028 | N/A |
+| Restore checkpoint, 1,024 rows | N/A | 871,450 ns | 302,757 | 1,042 | N/A |
+
+Capture and restore are checkpoint/control-plane operations, not row-update
+optimizations. Their allocations are proportional to detached checkpoint state.
+
+Raw feature samples (ns/op) were capture `218840; 219458; 217682; 222656;
+217947` and restore `871450; 879184; 856419; 870437; 877141`.
+
 ## M-U06 Differential Window Frames
 
 Commands:

@@ -67,6 +67,7 @@ type typedTableSortedArrangementOrderField struct {
 // for repeated ORDER BY access when the source field is already typed.
 type TypedTableSortedArrangement struct {
 	mu           sync.RWMutex
+	table        *TypedTable
 	field        int
 	fieldKind    TypedTableKind
 	columnCount  int
@@ -92,7 +93,7 @@ func NewTypedTableSortedArrangement(table *TypedTable, definition TypedTableSort
 	}
 	rows, checkpoint := typedTableSortedArrangementSnapshot(table)
 	arrangement := &TypedTableSortedArrangement{
-		field: orderFields[0].index, fieldKind: orderFields[0].kind, columnCount: len(table.columns), definition: definition,
+		table: table, field: orderFields[0].index, fieldKind: orderFields[0].kind, columnCount: len(table.columns), definition: definition,
 		entries:   make(map[string]TypedTableMergeJoinInput, len(rows)),
 		positions: make(map[string]int, len(rows)), orderFields: orderFields,
 		dictionaries: make([]*typedTableSortedArrangementStringDictionary, len(orderFields)), checkpoint: checkpoint,
