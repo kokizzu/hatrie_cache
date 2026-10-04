@@ -131,6 +131,9 @@ type MonitoringOptions struct {
 	// AsyncInsertQueues enables authenticated monitoring of named async-insert
 	// buffers when a registry is supplied. A nil value keeps these routes off.
 	AsyncInsertQueues *AsyncInsertQueueRegistry
+	// QueryLog enables the authenticated query-log durability barrier route when
+	// supplied. A nil value keeps the route off.
+	QueryLog *SQLQueryLog
 	// SlowCommandThreshold enables bounded slow-command capture when positive.
 	// It is disabled by default; values are never stored in captured records.
 	SlowCommandThreshold            time.Duration
@@ -666,6 +669,9 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	if handler.options.AsyncInsertQueues != nil {
 		server.HandleFunc("/api/async-inserts", handler.handleAsyncInsertQueues)
 		server.HandleFunc("/api/async-inserts/flush", handler.handleAsyncInsertQueueFlush)
+	}
+	if handler.options.QueryLog != nil {
+		server.HandleFunc("/api/sql/query-log/flush", handler.handleSQLQueryLogFlush)
 	}
 	server.HandleFunc("/api/snapshot", handler.handleSnapshot)
 	server.HandleFunc("/api/backup", handler.handleBackup)
@@ -1545,7 +1551,7 @@ func (handler *MonitoringHandler) handleOpenAPI(w http.ResponseWriter, r *http.R
 		writeMethodNotAllowed(w)
 		return
 	}
-	writeJSON(w, monitoringOpenAPIDocumentWithAsyncInsertQueues(handler.options.AsyncCommands, handler.options.AsyncInsertQueues != nil))
+	writeJSON(w, monitoringOpenAPIDocumentWithOptions(handler.options.AsyncCommands, handler.options.AsyncInsertQueues != nil, handler.options.QueryLog != nil))
 }
 
 func monitoringOpenAPIDocument(asyncCommands bool) map[string]interface{} {
@@ -1553,6 +1559,10 @@ func monitoringOpenAPIDocument(asyncCommands bool) map[string]interface{} {
 }
 
 func monitoringOpenAPIDocumentWithAsyncInsertQueues(asyncCommands, asyncInsertQueues bool) map[string]interface{} {
+	return monitoringOpenAPIDocumentWithOptions(asyncCommands, asyncInsertQueues, false)
+}
+
+func monitoringOpenAPIDocumentWithOptions(asyncCommands, asyncInsertQueues, queryLog bool) map[string]interface{} {
 	jsonResponse := map[string]interface{}{
 		"description": "JSON response",
 		"content":     map[string]interface{}{"application/json": map[string]interface{}{"schema": map[string]interface{}{"type": "object"}}},
@@ -1614,6 +1624,9 @@ func monitoringOpenAPIDocumentWithAsyncInsertQueues(asyncCommands, asyncInsertQu
 	if asyncInsertQueues {
 		paths["/api/async-inserts"] = map[string]interface{}{"get": map[string]interface{}{"operationId": "getAsyncInsertQueues", "responses": map[string]interface{}{"200": jsonResponse}}}
 		paths["/api/async-inserts/flush"] = map[string]interface{}{"post": map[string]interface{}{"operationId": "flushAsyncInsertQueues", "responses": map[string]interface{}{"200": jsonResponse}}}
+	}
+	if queryLog {
+		paths["/api/sql/query-log/flush"] = map[string]interface{}{"post": map[string]interface{}{"operationId": "flushSQLQueryLog", "responses": map[string]interface{}{"200": jsonResponse}}}
 	}
 	return map[string]interface{}{
 		"openapi": "3.1.0",

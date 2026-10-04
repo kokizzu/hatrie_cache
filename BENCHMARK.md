@@ -32726,3 +32726,40 @@ The build allocation is transient and should not be read as retained index
 size. This is a good tradeoff for repeated selective reads, but not for a
 single lookup; conditional indexes are therefore opt-in and are not built
 automatically.
+
+## CH-U51 SQL Query-Log Flush Barrier
+
+The append benchmark was run five times before and after the monitoring change
+on Linux/amd64 with an AMD Ryzen 9 5950X. The feature does not modify the
+append path. The new operator endpoint is measured separately because it
+intentionally performs a filesystem sync and includes HTTP dispatch.
+
+| Workload | Before median | After samples | After median | Memory | Allocations | Result |
+| --- | ---: | --- | ---: | ---: | ---: | --- |
+| Query-log append, `SyncOnAppend=false` | 2,504 ns/op | 2,582; 2,548; 2,475; 2,470; 2,592 ns/op | 2,548 ns/op | 369 B/op | 4 | no meaningful regression; within run-to-run noise |
+| `POST /api/sql/query-log/flush` | not applicable | 205,401; 214,270; 230,253; 203,977; 221,379 ns/op | 214,270 ns/op | 6,692 B/op | 27 | explicit operator cost |
+
+Raw output:
+
+```text
+Before: BenchmarkCH004BaselineSQLQueryLogAppend-32 477787 2524 ns/op 369 B/op 4 allocs/op
+Before: BenchmarkCH004BaselineSQLQueryLogAppend-32 460528 2487 ns/op 369 B/op 4 allocs/op
+Before: BenchmarkCH004BaselineSQLQueryLogAppend-32 433221 2504 ns/op 369 B/op 4 allocs/op
+Before: BenchmarkCH004BaselineSQLQueryLogAppend-32 466366 2457 ns/op 369 B/op 4 allocs/op
+Before: BenchmarkCH004BaselineSQLQueryLogAppend-32 480160 2505 ns/op 369 B/op 4 allocs/op
+After:  BenchmarkCH031SQLQueryLogAppend/sync-false-32 490300 2582 ns/op 369 B/op 4 allocs/op
+After:  BenchmarkCH031SQLQueryLogAppend/sync-false-32 478856 2548 ns/op 369 B/op 4 allocs/op
+After:  BenchmarkCH031SQLQueryLogAppend/sync-false-32 483741 2475 ns/op 369 B/op 4 allocs/op
+After:  BenchmarkCH031SQLQueryLogAppend/sync-false-32 487536 2470 ns/op 369 B/op 4 allocs/op
+After:  BenchmarkCH031SQLQueryLogAppend/sync-false-32 465957 2592 ns/op 369 B/op 4 allocs/op
+After:  BenchmarkCHU51MonitoringSQLQueryLogFlush-32 9798 205401 ns/op 6689 B/op 27 allocs/op
+After:  BenchmarkCHU51MonitoringSQLQueryLogFlush-32 9822 214270 ns/op 6692 B/op 27 allocs/op
+After:  BenchmarkCHU51MonitoringSQLQueryLogFlush-32 7642 230253 ns/op 6692 B/op 27 allocs/op
+After:  BenchmarkCHU51MonitoringSQLQueryLogFlush-32 8037 203977 ns/op 6690 B/op 27 allocs/op
+After:  BenchmarkCHU51MonitoringSQLQueryLogFlush-32 8368 221379 ns/op 6692 B/op 27 allocs/op
+```
+
+The endpoint's CPU and allocation cost is a deliberate control-plane tradeoff,
+paid only when the barrier is called.
+See [SQL_QUERY_LOG.md](SQL_QUERY_LOG.md#operator-flush-barrier) for the
+configuration and security contract.

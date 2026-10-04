@@ -1,3 +1,5 @@
+include Makefile.codex-chu51
+
 .PHONY: verify-ch029-dictionary-join-c203
 .PHONY: test-tt020
 test-tt020:

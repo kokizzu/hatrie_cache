@@ -76,3 +76,26 @@ The optional rotation path has extra filesystem work at segment boundaries.
 The default path has no rotation checks beyond a disabled-feature branch. See
 the [CH-004 benchmark](BENCHMARK.md#ch-004-retained-query-log-rotation) for
 CPU, allocation, and rotation-cost measurements.
+
+## Operator Flush Barrier
+
+Monitoring can expose an explicit filesystem durability barrier for the query
+log. Supply the same `*hatCache.SQLQueryLog` used by the query manager through
+`MonitoringOptions.QueryLog`:
+
+```go
+monitoring := hatCache.NewMonitoringHandler(trie, hatCache.MonitoringOptions{
+	AuthToken: "operator-token",
+	QueryLog:  queryLog,
+})
+```
+
+With a query log supplied, an authenticated `POST /api/sql/query-log/flush`
+calls `SQLQueryLog.Sync()` while holding the log's existing append mutex and
+returns `{"flushed":true}`. The route is not registered when `QueryLog` is
+nil, and OpenAPI advertises it only when enabled. Configure the ordinary
+monitoring auth token or identity provider before exposing this operator route.
+
+This is an explicit checkpoint for backups and handoff workflows; it does not
+change append durability defaults and adds no per-query overhead. A filesystem
+sync is intentionally paid only when an operator invokes the endpoint.

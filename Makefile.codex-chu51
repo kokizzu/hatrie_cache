@@ -1,0 +1,39 @@
+.PHONY: test-chu51-red
+test-chu51-red:
+	@sh ./scripts/test-chu51.sh red
+
+.PHONY: test-chu51
+test-chu51:
+	@sh ./scripts/test-chu51.sh test
+
+.PHONY: race-chu51
+race-chu51:
+	@sh ./scripts/test-chu51.sh race
+
+.PHONY: vet-chu51
+vet-chu51:
+	@sh ./scripts/test-chu51.sh vet
+
+.PHONY: format-chu51
+format-chu51:
+	@sh ./scripts/test-chu51.sh format
+
+.PHONY: benchmark-chu51
+benchmark-chu51:
+	@sh ./scripts/test-chu51.sh benchmark
+
+.PHONY: package-chu51
+package-chu51:
+	@sh ./scripts/test-chu51.sh package
+
+.PHONY: stage-chu51
+stage-chu51:
+	@sh ./scripts/deliver-chu51.sh stage
+
+.PHONY: commit-chu51
+commit-chu51:
+	@sh ./scripts/deliver-chu51.sh commit
+
+.PHONY: push-chu51
+push-chu51:
+	@sh ./scripts/deliver-chu51.sh push
