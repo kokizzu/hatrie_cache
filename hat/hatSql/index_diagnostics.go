@@ -3,7 +3,9 @@ package hatSql
 // SQLIndexDiagnostics describes the work performed by one source index for a
 // single equality probe. Candidate rows are returned by the index before the
 // complete predicate is evaluated; residual exact-check work is reported in
-// ExplainPruning on the corresponding plan step.
+// ExplainPruning on the corresponding plan step. IndexBytes is an exact
+// encoded payload size when the index exposes one, otherwise a bounded logical
+// footprint estimate that excludes Go object and map overhead.
 type SQLIndexDiagnostics struct {
 	Kind              string `json:"kind"`
 	Field             string `json:"field"`

@@ -32786,3 +32786,37 @@ The endpoint's CPU and allocation cost is a deliberate control-plane tradeoff,
 paid only when the barrier is called.
 See [SQL_QUERY_LOG.md](SQL_QUERY_LOG.md#operator-flush-barrier) for the
 configuration and security contract.
+## CH-U49 Index-family EXPLAIN Diagnostics
+
+Workload: Linux amd64, AMD Ryzen 9 5950X 16-Core Processor, Go benchmark with
+10,000 JSON rows and one equality index. Each value is the median of five
+`-benchmem` samples. The baseline is clean commit `2c0f8ad0` with the same
+benchmark file but without the diagnostics implementation.
+
+| Case | Baseline ns/op | After ns/op | Speed x | Baseline B/op | After B/op | Memory x | Baseline allocs/op | After allocs/op |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Field equality | 3,441,668 | 3,452,818 | 0.997x | 1,886,180 | 1,886,817 | 1.000x | 36,151 | 36,163 |
+| Typed int64 equality | 3,487,513 | 3,414,547 | 1.021x | 1,894,312 | 1,894,942 | 1.000x | 36,148 | 36,158 |
+| Bitmap equality | 3,465,276 | 3,537,331 | 0.980x | 1,898,554 | 1,899,235 | 1.000x | 36,155 | 36,168 |
+
+The feature changes only `EXPLAIN ANALYZE`; ordinary indexed queries do not
+call the diagnostics resolver. Explain performance stayed within roughly 2.1%
+of baseline, with a bounded 10-13 allocation increase for the 10,000-row
+explain workload. The reported non-skip `index_bytes` values are logical
+footprint estimates, not process heap measurements.
+
+Raw baseline samples:
+
+```text
+BenchmarkCHU49ExplainFieldIndex: 3452236 3348946 3409155 3478370 3441668 ns/op; 1887304 1886188 1886180 1886166 1886158 B/op; 36151 36151 36151 36151 36151 allocs/op
+BenchmarkCHU49ExplainTypedInt64Index: 3615122 3462196 3527072 3487513 3397673 ns/op; 1895409 1894302 1894312 1894322 1894302 B/op; 36148 36148 36148 36148 36147 allocs/op
+BenchmarkCHU49ExplainBitmapIndex: 3470274 3437830 3430550 3465276 3472295 ns/op; 1899681 1898588 1898582 1898543 1898554 B/op; 36155 36155 36155 36155 36155 allocs/op
+```
+
+Raw post-change samples:
+
+```text
+BenchmarkCHU49ExplainFieldIndex: 3826464 3497920 3399841 3442042 3452818 ns/op; 1887938 1886816 1886828 1886813 1886817 B/op; 36164 36163 36163 36163 36163 allocs/op
+BenchmarkCHU49ExplainTypedInt64Index: 3581326 3385365 3432155 3397843 3414547 ns/op; 1896054 1894942 1894953 1894931 1894940 B/op; 36159 36158 36158 36158 36158 allocs/op
+BenchmarkCHU49ExplainBitmapIndex: 3543578 3429880 3520728 3683599 3537331 ns/op; 1900373 1899225 1899235 1899230 1899244 B/op; 36169 36168 36168 36168 36168 allocs/op
+```
