@@ -4342,6 +4342,9 @@ lookup and preparation tradeoff is documented in
 	[TR019_TUPLE_FIELD_OFFSETS.md](TR019_TUPLE_FIELD_OFFSETS.md).
 - Opt-in bounded prioritized index-rebuild maintenance queue with cancellation
   and progress: [CHU12_BACKGROUND_INDEX_REBUILD_QUEUE.md](CHU12_BACKGROUND_INDEX_REBUILD_QUEUE.md)
+- Opt-in online space upgrade coordinator with dual reads/writes, resumable
+  checkpoints, cutover, and rollback: [TU20_ONLINE_SPACE_UPGRADE.md](TU20_ONLINE_SPACE_UPGRADE.md),
+  with measurements in [BENCHMARK.md](BENCHMARK.md#t-u20-online-space-upgrade)
 - Opt-in ClickHouse-style low-cardinality string columns with packed codes for grouping/order and compact transfer: [CH051_LOW_CARDINALITY.md](CH051_LOW_CARDINALITY.md)
 - Opt-in Tarantool-style compact peer session adapter: [COMPACT_PEER_SESSION.md](COMPACT_PEER_SESSION.md)
 - Prepared compact peer calls: [TR043A_COMPACT_PEER_PREPARED_CALL.md](TR043A_COMPACT_PEER_PREPARED_CALL.md)

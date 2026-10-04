@@ -33096,3 +33096,25 @@ admission in the current pointer-lease API. It should surround mutation
 operations at a safety boundary, not be placed inside an already protected
 inner loop. The implementation was retained because its value is blocking
 drain semantics and explicit origin policy, not raw speed.
+# T-U20: Online space upgrade
+
+This opt-in coordinator was measured against direct map-backed conversion and
+dual-write work. Both paths use zero allocations; the coordinator adds a
+read/write gate and lifecycle checks for resumable conversion and cutover.
+
+| Workload | Median ns/op | B/op | allocs/op | Relative CPU |
+|---|---:|---:|---:|---:|
+| Direct dual-write baseline | 29.72 | 0 | 0 | 1.00x |
+| Coordinator `Write` | 45.01 | 0 | 0 | 1.51x |
+
+Raw five-run samples:
+
+```text
+BenchmarkOnlineSpaceUpgradeBaseline: 29.55, 30.25, 29.72, 29.64, 31.07 ns/op
+BenchmarkOnlineSpaceUpgradeWrite: 47.08, 45.01, 43.69, 42.86, 47.87 ns/op
+```
+
+The 15.29 ns/op CPU increase is opt-in coordination overhead. There is no
+allocation increase in this in-process workload, and no default-path change.
+See [TU20_ONLINE_SPACE_UPGRADE.md](TU20_ONLINE_SPACE_UPGRADE.md) for lifecycle,
+backend requirements, and recovery semantics.
