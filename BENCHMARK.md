@@ -1,5 +1,44 @@
 # Benchmark
 
+## CH-U51 Result-cache admission
+
+Environment: Linux/amd64, AMD Ryzen 9 5950X 16-Core Processor. Five samples
+were collected with the same 1,024 distinct-key workload and `-benchmem`.
+The baseline used the existing `NewSQLResultCache`; the final path used an
+opt-in 1 ms admission threshold. Every executor returned a small one-row
+result quickly enough to be rejected, so the final path did not retain any
+entries.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Entries | Relative time | Relative memory |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Existing cache, retain every result | 306.3 | 344 | 3 | 1,024 | 1.00x | 1.00x |
+| Admission gate, reject fast results | 106.1 | 0 | 0 | 0 | 2.89x faster | 0 B/op |
+
+Raw baseline samples:
+
+```text
+315.1 ns/op 344 B/op 3 allocs/op
+306.4 ns/op 344 B/op 3 allocs/op
+306.3 ns/op 344 B/op 3 allocs/op
+306.2 ns/op 344 B/op 3 allocs/op
+304.8 ns/op 344 B/op 3 allocs/op
+```
+
+Raw admission samples:
+
+```text
+104.0 ns/op 0 B/op 0 allocs/op
+106.1 ns/op 0 B/op 0 allocs/op
+106.6 ns/op 0 B/op 0 allocs/op
+103.5 ns/op 0 B/op 0 allocs/op
+112.1 ns/op 0 B/op 0 allocs/op
+```
+
+This is a retention-admission workload, not a general cache-hit benchmark.
+The win comes from avoiding snapshot cloning and insertion for cheap one-shot
+results. Slow results remain eligible for normal retention, and the default
+constructors remain unchanged.
+
 ## T-U10 journal-wide synchronous write quorum
 
 Environment: Linux/amd64, AMD Ryzen 9 5950X 16-Core Processor. Five samples

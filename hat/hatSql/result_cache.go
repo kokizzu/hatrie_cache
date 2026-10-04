@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	json "github.com/goccy/go-json"
 )
@@ -19,6 +20,21 @@ type ResultCacheDependency struct {
 	Kind string
 	Key  string
 }
+
+// ResultCacheAdmissionPolicy controls optional cost-based retention. A result
+// that executes faster than MinExecutionDuration is returned normally but is
+// not retained. The zero value preserves the existing always-admit behavior.
+type ResultCacheAdmissionPolicy struct {
+	MinExecutionDuration time.Duration
+}
+
+// ResultCacheAdmissionStats reports cost-based retention decisions.
+type ResultCacheAdmissionStats struct {
+	Admitted uint64
+	Rejected uint64
+}
+
+var ErrResultCacheAdmissionInvalid = errors.New("invalid result cache admission policy")
 
 type resultCacheDependencyKey struct {
 	kind string
@@ -37,6 +53,10 @@ type ResultCache struct {
 	misses               uint64
 	bypasses             uint64
 	evictions            uint64
+	admissionPolicy      ResultCacheAdmissionPolicy
+	admissionEnabled     bool
+	admissionAdmitted    uint64
+	admissionRejected    uint64
 }
 
 // ResultCacheStats reports cache reuse and retention outcomes. Misses count
@@ -106,6 +126,73 @@ func NewSQLResultCacheWithDependencies(capacity int) *SQLResultCache {
 	return NewResultCacheWithDependencies(capacity)
 }
 
+// NewResultCacheWithAdmission creates a cache with an opt-in execution-cost
+// admission gate. It does not change lookup correctness or source-version
+// validation; it only controls whether successful results are retained.
+func NewResultCacheWithAdmission(capacity int, policy ResultCacheAdmissionPolicy) (*ResultCache, error) {
+	if err := policy.validate(); err != nil {
+		return nil, err
+	}
+	cache := newResultCache(capacity, false)
+	cache.admissionPolicy = policy
+	cache.admissionEnabled = policy.MinExecutionDuration > 0
+	return cache, nil
+}
+
+// NewResultCacheWithDependenciesAndAdmission combines dependency invalidation
+// with opt-in cost-based retention.
+func NewResultCacheWithDependenciesAndAdmission(capacity int, policy ResultCacheAdmissionPolicy) (*ResultCache, error) {
+	if err := policy.validate(); err != nil {
+		return nil, err
+	}
+	cache := newResultCache(capacity, true)
+	cache.admissionPolicy = policy
+	cache.admissionEnabled = policy.MinExecutionDuration > 0
+	return cache, nil
+}
+
+// NewSQLResultCacheWithAdmission creates the typed SQL view of an admission
+// configured cache.
+func NewSQLResultCacheWithAdmission(capacity int, policy ResultCacheAdmissionPolicy) (*SQLResultCache, error) {
+	return NewResultCacheWithAdmission(capacity, policy)
+}
+
+// NewSQLResultCacheWithDependenciesAndAdmission combines typed SQL results,
+// dependency invalidation, and opt-in cost-based retention.
+func NewSQLResultCacheWithDependenciesAndAdmission(capacity int, policy ResultCacheAdmissionPolicy) (*SQLResultCache, error) {
+	return NewResultCacheWithDependenciesAndAdmission(capacity, policy)
+}
+
+func (policy ResultCacheAdmissionPolicy) validate() error {
+	if policy.MinExecutionDuration < 0 {
+		return ErrResultCacheAdmissionInvalid
+	}
+	return nil
+}
+
+// AdmissionStats returns cost-based retention decisions since cache creation.
+func (cache *ResultCache) AdmissionStats() ResultCacheAdmissionStats {
+	if cache == nil {
+		return ResultCacheAdmissionStats{}
+	}
+	return ResultCacheAdmissionStats{
+		Admitted: atomic.LoadUint64(&cache.admissionAdmitted),
+		Rejected: atomic.LoadUint64(&cache.admissionRejected),
+	}
+}
+
+func (cache *ResultCache) admissionAllows(executionDuration time.Duration) bool {
+	if !cache.admissionEnabled {
+		return true
+	}
+	if executionDuration < cache.admissionPolicy.MinExecutionDuration {
+		atomic.AddUint64(&cache.admissionRejected, 1)
+		return false
+	}
+	atomic.AddUint64(&cache.admissionAdmitted, 1)
+	return true
+}
+
 // Stats returns a stable snapshot of cache entries and cumulative counters.
 func (cache *ResultCache) Stats() ResultCacheStats {
 	if cache == nil {
@@ -157,6 +244,10 @@ func (cache *ResultCache) Execute(ctx context.Context, key string, epoch func() 
 		return cloneResultCacheResult(entry.result), nil
 	}
 	atomic.AddUint64(&cache.misses, 1)
+	var started time.Time
+	if cache.admissionEnabled {
+		started = time.Now()
+	}
 	result, err := execute(ctx)
 	if err != nil {
 		return result, err
@@ -164,6 +255,14 @@ func (cache *ResultCache) Execute(ctx context.Context, key string, epoch func() 
 	if epoch() != before {
 		cache.RecordBypass()
 		return result, nil
+	}
+	var executionDuration time.Duration
+	if cache.admissionEnabled {
+		executionDuration = time.Since(started)
+		if !cache.admissionAllows(executionDuration) {
+			cache.RecordBypass()
+			return result, nil
+		}
 	}
 	stored, err := snapshotResultCacheResult(result)
 	if err != nil {
@@ -223,6 +322,10 @@ func (cache *ResultCache) executeVersioned(ctx context.Context, key string, vers
 		return cloneResultCacheResult(entry.result), nil
 	}
 	atomic.AddUint64(&cache.misses, 1)
+	var started time.Time
+	if cache.admissionEnabled {
+		started = time.Now()
+	}
 	result, err := execute(ctx)
 	if err != nil {
 		return result, err
@@ -231,6 +334,14 @@ func (cache *ResultCache) executeVersioned(ctx context.Context, key string, vers
 	if !available || after != before {
 		cache.RecordBypass()
 		return result, nil
+	}
+	var executionDuration time.Duration
+	if cache.admissionEnabled {
+		executionDuration = time.Since(started)
+		if !cache.admissionAllows(executionDuration) {
+			cache.RecordBypass()
+			return result, nil
+		}
 	}
 	stored := cloneResultCacheResult(result)
 	entry = resultCacheEntry{version: before, typed: true, result: stored}

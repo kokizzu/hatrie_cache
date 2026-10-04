@@ -180,6 +180,14 @@ tradeoffs are documented and its commit is published.
 | T-U49 | Replica-set request hedging | `hatTopology.ExecuteReplicaHedged` now provides opt-in bounded read hedging with delayed fallback, first-success cancellation, deterministic failures, observer events, and a zero-allocation single-candidate fast path. | Tail-latency versus duplicate load and consistency. |
 | T-U50 | Cluster-wide configuration watch | `hatTopology.ConfigWatchLog` now provides an authenticated bounded versioned log with replay cursors, context-aware wait/resume, deterministic history-gap errors, value-copy isolation, and no per-client idle goroutine; transport and consensus remain caller-owned. | Gap recovery, authorization, and bounded history. |
 
+## CH-U51 Result-cache admission
+
+ClickHouse-inspired cost-based result-cache admission is adopted as an opt-in
+`hatSql.ResultCacheAdmissionPolicy`. Fast successful results can be returned
+without retention, while slow results keep normal bounded-cache behavior. The
+default constructors remain unchanged; see [CHU51_RESULT_CACHE_ADMISSION.md](CHU51_RESULT_CACHE_ADMISSION.md)
+and [BENCHMARK.md#ch-u51-result-cache-admission](BENCHMARK.md#ch-u51-result-cache-admission).
+
 ## Selection Policy
 
 The next implementation should be chosen from a row whose public integration
