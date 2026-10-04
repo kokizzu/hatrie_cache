@@ -4765,3 +4765,10 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+
+## Importable WebAssembly Sandbox
+
+The public `hat/hatSandbox` package provides bounded, no-host-import
+WebAssembly execution for small numeric functions. See
+[TG50_WASM_SANDBOX.md](TG50_WASM_SANDBOX.md) for the API, security boundary,
+defaults, and measured cost.

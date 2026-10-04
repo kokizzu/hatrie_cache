@@ -964,3 +964,11 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   four normalized `GROUP BY` keys use an inline linear index and promote to the
   existing map for larger groups; see [CHG02_SMALL_GROUP_INDEX.md](CHG02_SMALL_GROUP_INDEX.md)
   and [BENCHMARK.md](BENCHMARK.md#chg02-small-cardinality-group-by-index).
+
+## T-G50: Protected WebAssembly Execution
+
+Implemented in `hat/hatSandbox` as an importable Wazero-backed sandbox. It
+rejects host imports and applies module-size, linear-memory, parameter/result,
+and context-timeout limits. Calls are serialized and the default is opt-in;
+see [TG50_WASM_SANDBOX.md](TG50_WASM_SANDBOX.md) for the tradeoff versus a
+direct Go call.

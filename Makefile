@@ -22292,3 +22292,19 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: tg50-wasm-sandbox-format tg50-wasm-sandbox-test tg50-wasm-sandbox-race tg50-wasm-sandbox-vet tg50-wasm-sandbox-benchmark
+
+tg50-wasm-sandbox-format:
+	bash scripts/tg50-wasm-sandbox.sh format
+
+tg50-wasm-sandbox-test:
+	bash scripts/tg50-wasm-sandbox.sh test
+
+tg50-wasm-sandbox-race:
+	bash scripts/tg50-wasm-sandbox.sh race
+
+tg50-wasm-sandbox-vet:
+	bash scripts/tg50-wasm-sandbox.sh vet
+
+tg50-wasm-sandbox-benchmark:
+	bash scripts/tg50-wasm-sandbox.sh benchmark

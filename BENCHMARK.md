@@ -32580,3 +32580,27 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## TG50: Importable WebAssembly Sandbox
+
+This benchmark measures the overhead of the new public `hat/hatSandbox`
+execution boundary. It is intentionally compared with a direct scalar only as
+a lower-bound reference; the sandbox's purpose is isolation and bounded
+execution, not replacing a hot Go function.
+
+Environment: AMD Ryzen 9 5950X, linux/amd64. Five samples per benchmark.
+
+```text
+DirectScalarBaseline  0.7214  0.7230  0.7237  0.7216  0.7340 ns/op
+SandboxCall        4288.0  4221.0  4004.0  4197.0  4425.0 ns/op
+SandboxCreateClose 185750 184831 172627 179322 175533 ns/op
+```
+
+| Benchmark | Median ns/op | B/op | allocs/op | Relative CPU vs direct |
+| --- | ---: | ---: | ---: | ---: |
+| Direct scalar baseline | 0.7237 | 0 | 0 | 1.00x |
+| Reusable sandbox call | 4,221 | 12,224 | 12 | 5,833x |
+| Create, call, and close | 179,322 | 321,317 | 297 | 247,800x |
+
+Reuse the sandbox when the isolation boundary is needed. The implementation is
+not enabled automatically for existing SQL or extension paths.
