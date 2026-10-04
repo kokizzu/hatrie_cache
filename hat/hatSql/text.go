@@ -52,8 +52,8 @@ func textContainsPrefix(value, prefix string) bool {
 	if len(prefixTokens) != 1 {
 		return false
 	}
-	for _, token := range TextTokens(value) {
-		if strings.HasPrefix(token, prefixTokens[0]) {
+	for _, token := range TextTokenPositions(value) {
+		if strings.HasPrefix(token.Token, prefixTokens[0]) {
 			return true
 		}
 	}

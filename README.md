@@ -296,6 +296,7 @@ security guidance before exposing it on a network.
 - Selective substring pruning for warmed columnar layouts: [Columnar n-gram sidecars](COLUMNAR_NGRAMS.md)
 - Exact token postings for reusable row-level text filtering: [CH025_TOKEN_POSTINGS_INDEX.md](CH025_TOKEN_POSTINGS_INDEX.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-025-token-postings-index)
 - Opt-in BM25-like ranked full-text results over token postings: [CHU48_RANKED_FULL_TEXT.md](CHU48_RANKED_FULL_TEXT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#chu48-ranked-full-text)
+- Existing SQL `CONTAINS_PREFIX` filtering uses the same allocation-reduced positional path; see [BENCHMARK.md](BENCHMARK.md#sql-contains-prefix-allocation-fast-path).
 - PostgreSQL-wire SQL client integration: [PGWIRE.md](PGWIRE.md)
 - Grafana SQL datasource endpoints: [GRAFANA.md](GRAFANA.md)
 - OpenAPI management contract and client generation: [OPENAPI.md](OPENAPI.md)

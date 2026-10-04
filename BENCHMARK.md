@@ -24,6 +24,29 @@ boundaries, duplicate query terms, missing terms, and empty inputs. The
 optimization is internal to existing `CONTAINS`; no new configuration or
 memory cost is enabled.
 
+## SQL `CONTAINS_PREFIX` Allocation Fast Path
+
+This paired benchmark uses the same text and single-token prefix before and
+after the prefix evaluator stopped materializing a deduplicated document token
+slice. Five samples ran on an AMD Ryzen 9 5950X Linux amd64 host with
+`-benchmem`. Lower `ns/op`, `B/op`, and `allocs/op` are better.
+
+| Operation | Before median | After median | Relative result |
+| --- | ---: | ---: | ---: |
+| `CONTAINS_PREFIX` text match | 1,516 ns/op; 1,576 B/op; 8 allocs/op | 871.9 ns/op; 768 B/op; 5 allocs/op | 1.74x faster; 2.05x lower heap; 1.60x fewer allocs |
+
+Raw samples:
+
+```text
+before: 1643 1516 1508 1491 1510 ns/op; 1576 B/op; 8 allocs/op
+after:  869.7 871.9 869.6 880.9 888.0 ns/op; 768 B/op; 5 allocs/op
+```
+
+The focused semantic test covers case folding, Unicode prefixes, missing
+prefixes, multi-token prefixes, and empty prefixes. The optimization is
+internal to existing `CONTAINS_PREFIX`; no new configuration or memory cost is
+enabled.
+
 ## T-U46 Index Cardinality And Hot-Key Statistics
 
 This paired clean-worktree benchmark compares the same typed-index fixture at
