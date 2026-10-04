@@ -32726,3 +32726,27 @@ The build allocation is transient and should not be read as retained index
 size. This is a good tradeoff for repeated selective reads, but not for a
 single lookup; conditional indexes are therefore opt-in and are not built
 automatically.
+# T-U27 peer configuration watch
+
+Measured on `AMD Ryzen 9 5950X 16-Core Processor`, Linux amd64, with five
+`go test -benchmem` samples. The direct event-dispatch control is unchanged by
+the feature; the additional row measures the new watcher batch validation and
+value-copy path.
+
+| Operation | Baseline median | After median | Result | Memory |
+| --- | ---: | ---: | ---: | ---: |
+| Direct event dispatch | 17.30 ns/op | 16.63 ns/op | 1.04x faster, within run variance | 8 B/op, 1 alloc/op |
+| Watcher batch apply, one event | unavailable | 25.22 ns/op | New capability; 8.59 ns/op over direct control | 8 B/op, 1 alloc/op |
+
+Raw samples:
+
+```text
+Baseline direct: 17.51, 17.03, 17.30, 17.71, 16.60 ns/op
+After direct:    16.43, 16.40, 16.84, 16.84, 16.63 ns/op
+Watcher apply:   25.22, 25.04, 25.10, 25.89, 26.44 ns/op
+```
+
+The watcher adds one small value-copy allocation for a one-event batch; the
+measured cost is local validation and delivery only. Network, TLS, long-poll,
+reconnect, and remote storage latency are outside this microbenchmark and are
+expected to dominate production cost.

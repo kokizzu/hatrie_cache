@@ -189,3 +189,10 @@ generic `hat*` primitives are preferred when they provide a real reusable
 contract rather than an unintegrated placeholder. Large or irreversible ideas
 such as VShard migration, a new scripting runtime, or a consensus log remain
 proposal-only until their recovery and security contracts are complete.
+# T-U27 status update
+
+T-U27 is partially adopted as `hatPeer.PeerConfigWatcher`: it provides bounded
+prefix polling, strict cursor validation, copied event values, context-aware
+reconnect backoff, and handler-controlled retry boundaries. Transport
+authentication, authorization, durable remote history, and server-side
+configuration storage remain caller-owned.

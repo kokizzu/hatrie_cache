@@ -4769,3 +4769,10 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+# Peer configuration watch
+
+The importable `hatPeer.PeerConfigWatcher` consumes authenticated remote
+configuration prefixes with bounded batches, copied event values, strict
+cursors, cancellation-aware reconnect backoff, and handler-owned retry policy.
+It is transport-neutral so deployments can place it over the compact peer
+protocol or an existing HTTP transport. See [TU027_PEER_CONFIG_WATCH.md](TU027_PEER_CONFIG_WATCH.md).

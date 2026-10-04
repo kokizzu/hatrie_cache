@@ -22294,3 +22294,27 @@ push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
 bench-tu17-space-engine:
 	bash scripts/benchmark-tu17-space-engine.sh
+# codex-tu27
+test-tu27:
+	bash scripts/test-tu27.sh
+
+format-tu27:
+	bash scripts/format-tu27.sh
+
+benchmark-tu27:
+	bash scripts/benchmark-tu27.sh
+
+test-tu27-package:
+	bash scripts/test-tu27-package.sh
+
+verify-tu27:
+	bash scripts/verify-tu27.sh
+
+stage-tu27:
+	bash scripts/stage-tu27.sh
+
+commit-tu27:
+	bash scripts/commit-tu27.sh
+
+push-tu27:
+	bash scripts/push-tu27.sh
