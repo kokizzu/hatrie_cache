@@ -22292,3 +22292,7 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+
+.PHONY: benchmark-tu22-cross-index-unique
+benchmark-tu22-cross-index-unique:
+	bash scripts/benchmark-tu22-cross-index-unique.sh
