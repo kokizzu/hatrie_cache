@@ -32,16 +32,19 @@ func textContains(value, query string) bool {
 	if len(queryTokens) == 0 {
 		return false
 	}
-	valueTokens := make(map[string]struct{})
-	for _, token := range TextTokens(value) {
-		valueTokens[token] = struct{}{}
-	}
+	remaining := make(map[string]struct{}, len(queryTokens))
 	for _, token := range queryTokens {
-		if _, exists := valueTokens[token]; !exists {
-			return false
+		remaining[token] = struct{}{}
+	}
+	for _, token := range TextTokenPositions(value) {
+		if _, exists := remaining[token.Token]; exists {
+			delete(remaining, token.Token)
+			if len(remaining) == 0 {
+				return true
+			}
 		}
 	}
-	return true
+	return false
 }
 
 func textContainsPrefix(value, prefix string) bool {

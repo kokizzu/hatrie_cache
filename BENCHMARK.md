@@ -1,5 +1,29 @@
 # Benchmark
 
+## SQL `CONTAINS` Allocation Fast Path
+
+This paired benchmark uses the same text and three-token query before and after
+the `CONTAINS` evaluator stopped materializing a deduplicated document map.
+Five samples ran on an AMD Ryzen 9 5950X Linux amd64 host with `-benchmem`.
+The result is a semantic-preserving CPU and allocation reduction; storage,
+wire formats, and the default query configuration are unchanged.
+
+| Operation | Before median | After median | Relative result |
+| --- | ---: | ---: | ---: |
+| `CONTAINS` text match | 2,862 ns/op; 3,024 B/op; 13 allocs/op | 1,191 ns/op; 832 B/op; 5 allocs/op | 2.40x faster; 3.63x lower heap; 2.60x fewer allocs |
+
+Raw samples:
+
+```text
+before: 2824 2875 2885 2862 2835 ns/op; 3024 B/op; 13 allocs/op
+after:  1214 1198 1191 1191 1157 ns/op;  832 B/op;  5 allocs/op
+```
+
+The focused semantic test covers case folding, Unicode and punctuation
+boundaries, duplicate query terms, missing terms, and empty inputs. The
+optimization is internal to existing `CONTAINS`; no new configuration or
+memory cost is enabled.
+
 ## T-U46 Index Cardinality And Hot-Key Statistics
 
 This paired clean-worktree benchmark compares the same typed-index fixture at

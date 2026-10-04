@@ -4332,6 +4332,9 @@ lookup and preparation tradeoff is documented in
 
 - Opt-in SQL phrase and ordered proximity search over JSON text indexes:
   [SQL_TEXT_PHRASE.md](SQL_TEXT_PHRASE.md)
+- Existing SQL `CONTAINS` text filtering uses an allocation-reduced positional
+  membership path; the measured before/after result is in
+  [BENCHMARK.md](BENCHMARK.md#sql-contains-allocation-fast-path).
 - Opt-in exact phrase matching for the reusable token postings index:
   [CHU13_PHRASE_POSTINGS.md](CHU13_PHRASE_POSTINGS.md)
 
