@@ -1,5 +1,20 @@
 # Benchmark
 
+## M-U36: Hydration Progress And Admission
+
+Measured on the same AMD Ryzen 9 5950X Linux host with `-benchmem`,
+`-benchtime=2s`, and five samples per benchmark. The baseline is `c84021f2`;
+the after run adds lazy hydration-admission bookkeeping.
+
+| Benchmark | Baseline median | After median | Result |
+| --- | ---: | ---: | --- |
+| Aggregate `Hydrate` with one pending change | 1,073 ns/op, 1,481 B/op, 9 allocs/op | 1,028 ns/op, 1,443 B/op, 9 allocs/op | 1.04x faster, 2.6% lower bytes, allocation-neutral |
+| Ready aggregate probe (`Freshness` vs `HydrationStatus`) | 11.52 ns/op, 0 B/op, 0 allocs/op | 37.90 ns/op, 0 B/op, 0 allocs/op | 3.29x slower, allocation-neutral |
+
+The second row is not a regression to the same API: `HydrationStatus` returns
+remaining work and error state in addition to readiness. `Freshness` remains
+available for callers that need only the cheaper boolean/checkpoint probe.
+
 ## T-U46 Index Cardinality And Hot-Key Statistics
 
 This paired clean-worktree benchmark compares the same typed-index fixture at

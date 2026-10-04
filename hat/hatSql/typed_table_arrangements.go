@@ -41,6 +41,7 @@ type typedTableAggregateArrangementEntry struct {
 	mu         sync.Mutex
 	aggregate  *TypedTableAggregate
 	references int
+	hydration  typedTableHydrationAdmission
 }
 
 // TypedTableAggregateArrangement is one reference-counted lease on shared
@@ -103,7 +104,9 @@ func (arrangement *TypedTableAggregateArrangement) Apply(changes []TypedTableCha
 	}
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
-	return entry.aggregate.Apply(changes)
+	err = entry.aggregate.Apply(changes)
+	entry.hydration.recordLocked(err)
+	return err
 }
 
 // Checkpoint returns the shared aggregate's last fully applied sequence.
@@ -158,12 +161,15 @@ func (arrangement *TypedTableAggregateArrangement) Hydrate(limit int) (TypedTabl
 	before := entry.aggregate.checkpoint
 	changes, sourceSequence, err := entry.aggregate.table.ChangesAfter(before, limit)
 	if err != nil {
+		entry.hydration.recordLocked(err)
 		return TypedTableAggregateArrangementHydration{}, err
 	}
 	if err := entry.aggregate.Apply(changes); err != nil {
+		entry.hydration.recordLocked(err)
 		return TypedTableAggregateArrangementHydration{}, err
 	}
 	after := entry.aggregate.checkpoint
+	entry.hydration.recordLocked(nil)
 	return TypedTableAggregateArrangementHydration{
 		Before:         before,
 		After:          after,
