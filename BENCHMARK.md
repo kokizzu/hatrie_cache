@@ -32580,3 +32580,24 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## CH-G02 Unified External Sort
+
+Command: `make chg02-external-sort-benchmark`.
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X, sorting 8,192
+records. The in-memory baseline is `sort.SliceStable`. The CH-G02 spill path
+uses 4 KiB run memory, 32-way merge fan-in, and reports cumulative temporary
+bytes.
+
+| Workload | Median ns/op | B/op | Allocs/op | Peak run bytes | Runs | Spill bytes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Existing in-memory stable sort | 4,206,448 | 524,411 | 16,388 | n/a | n/a | n/a |
+| CH-G02 no spill, slice result | 5,327,228 | 2,514,917 | 16,406 | n/a | 1 | 0 |
+| CH-G02 spill, slice result | 8,347,878 | 3,555,232 | 82,753 | 4,080 | 35 | 278,528 |
+| CH-G02 spill, streaming result | 8,094,743 | 3,165,407 | 82,752 | 4,080 | 35 | 278,528 |
+
+The optimization comparison and raw before/after samples are recorded in
+[CHG02_EXTERNAL_SORT.md](CHG02_EXTERNAL_SORT.md). The direct in-memory path
+remains the faster and lower-memory choice for inputs that fit; the streaming
+spill form is for bounded-memory operation, not a default replacement.

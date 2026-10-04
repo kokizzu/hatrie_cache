@@ -4765,3 +4765,11 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+
+## Bounded external sorting
+
+The importable `hat/hatSort` package provides stable, bounded external sorting
+with temporary-run cleanup and a streaming output API for inputs that exceed a
+chosen memory budget. It is opt-in and does not change the default SQL path;
+see [CHG02_EXTERNAL_SORT.md](CHG02_EXTERNAL_SORT.md) for the API, cleanup
+contract, and benchmark tradeoffs.

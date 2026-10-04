@@ -22292,3 +22292,19 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+
+.PHONY: chg02-external-sort-format chg02-external-sort-test chg02-external-sort-race chg02-external-sort-vet chg02-external-sort-benchmark
+chg02-external-sort-format:
+	bash scripts/chg02-external-sort.sh format
+
+chg02-external-sort-test:
+	bash scripts/chg02-external-sort.sh test
+
+chg02-external-sort-race:
+	bash scripts/chg02-external-sort.sh race
+
+chg02-external-sort-vet:
+	bash scripts/chg02-external-sort.sh vet
+
+chg02-external-sort-benchmark:
+	bash scripts/chg02-external-sort.sh benchmark

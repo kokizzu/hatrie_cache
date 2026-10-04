@@ -964,3 +964,8 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   four normalized `GROUP BY` keys use an inline linear index and promote to the
   existing map for larger groups; see [CHG02_SMALL_GROUP_INDEX.md](CHG02_SMALL_GROUP_INDEX.md)
   and [BENCHMARK.md](BENCHMARK.md#chg02-small-cardinality-group-by-index).
+- [x] CH-G02 ClickHouse-style unified bounded external sort primitive. Stable
+  sorted runs spill to private temporary storage, merge with bounded fan-in,
+  and expose a streaming output form; it remains opt-in because in-memory
+  sorting is faster when the input fits. See
+  [CHG02_EXTERNAL_SORT.md](CHG02_EXTERNAL_SORT.md).
