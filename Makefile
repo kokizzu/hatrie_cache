@@ -22302,3 +22302,8 @@ benchmark-chu51-group-by-all:
 
 benchmark-chu52-order-by-all:
 	sh scripts/benchmark-chu52-order-by-all.sh
+test-chu53-select-star-except:
+	sh scripts/test-chu53-select-star-except.sh
+
+benchmark-chu53-select-star-except:
+	sh scripts/benchmark-chu53-select-star-except.sh

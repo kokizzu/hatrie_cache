@@ -32783,3 +32783,34 @@ all after:         10757908 10662083 10645543 10883960 11013959 ns/op, 3872024 3
 Memory and allocation counts are unchanged. The explicit baseline varied more
 than the shorthand difference, so this is recorded as a neutral SQL
 compatibility improvement rather than a speed claim.
+
+## CHU53: `SELECT * EXCEPT`
+
+Command:
+
+```sh
+make benchmark-chu53-select-star-except
+```
+
+Five `-count=5` samples used 1,024 four-field cache rows. The explicit query
+selected `id, active, score`; the shorthand selected the same three fields by
+excluding `name` from `*`.
+
+| form | median ns/op | B/op | allocs/op | relative result |
+| --- | ---: | ---: | ---: | --- |
+| explicit baseline | 332,987 | 358,523 | 2,061 | baseline |
+| explicit after | 333,820 | 358,523 | 2,061 | 1.00x baseline |
+| `SELECT * EXCEPT (name)` | 277,729 | 356,971 | 2,059 | 1.20x faster; 0.996x bytes; 0.999x allocations |
+
+Raw samples:
+
+```text
+explicit baseline: 331119 333558 332987 332681 335806 ns/op, 358526 358523 358523 358523 358525 B/op, 2061 allocs/op
+explicit after:    333650 334367 330476 333820 334388 ns/op, 358525 358523 358523 358524 358523 B/op, 2061 allocs/op
+except after:      277345 279796 276151 277729 278244 ns/op, 356971 356972 356971 356971 356971 B/op, 2059 allocs/op
+```
+
+The first implementation was rejected after measurement because it fell back
+to the general executor and was 1.82x slower with 2.47x the bytes and 2.00x
+the allocations. The shipped path avoids the per-row source-cache clone for
+the narrow safe shape; all other query shapes retain the existing executor.

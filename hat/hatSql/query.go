@@ -949,6 +949,10 @@ func executeSQLQueryUncached(ctx context.Context, source string, query *sqlQuery
 		}
 		return nativeResult, nativeErr
 	}
+	if starResult, handled, starErr := executeSQLStarExceptFastPath(query, resolver, control, metrics); handled {
+		starResult.QueryID = observation.id
+		return starResult, starErr
+	}
 	if metrics == nil && !sqlQueryHasWithFill(query) && query.limitBy == nil && !query.limitWithTies && sqlIndexedMaterializedOrderStreamable(query, resolver, options) {
 		streamed, streamErr := executeSQLIndexedOrderMaterializedStream(ctx, query, resolver, control)
 		if !errors.Is(streamErr, errSQLOrderedSourceUnavailable) {
@@ -1537,6 +1541,10 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 		}
 		row := make(SQLRow, len(columns))
 		for index, item := range query.selects {
+			if item.expr.kind == "star" {
+				sqlProjectStar(row, execRow, item.expr)
+				continue
+			}
 			value, err := evalSQLStreamExpr(item.expr, execRow, functions)
 			if err != nil {
 				return err
@@ -4733,7 +4741,7 @@ func validateSQLQueryStreamable(query *sqlQuery) error {
 		return fmt.Errorf("SQL query cannot stream window expressions")
 	}
 	for _, item := range query.selects {
-		if item.expr.kind == "star" || item.expr.window != nil || sqlExprHasAggregate(item.expr) {
+		if item.expr.kind == "star" && len(item.expr.starExcept) == 0 || item.expr.window != nil || sqlExprHasAggregate(item.expr) {
 			return fmt.Errorf("SQL query cannot stream SELECT *, aggregate, or window expressions")
 		}
 	}
@@ -5877,6 +5885,9 @@ func cloneSQLOrders(orders []sqlOrder) []sqlOrder {
 
 func cloneSQLExpr(source sqlExpr) sqlExpr {
 	copy := source
+	if source.starExcept != nil {
+		copy.starExcept = append([]string(nil), source.starExcept...)
+	}
 	if source.left != nil {
 		left := cloneSQLExpr(*source.left)
 		copy.left = &left
@@ -6020,6 +6031,7 @@ type sqlCaseWhen struct {
 type sqlExpr struct {
 	kind, name, qualifier, op string
 	value                     interface{}
+	starExcept                []string
 	left, right               *sqlExpr
 	args                      []sqlExpr
 	cases                     []sqlCaseWhen
@@ -6970,6 +6982,34 @@ func (p *sqlQueryParser) parseSelect() ([]sqlSelectItem, error) {
 		expr, err := p.parseExpr()
 		if err != nil {
 			return nil, err
+		}
+		if expr.kind == "star" && p.keyword("EXCEPT") {
+			p.next()
+			if err := p.expectKind(sqlTokenLeftParen, "("); err != nil {
+				return nil, err
+			}
+			if p.current().kind == sqlTokenRightParen {
+				return nil, p.diagnostic(p.current(), "SELECT * EXCEPT requires at least one column")
+			}
+			seen := make(map[string]struct{})
+			for {
+				column, err := p.expectIdentifier("a column name in SELECT * EXCEPT", nil)
+				if err != nil {
+					return nil, err
+				}
+				if _, exists := seen[column.text]; exists {
+					return nil, p.diagnostic(column, fmt.Sprintf("SELECT * EXCEPT lists column %q more than once", column.text))
+				}
+				seen[column.text] = struct{}{}
+				expr.starExcept = append(expr.starExcept, column.text)
+				if p.current().kind != sqlTokenComma {
+					break
+				}
+				p.next()
+			}
+			if err := p.expectKind(sqlTokenRightParen, ")"); err != nil {
+				return nil, err
+			}
 		}
 		item := sqlSelectItem{expr: expr}
 		if p.keyword("AS") {
@@ -12273,11 +12313,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		row := make(SQLRow, len(q.selects))
 		for idx, item := range q.selects {
 			if item.expr.kind == "star" {
-				for _, source := range representative.order {
-					for key, value := range representative.sources[source] {
-						row[key] = value
-					}
-				}
+				sqlProjectStar(row, representative, item.expr)
 				continue
 			}
 			value := evalSQLExpr(item.expr, group, representative)
@@ -13413,6 +13449,9 @@ func sqlExplainExpression(expression sqlExpr) string {
 	case "literal":
 		return fmt.Sprintf("%#v", expression.value)
 	case "star":
+		if len(expression.starExcept) > 0 {
+			return "* EXCEPT (" + strings.Join(expression.starExcept, ", ") + ")"
+		}
 		return "*"
 	case "cast":
 		if len(expression.args) == 1 {

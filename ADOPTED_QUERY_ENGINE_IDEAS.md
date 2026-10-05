@@ -768,3 +768,13 @@ wildcards and additional order expressions are rejected without schema
 expansion. Existing explicit `ORDER BY` behavior is unchanged. See
 [CHU52_ORDER_BY_ALL.md](CHU52_ORDER_BY_ALL.md) and
 [BENCHMARK.md](BENCHMARK.md#chu52-order-by-all).
+
+## ClickHouse CH-U53: `SELECT * EXCEPT (...)`
+
+Adopted as parser-validated wildcard projection with exclusion in both the
+materialized and streamed SQL paths. Simple untyped single-source reads use a
+direct projection path that avoids cloning source rows into the execution
+cache; queries needing filters, joins, grouping, ordering, typed validation,
+or other relational state retain the existing executor. See
+[CHU53_SELECT_STAR_EXCEPT.md](CHU53_SELECT_STAR_EXCEPT.md) and
+[BENCHMARK.md](BENCHMARK.md#chu53-select-star-except).
