@@ -141,6 +141,7 @@ type TypedTableMemoryUsage struct {
 	MaxBytes       int64 `json:"max_bytes"`
 	UsedBytes      int64 `json:"used_bytes"`
 	AvailableBytes int64 `json:"available_bytes"`
+	ReservedBytes  int64 `json:"reserved_bytes"`
 }
 
 // TypedTableValue stores one scalar table value. A value with Valid false is
@@ -483,28 +484,29 @@ func (storage *typedTableColumnStorage) promoteAdaptiveDictionary() {
 // TypedTable is a schema-checked row store with per-column primitive slices.
 // It is opt-in and implements the established source-resolver contracts.
 type TypedTable struct {
-	mu                   sync.RWMutex
-	schema               TypedTableSchema
-	columns              []typedTableColumnStorage
-	byName               map[string]int
-	keys                 []string
-	positions            map[string]int
-	generated            bool
-	generatedOrder       []int
-	columnar             typedTableColumnarCache
-	patchParts           *typedTablePatchState
+	mu                            sync.RWMutex
+	schema                        TypedTableSchema
+	columns                       []typedTableColumnStorage
+	byName                        map[string]int
+	keys                          []string
+	positions                     map[string]int
+	generated                     bool
+	generatedOrder                []int
+	columnar                      typedTableColumnarCache
+	patchParts                    *typedTablePatchState
 	patchStateKeyLayoutGeneration uint64
-	storageEvents        *typedTableStorageEventLog
-	mvcc                 *typedTableMVCCState
-	ttl                  *typedTableTTLState
-	columnTTLs           []*typedTableColumnTTLState
-	appendOnly           bool
-	statsCache           TypedTableStats
-	statsCacheValid      bool
-	histogramCache       map[typedTableHistogramCacheKey]TypedTableHistogram
-	memoryBudgetMaxBytes int64
-	memoryBytes          int64
-	memoryRowBytes       []int64
+	storageEvents                 *typedTableStorageEventLog
+	mvcc                          *typedTableMVCCState
+	ttl                           *typedTableTTLState
+	columnTTLs                    []*typedTableColumnTTLState
+	appendOnly                    bool
+	statsCache                    TypedTableStats
+	statsCacheValid               bool
+	histogramCache                map[typedTableHistogramCacheKey]TypedTableHistogram
+	memoryBudgetMaxBytes          int64
+	memoryBytes                   int64
+	memoryReservedBytes           int64
+	memoryRowBytes                []int64
 
 	changes          []TypedTableChange
 	compactedThrough uint64
@@ -1072,8 +1074,9 @@ func (table *TypedTable) checkTypedTableMemoryBudgetLocked(previousBytes, nextBy
 		return nil
 	}
 	increase := nextBytes - previousBytes
-	if table.memoryBytes > table.memoryBudgetMaxBytes || increase > table.memoryBudgetMaxBytes-table.memoryBytes {
-		return fmt.Errorf("%w: maximum %d bytes, current %d bytes, requested %d bytes", ErrTypedTableMemoryBudgetExceeded, table.memoryBudgetMaxBytes, table.memoryBytes, nextBytes)
+	current := typedTableAddMemoryBytes(table.memoryBytes, table.memoryReservedBytes)
+	if current > table.memoryBudgetMaxBytes || increase > table.memoryBudgetMaxBytes-current {
+		return fmt.Errorf("%w: maximum %d bytes, current %d bytes, requested %d bytes", ErrTypedTableMemoryBudgetExceeded, table.memoryBudgetMaxBytes, current, nextBytes)
 	}
 	return nil
 }
@@ -1188,8 +1191,9 @@ func (table *TypedTable) MemoryUsage() TypedTableMemoryUsage {
 	table.mu.RLock()
 	defer table.mu.RUnlock()
 	usage := TypedTableMemoryUsage{
-		MaxBytes:  table.memoryBudgetMaxBytes,
-		UsedBytes: table.memoryBytes,
+		MaxBytes:      table.memoryBudgetMaxBytes,
+		UsedBytes:     typedTableAddMemoryBytes(table.memoryBytes, table.memoryReservedBytes),
+		ReservedBytes: table.memoryReservedBytes,
 	}
 	if usage.MaxBytes > usage.UsedBytes {
 		usage.AvailableBytes = usage.MaxBytes - usage.UsedBytes

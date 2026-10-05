@@ -22,6 +22,24 @@ mutation before changing table state; an over-budget mutation returns
 `ErrTypedTableMemoryBudgetExceeded`. `MemoryUsage` exposes the configured
 limit, current estimate, and remaining admission space.
 
+`MemoryUsage.ReservedBytes` reports explicit caller-owned reservations. Use
+`ReserveMemory` for bounded index, arrangement, or query working memory:
+
+```go
+reservation, err := table.ReserveMemory(8 << 20)
+if err != nil {
+    return err
+}
+if reservation != nil {
+    defer reservation.Release()
+}
+```
+
+`Release` is idempotent. With `MaxBytes: 0`, `ReserveMemory` returns
+`(nil, nil)` without taking the table lock or allocating, so the default path
+is unchanged. The reservation remains a logical admission contract; it does
+not automatically measure Go map capacity, allocator fragmentation, or RSS.
+
 The estimate is deliberately deterministic and cheap: a fixed row allowance,
 key bytes, one validity byte per column, and scalar payload bytes. It does not
 pretend to cover Go map capacity, indexes, SQL working memory, allocator
@@ -41,11 +59,29 @@ five `-benchmem` samples of repeated existing-row `Upsert` measured:
 
 | Path | Median ns/op | Median B/op | Median allocs/op |
 | --- | ---: | ---: | ---: |
-| Budget disabled | 267.5 | 192 | 4 |
-| Budget enabled | 276.4 | 192 | 4 |
+| Budget disabled | 228.9 | 192 | 4 |
+| Budget enabled | 238.3 | 192 | 4 |
 
-The enabled guard was about 3.3% slower in this small write benchmark and did
+The enabled guard was about 4.1% slower in this small write benchmark and did
 not add allocations. The guard protects against unbounded logical row growth;
 it is not a replacement for measuring the full heap of a workload.
+
+## Working-Memory Reservation Tradeoff
+
+The following five-sample run was measured on the same linux/amd64 host after
+adding the reservation counter. The existing upsert paths retained their
+allocation profile. The small before/after CPU differences are benchmark
+noise, not a claimed optimization.
+
+| Path | Before median ns/op | After median ns/op | After B/op | After allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Budget-disabled upsert | 228.9 | 224.0 | 192 | 4 | 0.98x |
+| Budget-enabled upsert | 238.3 | 228.8 | 192 | 4 | 0.96x |
+| Disabled `ReserveMemory(64)` | n/a | 8.231 | 0 | 0 | new no-op path |
+| Enabled reserve + release | n/a | 40.60 | 24 | 1 | explicit opt-in cost |
+
+Run `make codex-chu24-memory-reservation-benchmark` to reproduce the raw
+samples. The lease is intended for bounded setup or query scopes, not for a
+per-row hot loop.
 
 See the raw samples in [BENCHMARK.md](BENCHMARK.md#ch-u24-typed-table-memory-budget).

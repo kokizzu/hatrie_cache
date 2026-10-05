@@ -5026,5 +5026,14 @@ default is off. See
 [T234_EARLY_TRANSACTION_CONFLICT.md](T234_EARLY_TRANSACTION_CONFLICT.md) for
 the API, tradeoff, and benchmark.
 
+## Typed-Table Working-Memory Reservations
+
+`TypedTable.ReserveMemory` is an opt-in scoped admission lease for logical
+index, arrangement, or query working bytes. It participates in the existing
+typed-table budget and releases idempotently; `MaxBytes: 0` remains the
+default, allocation-free path. See
+[CHU24_TYPED_TABLE_MEMORY_BUDGET.md](CHU24_TYPED_TABLE_MEMORY_BUDGET.md) and
+[BENCHMARK.md](BENCHMARK.md#ch-u24-typed-table-memory-budget-reservations).
+
 Run `make test-t234`, `make race-t234`, `make vet-t234`, and
 `make benchmark-t234` for the focused checks and measurements.

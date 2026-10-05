@@ -39424,3 +39424,25 @@ difference is within normal benchmark noise. Existing join/leave behavior is
 preserved. See [T207_REPLICA_EVICTION_REJOIN.md](T207_REPLICA_EVICTION_REJOIN.md)
 for the recovery sequence, API contract, security boundaries, and verification
 commands.
+
+## CH-U24 Typed-Table Memory Budget Reservations
+
+The baseline and after runs used five `-benchmem` samples on an AMD Ryzen 9
+5950X, linux/amd64. The feature adds an opt-in scoped reservation for
+caller-owned index, arrangement, or query working bytes. Existing upsert
+allocations remained unchanged.
+
+| Path | Before median ns/op | After median ns/op | After B/op | After allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Budget-disabled upsert | 228.9 | 224.0 | 192 | 4 | 0.98x |
+| Budget-enabled upsert | 238.3 | 228.8 | 192 | 4 | 0.96x |
+| Disabled `ReserveMemory(64)` | n/a | 8.231 | 0 | 0 | new no-op path |
+| Enabled reserve + release | n/a | 40.60 | 24 | 1 | explicit opt-in cost |
+
+Raw existing-path samples before the change were `229.7, 228.9, 232.0,
+228.9, 228.6 ns/op` (budget disabled) and `234.7, 241.5, 241.9, 237.8,
+238.3 ns/op` (budget enabled). After the change they were `223.9, 225.5,
+223.9, 225.5, 224.0 ns/op` and `228.7, 227.9, 229.0, 228.8, 229.6 ns/op`,
+respectively. The differences are within ordinary run-to-run noise; the
+important invariant is unchanged B/op and allocs/op. Run
+`make codex-chu24-memory-reservation-benchmark` for the current raw samples.

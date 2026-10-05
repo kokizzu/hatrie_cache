@@ -183,6 +183,16 @@ tradeoffs are documented and its commit is published.
 | T-U49 | Replica-set request hedging | `hatTopology.ExecuteReplicaHedged` now provides opt-in bounded read hedging with delayed fallback, first-success cancellation, deterministic failures, observer events, and a zero-allocation single-candidate fast path. | Tail-latency versus duplicate load and consistency. |
 | T-U50 | Cluster-wide configuration watch | `hatTopology.ConfigWatchLog` now provides an authenticated bounded versioned log with replay cursors, context-aware wait/resume, deterministic history-gap errors, value-copy isolation, and no per-client idle goroutine; transport and consensus remain caller-owned. | Gap recovery, authorization, and bounded history. |
 
+## CH-U24 Update
+
+The typed-table memory budget now also supports explicit scoped reservations
+through `TypedTable.ReserveMemory`. Index, arrangement, and query owners can
+charge logical working bytes to a table budget and release them idempotently;
+the default-disabled path remains allocation-free. This remains an admission
+contract rather than an automatic heap/RSS measurement. See
+[CHU24_TYPED_TABLE_MEMORY_BUDGET.md](CHU24_TYPED_TABLE_MEMORY_BUDGET.md) and
+[BENCHMARK.md](BENCHMARK.md#ch-u24-typed-table-memory-budget-reservations).
+
 ## Selection Policy
 
 The next implementation should be chosen from a row whose public integration
