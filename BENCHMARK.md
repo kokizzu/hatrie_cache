@@ -33116,3 +33116,10 @@ admission in the current pointer-lease API. It should surround mutation
 operations at a safety boundary, not be placed inside an already protected
 inner loop. The implementation was retained because its value is blocking
 drain semantics and explicit origin policy, not raw speed.
+## CH-U47 Parallel CSV Parsing
+
+The explicit `ParseCSVParallel`/`ImportCSVParallel` path is 1.42x faster than
+serial materialization on 20,000 three-column CSV rows, with 5.9% more bytes
+allocated and effectively unchanged allocation count. The existing streaming
+CSV path remains the default. Full raw samples and methodology are in
+`CHU47_PARALLEL_FORMAT_PARSING.md`.

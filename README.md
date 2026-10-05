@@ -4792,3 +4792,10 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+### Parallel CSV Import (Opt-In)
+
+For CSV workloads that must be materialized into rows, use
+`ParseCSVParallel` or `ExternalTables.ImportCSVParallel` with an explicit
+worker count. These APIs preserve input order and atomically replace a table
+only after validation succeeds. `StreamCSV` and `ImportCSV` remain the default
+lower-memory paths; see `CHU47_PARALLEL_FORMAT_PARSING.md` for measurements.
