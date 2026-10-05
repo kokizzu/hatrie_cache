@@ -243,6 +243,8 @@ type CommandJournal struct {
 	projectionWatermarks  map[string]uint64
 	idempotency           commandIdempotencyState
 	replayProgress        *commandJournalReplayProgressState
+	spaceSyncPolicies     map[string]CommandJournalSpaceSyncPolicy
+	spaceSyncPending      map[string]uint64
 }
 
 type commandJournalAppendState struct {
@@ -460,12 +462,15 @@ func (journal *CommandJournal) ExecuteCommand(trie *HatTrie, request CacheComman
 	} else if duplicate {
 		return response
 	}
-	appendState, err := journal.appendLockedWithIdempotency(journalRequest, commandIdempotencyFingerprintData(check))
+	spaceSync := journal.reserveSpaceSync(journalRequest.Key)
+	appendState, err := journal.appendLockedWithIdempotencyAndSync(journalRequest, commandIdempotencyFingerprintData(check), spaceSync.syncRequired)
 	if err != nil {
+		journal.rollbackSpaceSync(spaceSync)
 		return commandError(err.Error())
 	}
 	response := trie.ExecuteCommand(request)
 	if !response.OK {
+		journal.rollbackSpaceSync(spaceSync)
 		if err := journal.rollbackAppendLocked(appendState); err != nil {
 			return commandError(response.Message + "; failed to remove rejected journal entry: " + err.Error())
 		}
@@ -581,13 +586,23 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 			return
 		}
 		recordSizes := make([]uint32, len(pending))
+		var reservations []commandJournalSpaceSyncReservation
+		syncRequired := len(journal.spaceSyncPolicies) == 0
+		if !syncRequired {
+			reservations = make([]commandJournalSpaceSyncReservation, len(pending))
+		}
 		encoded := make([]byte, 0, commandJournalRequestBatchInitialCapacity(pending, chunkBytes))
 		for idx, job := range pending {
 			sequence, nextErr := journal.nextAppendSequenceLocked()
 			if nextErr != nil {
+				journal.rollbackSpaceSyncReservations(reservations)
 				err = journal.rollbackPreparedBatchLocked(batchState, nextErr)
 				failCommandJournalJobs(pending, err)
 				return
+			}
+			if reservations != nil {
+				reservations[idx] = journal.reserveSpaceSync(job.journalRequest.Key)
+				syncRequired = syncRequired || reservations[idx].syncRequired
 			}
 			entry := commandJournalEntry{
 				Version:  commandJournalVersion,
@@ -596,6 +611,7 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 			}
 			if commandJournalRecordBatchShouldFlush(encoded, entry.Request, chunkBytes) {
 				if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
+					journal.rollbackSpaceSyncReservations(reservations)
 					err = journal.rollbackPreparedBatchLocked(batchState, err)
 					failCommandJournalJobs(pending, err)
 					return
@@ -605,6 +621,7 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 			start := len(encoded)
 			encoded, err = appendCommandJournalRecordWithEncryption(encoded, entry, journal.format, journal.encryptor)
 			if err != nil {
+				journal.rollbackSpaceSyncReservations(reservations)
 				err = journal.rollbackPreparedBatchLocked(batchState, err)
 				failCommandJournalJobs(pending, err)
 				return
@@ -613,6 +630,7 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 			journal.markAppendedLocked(sequence)
 			if len(encoded) >= chunkBytes {
 				if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
+					journal.rollbackSpaceSyncReservations(reservations)
 					err = journal.rollbackPreparedBatchLocked(batchState, err)
 					failCommandJournalJobs(pending, err)
 					return
@@ -621,14 +639,18 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 			}
 		}
 		if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
+			journal.rollbackSpaceSyncReservations(reservations)
 			err = journal.rollbackPreparedBatchLocked(batchState, err)
 			failCommandJournalJobs(pending, err)
 			return
 		}
-		if err := journal.syncLocked(); err != nil {
-			err = journal.rollbackPreparedBatchLocked(batchState, err)
-			failCommandJournalJobs(pending, err)
-			return
+		if syncRequired {
+			if err := journal.syncLocked(); err != nil {
+				journal.rollbackSpaceSyncReservations(reservations)
+				err = journal.rollbackPreparedBatchLocked(batchState, err)
+				failCommandJournalJobs(pending, err)
+				return
+			}
 		}
 		for idx, job := range pending {
 			if job.submission != nil {
@@ -654,6 +676,9 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 				nextSequence: batchState.nextSequence + uint64(idx),
 			}
 			rollbackErr := journal.rollbackAppendLocked(rollbackState)
+			if reservations != nil {
+				journal.rollbackSpaceSyncReservations(reservations[idx:])
+			}
 			clearCommandJournalJobSequences(pending[idx:])
 			if rollbackErr != nil {
 				response.Message += "; failed to remove rejected journal entries: " + rollbackErr.Error()
@@ -716,14 +741,24 @@ func (journal *CommandJournal) processIdempotentGroupCommitLocked(batch []*comma
 			return
 		}
 		recordSizes := make([]uint32, len(entries))
+		var reservations []commandJournalSpaceSyncReservation
+		syncRequired := len(journal.spaceSyncPolicies) == 0
+		if !syncRequired {
+			reservations = make([]commandJournalSpaceSyncReservation, len(entries))
+		}
 		encoded := make([]byte, 0, commandJournalRequestBatchInitialCapacityFromIdempotentEntries(entries, chunkBytes))
 		for index := range entries {
 			entry := &entries[index]
 			sequence, nextErr := journal.nextAppendSequenceLocked()
 			if nextErr != nil {
+				journal.rollbackSpaceSyncReservations(reservations)
 				err = journal.rollbackPreparedBatchLocked(batchState, nextErr)
 				failCommandJournalIdempotentGroupEntries(entries, err)
 				return
+			}
+			if reservations != nil {
+				reservations[index] = journal.reserveSpaceSync(entry.job.journalRequest.Key)
+				syncRequired = syncRequired || reservations[index].syncRequired
 			}
 			entry.sequence = sequence
 			journalEntry := commandJournalEntry{
@@ -734,6 +769,7 @@ func (journal *CommandJournal) processIdempotentGroupCommitLocked(batch []*comma
 			}
 			if commandJournalRecordBatchShouldFlush(encoded, journalEntry.Request, chunkBytes) {
 				if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
+					journal.rollbackSpaceSyncReservations(reservations)
 					err = journal.rollbackPreparedBatchLocked(batchState, err)
 					failCommandJournalIdempotentGroupEntries(entries, err)
 					return
@@ -743,6 +779,7 @@ func (journal *CommandJournal) processIdempotentGroupCommitLocked(batch []*comma
 			start := len(encoded)
 			encoded, err = appendCommandJournalRecordWithEncryption(encoded, journalEntry, journal.format, journal.encryptor)
 			if err != nil {
+				journal.rollbackSpaceSyncReservations(reservations)
 				err = journal.rollbackPreparedBatchLocked(batchState, err)
 				failCommandJournalIdempotentGroupEntries(entries, err)
 				return
@@ -751,6 +788,7 @@ func (journal *CommandJournal) processIdempotentGroupCommitLocked(batch []*comma
 			journal.markAppendedLocked(sequence)
 			if len(encoded) >= chunkBytes {
 				if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
+					journal.rollbackSpaceSyncReservations(reservations)
 					err = journal.rollbackPreparedBatchLocked(batchState, err)
 					failCommandJournalIdempotentGroupEntries(entries, err)
 					return
@@ -759,14 +797,18 @@ func (journal *CommandJournal) processIdempotentGroupCommitLocked(batch []*comma
 			}
 		}
 		if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
+			journal.rollbackSpaceSyncReservations(reservations)
 			err = journal.rollbackPreparedBatchLocked(batchState, err)
 			failCommandJournalIdempotentGroupEntries(entries, err)
 			return
 		}
-		if err := journal.syncLocked(); err != nil {
-			err = journal.rollbackPreparedBatchLocked(batchState, err)
-			failCommandJournalIdempotentGroupEntries(entries, err)
-			return
+		if syncRequired {
+			if err := journal.syncLocked(); err != nil {
+				journal.rollbackSpaceSyncReservations(reservations)
+				err = journal.rollbackPreparedBatchLocked(batchState, err)
+				failCommandJournalIdempotentGroupEntries(entries, err)
+				return
+			}
 		}
 		setCommandJournalIdempotentGroupSequences(entries)
 
@@ -790,6 +832,9 @@ func (journal *CommandJournal) processIdempotentGroupCommitLocked(batch []*comma
 				nextSequence: batchState.nextSequence + uint64(index),
 			}
 			rollbackErr := journal.rollbackAppendLocked(rollbackState)
+			if reservations != nil {
+				journal.rollbackSpaceSyncReservations(reservations[index:])
+			}
 			clearCommandJournalIdempotentGroupSequences(entries[index:])
 			if rollbackErr != nil {
 				response = commandError(response.Message + "; failed to remove rejected journal entries: " + rollbackErr.Error())
@@ -936,6 +981,11 @@ func (journal *CommandJournal) executeJournalRecordsBatchWithScalarBatch(trie *H
 		return 0, commandError(err.Error())
 	}
 	recordSizes := make([]uint32, len(records))
+	var reservations []commandJournalSpaceSyncReservation
+	syncRequired := len(journal.spaceSyncPolicies) == 0
+	if !syncRequired {
+		reservations = make([]commandJournalSpaceSyncReservation, len(records))
+	}
 	idempotencyChecks := make([]commandIdempotencyCheck, len(records))
 	idempotencySequences := make([]uint64, len(records))
 	chunkBytes := journal.recordBatchChunkLimit()
@@ -944,6 +994,7 @@ func (journal *CommandJournal) executeJournalRecordsBatchWithScalarBatch(trie *H
 	for idx, record := range records {
 		sequence, err := journal.nextAppendSequenceLocked()
 		if err != nil {
+			journal.rollbackSpaceSyncReservations(reservations)
 			return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 		}
 		entry := commandJournalEntry{
@@ -951,9 +1002,14 @@ func (journal *CommandJournal) executeJournalRecordsBatchWithScalarBatch(trie *H
 			Sequence: sequence,
 			Request:  journal.normalizeJournalRequest(record.Request, now),
 		}
+		if reservations != nil {
+			reservations[idx] = journal.reserveSpaceSync(entry.Request.Key)
+			syncRequired = syncRequired || reservations[idx].syncRequired
+		}
 		if journal.idempotency.enabled() {
 			check, err := newCommandIdempotencyCheck(entry.Request)
 			if err != nil {
+				journal.rollbackSpaceSyncReservations(reservations)
 				return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 			}
 			idempotencyChecks[idx] = check
@@ -962,6 +1018,7 @@ func (journal *CommandJournal) executeJournalRecordsBatchWithScalarBatch(trie *H
 		}
 		if commandJournalRecordBatchShouldFlush(encoded, entry.Request, chunkBytes) {
 			if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
+				journal.rollbackSpaceSyncReservations(reservations)
 				return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 			}
 			encoded = encoded[:0]
@@ -969,26 +1026,33 @@ func (journal *CommandJournal) executeJournalRecordsBatchWithScalarBatch(trie *H
 		start := len(encoded)
 		encoded, err = appendCommandJournalRecordWithEncryption(encoded, entry, journal.format, journal.encryptor)
 		if err != nil {
+			journal.rollbackSpaceSyncReservations(reservations)
 			return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 		}
 		recordBytes := len(encoded) - start
 		if uint64(recordBytes) > uint64(^uint32(0)) {
+			journal.rollbackSpaceSyncReservations(reservations)
 			return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, errCommandJournalBinaryRecordTooLarge).Error())
 		}
 		recordSizes[idx] = uint32(recordBytes)
 		journal.markAppendedLocked(sequence)
 		if len(encoded) >= chunkBytes {
 			if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
+				journal.rollbackSpaceSyncReservations(reservations)
 				return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 			}
 			encoded = encoded[:0]
 		}
 	}
 	if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
+		journal.rollbackSpaceSyncReservations(reservations)
 		return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 	}
-	if err := journal.syncLocked(); err != nil {
-		return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
+	if syncRequired {
+		if err := journal.syncLocked(); err != nil {
+			journal.rollbackSpaceSyncReservations(reservations)
+			return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
+		}
 	}
 	rollbackOffset := batchState.offset
 	useScalarBatch := scalarBatch && trie.localPartitionSet() == nil
@@ -1009,6 +1073,9 @@ func (journal *CommandJournal) executeJournalRecordsBatchWithScalarBatch(trie *H
 						offset:       rollbackOffset,
 						nextSequence: batchState.nextSequence + uint64(idx),
 					}
+					if reservations != nil {
+						journal.rollbackSpaceSyncReservations(reservations[idx:])
+					}
 					if rollbackErr := journal.rollbackAppendLocked(rollbackState); rollbackErr != nil {
 						response.Message += "; failed to remove rejected journal entries: " + rollbackErr.Error()
 					}
@@ -1026,6 +1093,9 @@ func (journal *CommandJournal) executeJournalRecordsBatchWithScalarBatch(trie *H
 		rollbackState := commandJournalAppendState{
 			offset:       rollbackOffset,
 			nextSequence: batchState.nextSequence + uint64(idx),
+		}
+		if reservations != nil {
+			journal.rollbackSpaceSyncReservations(reservations[idx:])
 		}
 		if rollbackErr := journal.rollbackAppendLocked(rollbackState); rollbackErr != nil {
 			response.Message += "; failed to remove rejected journal entries: " + rollbackErr.Error()
@@ -1073,17 +1143,28 @@ func (journal *CommandJournal) executeCompactJournalRecordsBatch(trie *HatTrie, 
 		return 0, commandError(err.Error())
 	}
 	recordSizes := make([]uint32, len(records))
+	var reservations []commandJournalSpaceSyncReservation
+	syncRequired := len(journal.spaceSyncPolicies) == 0
+	if !syncRequired {
+		reservations = make([]commandJournalSpaceSyncReservation, len(records))
+	}
 	chunkBytes := journal.recordBatchChunkLimit()
 	encoded := make([]byte, 0, compactCommandJournalRecordBatchInitialCapacity(records, chunkBytes))
 	for idx, record := range records {
 		sequence, err := journal.nextAppendSequenceLocked()
 		if err != nil {
+			journal.rollbackSpaceSyncReservations(reservations)
 			return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 		}
 		request := record.request()
+		if reservations != nil {
+			reservations[idx] = journal.reserveSpaceSync(request.Key)
+			syncRequired = syncRequired || reservations[idx].syncRequired
+		}
 		entry := commandJournalEntry{Version: commandJournalVersion, Sequence: sequence, Request: request}
 		if commandJournalRecordBatchShouldFlush(encoded, request, chunkBytes) {
 			if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
+				journal.rollbackSpaceSyncReservations(reservations)
 				return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 			}
 			encoded = encoded[:0]
@@ -1091,26 +1172,33 @@ func (journal *CommandJournal) executeCompactJournalRecordsBatch(trie *HatTrie, 
 		start := len(encoded)
 		encoded, err = appendCommandJournalRecordWithEncryption(encoded, entry, journal.format, journal.encryptor)
 		if err != nil {
+			journal.rollbackSpaceSyncReservations(reservations)
 			return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 		}
 		recordBytes := len(encoded) - start
 		if uint64(recordBytes) > uint64(^uint32(0)) {
+			journal.rollbackSpaceSyncReservations(reservations)
 			return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, errCommandJournalBinaryRecordTooLarge).Error())
 		}
 		recordSizes[idx] = uint32(recordBytes)
 		journal.markAppendedLocked(sequence)
 		if len(encoded) >= chunkBytes {
 			if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
+				journal.rollbackSpaceSyncReservations(reservations)
 				return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 			}
 			encoded = encoded[:0]
 		}
 	}
 	if err := journal.writeCommandJournalRecordBatchChunkLocked(encoded); err != nil {
+		journal.rollbackSpaceSyncReservations(reservations)
 		return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
 	}
-	if err := journal.syncLocked(); err != nil {
-		return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
+	if syncRequired {
+		if err := journal.syncLocked(); err != nil {
+			journal.rollbackSpaceSyncReservations(reservations)
+			return 0, commandError(journal.rollbackPreparedBatchLocked(batchState, err).Error())
+		}
 	}
 
 	applied, response := trie.executeCompactJournalSetBatch(records)
@@ -1125,6 +1213,9 @@ func (journal *CommandJournal) executeCompactJournalRecordsBatch(trie *HatTrie, 
 	rollbackState := commandJournalAppendState{
 		offset:       rollbackOffset,
 		nextSequence: batchState.nextSequence + uint64(applied),
+	}
+	if reservations != nil {
+		journal.rollbackSpaceSyncReservations(reservations[applied:])
 	}
 	if rollbackErr := journal.rollbackAppendLocked(rollbackState); rollbackErr != nil {
 		response.Message += "; failed to remove rejected journal entries: " + rollbackErr.Error()
@@ -1282,12 +1373,15 @@ func (journal *CommandJournal) executePreparedInternalReplicationCommand(trie *H
 	} else if duplicate {
 		return response
 	}
-	appendState, err := journal.appendLockedWithIdempotency(journalRequest, commandIdempotencyFingerprintData(check))
+	spaceSync := journal.reserveSpaceSync(journalRequest.Key)
+	appendState, err := journal.appendLockedWithIdempotencyAndSync(journalRequest, commandIdempotencyFingerprintData(check), spaceSync.syncRequired)
 	if err != nil {
+		journal.rollbackSpaceSync(spaceSync)
 		return commandError(err.Error())
 	}
 	response := executePreparedInternalReplicationCommand(trie, request, operation)
 	if !response.OK {
+		journal.rollbackSpaceSync(spaceSync)
 		if err := journal.rollbackAppendLocked(appendState); err != nil {
 			return commandError(response.Message + "; failed to remove rejected journal entry: " + err.Error())
 		}
@@ -1743,12 +1837,18 @@ func (journal *CommandJournal) appendLocked(request CacheCommandRequest) (comman
 }
 
 func (journal *CommandJournal) appendLockedWithIdempotency(request CacheCommandRequest, fingerprint []byte) (commandJournalAppendState, error) {
+	return journal.appendLockedWithIdempotencyAndSync(request, fingerprint, true)
+}
+
+func (journal *CommandJournal) appendLockedWithIdempotencyAndSync(request CacheCommandRequest, fingerprint []byte, syncRequired bool) (commandJournalAppendState, error) {
 	appendState, err := journal.appendWithoutSyncLockedWithIdempotency(request, fingerprint)
 	if err != nil {
 		return commandJournalAppendState{}, journal.rollbackFailedAppendLocked(appendState, err)
 	}
-	if err := journal.syncLocked(); err != nil {
-		return commandJournalAppendState{}, journal.rollbackFailedAppendLocked(appendState, err)
+	if syncRequired {
+		if err := journal.syncLocked(); err != nil {
+			return commandJournalAppendState{}, journal.rollbackFailedAppendLocked(appendState, err)
+		}
 	}
 	return appendState, nil
 }

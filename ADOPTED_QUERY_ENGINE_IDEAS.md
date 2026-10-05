@@ -790,3 +790,17 @@ details for repair and never silently counts stale or unapplied responses.
 **Remaining:** The embedding service still owns peer transport,
 authentication, retries, ordering, rollback, and wiring the coordinator into a
 real journal commit path.
+
+## T-U34: Per-space WAL sync policy
+
+**Source:** Tarantool-style configurable WAL durability and write-boundary
+semantics.
+
+**Adopted:** `CommandJournal.SetSpaceSyncPolicy` keeps immediate syncing as the
+safe default and adds opt-in periodic or disabled policies by logical space.
+`CommandJournal.Sync` provides an explicit durability boundary, and all direct,
+group, batch, and prepared replication journal paths use the same policy.
+
+**Remaining:** Periodic and disabled crash-loss windows remain the caller's
+responsibility; policy configuration is intentionally runtime-only and is not
+stored in journal records.

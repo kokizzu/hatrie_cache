@@ -33219,3 +33219,70 @@ of the paired post-change control. The separate pre-change control median was
 48.69 ns/op; the difference is within the local benchmark noise envelope and is
 not treated as a regression claim. See [PEER_LIFECYCLE.md](PEER_LIFECYCLE.md)
 for event semantics and test coverage.
+
+## T-U34 Per-Space WAL Sync Policy
+
+Five `-benchmem` samples were measured on Linux/amd64 with an AMD Ryzen 9 5950X.
+The clean-base control used the existing
+`BenchmarkCommandJournalExecuteCommandNoSubscription` benchmark. The paired
+post-change run is included as a control, but the raw fsync benchmark is noisy
+on this host and is not used to claim a default-path speedup.
+
+### Existing command control
+
+| Control | Raw ns/op samples | B/op | Allocs/op |
+| --- | --- | ---: | ---: |
+| Clean base | 1,599,316; 3,242,024; 794,856; 995,479; 1,092,290 | 1,625-1,642 | 7 |
+| Post-change control | 681,698; 670,403; 691,025; 673,262; 764,231 | 1,620-1,623 | 7 |
+
+The post-change path retained the same allocation count and byte range. Because
+the two runs were separate fsync-heavy samples, the timing spread is treated as
+noise rather than a regression or improvement claim.
+
+### Policy bookkeeping with a no-op sync hook
+
+This isolates in-memory policy overhead while retaining journal encoding and
+file writes:
+
+| Mode | Raw ns/op samples | Median ns/op | B/op | Allocs/op | Syncs in sample |
+| --- | --- | ---: | ---: | ---: | --- |
+| Immediate | 4,277; 4,212; 4,247; 4,235; 4,131 | 4,235 | 256 | 2 | every operation |
+| Periodic, every 64 | 4,248; 4,229; 4,297; 4,212; 4,228 | 4,228 | 256 | about 1/64 |
+| Disabled | 4,171; 4,138; 4,169; 4,096; 4,152 | 4,152 | 256 | zero |
+
+Policy bookkeeping did not add allocations in this benchmark. Periodic and
+disabled modes cannot be expected to beat immediate mode when syncing is stubbed
+out because they still do policy work.
+
+### Real file sync
+
+The following benchmark used the same workload with the sync hook calling the
+real file `Sync`. The first two immediate samples include slow benchmark
+startup/calibration outliers; all raw samples are retained:
+
+| Mode | Raw ns/op samples | B/op | Allocs/op | Syncs in sample |
+| --- | --- | ---: | ---: | --- |
+| Immediate | 621,192,371; 303,838,131; 681,906; 838,659; 845,005 | 259-3,248 | 2-1,714 | every operation |
+| Periodic, every 64 | 18,439; 19,172; 18,678; 19,346; 18,822 | 256 | 2 | about 1/64 |
+| Disabled | 4,176; 4,142; 4,104; 4,093; 4,173 | 256 | 2 | zero |
+
+Using the steady immediate samples, periodic mode was roughly 40-45x lower in
+per-operation time and disabled mode roughly 180-205x lower on this host. That
+is a durability tradeoff: periodic mode exposes up to 63 accepted entries to a
+crash-loss window, while disabled mode requires an explicit `Sync` or another
+external durability boundary. The default remains immediate, so existing users
+pay no new durability risk.
+
+Details, API semantics, and verification coverage are in
+[TU34_SPACE_WAL_SYNC_POLICY.md](TU34_SPACE_WAL_SYNC_POLICY.md).
+
+### Final post-optimization rerun
+
+After removing the default-path reservation slice, the paired control samples
+were `681,698; 670,403; 691,025; 673,262; 764,231 ns/op`, with
+`1,620-1,623 B/op` and `7 allocs/op`. The final no-op-hook medians were
+`4,138 ns/op` immediate, `4,222 ns/op` periodic-every-64, and `4,150 ns/op`
+disabled, all at `256 B/op` and `2 allocs/op`. The final real-sync medians
+were `719,912 ns/op`, `17,662 ns/op`, and `4,174 ns/op` respectively, with
+the same sync-count ratios. These final samples supersede the earlier paired
+control when evaluating the implementation after optimization.
