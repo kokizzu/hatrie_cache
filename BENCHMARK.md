@@ -32814,3 +32814,30 @@ The first implementation was rejected after measurement because it fell back
 to the general executor and was 1.82x slower with 2.47x the bytes and 2.00x
 the allocations. The shipped path avoids the per-row source-cache clone for
 the narrow safe shape; all other query shapes retain the existing executor.
+## T-U12 Explicit Failover Proposals
+
+Command:
+
+```text
+make codex-inspiration-chu15-tu12-bench
+```
+
+Fixture: one 3-node sharded topology, one offline primary, two healthy
+replicas, five benchmark samples on `AMD Ryzen 9 5950X 16-Core Processor`.
+
+| Path | Median time | Bytes/op | Allocs/op |
+|---|---:|---:|---:|
+| `ElectionStore.ProposeFailover` | 4.18 us | 4,096 | 54 |
+| Equivalent caller-side sequence | 3.99 us | 4,016 | 52 |
+
+Raw `ns/op` samples, in command order:
+
+```text
+proposal: 4379, 4210, 4135, 4178, 4123
+manual:   3989, 3934, 3983, 4028, 3993
+```
+
+The proposal API is an opt-in control-plane operation, not a normal data-path
+optimization. Its bounded extra result metadata costs about 0.19 us, 80 B/op,
+and 2 allocations in this fixture. It does not change the default election,
+read, write, replication, or topology-publication paths.

@@ -263,6 +263,7 @@ security guidance before exposing it on a network.
 - Opt-in deterministic parallel mapping for independent CPU-bound work: [PARALLEL_MAP.md](PARALLEL_MAP.md)
 - Opt-in incremental foreign-key enforcement: [FOREIGN_KEY_INDEX.md](FOREIGN_KEY_INDEX.md)
 - Independent topology leader election: [LEADER_ELECTION.md](LEADER_ELECTION.md)
+- Explicit fenced failover proposals: [TU12_AUTOMATIC_FAILOVER.md](TU12_AUTOMATIC_FAILOVER.md) adds deterministic health-to-topology proposals; consensus and publication remain operator-controlled.
 - Opt-in leader-lease and monotonic fencing primitive; full consensus integration remains caller-owned: [TR01_LEADER_LEASE.md](TR01_LEADER_LEASE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#tr-01-leader-lease-and-fencing)
 - Opt-in cross-region read routing: [CROSS_REGION_READ_POLICY.md](CROSS_REGION_READ_POLICY.md)
 - Cross-region backup restore drill: [CROSS_REGION_RESTORE_DRILL.md](CROSS_REGION_RESTORE_DRILL.md)
