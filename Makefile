@@ -22298,3 +22298,7 @@ bench-tu17-space-engine:
 
 benchmark-chu51-group-by-all:
 	sh scripts/benchmark-chu51-group-by-all.sh
+.PHONY: benchmark-chu52-order-by-all
+
+benchmark-chu52-order-by-all:
+	sh scripts/benchmark-chu52-order-by-all.sh

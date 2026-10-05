@@ -32754,3 +32754,32 @@ This is a SQL compatibility and ergonomics improvement, not a runtime
 optimization. The parser expands selected non-aggregate expressions into the
 existing grouping executor, keeps aggregate-only queries global, and rejects
 `SELECT *` because there is no schema expansion in this path.
+
+## CHU52: `ORDER BY ALL`
+
+Command:
+
+```sh
+make benchmark-chu52-order-by-all
+```
+
+Five `-count=5` samples compared the existing explicit order list with the
+ClickHouse-style shorthand over the same 4,096-row workload.
+
+| form | median ns/op | B/op | allocs/op | comparison |
+| --- | ---: | ---: | ---: | --- |
+| explicit baseline | 10,430,957 | 3,872,044 | 20,512 | baseline |
+| explicit after | 11,426,948 | 3,872,041 | 20,512 | run-to-run noise |
+| `ORDER BY ALL` after | 10,757,908 | 3,872,024 | 20,512 | 0.94x explicit-after |
+
+Raw samples:
+
+```text
+explicit baseline: 10607484 10526622 10327739 10191797 10430957 ns/op, 3872268 3872097 3872044 3872033 3872037 B/op, 20512 allocs/op
+explicit after:    11293526 11435085 11229944 11426948 11757287 ns/op, 3872293 3872045 3872038 3872041 3872098 B/op, 20512 allocs/op
+all after:         10757908 10662083 10645543 10883960 11013959 ns/op, 3872024 3872022 3872032 3872019 3872027 B/op, 20512 allocs/op
+```
+
+Memory and allocation counts are unchanged. The explicit baseline varied more
+than the shorthand difference, so this is recorded as a neutral SQL
+compatibility improvement rather than a speed claim.

@@ -5924,35 +5924,39 @@ func sqlQueryOutputsTie(order []sqlOrder, left, right sqlQueryOutput) bool {
 }
 
 type sqlQuery struct {
-	cacheKey           string
-	cacheVolatile      bool
-	indexHint          SQLIndexHint
-	maxThreads         int
-	ctes               []sqlCTE
-	selects            []sqlSelectItem
-	from               *sqlSource
-	joins              []sqlJoin
-	where              sqlExpr
-	prewhere           sqlExpr
-	groupBy            []sqlExpr
-	groupByAll         bool
-	groupingSets       [][]sqlExpr
-	groupingDimensions []sqlExpr
-	having             sqlExpr
-	qualify            sqlExpr
-	orderBy            []sqlOrder
-	windows            map[string]sqlWindow
-	sample             *sqlTableSample
-	limitBy            *sqlLimitBy
-	limit              int
-	limitWithTies      bool
-	offset             int
-	distinct           bool
-	unions             []sqlUnion
-	explain            bool
-	explainCost        bool
-	pipeline           bool
-	analyze            bool
+	cacheKey             string
+	cacheVolatile        bool
+	indexHint            SQLIndexHint
+	maxThreads           int
+	ctes                 []sqlCTE
+	selects              []sqlSelectItem
+	from                 *sqlSource
+	joins                []sqlJoin
+	where                sqlExpr
+	prewhere             sqlExpr
+	groupBy              []sqlExpr
+	groupByAll           bool
+	groupingSets         [][]sqlExpr
+	groupingDimensions   []sqlExpr
+	having               sqlExpr
+	qualify              sqlExpr
+	orderBy              []sqlOrder
+	orderByAll           bool
+	orderByAllDesc       bool
+	orderByAllNullsFirst bool
+	orderByAllNullsLast  bool
+	windows              map[string]sqlWindow
+	sample               *sqlTableSample
+	limitBy              *sqlLimitBy
+	limit                int
+	limitWithTies        bool
+	offset               int
+	distinct             bool
+	unions               []sqlUnion
+	explain              bool
+	explainCost          bool
+	pipeline             bool
+	analyze              bool
 }
 
 type sqlLimitBy struct {
@@ -6356,18 +6360,44 @@ func (p *sqlQueryParser) parseQueryInternal(stopRight bool) (*sqlQuery, error) {
 			}
 			q.qualify = expr
 		case p.keyword("ORDER"):
-			if q.orderBy != nil {
+			if q.orderBy != nil || q.orderByAll {
 				return nil, p.diagnostic(p.current(), "ORDER BY appears more than once")
 			}
 			p.next()
 			if err := p.expectKeyword("BY"); err != nil {
 				return nil, err
 			}
-			order, err := p.parseOrder()
-			if err != nil {
-				return nil, err
+			if p.keyword("ALL") {
+				q.orderByAll = true
+				p.next()
+				if p.keyword("ASC") {
+					p.next()
+				} else if p.keyword("DESC") {
+					q.orderByAllDesc = true
+					p.next()
+				}
+				if p.keyword("NULLS") {
+					p.next()
+					if p.keyword("FIRST") {
+						q.orderByAllNullsFirst = true
+						p.next()
+					} else if p.keyword("LAST") {
+						q.orderByAllNullsLast = true
+						p.next()
+					} else {
+						return nil, p.expected(p.current(), "FIRST or LAST after NULLS", []string{"FIRST", "LAST"})
+					}
+				}
+				if p.current().kind == sqlTokenComma {
+					return nil, p.diagnostic(p.current(), "ORDER BY ALL cannot be combined with additional order expressions")
+				}
+			} else {
+				order, err := p.parseOrder()
+				if err != nil {
+					return nil, err
+				}
+				q.orderBy = order
 			}
-			q.orderBy = order
 		case p.keyword("LIMIT"):
 			if q.limit >= 0 {
 				return nil, p.diagnostic(p.current(), "LIMIT appears more than once")
@@ -6507,6 +6537,9 @@ func (p *sqlQueryParser) parseQueryInternal(stopRight bool) (*sqlQuery, error) {
 		}
 	}
 	if err := sqlExpandGroupByAll(q); err != nil {
+		return nil, p.diagnostic(p.current(), err.Error())
+	}
+	if err := sqlExpandOrderByAll(q); err != nil {
 		return nil, p.diagnostic(p.current(), err.Error())
 	}
 	if err := sqlExpandGroupingSets(q); err != nil {

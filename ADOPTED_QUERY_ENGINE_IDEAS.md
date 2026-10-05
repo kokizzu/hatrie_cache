@@ -759,3 +759,12 @@ single global group, mixed expressions contribute their non-aggregate
 components, and `SELECT *` is rejected rather than guessed. Existing explicit
 `GROUP BY` behavior is unchanged. See [CHU51_GROUP_BY_ALL.md](CHU51_GROUP_BY_ALL.md)
 and [BENCHMARK.md](BENCHMARK.md#chu51-group-by-all).
+
+## ClickHouse CH-U52: `ORDER BY ALL`
+
+Adopted as parser-time expansion of the complete select list into the existing
+order-key path. One global direction and NULL placement modifier is supported;
+wildcards and additional order expressions are rejected without schema
+expansion. Existing explicit `ORDER BY` behavior is unchanged. See
+[CHU52_ORDER_BY_ALL.md](CHU52_ORDER_BY_ALL.md) and
+[BENCHMARK.md](BENCHMARK.md#chu52-order-by-all).

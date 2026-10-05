@@ -47,6 +47,7 @@ security guidance before exposing it on a network.
 - ClickHouse/Materialize-style mergeable aggregate states and SQL `STATE`/`MERGE`: [AGGREGATE_COMBINATORS.md](AGGREGATE_COMBINATORS.md)
 - Filtered SQL aggregate state/merge combinators such as `SUM_STATE_IF` and `SUM_MERGE_IF`: [CHU44_SQL_AGGREGATE_COMBINATORS.md](CHU44_SQL_AGGREGATE_COMBINATORS.md), with raw measurements in [BENCHMARK.md](BENCHMARK.md#ch-u44-sql-aggregate-combinators)
 - ClickHouse-style `GROUP BY ALL` shorthand for selected non-aggregate expressions: [CHU51_GROUP_BY_ALL.md](CHU51_GROUP_BY_ALL.md), with measurements in [BENCHMARK.md](BENCHMARK.md#chu51-group-by-all)
+- ClickHouse-style `ORDER BY ALL` shorthand for complete select-list ordering: [CHU52_ORDER_BY_ALL.md](CHU52_ORDER_BY_ALL.md), with measurements in [BENCHMARK.md](BENCHMARK.md#chu52-order-by-all)
 - Filtered SQL aggregate state/merge combinators such as `SUM_STATE_IF` and `SUM_MERGE_IF`: [CHU44_SQL_AGGREGATE_COMBINATORS.md](CHU44_SQL_AGGREGATE_COMBINATORS.md), with raw measurements in [BENCHMARK.md](BENCHMARK.md#ch-u44-sql-aggregate-combinators)
 - Opt-in bounded retries for transient SQL source reads: [SQL_REMOTE_READ_RETRIES.md](SQL_REMOTE_READ_RETRIES.md)
 - Journal-driven SQL materialized views and recovery: [INCREMENTAL_PROJECTIONS.md](INCREMENTAL_PROJECTIONS.md)
