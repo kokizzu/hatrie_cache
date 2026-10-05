@@ -124,6 +124,7 @@ tradeoffs are documented and its commit is published.
 | M-U48 | Source connector health remediation | Implemented: opt-in bounded retry, exponential backoff, context cancellation, and quarantine through `StartWithHealthPolicy`. | Avoid retry storms, preserve offsets, and operator override without changing the default lifecycle path. |
 | M-U49 | Catalog migration runner | Implemented in [M049_CATALOG_MIGRATION.md](M049_CATALOG_MIGRATION.md): dependency-aware validation/dry-run ordering, serial apply, and reverse rollback callbacks. | The caller still owns SQL locks, durable history, retries, engine-specific compatibility, and mixed-version rollout policy. |
 | M-U50 | Durable frontier-based backup | Implemented in [M050_DURABLE_FRONTIER_BACKUP.md](M050_DURABLE_FRONTIER_BACKUP.md): bounded deterministic binary manifest plus restore-order and journal-gap validation for storage, sources, frontiers, and subscriptions. | The caller still owns source barriers, file/checksum verification, journal replay, rehearsal, and durable publication. |
+| M-U51 | SQL `TAIL` option envelope | Implemented in [MU051_SQL_TAIL_OPTIONS.md](MU051_SQL_TAIL_OPTIONS.md): trailing `WITH (...)` options map snapshot/live mode, progress events, AS OF/UP TO frontiers, and deterministic differential ordering onto the existing subscription definition. | Plain `TAIL` remains allocation-free and backward compatible; the caller still owns query execution, dependencies, authentication, transport, and durable publication. |
 
 ## Tarantool
 
