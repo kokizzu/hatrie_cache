@@ -39424,3 +39424,17 @@ difference is within normal benchmark noise. Existing join/leave behavior is
 preserved. See [T207_REPLICA_EVICTION_REJOIN.md](T207_REPLICA_EVICTION_REJOIN.md)
 for the recovery sequence, API contract, security boundaries, and verification
 commands.
+## CH-U28 Adaptive Compaction I/O Calibration (2026-10-06)
+
+Machine: AMD Ryzen 9 5950X, linux/amd64. Five `-benchmem` samples.
+
+| Benchmark | Before | After |
+| --- | ---: | ---: |
+| Default scheduler run | 612.6-647.4 ns/op, 760 B/op, 7 allocs/op | 597.9-603.5 ns/op, 760 B/op, 7 allocs/op |
+| Existing static I/O throttle | 936.6-949.7 ns/op, 1,096 B/op, 11 allocs/op | 909.6-932.3 ns/op, 1,096 B/op, 11 allocs/op |
+| Adaptive `Observe` | n/a | 6.445-6.886 ns/op, 0 B/op, 0 allocs/op |
+| Fresh adaptive scheduler | n/a | 1,038-1,050 ns/op, 1,160 B/op, 12 allocs/op |
+
+The default path remains unchanged. Adaptive pacing is opt-in and costs about
+1.7x the default scheduler microbenchmark in exchange for feedback-driven
+I/O-rate selection. See [CHU28_ADAPTIVE_IO_CALIBRATION.md](CHU28_ADAPTIVE_IO_CALIBRATION.md).

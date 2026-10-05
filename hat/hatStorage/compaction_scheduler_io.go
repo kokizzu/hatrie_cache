@@ -28,13 +28,15 @@ type compactionSchedulerIOState struct {
 	estimates map[string]uint64
 }
 
-func newCompactionSchedulerIOState(bytesPerSecond uint64) *compactionSchedulerIOState {
-	if bytesPerSecond == 0 {
+func newCompactionSchedulerIOState(bytesPerSecond uint64, calibration *CompactionIOCalibration) *compactionSchedulerIOState {
+	if bytesPerSecond == 0 && calibration == nil {
 		return nil
 	}
-	return &compactionSchedulerIOState{
-		throttle: newCompactionIOThrottle(bytesPerSecond),
+	throttle := newCompactionIOThrottle(bytesPerSecond)
+	if throttle == nil && calibration != nil {
+		throttle = &compactionIOThrottle{}
 	}
+	return &compactionSchedulerIOState{throttle: throttle}
 }
 
 func newCompactionIOThrottle(bytesPerSecond uint64) *compactionIOThrottle {
@@ -45,6 +47,13 @@ func newCompactionIOThrottle(bytesPerSecond uint64) *compactionIOThrottle {
 }
 
 func (throttle *compactionIOThrottle) wait(ctx context.Context, bytes uint64) error {
+	if throttle == nil {
+		return nil
+	}
+	return throttle.waitAtRate(ctx, bytes, throttle.bytesPerSecond)
+}
+
+func (throttle *compactionIOThrottle) waitAtRate(ctx context.Context, bytes, rate uint64) error {
 	if throttle == nil || bytes == 0 {
 		return nil
 	}
@@ -52,8 +61,11 @@ func (throttle *compactionIOThrottle) wait(ctx context.Context, bytes uint64) er
 		ctx = context.Background()
 	}
 
+	if rate == 0 {
+		return nil
+	}
 	now := time.Now()
-	duration := compactionIODuration(bytes, throttle.bytesPerSecond)
+	duration := compactionIODuration(bytes, rate)
 	throttle.mu.Lock()
 	start := throttle.nextAvailable
 	if start.IsZero() || start.Before(now) {

@@ -45,6 +45,7 @@ const DefaultCompactionSchedulerMaxConcurrent = 1
 type CompactionSchedulerOptions struct {
 	MaxConcurrent       int
 	MaxIOBytesPerSecond uint64
+	IOCalibration       *CompactionIOCalibration
 	SelectionPolicy     CompactionSelectionPolicy
 	PriorityPolicy      *CompactionPriorityPolicy
 }
@@ -97,6 +98,7 @@ type CompactionScheduler struct {
 	pendingBytes          uint64
 	runningBytes          uint64
 	ioState               *compactionSchedulerIOState
+	ioCalibration         *CompactionIOCalibration
 }
 
 // NewCompactionScheduler validates and creates a compaction scheduler. A zero
@@ -125,7 +127,8 @@ func NewCompactionScheduler(options CompactionSchedulerOptions) (*CompactionSche
 		pending:               make(map[string]compactionPendingTask),
 		running:               make(map[string]struct{}),
 		now:                   time.Now,
-		ioState:               newCompactionSchedulerIOState(options.MaxIOBytesPerSecond),
+		ioState:               newCompactionSchedulerIOState(options.MaxIOBytesPerSecond, options.IOCalibration),
+		ioCalibration:         options.IOCalibration,
 	}, nil
 }
 
@@ -568,11 +571,26 @@ func (scheduler *CompactionScheduler) takePending() ([]compactionTask, bool) {
 }
 
 func (scheduler *CompactionScheduler) executeTask(ctx context.Context, task compactionTask) error {
-	if scheduler.ioState == nil {
+	ioState := scheduler.ioState
+	if ioState == nil {
 		return task.run(ctx)
 	}
-	if ioBytes := scheduler.ioEstimate(task.name); ioBytes > 0 {
-		if err := scheduler.ioState.throttle.wait(ctx, ioBytes); err != nil {
+	ioBytes := scheduler.ioEstimate(task.name)
+	if scheduler.ioCalibration != nil {
+		if ioBytes > 0 && ioState.throttle != nil {
+			if err := ioState.throttle.waitAtRate(ctx, ioBytes, scheduler.ioCalibration.BytesPerSecond()); err != nil {
+				return err
+			}
+		}
+		started := time.Now()
+		err := task.run(ctx)
+		if err == nil && ioBytes > 0 {
+			_, _ = scheduler.ioCalibration.Observe(ioBytes, time.Since(started))
+		}
+		return err
+	}
+	if ioBytes > 0 && ioState.throttle != nil {
+		if err := ioState.throttle.wait(ctx, ioBytes); err != nil {
 			return err
 		}
 	}

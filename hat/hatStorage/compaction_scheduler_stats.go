@@ -40,6 +40,9 @@ func (scheduler *CompactionScheduler) Stats() CompactionSchedulerStats {
 	if scheduler.ioState != nil && scheduler.ioState.throttle != nil {
 		ioStats = scheduler.ioState.throttle.stats()
 	}
+	if scheduler.ioCalibration != nil {
+		ioStats.bytesPerSecond = scheduler.ioCalibration.BytesPerSecond()
+	}
 	pending := len(scheduler.pending)
 	if scheduler.priorityPending != nil {
 		pending = len(scheduler.priorityPending)

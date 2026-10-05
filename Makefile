@@ -28611,3 +28611,14 @@ benchmark-t204:
 
 benchmark-t206:
 	@bash ./scripts/benchmark-t206.sh
+.PHONY: test-chu28-adaptive-io race-chu28-adaptive-io vet-chu28-adaptive-io benchmark-chu28-adaptive-io format-chu28-adaptive-io
+test-chu28-adaptive-io:
+	bash scripts/test-chu28-adaptive-io.sh
+race-chu28-adaptive-io:
+	bash scripts/race-chu28-adaptive-io.sh
+vet-chu28-adaptive-io:
+	bash scripts/vet-chu28-adaptive-io.sh
+benchmark-chu28-adaptive-io:
+	bash scripts/benchmark-chu28-adaptive-io.sh
+format-chu28-adaptive-io:
+	bash scripts/format-chu28-adaptive-io.sh
