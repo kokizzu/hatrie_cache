@@ -802,3 +802,14 @@ the default column-oriented engine.
 and analytical arrangements remain intentionally scoped to `TypedTable`. See
 [TU16_MEMTX_TABLE.md](TU16_MEMTX_TABLE.md) and
 [BENCHMARK.md](BENCHMARK.md#t-u16-memtx-style-row-engine).
+
+## T-U47: Context-Aware Compact-Peer Writes
+
+Extended the existing opt-in peer cancellation contract with
+`hatPeer.CompactPeerSessionOptions.EnableWriteCancellation`. `Call` and
+`CallTemplate` now apply caller deadlines and cancellation to socket writes;
+an interrupted frame closes the session rather than allowing protocol
+desynchronization. The option is disabled by default, so existing pool/session
+callers keep their allocation profile and wire behavior. See
+[PEER_CALL_CANCELLATION.md](PEER_CALL_CANCELLATION.md#interrupting-compact-peer-writes)
+and [BENCHMARK.md](BENCHMARK.md#t-u47-context-aware-compact-peer-writes).

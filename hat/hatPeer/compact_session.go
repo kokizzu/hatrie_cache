@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 var (
@@ -59,6 +61,10 @@ type CompactPeerSessionOptions struct {
 	// caller context cancels. The remote session cancels the matching handler
 	// context. It is disabled by default to preserve existing wire behavior.
 	EnableRequestCancellation bool
+	// EnableWriteCancellation applies caller deadlines and cancellation to
+	// socket writes for Call and CallTemplate. It is disabled by default because
+	// it adds per-call context coordination to the ordinary fast path.
+	EnableWriteCancellation bool
 }
 
 // CompactPeerSessionOptionsForNegotiatedHandshake returns session options
@@ -94,6 +100,7 @@ type CompactPeerSession struct {
 	writeBuffer  []byte
 	stateMu      sync.Mutex
 	cancellation *compactPeerCancellationState
+	writeCancel  bool
 	closed       bool
 	closeError   error
 }
@@ -145,6 +152,7 @@ func NewCompactPeerSession(conn net.Conn, options CompactPeerSessionOptions) (*C
 		cancel:       cancel,
 		lifecycle:    options.Lifecycle,
 		peerID:       options.PeerID,
+		writeCancel:  options.EnableWriteCancellation,
 		done:         make(chan struct{}),
 		readDone:     make(chan struct{}),
 		cancellation: cancellation,
@@ -175,9 +183,15 @@ func (session *CompactPeerSession) Call(ctx context.Context, command, payload []
 	if err != nil {
 		return CompactFrame{}, err
 	}
-	if err := session.write(request); err != nil {
-		session.fail(err)
-		return CompactFrame{}, err
+	var writeErr error
+	if session.writeCancel {
+		writeErr = session.writeContext(ctx, request)
+	} else {
+		writeErr = session.write(request)
+	}
+	if writeErr != nil {
+		session.fail(writeErr)
+		return CompactFrame{}, writeErr
 	}
 	response, err := pending.Wait(ctx)
 	if err != nil {
@@ -216,9 +230,17 @@ func (session *CompactPeerSession) CallTemplate(ctx context.Context, template Co
 		return CompactFrame{}, err
 	}
 	if session.protocol.compressPayloadsAbove > 0 {
-		err = session.write(request)
+		if session.writeCancel {
+			err = session.writeContext(ctx, request)
+		} else {
+			err = session.write(request)
+		}
 	} else {
-		err = session.writeTemplate(template, request.RequestID, payload)
+		if session.writeCancel {
+			err = session.writeTemplateContext(ctx, template, request.RequestID, payload)
+		} else {
+			err = session.writeTemplate(template, request.RequestID, payload)
+		}
 	}
 	if err != nil {
 		session.fail(err)
@@ -401,6 +423,10 @@ func (session *CompactPeerSession) writeError(request CompactFrame, err error) {
 func (session *CompactPeerSession) write(frame CompactFrame) error {
 	session.writeMu.Lock()
 	defer session.writeMu.Unlock()
+	return session.writeLocked(frame)
+}
+
+func (session *CompactPeerSession) writeLocked(frame CompactFrame) error {
 	if err := session.Err(); err != nil {
 		return err
 	}
@@ -421,6 +447,10 @@ func (session *CompactPeerSession) write(frame CompactFrame) error {
 func (session *CompactPeerSession) writeTemplate(template CompactRequestTemplate, requestID uint64, payload []byte) error {
 	session.writeMu.Lock()
 	defer session.writeMu.Unlock()
+	return session.writeTemplateLocked(template, requestID, payload)
+}
+
+func (session *CompactPeerSession) writeTemplateLocked(template CompactRequestTemplate, requestID uint64, payload []byte) error {
 	if err := session.Err(); err != nil {
 		return err
 	}
@@ -433,6 +463,84 @@ func (session *CompactPeerSession) writeTemplate(template CompactRequestTemplate
 	}
 	session.writeBuffer = retainCompactPeerWriteBuffer(encoded)
 	return nil
+}
+
+func (session *CompactPeerSession) writeContext(ctx context.Context, frame CompactFrame) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	session.writeMu.Lock()
+	defer session.writeMu.Unlock()
+	if err := session.Err(); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	restoreDeadline, err := session.installWriteContext(ctx)
+	if err != nil {
+		return err
+	}
+	defer restoreDeadline()
+	err = session.writeLocked(frame)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+	}
+	return err
+}
+
+func (session *CompactPeerSession) writeTemplateContext(ctx context.Context, template CompactRequestTemplate, requestID uint64, payload []byte) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	session.writeMu.Lock()
+	defer session.writeMu.Unlock()
+	if err := session.Err(); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	restoreDeadline, err := session.installWriteContext(ctx)
+	if err != nil {
+		return err
+	}
+	defer restoreDeadline()
+	err = session.writeTemplateLocked(template, requestID, payload)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+	}
+	return err
+}
+
+func (session *CompactPeerSession) installWriteContext(ctx context.Context) (func(), error) {
+	if ctx == nil || ctx.Done() == nil {
+		return func() {}, nil
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := session.conn.SetWriteDeadline(deadline); err != nil {
+			return nil, err
+		}
+	}
+	var finished uint32
+	stop := context.AfterFunc(ctx, func() {
+		if atomic.LoadUint32(&finished) != 0 {
+			return
+		}
+		_ = session.conn.SetWriteDeadline(time.Now())
+		if atomic.LoadUint32(&finished) != 0 {
+			_ = session.conn.SetWriteDeadline(time.Time{})
+		}
+	})
+	return func() {
+		atomic.StoreUint32(&finished, 1)
+		stop()
+		_ = session.conn.SetWriteDeadline(time.Time{})
+	}, nil
 }
 
 func retainCompactPeerWriteBuffer(encoded []byte) []byte {

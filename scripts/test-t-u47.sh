@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-go test ./hat/hatPeer -run '^TestConnectionPoolCloseCancelsActiveHandlerContext$' -count=1
+go test ./hat/hatPeer -run '^Test(ConnectionPoolCloseCancelsActiveHandlerContext|CompactPeerSessionCallCancellationInterruptsBlockedWrite|CompactPeerSessionCallTemplateCancellationInterruptsBlockedWrite|CompactPeerSessionWriteCancellationBeatsLaterDeadline|TU47DisabledCancellationProbe|TU47DisabledCancellationRepeated)$' -count=1

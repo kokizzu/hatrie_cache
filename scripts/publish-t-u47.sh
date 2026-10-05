@@ -5,12 +5,19 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 feature_files=(
+	ADOPTED_QUERY_ENGINE_IDEAS.md
+	BENCHMARK.md
 	PEER_CALL_CANCELLATION.md
+	PRODUCT_IDEA_GAPS.md
+	README.md
 	hat/hatPeer/connection_pool_lifecycle.go
 	hat/hatPeer/connection_pool_cancellation_test.go
+	hat/hatPeer/compact_session.go
+	hat/hatPeer/tu47_context_write_test.go
 	scripts/benchmark-t-u47.sh
 	scripts/format-t-u47.sh
 	scripts/publish-t-u47.sh
+	scripts/race-t-u47.sh
 	scripts/test-t-u47.sh
 )
 
@@ -52,6 +59,10 @@ benchmark-t-u47:
 .PHONY: publish-t-u47
 publish-t-u47:
 	@bash scripts/publish-t-u47.sh
+
+.PHONY: race-t-u47
+race-t-u47:
+	@bash scripts/race-t-u47.sh
 EOF
 fi
 

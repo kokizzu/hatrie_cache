@@ -71,3 +71,36 @@ make benchmark-t-u47
 
 The publisher additionally runs the race detector, `go vet`, and the complete
 repository test suite before committing.
+
+## Interrupting Compact-Peer Writes
+
+`CompactPeerSessionOptions.EnableWriteCancellation` is a separate opt-in for
+the compact protocol. When enabled, `Call` and `CallTemplate` apply the caller
+deadline to the socket write and interrupt a blocked write when the caller
+cancels. The write deadline is restored after each completed write.
+
+If cancellation interrupts a frame write, the session is closed. Reusing a
+connection after a partial frame could desynchronize the compact protocol, so
+discarding that connection is the correctness-preserving cleanup action. If a
+frame has already been written, ordinary pending-response cancellation keeps
+the session reusable and follows the existing request-cancellation setting.
+
+This option adds no wire fields and is disabled by default. The pool lifecycle
+API still governs pool shutdown, while this option covers the lower-level
+socket-write boundary for compact sessions.
+
+### Measured Cost
+
+Five `-benchtime=500ms` samples were collected on Linux/amd64 with an AMD Ryzen
+9 5950X. The exact baseline is the clean parent worktree; the default-after
+path is the same cancelable-context workload with write cancellation disabled.
+
+| Workload | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Clean parent cancelable call | 5,990 | 656 | 10 | baseline |
+| Current default, option disabled | 5,923 | 656 | 10 | `0.99x` CPU; same allocations |
+| Opt-in write cancellation enabled | 7,392 | 1,096 | 17 | `1.25x` CPU, `1.67x` bytes, +7 allocations vs default |
+
+The opt-in path intentionally pays this cost only when a caller requires a
+blocked socket write to observe cancellation. The default path keeps the
+existing allocation profile.

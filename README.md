@@ -192,7 +192,7 @@ security guidance before exposing it on a network.
 - Snapshot-consistent ordered index cursors: [ORDERED_SNAPSHOT_CURSOR.md](ORDERED_SNAPSHOT_CURSOR.md)
 - Opt-in per-space memory quotas: [SPACE_MEMORY_QUOTA.md](SPACE_MEMORY_QUOTA.md)
 - Opt-in per-space operation statistics: [SPACE_OPERATION_STATS.md](SPACE_OPERATION_STATS.md)
-- Opt-in peer-call lifecycle cancellation: [PEER_CALL_CANCELLATION.md](PEER_CALL_CANCELLATION.md)
+- Opt-in peer-call lifecycle and compact-peer blocked-write cancellation: [PEER_CALL_CANCELLATION.md](PEER_CALL_CANCELLATION.md#interrupting-compact-peer-writes)
 - Opt-in index cardinality and hot-key statistics: [INDEX_STATS.md](INDEX_STATS.md)
 - Opt-in method-aware peer retries: [RETRY_POLICY.md](RETRY_POLICY.md)
 - Opt-in bounded replica read hedging: [REPLICA_HEDGING.md](REPLICA_HEDGING.md)

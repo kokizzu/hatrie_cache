@@ -11503,6 +11503,10 @@ benchmark-t-u47:
 publish-t-u47:
 	@bash scripts/publish-t-u47.sh
 
+.PHONY: race-t-u47
+race-t-u47:
+	@bash scripts/race-t-u47.sh
+
 .PHONY: test-t-u46
 test-t-u46:
 	@bash scripts/test-t-u46.sh

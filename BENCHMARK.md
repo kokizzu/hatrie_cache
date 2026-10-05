@@ -33237,3 +33237,23 @@ samples ran on Linux/amd64, AMD Ryzen 9 5950X, with 1,024 rows where applicable.
 The point-lookup row compares one indexed equality candidate with the old
 1,024-row full scan and is intentionally selective. Full raw samples and API
 limitations are in [TU16_MEMTX_TABLE.md](TU16_MEMTX_TABLE.md).
+
+## T-U47 Context-aware compact-peer writes
+
+This measures the existing cancelable compact call with the new write
+cancellation option disabled and enabled. The clean parent worktree is the
+pre-change baseline. Five `500ms` `-benchmem` samples ran on Linux/amd64 with
+an AMD Ryzen 9 5950X.
+
+| Workload | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | --- | ---: | ---: | ---: | --- |
+| Clean parent cancelable call | 5,907; 5,906; 5,990; 6,103; 6,168 | 5,990 | 656 | 10 | baseline |
+| Current default, write cancellation disabled | 5,896; 5,871; 6,060; 5,923; 6,179 | 5,923 | 656 | 10 | 0.99x CPU; same allocations |
+| Opt-in write cancellation enabled | 7,465; 7,392; 7,057; 7,601; 7,264 | 7,392 | 1,096 | 17 | 1.25x CPU; 1.67x bytes; +7 allocs vs default |
+
+The opt-in path is a correctness feature for callers that must interrupt a
+blocked socket write. It is disabled by default to keep ordinary compact calls
+on the existing allocation profile. The focused regression test demonstrates
+that the pre-change path remains blocked while the opt-in path returns
+`context.Canceled` and closes the unsafe partial-frame session. See
+[PEER_CALL_CANCELLATION.md](PEER_CALL_CANCELLATION.md#interrupting-compact-peer-writes).
