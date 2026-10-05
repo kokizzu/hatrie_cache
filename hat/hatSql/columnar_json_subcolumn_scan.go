@@ -313,7 +313,7 @@ func executeSQLColumnarJSONSubcolumnGroupAggregate(q *sqlQuery, batch ColumnarBa
 			return SQLQueryResult{}, true, fmt.Errorf("SQL group row limit exceeded: group contains %d rows, maximum %d", group.count, control.options.MaxGroupRowsPerKey)
 		}
 	}
-	if control != nil && (control.options.MaxGroupBytes > 0 || control.operatorMemory != nil) {
+	if control != nil && (control.options.MaxGroupBytes > 0 || control.operatorMemory != nil || control.operatorMemoryProfiler != nil) {
 		groupBytes := sqlColumnarJSONSubcolumnGroupMemoryBytes(groups)
 		if err := control.observeOperatorMemory("GROUP BY", groupBytes); err != nil {
 			return SQLQueryResult{}, true, err

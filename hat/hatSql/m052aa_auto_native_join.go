@@ -68,7 +68,7 @@ func sqlAutoNativeJoinEligible(query *sqlQuery, resolver SQLSourceResolver, opti
 	if options.Collation != "" || options.Optimizer != nil || options.Workers != 0 || options.IndexHint.Source != "" || options.IndexHint.Field != "" || options.IndexHint.Mode != "" || options.AdaptivePlanner != nil || options.IndexAdvisor != nil || options.ProjectionAdvisor != nil || options.IndexUseRecorder != nil || options.SlowQueryRecorder != nil {
 		return false
 	}
-	if options.MaxJoinBytes > 0 || options.JoinOverflowPolicy != "" || options.SpillBloom || options.RuntimeJoinBloomFilter || options.OperatorMemoryTracker != nil || options.RequireSourceFrontier || options.AsOfFrontier != nil || options.FinalSourceOptions != nil || options.SnapshotToken != "" || options.PlanSnapshot != nil || options.ConditionCache != nil {
+	if options.MaxJoinBytes > 0 || options.JoinOverflowPolicy != "" || options.SpillBloom || options.RuntimeJoinBloomFilter || options.OperatorMemoryTracker != nil || (options.QueryProfiler != nil && options.QueryProfiler.captureOperatorMemory) || options.RequireSourceFrontier || options.AsOfFrontier != nil || options.FinalSourceOptions != nil || options.SnapshotToken != "" || options.PlanSnapshot != nil || options.ConditionCache != nil {
 		return false
 	}
 	if sqlAutoNativeDataflowHasSpecializedResolver(resolver) {

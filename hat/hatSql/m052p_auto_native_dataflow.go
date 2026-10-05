@@ -114,7 +114,7 @@ func sqlAutoNativeDataflowEligible(query *sqlQuery, resolver SQLSourceResolver, 
 }
 
 func sqlAutoNativeUnionBranchEligible(query *sqlQuery, resolver SQLSourceResolver, options SQLQueryOptions) bool {
-	if options.MaxIntermediateRows > 0 || options.OperatorMemoryTracker != nil || options.RequireSourceFrontier || options.AsOfFrontier != nil || options.FinalSourceOptions != nil || options.SnapshotToken != "" || options.PlanSnapshot != nil || options.ConditionCache != nil {
+	if options.MaxIntermediateRows > 0 || options.OperatorMemoryTracker != nil || (options.QueryProfiler != nil && options.QueryProfiler.captureOperatorMemory) || options.RequireSourceFrontier || options.AsOfFrontier != nil || options.FinalSourceOptions != nil || options.SnapshotToken != "" || options.PlanSnapshot != nil || options.ConditionCache != nil {
 		return false
 	}
 	return sqlAutoNativeDataflowEligible(query, resolver, options)

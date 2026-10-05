@@ -5028,3 +5028,11 @@ the API, tradeoff, and benchmark.
 
 Run `make test-t234`, `make race-t234`, `make vet-t234`, and
 `make benchmark-t234` for the focused checks and measurements.
+
+## Automatic SQL Operator Memory Profiles
+
+Set `SQLQueryProfilerOptions.CaptureOperatorMemory` to publish bounded logical
+working-byte peaks for executor `GROUP BY`, `SORT`, and set-operation hooks.
+The flag is off by default and does not measure process RSS or allocator
+ownership. See [CHU26_OPERATOR_MEMORY_PROFILES.md](CHU26_OPERATOR_MEMORY_PROFILES.md)
+and the measured tradeoff in [BENCHMARK.md](BENCHMARK.md#ch-u26-automatic-sql-operator-memory-profiles).

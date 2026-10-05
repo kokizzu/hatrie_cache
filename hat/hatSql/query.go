@@ -403,7 +403,9 @@ type SQLQueryOptions struct {
 	Observer           SQLQueryObserver
 	// QueryProfiler converts completed query stages into bounded samples. It is
 	// disabled by default. Allocation fields are measured once at the query
-	// boundary and are not attributed to individual stages.
+	// boundary and are not attributed to individual stages. Set
+	// CaptureOperatorMemory on the profiler to publish logical retained-byte
+	// observations for executor operators that already expose bounded tracking.
 	QueryProfiler *SQLQueryProfiler
 	// IndexAdvisor records candidate index fields only for observed slow scans.
 	// Nil preserves the existing privacy-safe telemetry-only behavior.
@@ -428,8 +430,9 @@ type SQLQueryOptions struct {
 	Optimizer *SQLQueryOptimizer
 	// OptimizerTrace enables a bounded rule and planner-decision trace on the
 	// materialized result. Nil preserves the default allocation-free path.
-	OptimizerTrace *SQLOptimizerTraceOptions
-	optimizerTrace *SQLOptimizerTrace
+	OptimizerTrace        *SQLOptimizerTraceOptions
+	optimizerTrace        *SQLOptimizerTrace
+	operatorMemoryQueryID string
 	// SlowQueryRecorder retains privacy-safe samples only for queries that
 	// meet SlowQueryThreshold. Nil disables sample retention.
 	SlowQueryRecorder *SQLSlowQueryRecorder
@@ -786,6 +789,13 @@ func newSQLQueryObservation(options SQLQueryOptions) sqlQueryObservation {
 	return observation
 }
 
+func bindSQLQueryObservation(options *SQLQueryOptions, observation sqlQueryObservation) {
+	if options == nil {
+		return
+	}
+	options.operatorMemoryQueryID = observation.id
+}
+
 func (observation sqlQueryObservation) finish(result SQLQueryResult, err error, steps []SQLExplainStep, source string, parameters []interface{}) {
 	observation.finishSummary(len(result.Rows), len(result.Columns), observation.resultBytes(result.Rows), err, steps, source, parameters)
 }
@@ -899,6 +909,7 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 	}
 	options.optimizerTrace = newSQLOptimizerTrace(options.OptimizerTrace)
 	observation := newSQLQueryObservation(options)
+	bindSQLQueryObservation(&options, observation)
 	var operatorSteps []SQLExplainStep
 	var quotaReservation SQLQuotaReservation
 	var quotaActive bool
@@ -1134,6 +1145,7 @@ func ExecuteSQLQueryRows(ctx context.Context, source string, resolver SQLSourceR
 		return err
 	}
 	observation := newSQLQueryObservation(options)
+	bindSQLQueryObservation(&options, observation)
 	outputRows, outputColumns, resultBytes := 0, 0, observation.resultBytes(nil)
 	var quotaReservation SQLQuotaReservation
 	var quotaActive bool
@@ -5567,6 +5579,7 @@ func ExecuteSQLQueryPage(ctx context.Context, source string, resolver SQLSourceR
 	}
 	options.optimizerTrace = newSQLOptimizerTrace(options.OptimizerTrace)
 	observation := newSQLQueryObservation(options)
+	bindSQLQueryObservation(&options, observation)
 	var operatorSteps []SQLExplainStep
 	result.QueryID = observation.id
 	defer func() {
@@ -8362,24 +8375,26 @@ func executeSQLQuery(q *sqlQuery, resolver SQLSourceResolver, ctes map[string][]
 }
 
 type sqlExecutionControl struct {
-	ctx               context.Context
-	maxRows           int
-	options           SQLQueryOptions
-	parameters        []interface{}
-	joinWork          int
-	sources           map[string][]SQLRow
-	finalSources      map[string][]SQLRow
-	arena             sqlExecutionArena
-	spillQuota        *sqlSpillQuota
-	operatorMemory    *SQLOperatorMemoryTracker
-	yieldEvery        uint64
-	yieldFuel         atomic.Uint64
-	yields            atomic.Uint64
-	maxExecutionSteps uint64
-	executionSteps    uint64
-	maxCPUTime        time.Duration
-	cpuTimeSource     *SQLCPUTimeSource
-	cpuStart          time.Duration
+	ctx                    context.Context
+	maxRows                int
+	options                SQLQueryOptions
+	parameters             []interface{}
+	joinWork               int
+	sources                map[string][]SQLRow
+	finalSources           map[string][]SQLRow
+	arena                  sqlExecutionArena
+	spillQuota             *sqlSpillQuota
+	operatorMemory         *SQLOperatorMemoryTracker
+	operatorMemoryProfiler *SQLQueryProfiler
+	operatorMemoryQueryID  string
+	yieldEvery             uint64
+	yieldFuel              atomic.Uint64
+	yields                 atomic.Uint64
+	maxExecutionSteps      uint64
+	executionSteps         uint64
+	maxCPUTime             time.Duration
+	cpuTimeSource          *SQLCPUTimeSource
+	cpuStart               time.Duration
 }
 
 // sqlExecutionControlContext preserves the normal context contract while
@@ -8399,10 +8414,22 @@ func (control *sqlExecutionControl) executionContext() context.Context {
 }
 
 func (control *sqlExecutionControl) observeOperatorMemory(operator string, currentBytes int) error {
-	if control == nil || control.operatorMemory == nil {
+	if control == nil {
 		return nil
 	}
-	return control.operatorMemory.Observe(operator, currentBytes)
+	if control.operatorMemory != nil {
+		if err := control.operatorMemory.Observe(operator, currentBytes); err != nil {
+			return err
+		}
+	}
+	if control.operatorMemoryProfiler != nil && control.operatorMemoryQueryID != "" && currentBytes >= 0 {
+		bytes := uint64(currentBytes)
+		_, _ = control.operatorMemoryProfiler.RecordMemory(control.operatorMemoryQueryID, operator, SQLQueryMemorySample{
+			PeakBytes:     bytes,
+			RetainedBytes: bytes,
+		})
+	}
+	return nil
 }
 
 func (control *sqlExecutionControl) releaseOperatorMemory(operator string) {
@@ -8454,7 +8481,12 @@ func newSQLExecutionControl(ctx context.Context, options SQLQueryOptions) (*sqlE
 		return nil, func() {}, fmt.Errorf("unsupported SQL collation %q", options.Collation)
 	}
 	newControl := func(controlContext context.Context) *sqlExecutionControl {
-		control := &sqlExecutionControl{ctx: controlContext, maxRows: sqlQueryMaxRows(options), options: options, sources: map[string][]SQLRow{}, operatorMemory: options.OperatorMemoryTracker, maxExecutionSteps: uint64(options.MaxExecutionSteps), maxCPUTime: options.MaxCPUTime, cpuTimeSource: options.CPUTimeSource}
+		operatorMemory := options.OperatorMemoryTracker
+		var operatorMemoryProfiler *SQLQueryProfiler
+		if options.QueryProfiler != nil && options.QueryProfiler.captureOperatorMemory {
+			operatorMemoryProfiler = options.QueryProfiler
+		}
+		control := &sqlExecutionControl{ctx: controlContext, maxRows: sqlQueryMaxRows(options), options: options, sources: map[string][]SQLRow{}, operatorMemory: operatorMemory, operatorMemoryProfiler: operatorMemoryProfiler, operatorMemoryQueryID: options.operatorMemoryQueryID, maxExecutionSteps: uint64(options.MaxExecutionSteps), maxCPUTime: options.MaxCPUTime, cpuTimeSource: options.CPUTimeSource}
 		if control.maxCPUTime > 0 {
 			control.cpuStart = control.cpuTimeSource.now()
 		}
@@ -12640,7 +12672,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 		}
 	}
 	groupBytes := 0
-	if control != nil && (control.options.MaxGroupBytes > 0 || control.operatorMemory != nil) {
+	if control != nil && (control.options.MaxGroupBytes > 0 || control.operatorMemory != nil || control.operatorMemoryProfiler != nil) {
 		groupBytes = sqlGroupedRowsBytes(groups)
 		if err := control.observeOperatorMemory("GROUP BY", groupBytes); err != nil {
 			return SQLQueryResult{}, err
@@ -13042,7 +13074,7 @@ func executeSQLQueryWithMetricsOuter(q *sqlQuery, resolver SQLSourceResolver, ct
 			}
 			spillRecords = append(spillRecords, record)
 		}
-		if control != nil && (control.options.MaxSortBytes > 0 || control.operatorMemory != nil) && !sqlQueryHasWithFill(q) {
+		if control != nil && (control.options.MaxSortBytes > 0 || control.operatorMemory != nil || control.operatorMemoryProfiler != nil) && !sqlQueryHasWithFill(q) {
 			sortBytes := 0
 			for _, item := range out {
 				sortBytes += sqlRowBytes(item.row)

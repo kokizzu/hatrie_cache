@@ -47,6 +47,9 @@ type SQLQueryProfilerOptions struct {
 	// It is off by default because runtime memory snapshots are substantially
 	// more expensive than recording existing execution-stage metrics.
 	CaptureAllocations bool
+	// CaptureOperatorMemory publishes logical retained-byte observations from
+	// the executor's bounded operator memory tracker. It is off by default.
+	CaptureOperatorMemory bool
 }
 
 // SQLQueryProfileSample is one privacy-safe operator observation. CPUTime and
@@ -62,11 +65,10 @@ type SQLQueryProfileSample struct {
 	Timestamp   time.Time     `json:"timestamp"`
 }
 
-// SQLQueryMemorySample is one caller-supplied operator memory observation.
+// SQLQueryMemorySample is one logical operator memory observation.
 // AllocatedBytes is cumulative allocation work for the observation, while
 // PeakBytes and RetainedBytes describe the operator's peak and retained
-// resident bytes. The profiler does not read process-wide runtime statistics;
-// callers provide measurements from their operator instrumentation.
+// working bytes. The profiler does not read process-wide runtime statistics.
 type SQLQueryMemorySample struct {
 	AllocatedBytes uint64 `json:"allocated_bytes"`
 	PeakBytes      uint64 `json:"peak_bytes"`
@@ -143,6 +145,7 @@ type SQLQueryProfiler struct {
 	maxMemoryOperatorsPerQuery    int
 	sampleEvery                   uint64
 	captureAllocations            bool
+	captureOperatorMemory         bool
 	sequence                      uint64
 	querySequence                 uint64
 	sampleCount                   uint64
@@ -198,6 +201,7 @@ func NewSQLQueryProfiler(options SQLQueryProfilerOptions) (*SQLQueryProfiler, er
 		maxMemoryOperatorsPerQuery: maxMemoryOperators,
 		sampleEvery:                sampleEvery,
 		captureAllocations:         options.CaptureAllocations,
+		captureOperatorMemory:      options.CaptureOperatorMemory,
 		queries:                    make(map[string]*sqlQueryProfileState, maxQueries),
 	}, nil
 }

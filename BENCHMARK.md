@@ -39424,3 +39424,22 @@ difference is within normal benchmark noise. Existing join/leave behavior is
 preserved. See [T207_REPLICA_EVICTION_REJOIN.md](T207_REPLICA_EVICTION_REJOIN.md)
 for the recovery sequence, API contract, security boundaries, and verification
 commands.
+
+## CH-U26 Automatic SQL Operator Memory Profiles
+
+Five `-benchmem` samples were measured on an AMD Ryzen 9 5950X, linux/amd64.
+The automatic path publishes logical retained-byte observations from existing
+`GROUP BY`/`SORT`/set tracker hooks; it does not measure process RSS.
+
+| Path | Before median ns/op | After median ns/op | After B/op | After allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Existing query, no tracker | 10097 | 10464 | 8824 | 55 | 1.04x |
+| Existing caller tracker | 13461 | 14477 | 10039 | 82 | 1.08x |
+| Ordinary query profiler | n/a | 18219 | 13024 | 136 | reference |
+| Automatic operator memory | n/a | 20317 | 13731 | 160 | 1.12x ordinary profiler |
+
+Raw automatic samples were `21195, 20945, 19975, 20190, 20317 ns/op`,
+`13731 B/op`, and `160 allocs/op`; ordinary profiler samples were `18251,
+18166, 18712, 18219, 18209 ns/op`, `13024 B/op`, and `136 allocs/op`.
+Automatic capture is opt-in because the diagnostic path costs about 11.5% CPU,
+5.4% bytes, and 17.6% allocations over ordinary profiling in this workload.

@@ -32,6 +32,27 @@ if ok {
 }
 ```
 
+To have the SQL executor publish its existing logical working-byte
+observations automatically, enable `CaptureOperatorMemory`:
+
+```go
+profiler, err := hatSql.NewSQLQueryProfiler(hatSql.SQLQueryProfilerOptions{
+    CaptureOperatorMemory: true,
+})
+if err != nil {
+    return err
+}
+result, err := hatSql.ExecuteSQLQueryContext(ctx, source, resolver,
+    hatSql.SQLQueryOptions{QueryProfiler: profiler})
+```
+
+The automatic path currently covers executor operators that already expose
+bounded logical estimates, including `GROUP BY`, `SORT`, and set operations.
+It records peak and retained logical working bytes in the profiler profile;
+it does not claim process-heap, RSS, allocator, or per-goroutine attribution.
+The flag is off by default, and a caller-supplied
+`OperatorMemoryTracker` remains the enforcement and measurement authority.
+
 `AllocatedBytes` is cumulative allocation work and is added with saturation at
 `math.MaxUint64`. `PeakBytes` and `MaxRetainedBytes` keep the maximum observed
 values. Each accepted observation increments the operator observation count.
@@ -56,9 +77,9 @@ inspected without holding the profiler lock.
 
 The profiler does not inspect process-wide runtime statistics, take heap
 profiles, or infer ownership from goroutines. The SQL executor or another
-caller-owned instrumenter supplies measurements at operator boundaries. This
-keeps the API portable and privacy-safe while allowing a query engine to report
-operator allocation, peak, and retained-byte behavior.
+caller-owned instrumenter supplies logical measurements at operator boundaries.
+This keeps the API portable and privacy-safe while allowing a query engine to
+report operator allocation, peak, and retained-byte behavior.
 
 ## Measurement
 
@@ -75,6 +96,24 @@ The explicit memory path costs about `1.58x` CPU in this isolated accounting
 benchmark because it performs the additional operator aggregation and memory
 map lookup. Both paths remain allocation-free after warm-up. The default
 ordinary profiler path is unchanged unless a caller invokes `RecordMemory`.
+
+## Automatic SQL Executor Capture
+
+Five `-benchmem` samples were measured on the same host. The existing CHG42
+tracker benchmark was measured before and after the wiring change; the new
+CH-U26 benchmark compares no profiler, an ordinary profiler, and automatic
+logical operator capture.
+
+| Path | Before median ns/op | After median ns/op | After B/op | After allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Existing query, no tracker | 10097 | 10464 | 8824 | 55 | 1.04x |
+| Existing caller tracker | 13461 | 14477 | 10039 | 82 | 1.08x |
+| Ordinary query profiler | n/a | 18219 | 13024 | 136 | reference |
+| Automatic operator memory | n/a | 20317 | 13731 | 160 | 1.12x ordinary profiler |
+
+Automatic capture adds about 11.5% CPU, 5.4% bytes, and 17.6% allocations
+versus ordinary query profiling in this workload. It is therefore explicitly
+opt-in and should be used for diagnostics, not enabled on every hot query.
 
 Run the focused checks with:
 
