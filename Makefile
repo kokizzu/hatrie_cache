@@ -22294,3 +22294,7 @@ push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
 bench-tu17-space-engine:
 	bash scripts/benchmark-tu17-space-engine.sh
+.PHONY: benchmark-chu51-group-by-all
+
+benchmark-chu51-group-by-all:
+	sh scripts/benchmark-chu51-group-by-all.sh

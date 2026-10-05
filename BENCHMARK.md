@@ -32726,3 +32726,31 @@ The build allocation is transient and should not be read as retained index
 size. This is a good tradeoff for repeated selective reads, but not for a
 single lookup; conditional indexes are therefore opt-in and are not built
 automatically.
+
+## CHU51: `GROUP BY ALL`
+
+Command:
+
+```sh
+make benchmark-chu51-group-by-all
+```
+
+Five `-count=5` samples on the same 4,096-row grouped-query workload compared
+the existing explicit group list with the `GROUP BY ALL` shorthand.
+
+| form | median ns/op | B/op | allocs/op | relative time |
+| --- | ---: | ---: | ---: | ---: |
+| explicit `GROUP BY` | 942,615 | 687,158 | 152 | baseline |
+| `GROUP BY ALL` | 944,304 | 687,141 | 152 | 1.00x; 1.00x memory and allocations |
+
+Raw samples:
+
+```text
+explicit: 906464 889997 975700 971982 942615 ns/op, 687162 687161 687158 687157 687158 B/op, 152 allocs/op
+all:      936949 951626 954031 944304 894585 ns/op, 687141 687140 687142 687141 687141 B/op, 152 allocs/op
+```
+
+This is a SQL compatibility and ergonomics improvement, not a runtime
+optimization. The parser expands selected non-aggregate expressions into the
+existing grouping executor, keeps aggregate-only queries global, and rejects
+`SELECT *` because there is no schema expansion in this path.

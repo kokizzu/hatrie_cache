@@ -750,3 +750,12 @@ background rebuild remain caller-owned. The 10,000-row selective fixture is
 one-time build costs 11.6 ms and 8.1 MB transient allocation. See
 [TU24_CONDITIONAL_SPACE_INDEXES.md](TU24_CONDITIONAL_SPACE_INDEXES.md) and
 [BENCHMARK.md](BENCHMARK.md#t-u24-conditional-space-indexes).
+
+## ClickHouse CH-U51: `GROUP BY ALL`
+
+Adopted as parser-time expansion of the selected non-aggregate and non-window
+expressions into the existing grouped SQL path. Aggregate-only queries keep a
+single global group, mixed expressions contribute their non-aggregate
+components, and `SELECT *` is rejected rather than guessed. Existing explicit
+`GROUP BY` behavior is unchanged. See [CHU51_GROUP_BY_ALL.md](CHU51_GROUP_BY_ALL.md)
+and [BENCHMARK.md](BENCHMARK.md#chu51-group-by-all).

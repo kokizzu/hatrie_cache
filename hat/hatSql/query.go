@@ -5935,6 +5935,7 @@ type sqlQuery struct {
 	where              sqlExpr
 	prewhere           sqlExpr
 	groupBy            []sqlExpr
+	groupByAll         bool
 	groupingSets       [][]sqlExpr
 	groupingDimensions []sqlExpr
 	having             sqlExpr
@@ -6284,20 +6285,25 @@ func (p *sqlQueryParser) parseQueryInternal(stopRight bool) (*sqlQuery, error) {
 			}
 			q.prewhere = expr
 		case p.keyword("GROUP"):
-			if q.groupBy != nil || q.groupingSets != nil {
+			if q.groupBy != nil || q.groupByAll || q.groupingSets != nil {
 				return nil, p.diagnostic(p.current(), "GROUP BY appears more than once")
 			}
 			p.next()
 			if err := p.expectKeyword("BY"); err != nil {
 				return nil, err
 			}
-			values, sets, dimensions, err := p.parseSQLGroupingClause()
-			if err != nil {
-				return nil, err
+			if p.keyword("ALL") {
+				q.groupByAll = true
+				p.next()
+			} else {
+				values, sets, dimensions, err := p.parseSQLGroupingClause()
+				if err != nil {
+					return nil, err
+				}
+				q.groupBy = values
+				q.groupingSets = sets
+				q.groupingDimensions = dimensions
 			}
-			q.groupBy = values
-			q.groupingSets = sets
-			q.groupingDimensions = dimensions
 		case p.keyword("HAVING"):
 			if q.having.kind != "" {
 				return nil, p.diagnostic(p.current(), "HAVING appears more than once")
@@ -6499,6 +6505,9 @@ func (p *sqlQueryParser) parseQueryInternal(stopRight bool) (*sqlQuery, error) {
 		if sqlExprHasWindow(q.qualify) {
 			return nil, p.diagnostic(q.qualify.token, "QUALIFY window expressions must be selected with an alias and referenced by that alias")
 		}
+	}
+	if err := sqlExpandGroupByAll(q); err != nil {
+		return nil, p.diagnostic(p.current(), err.Error())
 	}
 	if err := sqlExpandGroupingSets(q); err != nil {
 		return nil, p.diagnostic(p.current(), err.Error())
