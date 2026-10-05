@@ -32,6 +32,32 @@ const (
 	DifferentialWindowFrameRange
 )
 
+// DifferentialWindowFrameBoundKind describes one SQL-style frame boundary.
+// Offset keeps the existing signed relative-position semantics; the other
+// kinds provide the unbounded and current-row boundaries used by SQL frames.
+type DifferentialWindowFrameBoundKind uint8
+
+const (
+	DifferentialWindowBoundOffset DifferentialWindowFrameBoundKind = iota + 1
+	DifferentialWindowBoundUnboundedPreceding
+	DifferentialWindowBoundCurrentRow
+	DifferentialWindowBoundUnboundedFollowing
+)
+
+// DifferentialWindowFrameBound is one explicit frame boundary.
+type DifferentialWindowFrameBound struct {
+	Kind   DifferentialWindowFrameBoundKind
+	Offset int64
+}
+
+// DifferentialWindowFrame configures SQL-style inclusive start and end
+// boundaries. It is opt-in so existing numeric Start/End callers remain
+// source-compatible and keep their current fast path.
+type DifferentialWindowFrame struct {
+	Start DifferentialWindowFrameBound
+	End   DifferentialWindowFrameBound
+}
+
 // DifferentialWindowValue extracts an optional numeric value for frame sums.
 // Returning false excludes the row from FrameSum while it remains in
 // FrameCount. A nil extractor disables sum calculation.
@@ -85,26 +111,49 @@ type differentialWindowOutputID struct {
 // from signed differential updates. It is intentionally opt-in and keeps the
 // existing append-only IncrementalRowNumberLagWindow behavior unchanged.
 type DifferentialWindow struct {
-	mu           sync.RWMutex
-	partitionKey func(SQLRow) string
-	mode         DifferentialWindowFrameMode
-	start        int64
-	end          int64
-	value        DifferentialWindowValue
-	maxRows      int
-	entries      map[differentialWindowRowID]differentialWindowEntry
-	partitions   map[string]map[differentialWindowRowID]struct{}
+	mu            sync.RWMutex
+	partitionKey  func(SQLRow) string
+	mode          DifferentialWindowFrameMode
+	start         int64
+	end           int64
+	frame         DifferentialWindowFrame
+	explicitFrame bool
+	value         DifferentialWindowValue
+	maxRows       int
+	entries       map[differentialWindowRowID]differentialWindowEntry
+	partitions    map[string]map[differentialWindowRowID]struct{}
 }
 
-// NewDifferentialWindow validates options and creates an empty exact window.
+// NewDifferentialWindow validates legacy numeric options and creates an empty
+// exact window. Use NewDifferentialWindowWithFrame for explicit SQL-style
+// boundaries without changing the legacy options shape.
 func NewDifferentialWindow(options DifferentialWindowOptions) (*DifferentialWindow, error) {
+	return newDifferentialWindow(options, false, DifferentialWindowFrame{})
+}
+
+// NewDifferentialWindowWithFrame creates an exact window with explicit
+// SQL-style inclusive frame boundaries.
+func NewDifferentialWindowWithFrame(options DifferentialWindowOptions, frame DifferentialWindowFrame) (*DifferentialWindow, error) {
+	return newDifferentialWindow(options, true, frame)
+}
+
+func newDifferentialWindow(options DifferentialWindowOptions, explicit bool, explicitFrame DifferentialWindowFrame) (*DifferentialWindow, error) {
 	if options.Mode == 0 {
 		options.Mode = DifferentialWindowFrameRows
 	}
 	if options.Mode != DifferentialWindowFrameRows && options.Mode != DifferentialWindowFrameRange {
 		return nil, ErrDifferentialWindowFrameInvalid
 	}
-	if options.Start > options.End {
+	frame := DifferentialWindowFrame{
+		Start: DifferentialWindowFrameBound{Kind: DifferentialWindowBoundOffset, Offset: options.Start},
+		End:   DifferentialWindowFrameBound{Kind: DifferentialWindowBoundOffset, Offset: options.End},
+	}
+	if explicit {
+		frame = explicitFrame
+		if err := validateDifferentialWindowFrame(frame); err != nil {
+			return nil, err
+		}
+	} else if options.Start > options.End {
 		return nil, ErrDifferentialWindowFrameInvalid
 	}
 	if options.MaxRows < 0 {
@@ -114,14 +163,16 @@ func NewDifferentialWindow(options DifferentialWindowOptions) (*DifferentialWind
 		options.MaxRows = DefaultDifferentialWindowMaxRows
 	}
 	return &DifferentialWindow{
-		partitionKey: options.PartitionKey,
-		mode:         options.Mode,
-		start:        options.Start,
-		end:          options.End,
-		value:        options.Value,
-		maxRows:      options.MaxRows,
-		entries:      make(map[differentialWindowRowID]differentialWindowEntry),
-		partitions:   make(map[string]map[differentialWindowRowID]struct{}),
+		partitionKey:  options.PartitionKey,
+		mode:          options.Mode,
+		start:         options.Start,
+		end:           options.End,
+		frame:         frame,
+		explicitFrame: explicit,
+		value:         options.Value,
+		maxRows:       options.MaxRows,
+		entries:       make(map[differentialWindowRowID]differentialWindowEntry),
+		partitions:    make(map[string]map[differentialWindowRowID]struct{}),
 	}, nil
 }
 
@@ -369,6 +420,9 @@ func (window *DifferentialWindow) partitionRows(entries map[differentialWindowRo
 }
 
 func (window *DifferentialWindow) frameIndexes(records []differentialWindowEntry, index int) (int, int) {
+	if window.explicitFrame {
+		return window.explicitFrameIndexes(records, index)
+	}
 	if window.mode == DifferentialWindowFrameRows {
 		start := differentialWindowIndexOffset(index, window.start)
 		end := differentialWindowIndexOffset(index, window.end)
@@ -395,6 +449,105 @@ func (window *DifferentialWindow) frameIndexes(records []differentialWindowEntry
 		return records[recordIndex].id.time > upper
 	})
 	return start, endExclusive - 1
+}
+
+func (window *DifferentialWindow) explicitFrameIndexes(records []differentialWindowEntry, index int) (int, int) {
+	if window.mode == DifferentialWindowFrameRows {
+		start := differentialWindowFrameRowIndex(window.frame.Start, index, len(records))
+		end := differentialWindowFrameRowIndex(window.frame.End, index, len(records))
+		if start < 0 {
+			start = 0
+		}
+		if end >= int64(len(records)) {
+			end = int64(len(records) - 1)
+		}
+		if start >= int64(len(records)) {
+			start = int64(len(records))
+		}
+		if end < -1 {
+			end = -1
+		}
+		return int(start), int(end)
+	}
+
+	start := 0
+	if window.frame.Start.Kind != DifferentialWindowBoundUnboundedPreceding {
+		lower := differentialWindowFrameTime(records[index].id.time, window.frame.Start)
+		start = sort.Search(len(records), func(recordIndex int) bool {
+			return records[recordIndex].id.time >= lower
+		})
+	}
+	endExclusive := len(records)
+	if window.frame.End.Kind != DifferentialWindowBoundUnboundedFollowing {
+		upper := differentialWindowFrameTime(records[index].id.time, window.frame.End)
+		endExclusive = sort.Search(len(records), func(recordIndex int) bool {
+			return records[recordIndex].id.time > upper
+		})
+	}
+	return start, endExclusive - 1
+}
+
+func differentialWindowFrameRowIndex(bound DifferentialWindowFrameBound, index, length int) int64 {
+	switch bound.Kind {
+	case DifferentialWindowBoundUnboundedPreceding:
+		return 0
+	case DifferentialWindowBoundCurrentRow:
+		return int64(index)
+	case DifferentialWindowBoundUnboundedFollowing:
+		return int64(length)
+	case DifferentialWindowBoundOffset:
+		return differentialWindowIndexOffset(index, bound.Offset)
+	default:
+		return int64(length)
+	}
+}
+
+func differentialWindowFrameTime(value uint64, bound DifferentialWindowFrameBound) uint64 {
+	switch bound.Kind {
+	case DifferentialWindowBoundCurrentRow:
+		return value
+	case DifferentialWindowBoundOffset:
+		return differentialWindowShift(value, bound.Offset)
+	default:
+		return 0
+	}
+}
+
+func validateDifferentialWindowFrame(frame DifferentialWindowFrame) error {
+	if !validDifferentialWindowFrameBound(frame.Start) || !validDifferentialWindowFrameBound(frame.End) {
+		return ErrDifferentialWindowFrameInvalid
+	}
+	if frame.Start.Kind == DifferentialWindowBoundUnboundedFollowing || frame.End.Kind == DifferentialWindowBoundUnboundedPreceding {
+		return ErrDifferentialWindowFrameInvalid
+	}
+	if differentialWindowFrameBoundRank(frame.Start) > differentialWindowFrameBoundRank(frame.End) {
+		return ErrDifferentialWindowFrameInvalid
+	}
+	return nil
+}
+
+func validDifferentialWindowFrameBound(bound DifferentialWindowFrameBound) bool {
+	switch bound.Kind {
+	case DifferentialWindowBoundOffset:
+		return true
+	case DifferentialWindowBoundUnboundedPreceding, DifferentialWindowBoundCurrentRow, DifferentialWindowBoundUnboundedFollowing:
+		return bound.Offset == 0
+	default:
+		return false
+	}
+}
+
+func differentialWindowFrameBoundRank(bound DifferentialWindowFrameBound) int64 {
+	switch bound.Kind {
+	case DifferentialWindowBoundUnboundedPreceding:
+		return -1 << 63
+	case DifferentialWindowBoundUnboundedFollowing:
+		return 1<<63 - 1
+	case DifferentialWindowBoundCurrentRow, DifferentialWindowBoundOffset:
+		return bound.Offset
+	default:
+		return 1<<63 - 1
+	}
 }
 
 func differentialWindowIndexOffset(index int, offset int64) int64 {
