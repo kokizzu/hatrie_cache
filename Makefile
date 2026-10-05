@@ -22836,3 +22836,11 @@ commit-chg18-session-settings:
 push-chg18-session-settings:
 	bash scripts/deliver-chg18-session-settings.sh push
 include Makefile.chu55-benchmark
+
+.PHONY: race-t-u02 vet-t-u02
+
+race-t-u02:
+	@bash scripts/race-t-u02.sh
+
+vet-t-u02:
+	@bash scripts/vet-t-u02.sh

@@ -33219,3 +33219,24 @@ of the paired post-change control. The separate pre-change control median was
 48.69 ns/op; the difference is within the local benchmark noise envelope and is
 not treated as a regression claim. See [PEER_LIFECYCLE.md](PEER_LIFECYCLE.md)
 for event semantics and test coverage.
+
+## T-U02 Authenticated Compact Peer Daemon
+
+The clean-base control is the existing fixed-size compact handshake. The new
+daemon benchmark adds a real loopback TCP connection, TLS 1.3 mutual
+authentication, version/feature negotiation, session construction, and close.
+Five `-benchmem` samples were run on Linux/amd64, AMD Ryzen 9 5950X, with a
+500ms duration per sample. The daemon path is a connection-establishment
+measurement, not a claim that an already-open session should be recreated per
+request.
+
+| Path | Raw ns/op samples | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Clean base handshake | 291.5, 298.0, 292.2, 290.8, 286.5 | 291.5 | 240 | 7 | 1.00x |
+| Daemon-enabled handshake control | 294.5, 298.8, 291.0, 301.4, 291.5 | 294.5 | 240 | 7 | 1.01x |
+| Fresh daemon mutual-TLS dial | 1,119,422; 1,131,427; 1,177,241; 1,137,768; 1,164,741 | 1,137,768 | 152,288 | 1,208 | 3,904x |
+
+The control difference is within local noise and has no default-path impact. A
+fresh mutual-TLS dial is intentionally expensive, so callers should reuse the
+returned multiplexed session. The daemon is disabled unless explicitly
+constructed and served.

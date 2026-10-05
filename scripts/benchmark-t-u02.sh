@@ -3,4 +3,4 @@ set -euo pipefail
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repo_root"
-go test ./hat/hatPeer -run '^$' -bench '^BenchmarkPerformCompactPeerHandshake$' -benchmem -count=5
+go test ./hat/hatPeer -run '^$' -bench '^(BenchmarkPerformCompactPeerHandshake|BenchmarkCompactPeerDaemonDial)$' -benchmem -benchtime=500ms -count=5

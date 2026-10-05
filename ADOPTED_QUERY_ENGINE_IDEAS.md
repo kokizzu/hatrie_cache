@@ -790,3 +790,13 @@ details for repair and never silently counts stale or unapplied responses.
 **Remaining:** The embedding service still owns peer transport,
 authentication, retries, ordering, rollback, and wiring the coordinator into a
 real journal commit path.
+
+## Tarantool T-U02: Authenticated Compact Peer Daemon
+
+Adopted as opt-in `hatPeer.CompactPeerDaemon`: it owns a bounded address
+listener, clones and validates TLS policy, supports strict mutual TLS, requires
+an authorization callback, negotiates compact protocol capabilities, and offers
+a context-aware client dial helper. Existing direct listeners and sessions are
+unchanged; cluster membership, discovery, and application authorization remain
+caller-owned. See [COMPACT_PEER_DAEMON.md](COMPACT_PEER_DAEMON.md) and
+[BENCHMARK.md](BENCHMARK.md#t-u02-authenticated-compact-peer-daemon).

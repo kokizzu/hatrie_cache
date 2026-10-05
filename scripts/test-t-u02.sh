@@ -3,4 +3,4 @@ set -euo pipefail
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repo_root"
-go test ./hat/hatPeer -run '^TestCompactPeerListener' -count=1
+go test ./hat/hatPeer -run '^TestCompactPeer(Listener|Handshake|Session|Daemon)' -count=1
