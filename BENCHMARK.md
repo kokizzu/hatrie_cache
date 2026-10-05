@@ -39424,3 +39424,20 @@ difference is within normal benchmark noise. Existing join/leave behavior is
 preserved. See [T207_REPLICA_EVICTION_REJOIN.md](T207_REPLICA_EVICTION_REJOIN.md)
 for the recovery sequence, API contract, security boundaries, and verification
 commands.
+# T212: WAL Retention From Replica Acknowledgments
+
+The focused fence benchmark uses `go test -run '^$' -bench
+'^BenchmarkCommandJournalReplicaRetention$' -benchmem -count=5 ./hat/hatCache`
+on the isolated `codex/inspiration-t212-wal-retention-20261006` worktree.
+
+| Mode | ns/op range | B/op | allocs/op | Relative latency |
+| --- | ---: | ---: | ---: | ---: |
+| Disabled | 6.19-6.32 | 0 | 0 | 1.00x |
+| One replica | 36.09-38.43 | 0 | 0 | 5.97x |
+| Four replicas | 49.22-51.34 | 0 | 0 | 8.08x |
+
+These numbers measure only the in-memory minimum-ack fence scan. The existing
+segmented-prune control measured `65.4-66.7 us/op`, `31.1-32.2 KB/op`, and
+`270 allocs/op` for count-only retention. Its byte-budget control measured
+`174.4-177.5 us/op`, `55.9 KB/op`, and `397 allocs/op`; T212 adds neither
+byte-budget accounting nor allocations to the disabled path.

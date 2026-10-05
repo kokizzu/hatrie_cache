@@ -241,6 +241,7 @@ type CommandJournal struct {
 	recordBatchChunkBytes int
 	outboxRetainFrom      uint64
 	projectionWatermarks  map[string]uint64
+	replicaWatermarks     map[string]uint64
 	idempotency           commandIdempotencyState
 	replayProgress        *commandJournalReplayProgressState
 }

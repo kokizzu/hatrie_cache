@@ -153,7 +153,7 @@ operator control remain the preferred deployment model.
 - [ ] T209 Relay/applier backpressure when a replica falls behind.
 - [ ] T210 Master-master conflict hooks with source and sequence context.
 - [ ] T211 Configurable WAL synchronization modes with durability reporting.
-- [ ] T212 WAL retention and rotation policies tied to replica acknowledgments.
+- [x] T212 WAL retention and rotation policies tied to replica acknowledgments. `CommandJournal.SetReplicaWatermark` protects segments newer than the slowest registered durable replica acknowledgment while preserving existing outbox/projection fences and keeping the default path off; see [T212_WAL_ACK_RETENTION.md](T212_WAL_ACK_RETENTION.md) and [BENCHMARK.md#t212-wal-retention-from-replica-acknowledgments](BENCHMARK.md#t212-wal-retention-from-replica-acknowledgments).
 - [ ] T213 Scheduled snapshots with checkpoint manifests and atomic publication.
 - [ ] T214 Streaming snapshots for replicas without a shared filesystem.
 - [ ] T215 Per-space memtx versus on-disk storage policy.
