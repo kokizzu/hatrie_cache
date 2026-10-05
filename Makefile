@@ -22835,3 +22835,4 @@ commit-chg18-session-settings:
 	bash scripts/deliver-chg18-session-settings.sh commit
 push-chg18-session-settings:
 	bash scripts/deliver-chg18-session-settings.sh push
+include Makefile.chu55-benchmark

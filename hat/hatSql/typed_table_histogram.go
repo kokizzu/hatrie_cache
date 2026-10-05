@@ -117,7 +117,7 @@ func (table *TypedTable) Histogram(field string, options TypedTableHistogramOpti
 		}
 		histogram.ValueCount++
 		if storage.kind == TypedTableInt64 {
-			value := storage.int64s[row]
+			value := storage.int64Value(row)
 			if !histogram.HasMinMax {
 				minInt, maxInt = value, value
 				histogram.Min = TypedInt64(value)
@@ -177,7 +177,7 @@ func (table *TypedTable) Histogram(field string, options TypedTableHistogramOpti
 			} else if table.typedTableRowDeletedLocked(row) || !storage.valid[row] || (table.columnTTLs != nil && table.typedTableColumnExpiredLocked(columnIndex, row)) {
 				continue
 			}
-			index := typedTableIntHistogramIndex(storage.int64s[row], minInt, maxInt, bins)
+			index := typedTableIntHistogramIndex(storage.int64Value(row), minInt, maxInt, bins)
 			histogram.Bins[index].Count++
 		}
 		if table.ttl == nil && table.columnTTLs == nil {

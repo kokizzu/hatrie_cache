@@ -206,7 +206,11 @@ func (storage *typedTableColumnStorage) reserve(additional int) {
 			storage.strings = reserveTypedTableSlice(storage.strings, additional)
 		}
 	case TypedTableInt64:
-		storage.int64s = reserveTypedTableSlice(storage.int64s, additional)
+		if storage.dictionary {
+			storage.dictionaryCodes = reserveTypedTableSlice(storage.dictionaryCodes, additional)
+		} else {
+			storage.int64s = reserveTypedTableSlice(storage.int64s, additional)
+		}
 	case TypedTableFloat64:
 		storage.floats = reserveTypedTableSlice(storage.floats, additional)
 	case TypedTableBool:

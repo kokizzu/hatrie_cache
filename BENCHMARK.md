@@ -33116,6 +33116,26 @@ admission in the current pointer-lease API. It should surround mutation
 operations at a safety boundary, not be placed inside an already protected
 inner loop. The implementation was retained because its value is blocking
 drain semantics and explicit origin policy, not raw speed.
+## CH-U55 typed numeric low-cardinality dictionary
+
+Five samples through `make benchmark-chu55` on Linux/amd64, AMD Ryzen 9 5950X,
+using 2,048 `TypedTableInt64` rows. The dictionary path is explicit
+`DictionaryEncoded: true`; the plain path is the unchanged control.
+
+| Workload | Plain median ns/op | Dictionary median ns/op | Relative CPU | Plain tracked payload | Dictionary tracked payload | Plain B/op | Dictionary B/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Upsert, 8 values | 906,879 | 905,674 | 1.00x | 18,432 | 10,304 | 1,295,071 | 1,256,526 |
+| Upsert, 2,048 values | 872,965 | 1,117,441 | 0.78x | 18,432 | 26,624 | 1,295,070 | 1,485,640 |
+| Upsert plus `Rows`, 8 values | 1,465,932 | 1,467,549 | 1.00x | 18,432 | 10,304 | 2,099,941 | 2,061,396 |
+| Upsert plus `Rows`, 2,048 values | 1,493,946 | 1,707,346 | 0.88x | 18,432 | 26,624 | 2,114,279 | 2,304,852 |
+
+The repeated eight-value case reduces the tracked numeric payload by 44.1%
+without a material CPU regression in this fixture. The unique-value case is a
+regression: 1.29x slower for upsert and 44.4% larger tracked payload before
+dictionary-map overhead. The option remains explicit and disabled by default;
+see [CHU55_TYPED_NUMERIC_DICTIONARY.md](CHU55_TYPED_NUMERIC_DICTIONARY.md) for
+raw methodology, allocation counts, and correctness coverage.
+
 ## CH-U47 Parallel CSV Parsing
 
 The explicit `ParseCSVParallel`/`ImportCSVParallel` path is 1.42x faster than

@@ -1,0 +1,4 @@
+.PHONY: benchmark-chu55
+
+benchmark-chu55:
+	@bash ./scripts/benchmark-chu55-numeric-dictionary.sh

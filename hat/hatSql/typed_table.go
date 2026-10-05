@@ -55,7 +55,9 @@ type TypedTableColumn struct {
 	Name string
 	Kind TypedTableKind
 	// TTL independently masks this column after expiry while retaining its row.
-	TTL               TypedTableTTLOptions
+	TTL TypedTableTTLOptions
+	// DictionaryEncoded stores repeated string or int64 values as uint32 row
+	// codes. It is explicit opt-in and is intended for low-cardinality columns.
 	DictionaryEncoded bool
 	// DictionaryAdaptive samples the first bounded batch of string rows and
 	// promotes the column only when the observed cardinality is low enough to
@@ -178,19 +180,21 @@ type TypedTableChange struct {
 }
 
 type typedTableColumnStorage struct {
-	kind                TypedTableKind
-	strings             []string
-	dictionary          bool
-	adaptiveDictionary  *typedTableDictionaryProbe
-	dictionaryValues    []string
-	dictionaryCodes     []uint32
-	dictionaryPositions map[string]uint32
-	dictionaryCounts    []uint32
-	dictionaryFree      []uint32
-	int64s              []int64
-	floats              []float64
-	bools               []bool
-	valid               []bool
+	kind                     TypedTableKind
+	strings                  []string
+	dictionary               bool
+	adaptiveDictionary       *typedTableDictionaryProbe
+	dictionaryValues         []string
+	dictionaryCodes          []uint32
+	dictionaryPositions      map[string]uint32
+	dictionaryCounts         []uint32
+	dictionaryFree           []uint32
+	dictionaryInt64Values    []int64
+	dictionaryInt64Positions map[int64]uint32
+	int64s                   []int64
+	floats                   []float64
+	bools                    []bool
+	valid                    []bool
 }
 
 type typedTableDictionaryProbe struct {
@@ -232,7 +236,14 @@ func (storage *typedTableColumnStorage) append(value TypedTableValue) {
 			storage.observeAdaptiveDictionary(value)
 		}
 	case TypedTableInt64:
-		storage.int64s = append(storage.int64s, value.Int64)
+		if storage.dictionary {
+			storage.dictionaryCodes = append(storage.dictionaryCodes, 0)
+			if value.Valid {
+				storage.dictionaryCodes[len(storage.dictionaryCodes)-1] = storage.retainDictionaryInt64Value(value.Int64)
+			}
+		} else {
+			storage.int64s = append(storage.int64s, value.Int64)
+		}
 	case TypedTableFloat64:
 		storage.floats = append(storage.floats, value.Float64)
 	case TypedTableBool:
@@ -259,7 +270,18 @@ func (storage *typedTableColumnStorage) set(index int, value TypedTableValue) {
 			storage.noteAdaptiveDictionaryValue(value)
 		}
 	case TypedTableInt64:
-		storage.int64s[index] = value.Int64
+		if storage.dictionary {
+			if wasValid {
+				storage.releaseDictionaryInt64Value(storage.dictionaryCodes[index])
+			}
+			if value.Valid {
+				storage.dictionaryCodes[index] = storage.retainDictionaryInt64Value(value.Int64)
+			} else {
+				storage.dictionaryCodes[index] = 0
+			}
+		} else {
+			storage.int64s[index] = value.Int64
+		}
 	case TypedTableFloat64:
 		storage.floats[index] = value.Float64
 	case TypedTableBool:
@@ -279,13 +301,26 @@ func (storage *typedTableColumnStorage) value(index int) TypedTableValue {
 			value.String = storage.strings[index]
 		}
 	case TypedTableInt64:
-		value.Int64 = storage.int64s[index]
+		if storage.dictionary {
+			if value.Valid {
+				value.Int64 = storage.dictionaryInt64Values[storage.dictionaryCodes[index]]
+			}
+		} else {
+			value.Int64 = storage.int64s[index]
+		}
 	case TypedTableFloat64:
 		value.Float64 = storage.floats[index]
 	case TypedTableBool:
 		value.Bool = storage.bools[index]
 	}
 	return value
+}
+
+func (storage *typedTableColumnStorage) int64Value(index int) int64 {
+	if storage.dictionary {
+		return storage.dictionaryInt64Values[storage.dictionaryCodes[index]]
+	}
+	return storage.int64s[index]
 }
 
 func (storage *typedTableColumnStorage) copy(index, from int) {
@@ -311,7 +346,20 @@ func (storage *typedTableColumnStorage) copy(index, from int) {
 			storage.strings[index] = storage.strings[from]
 		}
 	case TypedTableInt64:
-		storage.int64s[index] = storage.int64s[from]
+		if storage.dictionary {
+			if wasValid {
+				storage.releaseDictionaryInt64Value(storage.dictionaryCodes[index])
+			}
+			if sourceValid {
+				code := storage.dictionaryCodes[from]
+				storage.dictionaryCounts[code]++
+				storage.dictionaryCodes[index] = code
+			} else {
+				storage.dictionaryCodes[index] = 0
+			}
+		} else {
+			storage.int64s[index] = storage.int64s[from]
+		}
 	case TypedTableFloat64:
 		storage.floats[index] = storage.floats[from]
 	case TypedTableBool:
@@ -320,10 +368,14 @@ func (storage *typedTableColumnStorage) copy(index, from int) {
 }
 
 func (storage *typedTableColumnStorage) truncate(length int) {
-	if storage.dictionary && storage.kind == TypedTableString {
+	if storage.dictionary && (storage.kind == TypedTableString || storage.kind == TypedTableInt64) {
 		for index := length; index < len(storage.valid); index++ {
 			if storage.valid[index] {
-				storage.releaseDictionaryValue(storage.dictionaryCodes[index])
+				if storage.kind == TypedTableString {
+					storage.releaseDictionaryValue(storage.dictionaryCodes[index])
+				} else {
+					storage.releaseDictionaryInt64Value(storage.dictionaryCodes[index])
+				}
 			}
 		}
 	}
@@ -336,7 +388,11 @@ func (storage *typedTableColumnStorage) truncate(length int) {
 			storage.strings = storage.strings[:length]
 		}
 	case TypedTableInt64:
-		storage.int64s = storage.int64s[:length]
+		if storage.dictionary {
+			storage.dictionaryCodes = storage.dictionaryCodes[:length]
+		} else {
+			storage.int64s = storage.int64s[:length]
+		}
 	case TypedTableFloat64:
 		storage.floats = storage.floats[:length]
 	case TypedTableBool:
@@ -374,6 +430,41 @@ func (storage *typedTableColumnStorage) releaseDictionaryValue(code uint32) {
 	storage.dictionaryValues[code] = ""
 	if int(code) == len(storage.dictionaryValues)-1 {
 		storage.dictionaryValues = storage.dictionaryValues[:code]
+		storage.dictionaryCounts = storage.dictionaryCounts[:code]
+		return
+	}
+	storage.dictionaryFree = append(storage.dictionaryFree, code)
+}
+
+func (storage *typedTableColumnStorage) retainDictionaryInt64Value(value int64) uint32 {
+	if code, found := storage.dictionaryInt64Positions[value]; found {
+		storage.dictionaryCounts[code]++
+		return code
+	}
+	var code uint32
+	if length := len(storage.dictionaryFree); length > 0 {
+		code = storage.dictionaryFree[length-1]
+		storage.dictionaryFree = storage.dictionaryFree[:length-1]
+		storage.dictionaryInt64Values[code] = value
+		storage.dictionaryCounts[code] = 1
+	} else {
+		code = uint32(len(storage.dictionaryInt64Values))
+		storage.dictionaryInt64Values = append(storage.dictionaryInt64Values, value)
+		storage.dictionaryCounts = append(storage.dictionaryCounts, 1)
+	}
+	storage.dictionaryInt64Positions[value] = code
+	return code
+}
+
+func (storage *typedTableColumnStorage) releaseDictionaryInt64Value(code uint32) {
+	storage.dictionaryCounts[code]--
+	if storage.dictionaryCounts[code] != 0 {
+		return
+	}
+	value := storage.dictionaryInt64Values[code]
+	delete(storage.dictionaryInt64Positions, value)
+	if int(code) == len(storage.dictionaryInt64Values)-1 {
+		storage.dictionaryInt64Values = storage.dictionaryInt64Values[:code]
 		storage.dictionaryCounts = storage.dictionaryCounts[:code]
 		return
 	}
@@ -545,9 +636,13 @@ func NewTypedTable(schema TypedTableSchema) (*TypedTable, error) {
 		if column.Generated != nil {
 			table.generated = true
 		}
-		table.columns[index].dictionary = column.Kind == TypedTableString && column.DictionaryEncoded
+		table.columns[index].dictionary = (column.Kind == TypedTableString || column.Kind == TypedTableInt64) && column.DictionaryEncoded
 		if table.columns[index].dictionary {
-			table.columns[index].dictionaryPositions = make(map[string]uint32)
+			if column.Kind == TypedTableString {
+				table.columns[index].dictionaryPositions = make(map[string]uint32)
+			} else {
+				table.columns[index].dictionaryInt64Positions = make(map[int64]uint32)
+			}
 		} else if column.Kind == TypedTableString && column.DictionaryAdaptive {
 			table.columns[index].adaptiveDictionary = &typedTableDictionaryProbe{}
 		}
