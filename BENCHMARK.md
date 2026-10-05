@@ -1581,6 +1581,64 @@ default `Upsert` or SQL mutation path. Duplicate/existing-key rejection,
 strict scalar validation, generated columns, NULLs, and atomic failure are
 covered by the focused test target.
 
+## CH-U30: Column-Aware Remote-Part Cache
+
+These five-sample runs used the isolated storage benchmark on Linux amd64 with
+an AMD Ryzen 9 5950X. The clean-base comparison is commit `4fa521b1` before
+column-aware APIs were added. A column loader returns an independently encoded
+column payload; its size is intentionally not compared with the whole-part
+metadata size.
+
+| Operation | Clean base median | CH-U30 median | Relative result |
+| --- | ---: | ---: | --- |
+| Whole-part cached `Get` | 66.98 ns/op, 0 B, 0 allocs | 66.76 ns/op, 0 B, 0 allocs | 1.00x; no regression |
+| Whole-part pinned `Acquire`/`Release` | 116.4 ns/op, 64 B, 1 alloc | 114.1 ns/op, 64 B, 1 alloc | 1.02x faster; same memory |
+| Column cached `GetColumn` | N/A | 95.50 ns/op, 0 B, 0 allocs | New opt-in path |
+| Column prefetch, zero-latency, bounded 2 | N/A | 23,669 ns/op, 5,355-5,357 B, 53 allocs | New opt-in path |
+| Column prefetch, 100 us loader latency, bounded 2 | N/A | 4,297,195 ns/op, 5,560-5,577 B, 55-56 allocs | Loader latency dominates |
+
+Raw CH-U30 samples:
+
+```text
+BenchmarkCHU30RemotePartCacheColumnCachedGet ns/op: 94.90 94.69 97.77 95.50 99.23
+BenchmarkCHU30RemotePartCacheColumnCachedGet B/op: 0 0 0 0 0
+BenchmarkCHU30RemotePartCacheColumnCachedGet allocs/op: 0 0 0 0 0
+BenchmarkCHU30RemotePartCachePrefetchColumns/zero-latency/bounded-2 ns/op: 25321 23669 23166 23391 24515
+BenchmarkCHU30RemotePartCachePrefetchColumns/zero-latency/bounded-2 B/op: 5357 5355 5356 5357 5357
+BenchmarkCHU30RemotePartCachePrefetchColumns/zero-latency/bounded-2 allocs/op: 53 53 53 53 53
+BenchmarkCHU30RemotePartCachePrefetchColumns/remote-latency/bounded-2 ns/op: 4278715 4284179 4297195 4299499 4301111
+BenchmarkCHU30RemotePartCachePrefetchColumns/remote-latency/bounded-2 B/op: 5560 5566 5568 5573 5577
+BenchmarkCHU30RemotePartCachePrefetchColumns/remote-latency/bounded-2 allocs/op: 55 55 55 56 56
+```
+
+Raw whole-part CH-U30 samples:
+
+```text
+BenchmarkRemotePartCache/cached-get ns/op: 66.66 66.76 66.94 66.51 66.96
+BenchmarkRemotePartCache/cached-get B/op: 0 0 0 0 0
+BenchmarkRemotePartCache/cached-get allocs/op: 0 0 0 0 0
+BenchmarkRemotePartCache/pinned-acquire-release ns/op: 114.1 114.3 116.2 113.1 113.3
+BenchmarkRemotePartCache/pinned-acquire-release B/op: 64 64 64 64 64
+BenchmarkRemotePartCache/pinned-acquire-release allocs/op: 1 1 1 1 1
+BenchmarkRemotePartCachePrefetch/zero-latency/sequential ns/op: 53112 52451 52035 51687 52107
+BenchmarkRemotePartCachePrefetch/zero-latency/sequential B/op: 139273 139273 139273 139273 139273
+BenchmarkRemotePartCachePrefetch/zero-latency/sequential allocs/op: 87 87 87 87 87
+BenchmarkRemotePartCachePrefetch/zero-latency/bounded-2 ns/op: 80235 77680 78280 83104 79491
+BenchmarkRemotePartCachePrefetch/zero-latency/bounded-2 B/op: 142649 142644 142644 142645 142645
+BenchmarkRemotePartCachePrefetch/zero-latency/bounded-2 allocs/op: 100 100 100 100 100
+BenchmarkRemotePartCachePrefetch/remote-latency/sequential ns/op: 16832841 16826284 16861257 16865391 16874504
+BenchmarkRemotePartCachePrefetch/remote-latency/sequential B/op: 139354 139354 139354 139354 139354
+BenchmarkRemotePartCachePrefetch/remote-latency/sequential allocs/op: 90 90 90 90 90
+BenchmarkRemotePartCachePrefetch/remote-latency/bounded-2 ns/op: 8353503 8320282 8343349 8361214 8295798
+BenchmarkRemotePartCachePrefetch/remote-latency/bounded-2 B/op: 142862 142870 142858 142874 142847
+BenchmarkRemotePartCachePrefetch/remote-latency/bounded-2 allocs/op: 103 103 103 103 103
+```
+
+The new column map is opt-in and shares the existing byte/entry budget. Column
+hits allocate nothing; prefetch retains the expected bounded worker/request
+overhead. Whole-part callers retain their zero-allocation hit path and the
+same 64-byte pinned-handle allocation.
+
 ## Run Commands
 
 Large HAT-trie comparable command rows, including the public `BATCH` pipeline

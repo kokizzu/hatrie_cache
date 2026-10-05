@@ -46,6 +46,7 @@ security guidance before exposing it on a network.
 - Opt-in ClickHouse-style SQL system tables for parts, mutations, and query history: [SQL_SYSTEM_TABLES.md](SQL_SYSTEM_TABLES.md)
 - Typed SQL external-dictionary keys for numeric and time lookups: [CHU52_TYPED_DICTIONARY_KEYS.md](CHU52_TYPED_DICTIONARY_KEYS.md)
 - ClickHouse-inspired opt-in low-cardinality dictionaries for typed `int64` columns: [CHU55_TYPED_NUMERIC_DICTIONARY.md](CHU55_TYPED_NUMERIC_DICTIONARY.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u55-typed-numeric-low-cardinality-dictionary)
+- ClickHouse-inspired opt-in column-aware remote-part cache reads: [CHU30_COLUMN_REMOTE_CACHE.md](CHU30_COLUMN_REMOTE_CACHE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u30-column-aware-remote-part-cache)
 - ClickHouse/Materialize-style mergeable aggregate states and SQL `STATE`/`MERGE`: [AGGREGATE_COMBINATORS.md](AGGREGATE_COMBINATORS.md)
 - Filtered SQL aggregate state/merge combinators such as `SUM_STATE_IF` and `SUM_MERGE_IF`: [CHU44_SQL_AGGREGATE_COMBINATORS.md](CHU44_SQL_AGGREGATE_COMBINATORS.md), with raw measurements in [BENCHMARK.md](BENCHMARK.md#ch-u44-sql-aggregate-combinators)
 - Filtered SQL aggregate state/merge combinators such as `SUM_STATE_IF` and `SUM_MERGE_IF`: [CHU44_SQL_AGGREGATE_COMBINATORS.md](CHU44_SQL_AGGREGATE_COMBINATORS.md), with raw measurements in [BENCHMARK.md](BENCHMARK.md#ch-u44-sql-aggregate-combinators)
