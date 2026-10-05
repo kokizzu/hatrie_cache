@@ -23,10 +23,40 @@ var (
 	// ErrSQLExternalDictionaryNotFound means that a registry has no dictionary
 	// with the requested name.
 	ErrSQLExternalDictionaryNotFound = errors.New("SQL external dictionary was not found")
+	// ErrSQLExternalDictionaryKeyType means that a lookup key does not match
+	// the dictionary's configured key kind.
+	ErrSQLExternalDictionaryKeyType = errors.New("SQL external dictionary key has the wrong type")
+	// ErrSQLExternalDictionaryKeyKindInvalid means that a dictionary was
+	// configured with an unsupported key kind.
+	ErrSQLExternalDictionaryKeyKindInvalid = errors.New("SQL external dictionary key kind is invalid")
+	// ErrSQLExternalDictionaryLoadConflict means that both loader forms were
+	// configured for one dictionary.
+	ErrSQLExternalDictionaryLoadConflict = errors.New("SQL external dictionary loaders are mutually exclusive")
+	// ErrSQLExternalDictionaryDuplicateKey means that a typed snapshot contains
+	// the same normalized key more than once.
+	ErrSQLExternalDictionaryDuplicateKey = errors.New("SQL external dictionary contains a duplicate key")
 	// ErrSQLFunctionNotHandled allows a function resolver chain to try the next
 	// resolver without turning an extension miss into a query error.
 	ErrSQLFunctionNotHandled = errors.New("SQL function was not handled")
 )
+
+// SQLExternalDictionaryKeyKind selects the key representation used by a
+// typed dictionary loader.
+type SQLExternalDictionaryKeyKind string
+
+const (
+	SQLExternalDictionaryKeyString SQLExternalDictionaryKeyKind = "string"
+	SQLExternalDictionaryKeyInt64  SQLExternalDictionaryKeyKind = "int64"
+	SQLExternalDictionaryKeyUint64 SQLExternalDictionaryKeyKind = "uint64"
+	SQLExternalDictionaryKeyTime   SQLExternalDictionaryKeyKind = "time"
+)
+
+// SQLExternalDictionaryEntry is one key/value pair for a typed dictionary
+// snapshot. Key validation and value cloning happen during Refresh.
+type SQLExternalDictionaryEntry struct {
+	Key   interface{}
+	Value interface{}
+}
 
 // SQLExternalDictionaryOptions configures a refreshable scalar lookup
 // dictionary. Load owns the source I/O and returns a complete replacement
@@ -34,9 +64,13 @@ var (
 // explicit Refresh calls only. MaxStale bounds how long the last good
 // snapshot may be served after a failed refresh; zero keeps it indefinitely.
 type SQLExternalDictionaryOptions struct {
-	CollectStats    bool
-	Name            string
-	Load            func(context.Context) (map[string]interface{}, error)
+	CollectStats bool
+	Name         string
+	// Load is the compatibility loader for string-keyed dictionaries.
+	Load func(context.Context) (map[string]interface{}, error)
+	// LoadEntries loads a snapshot without converting typed keys to strings.
+	LoadEntries     func(context.Context) ([]SQLExternalDictionaryEntry, error)
+	KeyKind         SQLExternalDictionaryKeyKind
 	RefreshInterval time.Duration
 	MaxStale        time.Duration
 }
@@ -59,9 +93,25 @@ type SQLExternalDictionaryStats struct {
 }
 
 type sqlExternalDictionarySnapshot struct {
-	values     map[string]interface{}
-	loadedAt   time.Time
-	generation uint64
+	values      map[string]interface{}
+	typedValues *sqlExternalDictionaryTypedValues
+	loadedAt    time.Time
+	generation  uint64
+}
+
+type sqlExternalDictionaryKey struct {
+	stringValue string
+	int64Value  int64
+	uint64Value uint64
+	timeValue   int64
+}
+
+type sqlExternalDictionaryTypedValues struct {
+	stringValues map[string]interface{}
+	int64Values  map[int64]interface{}
+	uint64Values map[uint64]interface{}
+	timeValues   map[int64]interface{}
+	count        int
 }
 
 // SQLExternalDictionary is a concurrently readable, source-replaceable
@@ -70,6 +120,8 @@ type SQLExternalDictionary struct {
 	collectStats    bool
 	name            string
 	load            func(context.Context) (map[string]interface{}, error)
+	loadEntries     func(context.Context) ([]SQLExternalDictionaryEntry, error)
+	keyKind         SQLExternalDictionaryKeyKind
 	refreshInterval time.Duration
 	maxStale        time.Duration
 	now             func() time.Time
@@ -102,8 +154,18 @@ func NewSQLExternalDictionary(options SQLExternalDictionaryOptions) (*SQLExterna
 	if name == "" {
 		return nil, errors.New("SQL external dictionary name is required")
 	}
-	if options.Load == nil {
+	if options.Load == nil && options.LoadEntries == nil {
 		return nil, fmt.Errorf("SQL external dictionary %q load function is required", name)
+	}
+	if options.Load != nil && options.LoadEntries != nil {
+		return nil, fmt.Errorf("%w: %q", ErrSQLExternalDictionaryLoadConflict, name)
+	}
+	keyKind, err := normalizeSQLExternalDictionaryKeyKind(options.KeyKind)
+	if err != nil {
+		return nil, err
+	}
+	if options.Load != nil && keyKind != SQLExternalDictionaryKeyString {
+		return nil, fmt.Errorf("%w: map loader requires string keys, got %q", ErrSQLExternalDictionaryKeyKindInvalid, keyKind)
 	}
 	if options.RefreshInterval < 0 {
 		return nil, fmt.Errorf("SQL external dictionary %q refresh interval must not be negative", name)
@@ -115,6 +177,8 @@ func NewSQLExternalDictionary(options SQLExternalDictionaryOptions) (*SQLExterna
 		collectStats:    options.CollectStats,
 		name:            name,
 		load:            options.Load,
+		loadEntries:     options.LoadEntries,
+		keyKind:         keyKind,
 		refreshInterval: options.RefreshInterval,
 		maxStale:        options.MaxStale,
 		now:             time.Now,
@@ -146,20 +210,36 @@ func (dictionary *SQLExternalDictionary) Refresh(ctx context.Context) error {
 	if dictionary.closed.Load() {
 		return ErrSQLExternalDictionaryClosed
 	}
-	values, err := dictionary.load(ctx)
-	if err != nil {
-		dictionary.recordRefreshFailure(err)
-		return err
-	}
-	snapshotValues, err := cloneSQLExternalDictionaryValues(values)
-	if err != nil {
-		dictionary.recordRefreshFailure(err)
-		return err
+	var snapshotValues map[string]interface{}
+	var snapshotTypedValues *sqlExternalDictionaryTypedValues
+	if dictionary.loadEntries != nil {
+		entries, err := dictionary.loadEntries(ctx)
+		if err != nil {
+			dictionary.recordRefreshFailure(err)
+			return err
+		}
+		snapshotTypedValues, err = cloneSQLExternalDictionaryEntries(entries, dictionary.keyKind)
+		if err != nil {
+			dictionary.recordRefreshFailure(err)
+			return err
+		}
+	} else {
+		values, err := dictionary.load(ctx)
+		if err != nil {
+			dictionary.recordRefreshFailure(err)
+			return err
+		}
+		snapshotValues, err = cloneSQLExternalDictionaryValues(values)
+		if err != nil {
+			dictionary.recordRefreshFailure(err)
+			return err
+		}
 	}
 	snapshot := &sqlExternalDictionarySnapshot{
-		values:     snapshotValues,
-		loadedAt:   dictionary.now(),
-		generation: dictionary.generation.Add(1),
+		values:      snapshotValues,
+		typedValues: snapshotTypedValues,
+		loadedAt:    dictionary.now(),
+		generation:  dictionary.generation.Add(1),
 	}
 	dictionary.snapshot.Store(snapshot)
 	dictionary.refreshes.Add(1)
@@ -171,6 +251,33 @@ func (dictionary *SQLExternalDictionary) Refresh(ctx context.Context) error {
 // Lookup returns one scalar dictionary value. The returned byte slice is
 // copied; scalar values are returned without per-lookup heap allocation.
 func (dictionary *SQLExternalDictionary) Lookup(key string) (interface{}, bool, error) {
+	if dictionary != nil && dictionary.loadEntries != nil {
+		typedKey, err := normalizeSQLExternalDictionaryKey(dictionary.keyKind, key)
+		if err != nil {
+			return nil, false, err
+		}
+		return dictionary.lookupSnapshot("", typedKey, true)
+	}
+	return dictionary.lookupSnapshot(key, sqlExternalDictionaryKey{}, false)
+}
+
+// LookupKey resolves a typed key without formatting it into a string. The
+// compatibility Load path keeps its original string-map lookup behavior.
+func (dictionary *SQLExternalDictionary) LookupKey(key interface{}) (interface{}, bool, error) {
+	if dictionary == nil {
+		return nil, false, ErrSQLExternalDictionaryClosed
+	}
+	typedKey, err := normalizeSQLExternalDictionaryKey(dictionary.keyKind, key)
+	if err != nil {
+		return nil, false, err
+	}
+	if dictionary.loadEntries == nil {
+		return dictionary.lookupSnapshot(typedKey.stringValue, sqlExternalDictionaryKey{}, false)
+	}
+	return dictionary.lookupSnapshot("", typedKey, true)
+}
+
+func (dictionary *SQLExternalDictionary) lookupSnapshot(stringKey string, typedKey sqlExternalDictionaryKey, typed bool) (interface{}, bool, error) {
 	if dictionary == nil {
 		return nil, false, ErrSQLExternalDictionaryClosed
 	}
@@ -185,11 +292,11 @@ func (dictionary *SQLExternalDictionary) Lookup(key string) (interface{}, bool, 
 	if snapshot == nil {
 		return nil, false, ErrSQLExternalDictionaryNotReady
 	}
-	age := dictionary.now().Sub(snapshot.loadedAt)
-	if age < 0 {
-		age = 0
-	}
 	if dictionary.refreshFailed.Load() {
+		age := dictionary.now().Sub(snapshot.loadedAt)
+		if age < 0 {
+			age = 0
+		}
 		if dictionary.maxStale > 0 && age > dictionary.maxStale {
 			if collectStats {
 				dictionary.expired.Add(1)
@@ -200,7 +307,22 @@ func (dictionary *SQLExternalDictionary) Lookup(key string) (interface{}, bool, 
 			dictionary.staleHits.Add(1)
 		}
 	}
-	value, found := snapshot.values[key]
+	var value interface{}
+	var found bool
+	if typed {
+		switch dictionary.keyKind {
+		case SQLExternalDictionaryKeyString:
+			value, found = snapshot.typedValues.stringValues[typedKey.stringValue]
+		case SQLExternalDictionaryKeyInt64:
+			value, found = snapshot.typedValues.int64Values[typedKey.int64Value]
+		case SQLExternalDictionaryKeyUint64:
+			value, found = snapshot.typedValues.uint64Values[typedKey.uint64Value]
+		case SQLExternalDictionaryKeyTime:
+			value, found = snapshot.typedValues.timeValues[typedKey.timeValue]
+		}
+	} else {
+		value, found = snapshot.values[stringKey]
+	}
 	if !found {
 		if collectStats {
 			dictionary.misses.Add(1)
@@ -210,7 +332,7 @@ func (dictionary *SQLExternalDictionary) Lookup(key string) (interface{}, bool, 
 	if collectStats {
 		dictionary.hits.Add(1)
 	}
-	cloned, err := cloneSQLExternalDictionaryValue(value)
+	cloned, err := cloneSQLExternalDictionaryLookupValue(value)
 	return cloned, true, err
 }
 
@@ -223,7 +345,11 @@ func (dictionary *SQLExternalDictionary) Stats() SQLExternalDictionaryStats {
 	var generation uint64
 	var loadedAt time.Time
 	if snapshot := dictionary.snapshot.Load(); snapshot != nil {
-		entries = len(snapshot.values)
+		if snapshot.typedValues != nil {
+			entries = snapshot.typedValues.count
+		} else {
+			entries = len(snapshot.values)
+		}
 		generation = snapshot.generation
 		loadedAt = snapshot.loadedAt
 	}
@@ -339,6 +465,156 @@ func cloneSQLExternalDictionaryValues(values map[string]interface{}) (map[string
 	return cloned, nil
 }
 
+func cloneSQLExternalDictionaryEntries(entries []SQLExternalDictionaryEntry, keyKind SQLExternalDictionaryKeyKind) (*sqlExternalDictionaryTypedValues, error) {
+	cloned := &sqlExternalDictionaryTypedValues{}
+	switch keyKind {
+	case SQLExternalDictionaryKeyString:
+		cloned.stringValues = make(map[string]interface{}, len(entries))
+	case SQLExternalDictionaryKeyInt64:
+		cloned.int64Values = make(map[int64]interface{}, len(entries))
+	case SQLExternalDictionaryKeyUint64:
+		cloned.uint64Values = make(map[uint64]interface{}, len(entries))
+	case SQLExternalDictionaryKeyTime:
+		cloned.timeValues = make(map[int64]interface{}, len(entries))
+	default:
+		return nil, fmt.Errorf("%w: %q", ErrSQLExternalDictionaryKeyKindInvalid, keyKind)
+	}
+	for index, entry := range entries {
+		key, err := normalizeSQLExternalDictionaryKey(keyKind, entry.Key)
+		if err != nil {
+			return nil, fmt.Errorf("SQL external dictionary entry %d: %w", index, err)
+		}
+		value, err := cloneSQLExternalDictionaryValue(entry.Value)
+		if err != nil {
+			return nil, fmt.Errorf("SQL external dictionary entry %d: %w", index, err)
+		}
+		var exists bool
+		switch keyKind {
+		case SQLExternalDictionaryKeyString:
+			_, exists = cloned.stringValues[key.stringValue]
+			if !exists {
+				cloned.stringValues[key.stringValue] = value
+			}
+		case SQLExternalDictionaryKeyInt64:
+			_, exists = cloned.int64Values[key.int64Value]
+			if !exists {
+				cloned.int64Values[key.int64Value] = value
+			}
+		case SQLExternalDictionaryKeyUint64:
+			_, exists = cloned.uint64Values[key.uint64Value]
+			if !exists {
+				cloned.uint64Values[key.uint64Value] = value
+			}
+		case SQLExternalDictionaryKeyTime:
+			_, exists = cloned.timeValues[key.timeValue]
+			if !exists {
+				cloned.timeValues[key.timeValue] = value
+			}
+		}
+		if exists {
+			return nil, fmt.Errorf("%w at entry %d", ErrSQLExternalDictionaryDuplicateKey, index)
+		}
+		cloned.count++
+	}
+	return cloned, nil
+}
+
+func normalizeSQLExternalDictionaryKeyKind(keyKind SQLExternalDictionaryKeyKind) (SQLExternalDictionaryKeyKind, error) {
+	if keyKind == "" {
+		return SQLExternalDictionaryKeyString, nil
+	}
+	switch keyKind {
+	case SQLExternalDictionaryKeyString,
+		SQLExternalDictionaryKeyInt64,
+		SQLExternalDictionaryKeyUint64,
+		SQLExternalDictionaryKeyTime:
+		return keyKind, nil
+	default:
+		return "", fmt.Errorf("%w: %q", ErrSQLExternalDictionaryKeyKindInvalid, keyKind)
+	}
+}
+
+func normalizeSQLExternalDictionaryKey(keyKind SQLExternalDictionaryKeyKind, value interface{}) (sqlExternalDictionaryKey, error) {
+	switch keyKind {
+	case SQLExternalDictionaryKeyString:
+		key, ok := value.(string)
+		if !ok {
+			return sqlExternalDictionaryKey{}, fmt.Errorf("%w: expected string key, got %T", ErrSQLExternalDictionaryKeyType, value)
+		}
+		return sqlExternalDictionaryKey{stringValue: key}, nil
+	case SQLExternalDictionaryKeyInt64:
+		switch key := value.(type) {
+		case int:
+			return sqlExternalDictionaryKey{int64Value: int64(key)}, nil
+		case int8:
+			return sqlExternalDictionaryKey{int64Value: int64(key)}, nil
+		case int16:
+			return sqlExternalDictionaryKey{int64Value: int64(key)}, nil
+		case int32:
+			return sqlExternalDictionaryKey{int64Value: int64(key)}, nil
+		case int64:
+			return sqlExternalDictionaryKey{int64Value: key}, nil
+		case uint:
+			if uint64(key) <= uint64(^uint64(0)>>1) {
+				return sqlExternalDictionaryKey{int64Value: int64(key)}, nil
+			}
+		case uint8:
+			return sqlExternalDictionaryKey{int64Value: int64(key)}, nil
+		case uint16:
+			return sqlExternalDictionaryKey{int64Value: int64(key)}, nil
+		case uint32:
+			return sqlExternalDictionaryKey{int64Value: int64(key)}, nil
+		case uint64:
+			if key <= uint64(^uint64(0)>>1) {
+				return sqlExternalDictionaryKey{int64Value: int64(key)}, nil
+			}
+		}
+		return sqlExternalDictionaryKey{}, fmt.Errorf("%w: expected signed integer key, got %T", ErrSQLExternalDictionaryKeyType, value)
+	case SQLExternalDictionaryKeyUint64:
+		switch key := value.(type) {
+		case int:
+			if key >= 0 {
+				return sqlExternalDictionaryKey{uint64Value: uint64(key)}, nil
+			}
+		case int8:
+			if key >= 0 {
+				return sqlExternalDictionaryKey{uint64Value: uint64(key)}, nil
+			}
+		case int16:
+			if key >= 0 {
+				return sqlExternalDictionaryKey{uint64Value: uint64(key)}, nil
+			}
+		case int32:
+			if key >= 0 {
+				return sqlExternalDictionaryKey{uint64Value: uint64(key)}, nil
+			}
+		case int64:
+			if key >= 0 {
+				return sqlExternalDictionaryKey{uint64Value: uint64(key)}, nil
+			}
+		case uint:
+			return sqlExternalDictionaryKey{uint64Value: uint64(key)}, nil
+		case uint8:
+			return sqlExternalDictionaryKey{uint64Value: uint64(key)}, nil
+		case uint16:
+			return sqlExternalDictionaryKey{uint64Value: uint64(key)}, nil
+		case uint32:
+			return sqlExternalDictionaryKey{uint64Value: uint64(key)}, nil
+		case uint64:
+			return sqlExternalDictionaryKey{uint64Value: key}, nil
+		}
+		return sqlExternalDictionaryKey{}, fmt.Errorf("%w: expected unsigned integer key, got %T", ErrSQLExternalDictionaryKeyType, value)
+	case SQLExternalDictionaryKeyTime:
+		key, ok := value.(time.Time)
+		if !ok {
+			return sqlExternalDictionaryKey{}, fmt.Errorf("%w: expected time.Time key, got %T", ErrSQLExternalDictionaryKeyType, value)
+		}
+		return sqlExternalDictionaryKey{timeValue: key.UnixNano()}, nil
+	default:
+		return sqlExternalDictionaryKey{}, fmt.Errorf("%w: %q", ErrSQLExternalDictionaryKeyKindInvalid, keyKind)
+	}
+}
+
 func cloneSQLExternalDictionaryValue(value interface{}) (interface{}, error) {
 	switch typed := value.(type) {
 	case nil, bool, string,
@@ -351,6 +627,13 @@ func cloneSQLExternalDictionaryValue(value interface{}) (interface{}, error) {
 	default:
 		return nil, fmt.Errorf("unsupported value type %T; only SQL scalar values are supported", value)
 	}
+}
+
+func cloneSQLExternalDictionaryLookupValue(value interface{}) (interface{}, error) {
+	if typed, ok := value.([]byte); ok {
+		return append([]byte(nil), typed...), nil
+	}
+	return value, nil
 }
 
 func normalizeSQLExternalDictionaryName(name string) string {
@@ -441,11 +724,17 @@ func (registry *SQLExternalDictionaryRegistry) dictionary(name string) (*SQLExte
 // Lookup resolves a named dictionary and then performs a lock-free value
 // lookup.
 func (registry *SQLExternalDictionaryRegistry) Lookup(name, key string) (interface{}, bool, error) {
+	return registry.LookupKey(name, key)
+}
+
+// LookupKey resolves a named dictionary with a typed key and then performs a
+// lock-free value lookup.
+func (registry *SQLExternalDictionaryRegistry) LookupKey(name string, key interface{}) (interface{}, bool, error) {
 	dictionary, exists := registry.dictionary(name)
 	if !exists {
 		return nil, false, fmt.Errorf("%w: %q", ErrSQLExternalDictionaryNotFound, name)
 	}
-	return dictionary.Lookup(key)
+	return dictionary.LookupKey(key)
 }
 
 // Stats returns all dictionary health records in deterministic name order.
@@ -494,11 +783,7 @@ func (registry *SQLExternalDictionaryRegistry) evaluateDictionaryFunction(calls 
 		if !ok {
 			return nil, fmt.Errorf("SQL dictionary name must be a string, got %T", call.Arguments[0])
 		}
-		key, ok := call.Arguments[1].(string)
-		if !ok {
-			return nil, fmt.Errorf("SQL dictionary key must be a string, got %T", call.Arguments[1])
-		}
-		value, found, err := registry.Lookup(dictionaryName, key)
+		value, found, err := registry.LookupKey(dictionaryName, call.Arguments[1])
 		if err != nil {
 			return nil, err
 		}

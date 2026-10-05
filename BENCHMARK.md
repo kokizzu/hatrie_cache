@@ -1,5 +1,25 @@
 # Benchmark
 
+## CH-U52 Typed SQL Dictionary Keys
+
+Five `-benchmem` samples used 1,024 `int64` dictionary entries and repeated
+scalar lookups on an AMD Ryzen 9 5950X. The raw baseline is intentionally a
+direct map lookup; it is not a complete dictionary operation.
+
+| Path | Samples (ns/op) | Median | Heap / allocs | Relative |
+| --- | ---: | ---: | ---: | ---: |
+| Direct `map[int64]interface{}` baseline | 7.541, 7.617, 8.616, 8.172, 8.029 | 8.029 ns/op | 0 B/op, 0 allocs/op | baseline |
+| First composite-key typed dictionary | 98.22, 98.12, 129.5, 161.0, 95.68 | 98.22 ns/op | 6 B/op, 0 allocs/op | 12.24x slower |
+| Scalar-map typed dictionary | 80.33, 80.01, 80.11, 79.76, 79.89 | 80.01 ns/op | 6 B/op, 0 allocs/op | 1.23x faster than first typed path |
+| Legacy string-loader dictionary | 13.90, 13.61, 14.30, 13.40, 13.80 | 13.80 ns/op | 0 B/op, 0 allocs/op | compatibility control |
+| Final typed dictionary hot path | 35.44, 35.22, 35.25, 36.23, 37.12 | 35.44 ns/op | 6 B/op, 0 allocs/op | 2.77x faster than first typed path |
+
+The final path is 4.41x slower than the raw direct-map baseline because it also
+performs atomic snapshot access, lifecycle/readiness checks, typed interface
+normalization, and value isolation. The old string `Load` API and default
+configuration are unchanged. See
+[CHU52_TYPED_DICTIONARY_KEYS.md](CHU52_TYPED_DICTIONARY_KEYS.md).
+
 ## T-U10 journal-wide synchronous write quorum
 
 Environment: Linux/amd64, AMD Ryzen 9 5950X 16-Core Processor. Five samples
