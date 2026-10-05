@@ -5,6 +5,40 @@ import (
 	"time"
 )
 
+func (pool *ConnectionPool) emitConnectionPoolLifecycle(kind PeerLifecycleKind, err error) {
+	if pool == nil || pool.lifecycle == nil {
+		return
+	}
+	event := PeerLifecycleEvent{
+		Kind:   kind,
+		PeerID: pool.peerID,
+	}
+	if err != nil {
+		event.Error = err.Error()
+	}
+	_ = pool.lifecycle.Emit(event)
+}
+
+func (pool *ConnectionPool) emitConnectionPoolShutdown() {
+	if pool == nil || pool.lifecycle == nil {
+		return
+	}
+	pool.lifecycleShutdown.Do(func() {
+		pool.emitConnectionPoolLifecycle(PeerLifecycleShutdown, nil)
+	})
+}
+
+func (pool *ConnectionPool) emitConnectionPoolShutdownIfDone() {
+	if pool == nil {
+		return
+	}
+	select {
+	case <-pool.done:
+		pool.emitConnectionPoolShutdown()
+	default:
+	}
+}
+
 // DoWithLifecycleContext is like Do, but also cancels the handler context when
 // the pool is closed. Use it for peer operations that must not outlive the
 // pool; the caller's cancellation and deadline are preserved as well.

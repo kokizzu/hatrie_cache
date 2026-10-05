@@ -33201,3 +33201,21 @@ serial materialization on 20,000 three-column CSV rows, with 5.9% more bytes
 allocated and effectively unchanged allocation count. The existing streaming
 CSV path remains the default. Full raw samples and methodology are in
 `CHU47_PARALLEL_FORMAT_PARSING.md`.
+
+## T-U28 Peer lifecycle pool integration
+
+The opt-in `ConnectionPoolOptions.Lifecycle` registry records physical dials,
+physical closes, and final pool shutdown. This benchmark reuses one idle
+connection, so lifecycle callbacks are outside the logical `Do` steady-state
+loop. Five `-benchmem` samples were run on Linux/amd64, AMD Ryzen 9 5950X.
+
+| Path | Raw ns/op samples | Median ns/op | B/op | Allocs/op | Relative time |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Post-change control | 60.05, 56.75, 58.24, 57.51, 52.78 | 57.51 | 0 | 0 | baseline |
+| Lifecycle-enabled pool | 55.74, 58.65, 57.57, 60.49, 57.01 | 57.57 | 0 | 0 | 1.00x |
+
+The lifecycle path retained zero allocations per operation and was within 0.1%
+of the paired post-change control. The separate pre-change control median was
+48.69 ns/op; the difference is within the local benchmark noise envelope and is
+not treated as a regression claim. See [PEER_LIFECYCLE.md](PEER_LIFECYCLE.md)
+for event semantics and test coverage.

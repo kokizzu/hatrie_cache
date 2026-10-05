@@ -69,6 +69,31 @@ termination goroutine so a slow hook cannot hold the protocol reader or block
 `Close()` from closing the socket. Existing sessions with a nil `Lifecycle`
 retain their previous behavior and do not create that goroutine.
 
+## Connection Pools
+
+`ConnectionPoolOptions.Lifecycle` enables the same registry for physical pool
+connections. `PeerLifecycleConnected` is emitted once after each successful
+dial, `PeerLifecycleDisconnected` is emitted once after each physical close,
+and `PeerLifecycleShutdown` is emitted once after the pool has drained. An
+idle reuse does not emit another connected event, and a timed-out `Close`
+does not emit shutdown until the last active handler releases its connection.
+
+```go
+pool, err := hatPeer.NewConnectionPool(hatPeer.ConnectionPoolOptions{
+	Lifecycle: registry,
+	PeerID:    "region-apac/pool-2",
+	Dial:      dialPeer,
+})
+if err != nil {
+	return err
+}
+defer pool.Close(context.Background())
+```
+
+The lifecycle fields are nil/empty by default. Existing pools therefore keep
+their previous connection reuse and close behavior; the registry callback is
+only called on physical connection or pool state transitions.
+
 This registry is an observation hook, not authentication, authorization,
 membership, failover, or schema negotiation. Do not expose a raw compact peer
 session to an untrusted network; wrap the connection in the deployment's
@@ -89,6 +114,20 @@ The one-hook path uses a direct dispatch fast path. Multiple hooks copy only
 the bounded callback list before invoking it. Snapshot allocation is the
 explicit cost of returning an independent slice and is not paid by session
 connect/disconnect when no registry is configured.
+
+The connection-pool steady-state benchmark used one reused idle connection
+and five `-benchmem` samples:
+
+| Path | Raw ns/op samples | Median | Memory |
+|---|---|---:|---:|
+| Pre-change pool `Do` | 48.40; 51.75; 48.57; 48.69; 49.89 | 48.69 ns/op | 0 B/op, 0 allocs/op |
+| Post-change pool `Do` control | 60.05; 56.75; 58.24; 57.51; 52.78 | 57.51 ns/op | 0 B/op, 0 allocs/op |
+| Post-change pool with lifecycle registry | 55.74; 58.65; 57.57; 60.49; 57.01 | 57.57 ns/op | 0 B/op, 0 allocs/op |
+
+The lifecycle-enabled median was `1.00x` the post-change control in this run;
+the 0.1% difference is within normal local benchmark noise, with no allocation
+or steady-state memory increase. Connection and close hooks add work only when
+a physical connection is created or destroyed.
 
 Focused correctness, race, and vet checks are available through:
 
