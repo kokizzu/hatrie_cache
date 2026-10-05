@@ -790,3 +790,15 @@ details for repair and never silently counts stale or unapplied responses.
 **Remaining:** The embedding service still owns peer transport,
 authentication, retries, ordering, rollback, and wiring the coordinator into a
 real journal commit path.
+
+## T-U16: Selectable memtx-style row engine
+
+**Adopted:** `hatSql.MemtxTable` is an opt-in dense tuple engine with primary
+key updates/deletes, optional scalar equality indexes, SQL source resolution,
+exact cardinality, and logical memory reporting. Existing `TypedTable` remains
+the default column-oriented engine.
+
+**Remaining:** Generated columns, TTL, dictionaries, columnar caches, MVCC,
+and analytical arrangements remain intentionally scoped to `TypedTable`. See
+[TU16_MEMTX_TABLE.md](TU16_MEMTX_TABLE.md) and
+[BENCHMARK.md](BENCHMARK.md#t-u16-memtx-style-row-engine).

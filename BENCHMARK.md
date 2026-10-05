@@ -33219,3 +33219,21 @@ of the paired post-change control. The separate pre-change control median was
 48.69 ns/op; the difference is within the local benchmark noise envelope and is
 not treated as a regression claim. See [PEER_LIFECYCLE.md](PEER_LIFECYCLE.md)
 for event semantics and test coverage.
+
+## T-U16 Memtx-style row engine
+
+`hatSql.MemtxTable` is an explicit row-oriented alternative to the existing
+column-oriented `TypedTable`. It stores dense scalar tuples, maintains the
+primary-key map and optional equality indexes, and implements the SQL source
+resolver contract. The default engine is unchanged. Five `100ms` `-benchmem`
+samples ran on Linux/amd64, AMD Ryzen 9 5950X, with 1,024 rows where applicable.
+
+| Workload | TypedTable control median | MemtxTable median | Improvement |
+| --- | ---: | ---: | --- |
+| Repeated upsert | 690.8 ns; 872 B; 4 allocs | 376.5 ns; 296 B; 4 allocs | 1.83x faster; 2.95x lower bytes; equal allocations |
+| Materialize 1,024 rows | 328,519 ns; 474,372 B; 4,865 allocs | 217,658 ns; 376,067 B; 3,841 allocs | 1.51x faster; 1.26x lower bytes; 1.27x fewer allocations |
+| Equality point lookup | 385,174 ns; 474,372 B; 4,865 allocs full scan | 440.0 ns; 381 B; 6 allocs indexed | 875x faster; 1,245x lower bytes; 811x fewer allocations |
+
+The point-lookup row compares one indexed equality candidate with the old
+1,024-row full scan and is intentionally selective. Full raw samples and API
+limitations are in [TU16_MEMTX_TABLE.md](TU16_MEMTX_TABLE.md).

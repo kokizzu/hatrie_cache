@@ -4350,6 +4350,7 @@ lookup and preparation tradeoff is documented in
 - Prepared compact peer calls: [TR043A_COMPACT_PEER_PREPARED_CALL.md](TR043A_COMPACT_PEER_PREPARED_CALL.md)
 - Reusable compact peer frame buffers: [TR043B_COMPACT_PEER_WRITE_BUFFER.md](TR043B_COMPACT_PEER_WRITE_BUFFER.md)
 - Opt-in bounded peer connection and schema lifecycle hooks: [PEER_LIFECYCLE.md](PEER_LIFECYCLE.md)
+- Opt-in Tarantool-style dense tuple row engine with scalar equality indexes: [TU16_MEMTX_TABLE.md](TU16_MEMTX_TABLE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#t-u16-memtx-style-row-engine)
 - Opt-in bounded peer transaction streams: [PEER_STREAM.md](PEER_STREAM.md)
 
 - Opt-in HTTP SQL RowBinary streaming for lower CPU, allocations, and wire
