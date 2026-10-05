@@ -39424,3 +39424,37 @@ difference is within normal benchmark noise. Existing join/leave behavior is
 preserved. See [T207_REPLICA_EVICTION_REJOIN.md](T207_REPLICA_EVICTION_REJOIN.md)
 for the recovery sequence, API contract, security boundaries, and verification
 commands.
+
+## CH-U47 SQL Dictionary Lookup Functions
+
+Linux `amd64`, AMD Ryzen 9 5950X, `go test -benchmem -count=5 -benchtime=200ms`.
+Each sample performs a 256-key batch. The control performs direct map lookups
+into an already allocated result slice; the registry path uses the public
+vectorized `DICT_GET` function contract.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative to direct control |
+| --- | --- | ---: | ---: | ---: | --- |
+| Direct map control | 7721, 7696, 7627, 7615, 7375 | 7627 | 4096 | 256 | 1.00x |
+| `SQLDictionaryRegistry` | 18093, 18906, 18177, 17909, 18368 | 18177 | 8960 | 257 | 2.38x CPU, 2.19x bytes, 1.00x allocations |
+
+The registry costs about 41.2 ns per lookup over the direct control in this
+fixture because it validates the function contract, captures a versioned
+definition, handles miss/default semantics, and returns a vectorized interface
+slice. It adds one allocation per 256-key batch. The cost is isolated to
+queries that expose a dictionary function; resolvers without
+`SQLFunctionResolver` keep the existing SQL path unchanged.
+
+Raw output:
+
+```text
+BenchmarkCHU47BaselineMapLookup-32     30837  7721 ns/op  4096 B/op 256 allocs/op
+BenchmarkCHU47BaselineMapLookup-32     30674  7696 ns/op  4096 B/op 256 allocs/op
+BenchmarkCHU47BaselineMapLookup-32     30596  7627 ns/op  4096 B/op 256 allocs/op
+BenchmarkCHU47BaselineMapLookup-32     30500  7615 ns/op  4096 B/op 256 allocs/op
+BenchmarkCHU47BaselineMapLookup-32     31264  7375 ns/op  4096 B/op 256 allocs/op
+BenchmarkCHU47DictionaryLookup-32      12913 18093 ns/op  8960 B/op 257 allocs/op
+BenchmarkCHU47DictionaryLookup-32      12832 18906 ns/op  8960 B/op 257 allocs/op
+BenchmarkCHU47DictionaryLookup-32      13132 18177 ns/op  8960 B/op 257 allocs/op
+BenchmarkCHU47DictionaryLookup-32      13093 17909 ns/op  8960 B/op 257 allocs/op
+BenchmarkCHU47DictionaryLookup-32      12964 18368 ns/op  8960 B/op 257 allocs/op
+```
