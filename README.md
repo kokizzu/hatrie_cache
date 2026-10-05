@@ -63,6 +63,7 @@ security guidance before exposing it on a network.
 - Shared SQL workload classes with bounded-priority aging for source, compute, sink, and ad-hoc work: [MU024_WORKLOAD_PRIORITIES.md](MU024_WORKLOAD_PRIORITIES.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mu-024-workload-classes-and-priorities)
 - Opt-in bounded unified source, compute, and sink metrics catalog: [MU026_UNIFIED_DATAFLOW_METRICS.md](MU026_UNIFIED_DATAFLOW_METRICS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mu-026-unified-dataflow-metrics)
 - Opt-in versioned logical SQL publication with bounded replay and consumer checkpoints: [MU027_LOGICAL_PUBLICATION.md](MU027_LOGICAL_PUBLICATION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mu-027-logical-sql-publications)
+- Durable CRC-protected SQL publication history snapshots with typed-value restore: [MU027_PUBLICATION_PERSISTENCE.md](MU027_PUBLICATION_PERSISTENCE.md)
 - Opt-in named SQL settings profiles with bounded inheritance: [SQL_NAMED_SETTINGS.md](SQL_NAMED_SETTINGS.md)
 - Static soft/hard namespace admission previews: [SQL_NAMESPACE_ADMISSION.md](SQL_NAMESPACE_ADMISSION.md)
 - Privacy-safe SQL query-log retention and rotation: [SQL_QUERY_LOG.md](SQL_QUERY_LOG.md)

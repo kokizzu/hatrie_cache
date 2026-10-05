@@ -31423,6 +31423,25 @@ the downstream transaction remain connector-owned. See
 [MU027_LOGICAL_PUBLICATION.md](MU027_LOGICAL_PUBLICATION.md) for the recovery
 contract.
 
+<a id="mu-027-durable-publication-history"></a>
+## M-U27 Durable Publication History
+
+Five samples on the AMD Ryzen 9 5950X host, using 128 one-delta batches and
+the same `hatSql` package benchmark target:
+
+```text
+BenchmarkMU027PublicationPersistenceMarshal     176656-183210 ns/op  118073-118081 B/op  2953 allocs/op
+BenchmarkMU027PublicationPersistenceUnmarshal  265681-269360 ns/op   217299-217300 B/op  5009 allocs/op
+snapshot_bytes 12165
+```
+
+The pre-existing publication benchmarks were unchanged within normal run
+noise: direct send about 30 ns/op and 0 B/op, append about 430 ns/op and 392
+B/op, subscriber append about 810 ns/op and 776 B/op, and replay/ack about
+22.7 us/op and 29,760 B/op. Persistence is opt-in and outside the hot path.
+See [MU027_PUBLICATION_PERSISTENCE.md](MU027_PUBLICATION_PERSISTENCE.md) for
+the format, recovery contract, and security limits.
+
 <a id="mu-028-sql-monotonicity-inference"></a>
 ## M-U28 SQL Monotonicity Inference
 
