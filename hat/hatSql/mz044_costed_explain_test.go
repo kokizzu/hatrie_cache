@@ -22,7 +22,7 @@ func TestMZ044CostedExplainAnnotatesOperatorsWithoutReadingSources(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(result.Columns, []string{"node", "detail", "estimated_rows", "estimated_cost", "estimated_memory_bytes"}) {
+	if !reflect.DeepEqual(result.Columns, []string{"node", "detail", "estimated_rows", "estimated_cost", "estimated_io_cost", "estimated_memory_bytes"}) {
 		t.Fatalf("EXPLAIN COST columns = %#v", result.Columns)
 	}
 	var foundScan bool
@@ -37,6 +37,9 @@ func TestMZ044CostedExplainAnnotatesOperatorsWithoutReadingSources(t *testing.T)
 		if step.EstimatedCost == nil || *step.EstimatedCost <= 0 {
 			t.Fatalf("costed scan cost = %#v, want positive", step.EstimatedCost)
 		}
+		if step.EstimatedIOCost == nil || *step.EstimatedIOCost <= 0 {
+			t.Fatalf("costed scan IO cost = %#v, want positive", step.EstimatedIOCost)
+		}
 		if step.EstimatedMemoryBytes == nil || *step.EstimatedMemoryBytes <= 0 {
 			t.Fatalf("costed scan memory = %#v, want positive", step.EstimatedMemoryBytes)
 		}
@@ -45,13 +48,20 @@ func TestMZ044CostedExplainAnnotatesOperatorsWithoutReadingSources(t *testing.T)
 		t.Fatalf("EXPLAIN COST plan = %#v, want SCAN", result.Plan)
 	}
 	var foundCostRow bool
+	var foundIORow bool
 	for _, row := range result.Rows {
 		if _, ok := row["estimated_cost"]; ok {
 			foundCostRow = true
 		}
+		if _, ok := row["estimated_io_cost"]; ok {
+			foundIORow = true
+		}
 	}
 	if !foundCostRow {
 		t.Fatalf("EXPLAIN COST rows = %#v, want at least one estimated_cost", result.Rows)
+	}
+	if !foundIORow {
+		t.Fatalf("EXPLAIN COST rows = %#v, want at least one estimated_io_cost", result.Rows)
 	}
 }
 
@@ -61,7 +71,7 @@ func TestMZ044RegularExplainOmitsCostFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, step := range result.Plan {
-		if step.EstimatedCost != nil || step.EstimatedMemoryBytes != nil {
+		if step.EstimatedCost != nil || step.EstimatedIOCost != nil || step.EstimatedMemoryBytes != nil {
 			t.Fatalf("regular EXPLAIN step = %#v, want no cost fields", step)
 		}
 	}

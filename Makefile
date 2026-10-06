@@ -22292,3 +22292,32 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: test-c237-projection-explain benchmark-c237-projection-explain race-c237-projection-explain vet-c237-projection-explain
+
+.PHONY: format-c237-projection-explain
+format-c237-projection-explain:
+	bash scripts/format-c237-projection-explain.sh
+
+.PHONY: verify-c237-projection-explain
+verify-c237-projection-explain:
+	bash scripts/verify-c237-projection-explain.sh
+
+.PHONY: commit-c237-projection-explain
+commit-c237-projection-explain:
+	bash scripts/commit-c237-projection-explain.sh
+
+.PHONY: push-c237-projection-explain
+push-c237-projection-explain:
+	bash scripts/push-c237-projection-explain.sh
+
+test-c237-projection-explain:
+	bash scripts/test-c237-projection-explain.sh
+
+benchmark-c237-projection-explain:
+	bash scripts/benchmark-c237-projection-explain.sh
+
+race-c237-projection-explain:
+	bash scripts/race-c237-projection-explain.sh
+
+vet-c237-projection-explain:
+	bash scripts/vet-c237-projection-explain.sh

@@ -45,6 +45,7 @@ type ExplainStep struct {
 	Lineage              []ColumnLineage          `json:"lineage,omitempty"`
 	EstimatedRows        *int                     `json:"estimated_rows,omitempty"`
 	EstimatedCost        *int                     `json:"estimated_cost,omitempty"`
+	EstimatedIOCost      *int                     `json:"estimated_io_cost,omitempty"`
 	EstimatedMemoryBytes *int                     `json:"estimated_memory_bytes,omitempty"`
 	ActualInputRows      *int                     `json:"actual_input_rows,omitempty"`
 	ActualOutputRows     *int                     `json:"actual_output_rows,omitempty"`

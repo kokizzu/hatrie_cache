@@ -20,7 +20,7 @@ func explainSQLPipelineQuery(query *sqlQuery, resolver SQLSourceResolver) (SQLQu
 	hasExplainCost := sqlExplainHasCost(steps)
 	columns := []string{"node", "detail", "stage", "worker", "workers", "estimated_rows"}
 	if hasExplainCost {
-		columns = append(columns, "estimated_cost", "estimated_memory_bytes")
+		columns = append(columns, "estimated_cost", "estimated_io_cost", "estimated_memory_bytes")
 	}
 	if hasArrangementMetadata {
 		columns = append(columns, "arrangements")
@@ -43,6 +43,9 @@ func explainSQLPipelineQuery(query *sqlQuery, resolver SQLSourceResolver) (SQLQu
 		}
 		if step.EstimatedCost != nil {
 			row["estimated_cost"] = *step.EstimatedCost
+		}
+		if step.EstimatedIOCost != nil {
+			row["estimated_io_cost"] = *step.EstimatedIOCost
 		}
 		if step.EstimatedMemoryBytes != nil {
 			row["estimated_memory_bytes"] = *step.EstimatedMemoryBytes

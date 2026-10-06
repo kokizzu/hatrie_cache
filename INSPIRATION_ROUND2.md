@@ -70,7 +70,7 @@ operator control remain the preferred deployment model.
 - [ ] C234 Query profiler records for stage time, bytes, and allocations.
 - [ ] C235 Read/write task profiler aggregation by table part and column.
 - [ ] C236 Explain output for data-skipping-index decisions and rejected marks.
-- [ ] C237 Explain output for projection selection and estimated I/O cost.
+- [x] C237 Explain output for projection selection and estimated I/O cost. See [C237_PROJECTION_EXPLAIN.md](C237_PROJECTION_EXPLAIN.md).
 - [ ] C238 Mutation queue progress with rows remaining and elapsed estimates.
 - [ ] C239 Part-merge backlog, amplification, and age metrics.
 - [ ] C240 Read-only backup database attachment for querying backup parts in place.

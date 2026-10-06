@@ -13046,7 +13046,7 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 	hasExplainCost := sqlExplainHasCost(steps)
 	columns := []string{"node", "detail", "estimated_rows"}
 	if hasExplainCost {
-		columns = append(columns, "estimated_cost", "estimated_memory_bytes")
+		columns = append(columns, "estimated_cost", "estimated_io_cost", "estimated_memory_bytes")
 	}
 	if hasArrangementMetadata {
 		columns = append(columns, "arrangements")
@@ -13063,6 +13063,9 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		}
 		if step.EstimatedCost != nil {
 			row["estimated_cost"] = *step.EstimatedCost
+		}
+		if step.EstimatedIOCost != nil {
+			row["estimated_io_cost"] = *step.EstimatedIOCost
 		}
 		if step.EstimatedMemoryBytes != nil {
 			row["estimated_memory_bytes"] = *step.EstimatedMemoryBytes
@@ -13118,6 +13121,9 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 		if step.EstimatedCost != nil {
 			row["estimated_cost"] = *step.EstimatedCost
 		}
+		if step.EstimatedIOCost != nil {
+			row["estimated_io_cost"] = *step.EstimatedIOCost
+		}
 		if step.EstimatedMemoryBytes != nil {
 			row["estimated_memory_bytes"] = *step.EstimatedMemoryBytes
 		}
@@ -13154,7 +13160,7 @@ func explainSQLQuery(query *sqlQuery, resolver SQLSourceResolver, control *sqlEx
 	}
 	result.Columns = append(result.Columns, "actual_rows", "estimate_error_rows", "estimate_error_percent", "actual_input_bytes", "actual_output_bytes", "result_bytes", "elapsed_ns")
 	if hasExplainCost {
-		result.Columns = append([]string{"node", "detail", "estimated_rows", "estimated_cost", "estimated_memory_bytes"}, result.Columns[3:]...)
+		result.Columns = append([]string{"node", "detail", "estimated_rows", "estimated_cost", "estimated_io_cost", "estimated_memory_bytes"}, result.Columns[3:]...)
 	}
 	if hasIndexDiagnostics {
 		result.Columns = append(result.Columns, "index")

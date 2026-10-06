@@ -32580,3 +32580,30 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## C237 Projection Explain And Estimated I/O Cost
+
+Command:
+
+```sh
+make benchmark-c237-projection-explain
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. Before values were
+captured immediately before the C237 change; after values are the implementation
+with source-scan-only I/O estimates. Full semantics and raw samples are in
+[C237_PROJECTION_EXPLAIN.md](C237_PROJECTION_EXPLAIN.md).
+
+| Benchmark | Before median ns/op | After median ns/op | CPU ratio after/before | Before B/op | After B/op | Memory ratio | Before allocs/op | After allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Regular explain | 8,758 | 8,590 | 0.981x | 10,504 | 11,018 | 1.049x | 58 | 58 |
+| Costed explain | 9,349 | 9,467 | 1.013x | 11,483 | 12,133 | 1.057x | 66 | 67 |
+
+Raw samples:
+
+```text
+Regular before: 8648, 8758, 8606, 8775, 8926 ns/op; 10504 B/op; 58 allocs/op
+Regular after:  8434, 8575, 8671, 8590, 8598 ns/op; 11018 B/op; 58 allocs/op
+Costed before:  9671, 9342, 9349, 9295, 9400 ns/op; 11483 B/op; 66 allocs/op
+Costed after:   9539, 9305, 9467, 9527, 9344 ns/op; 12133 B/op; 67 allocs/op
+```

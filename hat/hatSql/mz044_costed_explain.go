@@ -4,6 +4,7 @@ import "strings"
 
 const (
 	defaultSQLExplainCPUCostPerRow   = 1
+	defaultSQLExplainIOCostPerRow    = 1
 	defaultSQLExplainMemoryPerRow    = 64
 	defaultSQLExplainScanCPUWeight   = 1
 	defaultSQLExplainFilterCPUWeight = 2
@@ -18,6 +19,7 @@ const (
 // claim about allocator bytes or wall-clock nanoseconds.
 type SQLExplainCostOptions struct {
 	CPUCostPerRow     int
+	IOCostPerRow      int
 	MemoryBytesPerRow int
 }
 
@@ -31,6 +33,9 @@ func CostSQLExplainSteps(steps []ExplainStep, options SQLExplainCostOptions) []E
 	if options.CPUCostPerRow <= 0 {
 		options.CPUCostPerRow = defaultSQLExplainCPUCostPerRow
 	}
+	if options.IOCostPerRow <= 0 {
+		options.IOCostPerRow = defaultSQLExplainIOCostPerRow
+	}
 	if options.MemoryBytesPerRow <= 0 {
 		options.MemoryBytesPerRow = defaultSQLExplainMemoryPerRow
 	}
@@ -42,6 +47,10 @@ func CostSQLExplainSteps(steps []ExplainStep, options SQLExplainCostOptions) []E
 			cost := sqlExplainCostProduct(*step.EstimatedRows, options.CPUCostPerRow, cpuWeight)
 			memory := sqlExplainCostProduct(*step.EstimatedRows, options.MemoryBytesPerRow, memoryWeight)
 			step.EstimatedCost = &cost
+			if ioWeight := sqlExplainIOCostWeight(step.Node); ioWeight > 0 {
+				ioCost := sqlExplainCostProduct(*step.EstimatedRows, options.IOCostPerRow, ioWeight)
+				step.EstimatedIOCost = &ioCost
+			}
 			step.EstimatedMemoryBytes = &memory
 		}
 		costed[index] = step
@@ -51,11 +60,19 @@ func CostSQLExplainSteps(steps []ExplainStep, options SQLExplainCostOptions) []E
 
 func sqlExplainHasCost(steps []ExplainStep) bool {
 	for _, step := range steps {
-		if step.EstimatedCost != nil || step.EstimatedMemoryBytes != nil {
+		if step.EstimatedCost != nil || step.EstimatedIOCost != nil || step.EstimatedMemoryBytes != nil {
 			return true
 		}
 	}
 	return false
+}
+
+func sqlExplainIOCostWeight(node string) int {
+	name := strings.ToUpper(strings.TrimSpace(node))
+	if strings.Contains(name, "SCAN") {
+		return defaultSQLExplainScanCPUWeight
+	}
+	return 0
 }
 
 func sqlExplainCostWeights(node string) (int, int) {

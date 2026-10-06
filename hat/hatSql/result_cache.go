@@ -537,6 +537,7 @@ func cloneResultCachePlanStep(step ExplainStep) ExplainStep {
 	}
 	clone.EstimatedRows = cloneResultCacheInt(step.EstimatedRows)
 	clone.EstimatedCost = cloneResultCacheInt(step.EstimatedCost)
+	clone.EstimatedIOCost = cloneResultCacheInt(step.EstimatedIOCost)
 	clone.EstimatedMemoryBytes = cloneResultCacheInt(step.EstimatedMemoryBytes)
 	clone.ActualInputRows = cloneResultCacheInt(step.ActualInputRows)
 	clone.ActualOutputRows = cloneResultCacheInt(step.ActualOutputRows)
