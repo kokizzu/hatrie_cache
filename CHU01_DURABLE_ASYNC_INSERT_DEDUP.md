@@ -56,6 +56,32 @@ and bounded by `MaxCommandJournalIdempotencyKeyBytes` (256 bytes).
 - Idempotency keys are stored in the journal request metadata. They should be
   stable request identifiers, not credentials or other secrets.
 
+## Inspect the Bounded Ledger
+
+Call `journal.IdempotencyStats()` for a point-in-time snapshot:
+
+```go
+stats := journal.IdempotencyStats()
+fmt.Printf("%d/%d entries, oldest=%d newest=%d, duplicates=%d, bytes=%d\n",
+	stats.Entries,
+	stats.Capacity,
+	stats.OldestSequence,
+	stats.NewestSequence,
+	stats.Duplicates,
+	stats.DuplicateEstimatedBytes,
+)
+```
+
+`Entries` never exceeds `Capacity`. `OldestSequence` and `NewestSequence`
+describe the journal-sequence horizon currently retained by the ledger;
+`Evictions` counts FIFO removals. `Duplicates` and
+`DuplicateEstimatedBytes` are process-lifetime ledger exact-hit counters for
+the open journal; eviction counters also include replay-time ledger
+reconstruction. The byte counter is the sum of
+the already-marshaled canonical fingerprint payloads skipped by exact hits;
+it excludes framing, hashing, and the idempotency-key wrapper, so it is an
+accounting estimate rather than an on-disk byte count.
+
 ## Measurement
 
 Five `-benchtime=200ms` samples were collected on Linux `amd64` with an AMD
@@ -74,7 +100,30 @@ The keyed retry cost is intentional and buys bounded durable deduplication;
 the restart regression test also verifies that a duplicate does not append a
 second journal record.
 
+## Follow-up Measurement
+
+The follow-up adds the stats counters and fixes FIFO eviction while preserving
+the hot-path allocation count. One `-benchmem` sample was collected before and
+after on the same AMD Ryzen 9 5950X Linux `amd64` host:
+
+| Benchmark | Before | After | Result |
+| --- | ---: | ---: | --- |
+| `BenchmarkCHU01AsyncInsertKeyedDuplicate` | 125,998 ns/op; 108,222 B/op; 404 allocs | 126,341 ns/op; 108,623 B/op; 404 allocs | 1.00x within noise; heap/allocations within noise |
+| `BenchmarkCommandJournalIdempotencyRetry/Enabled` | 723.6 ns/op; 256 B/op; 2 allocs | 691.4 ns/op; 256 B/op; 2 allocs | 1.05x faster; heap/allocations unchanged |
+
+The stats snapshot itself is off the write path and scans at most the configured
+bounded ledger; duplicate hits add only two integer counter updates. No default
+or unkeyed behavior changed.
+
 ## Raw Output
+
+Follow-up output from `make benchmark-chu01-stats`:
+
+```text
+BenchmarkCHU01AsyncInsertKeyedDuplicate-32    8427    126341 ns/op    0.51 MB/s    108623 B/op    404 allocs/op
+BenchmarkCommandJournalIdempotencyRetry/Disabled-32    274860    4480 ns/op    263 B/op    3 allocs/op
+BenchmarkCommandJournalIdempotencyRetry/Enabled-32    1692134    691.4 ns/op    256 B/op    2 allocs/op
+```
 
 Before output from `make benchmark-chu01-before-c242`:
 

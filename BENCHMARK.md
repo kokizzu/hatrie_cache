@@ -27733,6 +27733,27 @@ keyed path pays for bounded fingerprinting and ledger lookup to provide
 restart-safe duplicate suppression; the CH-U01 test verifies that the retry
 does not append another journal record or change the stored value.
 
+### CH-U01 Follow-up: Ledger Statistics and FIFO Eviction
+
+This follow-up adds `CommandJournal.IdempotencyStats`, canonical-payload byte
+accounting, and a regression fix for FIFO eviction when the ledger first fills.
+The stats snapshot is off the write path and scans only the configured bounded
+ledger; duplicate hits add only two integer counter updates. The keyed retry
+path retains its allocation count:
+
+| Benchmark | Before | After | Relative result |
+| --- | ---: | ---: | --- |
+| `BenchmarkCHU01AsyncInsertKeyedDuplicate` | 125,998 ns/op; 108,222 B/op; 404 allocs | 126,341 ns/op; 108,623 B/op; 404 allocs | 1.00x within noise; heap/allocations within noise |
+| `BenchmarkCommandJournalIdempotencyRetry/Enabled` | 723.6 ns/op; 256 B/op; 2 allocs | 691.4 ns/op; 256 B/op; 2 allocs | 1.05x faster; heap/allocations unchanged |
+
+Raw follow-up output from `make benchmark-chu01-stats`:
+
+```text
+BenchmarkCHU01AsyncInsertKeyedDuplicate-32    8427    126341 ns/op    0.51 MB/s    108623 B/op    404 allocs/op
+BenchmarkCommandJournalIdempotencyRetry/Disabled-32    274860    4480 ns/op    263 B/op    3 allocs/op
+BenchmarkCommandJournalIdempotencyRetry/Enabled-32    1692134    691.4 ns/op    256 B/op    2 allocs/op
+```
+
 Raw output from `make benchmark-chu01-before-c242`:
 
 ```text

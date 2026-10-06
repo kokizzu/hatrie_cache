@@ -339,6 +339,10 @@ endpoint unchanged. See
 [ASYNC_HTTP_COMMANDS.md](ASYNC_HTTP_COMMANDS.md) for configuration, retries,
 security, and the replication compatibility guard.
 
+For retry-safe asynchronous inserts, enable a positive journal idempotency
+capacity and inspect the bounded ledger with `CommandJournal.IdempotencyStats`;
+see [CHU01_DURABLE_ASYNC_INSERT_DEDUP.md](CHU01_DURABLE_ASYNC_INSERT_DEDUP.md).
+
 SQL tuning tools can call `hatSql.ExplainSQLWhatIf` to estimate the row, byte,
 memory, and mutation-maintenance cost of an equality, range, order, or group
 index before creating it. The API is read-only and does not alter normal SQL;

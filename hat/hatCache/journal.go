@@ -486,6 +486,18 @@ func (journal *CommandJournal) idempotencyCheck(request CacheCommandRequest) (co
 	return newCommandIdempotencyCheck(request)
 }
 
+// IdempotencyStats returns a bounded-ledger snapshot. The counters are
+// process-lifetime values for this journal instance and include replay-time
+// ledger reconstruction; duplicate bytes are canonical-payload estimates.
+func (journal *CommandJournal) IdempotencyStats() CommandJournalIdempotencyStats {
+	if journal == nil {
+		return CommandJournalIdempotencyStats{}
+	}
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+	return journal.idempotency.stats()
+}
+
 func (journal *CommandJournal) submitGroupCommit(job *commandJournalJob) CacheCommandResponse {
 	journal.submitMu.RLock()
 	if !journal.accepting {

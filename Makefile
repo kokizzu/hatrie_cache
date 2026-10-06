@@ -22292,3 +22292,12 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+
+test-chu01-idempotency-stats:
+	bash scripts/test-chu01-idempotency-stats.sh
+
+benchmark-chu01-stats:
+	bash scripts/benchmark-chu01-stats.sh
+
+ship-chu01-stats:
+	bash scripts/ship-chu01-stats.sh

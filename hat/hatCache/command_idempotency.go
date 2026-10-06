@@ -12,10 +12,27 @@ import (
 const MaxCommandJournalIdempotencyKeyBytes = 256
 const commandIdempotencyFingerprintSize = sha256.Size
 
+// CommandJournalIdempotencyStats describes the bounded idempotency ledger and
+// its process-lifetime duplicate/eviction counters. DuplicateEstimatedBytes
+// is the canonical fingerprint-payload byte count for requests skipped by an
+// exact idempotency hit; it is intended for operational accounting, not wire
+// framing.
+type CommandJournalIdempotencyStats struct {
+	Enabled                 bool   `json:"enabled"`
+	Capacity                int    `json:"capacity"`
+	Entries                 int    `json:"entries"`
+	OldestSequence          uint64 `json:"oldest_sequence,omitempty"`
+	NewestSequence          uint64 `json:"newest_sequence,omitempty"`
+	Evictions               uint64 `json:"evictions"`
+	Duplicates              uint64 `json:"duplicates"`
+	DuplicateEstimatedBytes uint64 `json:"duplicate_estimated_bytes"`
+}
+
 type commandIdempotencyCheck struct {
-	enabled     bool
-	key         string
-	fingerprint [sha256.Size]byte
+	enabled               bool
+	key                   string
+	fingerprint           [sha256.Size]byte
+	estimatedRequestBytes uint64
 }
 
 type commandIdempotencyRecord struct {
@@ -31,10 +48,13 @@ type commandIdempotencyPending struct {
 }
 
 type commandIdempotencyState struct {
-	capacity   int
-	entries    map[string]commandIdempotencyRecord
-	order      []string
-	orderIndex int
+	capacity                int
+	entries                 map[string]commandIdempotencyRecord
+	order                   []string
+	orderIndex              int
+	evictions               uint64
+	duplicates              uint64
+	duplicateEstimatedBytes uint64
 }
 
 type commandIdempotencyFingerprintRequest struct {
@@ -79,9 +99,10 @@ func newCommandIdempotencyCheck(request CacheCommandRequest) (commandIdempotency
 		return commandIdempotencyCheck{}, fmt.Errorf("hatriecache: cannot fingerprint idempotent command: %w", err)
 	}
 	return commandIdempotencyCheck{
-		enabled:     true,
-		key:         key,
-		fingerprint: sha256.Sum256(data),
+		enabled:               true,
+		key:                   key,
+		fingerprint:           sha256.Sum256(data),
+		estimatedRequestBytes: uint64(len(data)),
 	}, nil
 }
 
@@ -138,6 +159,8 @@ func (state *commandIdempotencyState) lookup(check commandIdempotencyCheck) (Cac
 	if record.fingerprint != check.fingerprint {
 		return CacheCommandResponse{}, false, fmt.Errorf("hatriecache: idempotency key was reused with a different command")
 	}
+	state.duplicates++
+	state.duplicateEstimatedBytes += check.estimatedRequestBytes
 	return cloneCacheCommandResponse(record.response), true, nil
 }
 
@@ -152,16 +175,17 @@ func (state *commandIdempotencyState) remember(check commandIdempotencyCheck, re
 		state.entries[check.key] = record
 		return
 	}
-	for state.orderIndex < len(state.order) {
-		oldest := state.order[state.orderIndex]
-		state.orderIndex++
-		if _, ok := state.entries[oldest]; !ok {
-			continue
-		}
-		if len(state.entries) >= state.capacity {
+	if len(state.entries) >= state.capacity {
+		for state.orderIndex < len(state.order) {
+			oldest := state.order[state.orderIndex]
+			state.orderIndex++
+			if _, ok := state.entries[oldest]; !ok {
+				continue
+			}
 			delete(state.entries, oldest)
+			state.evictions++
+			break
 		}
-		break
 	}
 	state.entries[check.key] = commandIdempotencyRecord{
 		fingerprint: check.fingerprint,
@@ -173,6 +197,32 @@ func (state *commandIdempotencyState) remember(check commandIdempotencyCheck, re
 		state.order = append([]string(nil), state.order[state.orderIndex:]...)
 		state.orderIndex = 0
 	}
+}
+
+func (state *commandIdempotencyState) stats() CommandJournalIdempotencyStats {
+	if state == nil {
+		return CommandJournalIdempotencyStats{}
+	}
+	stats := CommandJournalIdempotencyStats{
+		Enabled:                 state.enabled(),
+		Capacity:                state.capacity,
+		Entries:                 len(state.entries),
+		Evictions:               state.evictions,
+		Duplicates:              state.duplicates,
+		DuplicateEstimatedBytes: state.duplicateEstimatedBytes,
+	}
+	for _, record := range state.entries {
+		if record.sequence == 0 {
+			continue
+		}
+		if stats.OldestSequence == 0 || record.sequence < stats.OldestSequence {
+			stats.OldestSequence = record.sequence
+		}
+		if record.sequence > stats.NewestSequence {
+			stats.NewestSequence = record.sequence
+		}
+	}
+	return stats
 }
 
 func lookupPendingCommandIdempotency(pending []commandIdempotencyPending, check commandIdempotencyCheck) (CacheCommandResponse, bool, error) {
