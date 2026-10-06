@@ -32579,4 +32579,27 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
+
+## CH-U01 Durable Asynchronous-Insert Deduplication
+
+The opt-in `hatPipeline.AsyncInsertLedger` persists completed insert IDs and
+the `DurableAsyncBatcher` suppresses committed retries after a restart. The
+existing in-memory `AsyncBatcher` path is unchanged by default. See
+[CHU01_DURABLE_INSERT_DEDUP.md](CHU01_DURABLE_INSERT_DEDUP.md) for recovery
+semantics and the sink transaction boundary.
+
+The focused package verification passed tests, race detection, and vet. Five
+benchmark samples on the AMD Ryzen 9 5950X workstation produced:
+
+| Workload | Baseline | Durable candidate | Improvement / cost |
+| --- | ---: | ---: | --- |
+| One submit + flush | 914.7 ns/op, 128 B, 2 allocs | 724,192 ns/op, 367 B, 4 allocs | 791x slower; 24.39 journal bytes/op |
+| 64 submits + one flush | 10,600 ns/batch, 128 B, 2 allocs | 9,209,198 ns/batch, 18,034 B, 135 allocs | 869x slower; 25.61 journal bytes/item |
+| Buffered one submit + flush | 914.7 ns/op baseline | 112,638 ns/op, 344 B, 5 allocs | 123x slower; recent records are not crash-durable until sync/close |
+| Already-committed duplicate | N/A | 95.39 ns/op, 0 B, 0 allocs | Fast no-op; no handler or journal write |
+
+Raw five-run samples for the synchronous one-submit workload were `673,796`,
+`8,747,827`, `724,192`, `715,983`, and `12,192,644 ns/op`; filesystem flush
+latency was highly variable. The feature is retained only as an opt-in
+reliability capability, not as a throughput optimization.
 existing JSON and data-bearing subscription paths are not changed.
