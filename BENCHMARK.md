@@ -33241,3 +33241,16 @@ BenchmarkConfigWatchReadResumeMiddle:   102.4 102.1 103.3 102.1 102.4 ns/op
 Both paths use `88 B/op` and `2 allocs/op`. The optimization adds no retained
 index or per-event memory; it replaces the seek scan with a binary search over
 the existing chronological ring.
+## T-U18 Explicit Volatile Cache Engine
+
+Five `-benchmem` samples on Linux/amd64, AMD Ryzen 9 5950X, using one byte
+key/value set followed by get per operation:
+
+| Path | Raw ns/op samples | Median ns/op | B/op | Allocs/op | Relative |
+| --- | --- | ---: | ---: | ---: | --- |
+| Direct HAT-trie byte path, baseline | 242.9; 244.1; 243.1; 243.1; 244.9 | 243.1 | 64 | 2 | baseline |
+| `VolatileEngine`, after | 338.1; 338.6; 335.2; 341.2; 337.8 | 338.1 | 64 | 2 | 1.39x CPU; +95.0 ns |
+
+The feature is opt-in and trades about 39% CPU for explicit non-durable
+identity, bounded FIFO admission, TTL expiry, and resident-byte accounting.
+See [TU018_EXPLICIT_VOLATILE_ENGINE.md](TU018_EXPLICIT_VOLATILE_ENGINE.md).

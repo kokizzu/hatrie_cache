@@ -22931,3 +22931,32 @@ verify-config-watch-index:
 .PHONY: stage-config-watch-index
 stage-config-watch-index:
 	bash scripts/stage-config-watch-index.sh
+test-tu18:
+	bash scripts/test-tu18.sh
+
+baseline-tu18:
+	bash scripts/benchmark-tu18.sh baseline
+
+benchmark-tu18:
+	bash scripts/benchmark-tu18.sh after
+
+format-tu18:
+	bash scripts/format-tu18.sh
+
+test-tu18-package:
+	bash scripts/verify-tu18.sh package
+
+race-tu18:
+	bash scripts/verify-tu18.sh race
+
+vet-tu18:
+	bash scripts/verify-tu18.sh vet
+
+test-tu18-all:
+	bash scripts/verify-tu18.sh all
+
+clean-tu18:
+	bash scripts/clean-tu18.sh
+
+ship-tu18:
+	bash scripts/ship-tu18.sh
