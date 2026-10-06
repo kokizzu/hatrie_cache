@@ -231,6 +231,12 @@ type CommandJournal struct {
 	groupCommitJobs       chan *commandJournalJob
 	groupCommitDone       chan struct{}
 	closeDone             chan struct{}
+	spacePolicies         map[string]CommandJournalSpaceSyncPolicy
+	periodicSyncWake      chan struct{}
+	periodicSyncStop      chan struct{}
+	periodicSyncDone      chan struct{}
+	periodicSyncDirty     bool
+	periodicSyncError     error
 	subscriptionWakeMu    sync.Mutex
 	subscriptionWake      chan struct{}
 	subscriptionCount     uint64
@@ -398,10 +404,25 @@ func (journal *CommandJournal) Close() error {
 		if journal.groupCommitDone != nil {
 			<-journal.groupCommitDone
 		}
+		journal.stopPeriodicSyncLoop()
 
 		journal.mu.Lock()
 		journal.closed = true
-		journal.closeErr = journal.closeAppendFileLocked()
+		if journal.periodicSyncDirty {
+			if err := journal.syncLocked(); err != nil {
+				journal.periodicSyncError = err
+			}
+		}
+		if journal.periodicSyncError != nil {
+			journal.closeErr = journal.periodicSyncError
+		}
+		if err := journal.closeAppendFileLocked(); err != nil {
+			if journal.closeErr != nil {
+				journal.closeErr = errors.Join(journal.closeErr, err)
+			} else {
+				journal.closeErr = err
+			}
+		}
 		journal.mu.Unlock()
 		close(journal.closeDone)
 	})

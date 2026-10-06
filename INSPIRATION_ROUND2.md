@@ -150,7 +150,7 @@ operator control remain the preferred deployment model.
 - [ ] T208 Anonymous replicas that do not participate in quorum decisions.
 - [ ] T209 Relay/applier backpressure when a replica falls behind.
 - [ ] T210 Master-master conflict hooks with source and sequence context.
-- [ ] T211 Configurable WAL synchronization modes with durability reporting.
+- [x] T211 Configurable WAL synchronization modes with durability reporting. See [TU34_PER_SPACE_WAL_SYNC.md](TU34_PER_SPACE_WAL_SYNC.md).
 - [ ] T212 WAL retention and rotation policies tied to replica acknowledgments.
 - [ ] T213 Scheduled snapshots with checkpoint manifests and atomic publication.
 - [ ] T214 Streaming snapshots for replicas without a shared filesystem.

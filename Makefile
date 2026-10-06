@@ -22931,3 +22931,26 @@ verify-config-watch-index:
 .PHONY: stage-config-watch-index
 stage-config-watch-index:
 	bash scripts/stage-config-watch-index.sh
+codex-tu34-test:
+	@bash ./scripts/test-tu34.sh
+
+codex-tu34-benchmark:
+	@bash ./scripts/benchmark-tu34.sh
+
+codex-tu34-format:
+	@bash ./scripts/format-tu34.sh
+
+codex-tu34-race:
+	@bash ./scripts/race-tu34.sh
+
+codex-tu34-vet:
+	@bash ./scripts/vet-tu34.sh
+
+codex-tu34-package:
+	@bash ./scripts/test-tu34-package.sh
+
+codex-tu34-status:
+	@bash ./scripts/status-tu34.sh
+
+codex-tu34-ship:
+	@bash ./scripts/ship-tu34.sh

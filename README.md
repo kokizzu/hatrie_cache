@@ -4802,3 +4802,9 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+## Per-Space WAL Sync
+
+Use the opt-in [`CommandJournalSpace` policy](TU34_PER_SPACE_WAL_SYNC.md) when
+different logical spaces need synchronous, periodic, or intentionally disabled
+command-journal durability. Existing journal callers keep the synchronous
+default.

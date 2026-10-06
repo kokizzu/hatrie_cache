@@ -33241,3 +33241,11 @@ BenchmarkConfigWatchReadResumeMiddle:   102.4 102.1 103.3 102.1 102.4 ns/op
 Both paths use `88 B/op` and `2 allocs/op`. The optimization adds no retained
 index or per-event memory; it replaces the seek scan with a binary search over
 the existing chronological ring.
+## Per-Space WAL Sync Policy
+
+T-U34 adds explicit synchronous, periodic, and disabled policies without
+changing ordinary command-journal defaults. The focused result is documented
+in [TU34_PER_SPACE_WAL_SYNC.md](TU34_PER_SPACE_WAL_SYNC.md): clean legacy
+median `4,222 ns/op`, explicit synchronous `4,284 ns/op` (1.5% slower),
+periodic `4,592 ns/op` (8.8% slower before its flush), and disabled
+`320 ns/op` (13.19x faster, zero allocations because it skips the WAL).
