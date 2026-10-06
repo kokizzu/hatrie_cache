@@ -22916,3 +22916,18 @@ benchmark-mu035-snapshot-blocking:
 .PHONY: stage-mu035-snapshot-blocking
 stage-mu035-snapshot-blocking:
 	bash scripts/stage-mu035-snapshot-blocking.sh
+.PHONY: benchmark-config-watch-index
+benchmark-config-watch-index:
+	bash scripts/benchmark-config-watch-index.sh
+.PHONY: test-config-watch-index
+test-config-watch-index:
+	bash scripts/test-config-watch-index.sh
+.PHONY: format-config-watch-index
+format-config-watch-index:
+	bash scripts/format-config-watch-index.sh
+.PHONY: verify-config-watch-index
+verify-config-watch-index:
+	bash scripts/verify-config-watch-index.sh
+.PHONY: stage-config-watch-index
+stage-config-watch-index:
+	bash scripts/stage-config-watch-index.sh

@@ -346,12 +346,11 @@ func (log *ConfigWatchLog) Read(ctx context.Context, request ConfigWatchRequest)
 			CurrentVersion:  log.current,
 		}
 	}
-	events := make([]ConfigWatchEvent, 0, min(limit, log.historySize))
-	for offset := 0; offset < log.historySize && len(events) < limit; offset++ {
+	first := log.firstReplayOffsetAfter(request.AfterVersion)
+	remaining := log.historySize - first
+	events := make([]ConfigWatchEvent, 0, min(limit, remaining))
+	for offset := first; offset < log.historySize && len(events) < limit; offset++ {
 		event := log.history[(log.historyStart+offset)%log.historyLimit]
-		if event.Version <= request.AfterVersion {
-			continue
-		}
 		events = append(events, cloneConfigWatchEvent(event))
 	}
 	next := request.AfterVersion
@@ -405,4 +404,22 @@ func cloneConfigWatchEvent(event ConfigWatchEvent) ConfigWatchEvent {
 		event.Value = append([]byte(nil), event.Value...)
 	}
 	return event
+}
+
+// firstReplayOffsetAfter finds the first retained event newer than the
+// caller's cursor. Publish enforces strictly increasing versions, so the
+// chronological ring view is sorted even when the physical backing slice has
+// wrapped.
+func (log *ConfigWatchLog) firstReplayOffsetAfter(afterVersion uint64) int {
+	low, high := 0, log.historySize
+	for low < high {
+		middle := low + (high-low)/2
+		event := log.history[(log.historyStart+middle)%log.historyLimit]
+		if event.Version <= afterVersion {
+			low = middle + 1
+			continue
+		}
+		high = middle
+	}
+	return low
 }

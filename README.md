@@ -77,6 +77,7 @@ security guidance before exposing it on a network.
 - 50-item adoption backlog for each inspiration source: [INSPIRATION_BACKLOG.md](INSPIRATION_BACKLOG.md)
 - Opt-in cross-source snapshot cutover coordination: [MZ010_SNAPSHOT_CUTOVER.md](MZ010_SNAPSHOT_CUTOVER.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-010-cross-source-snapshot-cutover)
 - Materialize-style blocking reads on a prepared cross-source snapshot until commit or abort: [MU035_SNAPSHOT_BLOCKING.md](MU035_SNAPSHOT_BLOCKING.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mu-035-snapshot-blocking)
+- O(log N) config-watch replay seeks over the bounded version ring: [CONFIG_WATCH_REPLAY_INDEX.md](CONFIG_WATCH_REPLAY_INDEX.md), with measurements in [BENCHMARK.md](BENCHMARK.md#config-watch-replay-index)
 - Kafka-style partition offset and watermark frontiers: [MZ011_PARTITION_OFFSET_FRONTIERS.md](MZ011_PARTITION_OFFSET_FRONTIERS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-011-kafka-style-partition-offset-frontiers)
 - Kafka-style consumer-group rebalance fencing: [MZ012_CONSUMER_GROUP_FENCING.md](MZ012_CONSUMER_GROUP_FENCING.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-012-kafka-style-consumer-group-fencing)
 - ClickHouse-inspired bounded asynchronous insert buffering: [CH009_ASYNC_INSERT_BUFFER.md](CH009_ASYNC_INSERT_BUFFER.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-009-bounded-async-insert-buffer)

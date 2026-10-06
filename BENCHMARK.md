@@ -33212,3 +33212,32 @@ Manager apply is 4.56x the baseline latency, 5.09x the bytes, and 9.25x the
 allocations for this tiny two-step example. That is control-plane overhead for
 precondition checking, progress, callback isolation, resumability, rollback,
 and snapshot-safe state; it must not be placed in a per-row execution path.
+
+## Config watch replay index
+
+The workload retained 1,024 versioned events and read one event from either a
+near-tail cursor (`after=1023`) or the middle (`after=511`). Each row is the
+median of five `go test -benchmem` samples on an AMD Ryzen 9 5950X.
+
+| Resume point | Before linear scan | After binary seek | Improvement | Before memory | After memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Near tail | 2,335 ns/op | 104.2 ns/op | 22.4x faster | 88 B/op, 2 allocs/op | 88 B/op, 2 allocs/op |
+| Middle | 1,193 ns/op | 102.4 ns/op | 11.7x faster | 88 B/op, 2 allocs/op | 88 B/op, 2 allocs/op |
+
+Raw baseline samples:
+
+```text
+BenchmarkConfigWatchReadResumeNearTail: 2345 2335 2380 2315 2317 ns/op
+BenchmarkConfigWatchReadResumeMiddle:   1185 1193 1206 1203 1182 ns/op
+```
+
+Raw optimized samples:
+
+```text
+BenchmarkConfigWatchReadResumeNearTail: 103.6 104.2 104.8 104.2 104.9 ns/op
+BenchmarkConfigWatchReadResumeMiddle:   102.4 102.1 103.3 102.1 102.4 ns/op
+```
+
+Both paths use `88 B/op` and `2 allocs/op`. The optimization adds no retained
+index or per-event memory; it replaces the seek scan with a binary search over
+the existing chronological ring.
