@@ -4430,8 +4430,9 @@ the measured cost in
 `EXTERNAL('name')` source when its resolver implements
 `ExternalStreamSourceResolver`: running rank/number windows, running numeric
 aggregates, and fixed-offset `LAG`/`LEAD`. The callback is consumed in source
-order and the result slice is avoided. Partitioned, explicitly framed, or
-window-ordered external queries retain existing materialization behavior.
+order and the result slice is avoided. Unordered `PARTITION BY` windows keep
+bounded state per observed partition. Explicitly framed or window-ordered
+external queries retain existing materialization behavior.
 See [CHU05_EXTERNAL_WINDOW_STREAM.md](CHU05_EXTERNAL_WINDOW_STREAM.md) and
 the [CH-U05 benchmark](BENCHMARK.md#ch-u05-external-window-streaming).
 

@@ -17,6 +17,7 @@ import (
 	"math"
 	"math/big"
 	"os"
+	"reflect"
 	"runtime"
 	"sort"
 	"strconv"
@@ -1439,6 +1440,9 @@ func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQ
 	if sqlRunningWindowStreamable(query, resolver) {
 		return executeSQLRunningWindowStream(ctx, query, resolver, control, visit)
 	}
+	if sqlPartitionedRunningWindowStreamable(query, resolver) {
+		return executeSQLPartitionedRunningWindowStream(ctx, query, resolver, control, visit)
+	}
 	if control == nil || control.options.MaxGroupKeys <= 0 {
 		if projections, ok := sqlIndexedGroupStreamable(query, resolver); ok {
 			return executeSQLIndexedGroupAggregateStream(ctx, query, resolver, control, visit, projections)
@@ -2395,6 +2399,98 @@ func sqlRunningWindowStreamable(query *sqlQuery, resolver SQLSourceResolver) boo
 	return hasWindow
 }
 
+// sqlPartitionedRunningWindowStreamable recognizes the same bounded running
+// window subset as sqlRunningWindowStreamable, but keeps one state object per
+// PARTITION BY key. The source order is preserved because no ordering or frame
+// semantics are involved.
+func sqlPartitionedRunningWindowStreamable(query *sqlQuery, resolver SQLSourceResolver) bool {
+	if query == nil || query.explain || query.from == nil || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 0 || len(query.groupBy) != 0 || query.having.kind != "" || query.distinct || len(query.orderBy) != 0 || len(query.from.fieldTypes) != 0 || !sqlWindowSourceStreamable(query, resolver) || sqlExprHasWindow(query.where) || sqlExprHasCustomFunction(query.where, nil) {
+		return false
+	}
+	hasWindow, hasPartition := false, false
+	for _, item := range query.selects {
+		expr := item.expr
+		if expr.window == nil {
+			if expr.kind == "star" || sqlExprHasAggregate(expr) || sqlExprHasWindow(expr) || sqlExprHasCustomFunction(expr, nil) {
+				return false
+			}
+			continue
+		}
+		hasWindow = true
+		if expr.kind != "func" || len(expr.window.order) != 0 || expr.window.frame != nil {
+			return false
+		}
+		if len(expr.window.partition) > 0 {
+			hasPartition = true
+		}
+		for _, partition := range expr.window.partition {
+			if sqlExprHasAggregate(partition) || sqlExprHasWindow(partition) || sqlExprHasCustomFunction(partition, nil) {
+				return false
+			}
+		}
+		switch strings.ToUpper(expr.name) {
+		case "ROW_NUMBER", "RANK", "DENSE_RANK":
+			if len(expr.args) != 0 {
+				return false
+			}
+		case "SUM", "AVG", "MIN", "MAX":
+			if len(expr.args) != 1 || sqlExprHasAggregate(expr.args[0]) || sqlExprHasWindow(expr.args[0]) || sqlExprHasCustomFunction(expr.args[0], nil) {
+				return false
+			}
+		case "LAG":
+			if _, ok := sqlRunningWindowLagOffset(expr.args); !ok {
+				return false
+			}
+			for _, argument := range expr.args {
+				if sqlExprHasAggregate(argument) || sqlExprHasWindow(argument) || sqlExprHasCustomFunction(argument, nil) {
+					return false
+				}
+			}
+		default:
+			return false
+		}
+	}
+	return hasWindow && hasPartition
+}
+
+func sqlWindowPartitionKey(row sqlExecRow, expressions []sqlExpr) (string, error) {
+	if len(expressions) == 0 {
+		return "", nil
+	}
+	if len(expressions) == 1 {
+		value := evalSQLExpr(expressions[0], []sqlExecRow{row}, row)
+		if err := sqlExpressionError(value); err != nil {
+			return "", err
+		}
+		return sqlWindowPartitionComponent(value), nil
+	}
+	var key strings.Builder
+	for _, expression := range expressions {
+		value := evalSQLExpr(expression, []sqlExecRow{row}, row)
+		if err := sqlExpressionError(value); err != nil {
+			return "", err
+		}
+		encoded := sqlWindowPartitionComponent(value)
+		key.WriteString(strconv.Itoa(len(encoded)))
+		key.WriteByte(':')
+		key.WriteString(encoded)
+	}
+	return key.String(), nil
+}
+
+func sqlWindowPartitionComponent(value interface{}) string {
+	switch typed := value.(type) {
+	case nil:
+		return "null:"
+	case string:
+		return "string:" + typed
+	case bool:
+		return "bool:" + strconv.FormatBool(typed)
+	default:
+		return fmt.Sprintf("%T:%#v", value, value)
+	}
+}
+
 // sqlRunningWindowLagOffset accepts only a literal offset because streamed LAG
 // needs a fixed-size history. Materialized execution remains available for
 // dynamic offsets and for LEAD, which requires future rows.
@@ -2647,6 +2743,26 @@ func (state sqlRunningWindowState) value() interface{} {
 	return nil
 }
 
+func newSQLRunningWindowState(item sqlSelectItem, maxRows int) *sqlRunningWindowState {
+	state := &sqlRunningWindowState{name: strings.ToUpper(item.expr.name)}
+	if len(item.expr.args) == 1 {
+		state.arg = item.expr.args[0]
+	}
+	if state.name == "LAG" {
+		offset, _ := sqlRunningWindowLagOffset(item.expr.args)
+		state.arg = item.expr.args[0]
+		state.lagOffset = offset
+		if len(item.expr.args) == 3 {
+			defaultExpr := item.expr.args[2]
+			state.lagDefault = &defaultExpr
+		}
+		if offset > 0 && offset < maxRows {
+			state.lagValues = make([]interface{}, offset)
+		}
+	}
+	return state
+}
+
 func executeSQLRunningWindowStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func(columns []string, row SQLRow) error) error {
 	columns := sqlColumns(query.selects)
 	states := make([]*sqlRunningWindowState, len(query.selects))
@@ -2654,23 +2770,7 @@ func executeSQLRunningWindowStream(ctx context.Context, query *sqlQuery, resolve
 		if item.expr.window == nil {
 			continue
 		}
-		state := &sqlRunningWindowState{name: strings.ToUpper(item.expr.name)}
-		if len(item.expr.args) == 1 {
-			state.arg = item.expr.args[0]
-		}
-		if state.name == "LAG" {
-			offset, _ := sqlRunningWindowLagOffset(item.expr.args)
-			state.arg = item.expr.args[0]
-			state.lagOffset = offset
-			if len(item.expr.args) == 3 {
-				defaultExpr := item.expr.args[2]
-				state.lagDefault = &defaultExpr
-			}
-			if offset > 0 && offset < control.maxRows {
-				state.lagValues = make([]interface{}, offset)
-			}
-		}
-		states[index] = state
+		states[index] = newSQLRunningWindowState(item, control.maxRows)
 	}
 	if query.limit == 0 {
 		return nil
@@ -2698,6 +2798,119 @@ func executeSQLRunningWindowStream(ctx context.Context, query *sqlQuery, resolve
 		for index, item := range query.selects {
 			if states[index] != nil {
 				value, err := states[index].add(execRow)
+				if err != nil {
+					return err
+				}
+				row[columns[index]] = value
+				continue
+			}
+			value := evalSQLExpr(item.expr, []sqlExecRow{execRow}, execRow)
+			if err := sqlExpressionError(value); err != nil {
+				return err
+			}
+			row[columns[index]] = value
+		}
+		seen++
+		if seen <= query.offset {
+			return nil
+		}
+		if query.limit >= 0 && emitted >= query.limit {
+			return errSQLStreamLimitReached
+		}
+		if control.options.MaxResultBytes > 0 {
+			resultBytes += sqlRowBytes(row)
+			if resultBytes > control.options.MaxResultBytes {
+				return fmt.Errorf("SQL result byte budget exceeded: maximum %d bytes", control.options.MaxResultBytes)
+			}
+		}
+		emitted++
+		if err := visit(columns, row); err != nil {
+			return err
+		}
+		if query.limit >= 0 && emitted >= query.limit {
+			return errSQLStreamLimitReached
+		}
+		return nil
+	})
+	if err != nil && err != errSQLStreamLimitReached {
+		return sqlRuntimeDiagnostic(err)
+	}
+	return nil
+}
+
+// executeSQLPartitionedRunningWindowStream retains state only for the
+// partitions observed by the source. It deliberately handles unordered
+// windows only; ordered windows and explicit frames still use materialized
+// execution so their semantics remain unchanged.
+func executeSQLPartitionedRunningWindowStream(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func(columns []string, row SQLRow) error) error {
+	columns := sqlColumns(query.selects)
+	states := make([]map[string]*sqlRunningWindowState, len(query.selects))
+	partitionGroups := make([][]sqlExpr, 0)
+	partitionGroupBySelect := make([]int, len(query.selects))
+	for index := range partitionGroupBySelect {
+		partitionGroupBySelect[index] = -1
+	}
+	for index, item := range query.selects {
+		if item.expr.window != nil {
+			states[index] = make(map[string]*sqlRunningWindowState)
+			if len(item.expr.window.partition) == 0 {
+				continue
+			}
+			for groupIndex, expressions := range partitionGroups {
+				if reflect.DeepEqual(expressions, item.expr.window.partition) {
+					partitionGroupBySelect[index] = groupIndex
+					break
+				}
+			}
+			if partitionGroupBySelect[index] < 0 {
+				partitionGroupBySelect[index] = len(partitionGroups)
+				partitionGroups = append(partitionGroups, item.expr.window.partition)
+			}
+		}
+	}
+	if query.limit == 0 {
+		return nil
+	}
+	partitionKeys := make([]string, len(partitionGroups))
+	inputRows, seen, emitted, resultBytes := 0, 0, 0, 0
+	err := streamSQLSourceRowsWithPartitionPredicates(ctx, *query.from, resolver, sqlQueryPartitionPredicates(query), func(sourceRow SQLRow) error {
+		if err := control.check(); err != nil {
+			return err
+		}
+		inputRows++
+		if inputRows > control.maxRows {
+			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
+		}
+		execRow := newSQLSingleSourceExecRow(query.from.alias, sourceRow)
+		if query.where.kind != "" {
+			value := evalSQLExpr(query.where, []sqlExecRow{execRow}, execRow)
+			if err := sqlExpressionError(value); err != nil {
+				return err
+			}
+			if !sqlTruthy(value) {
+				return nil
+			}
+		}
+		for groupIndex, expressions := range partitionGroups {
+			key, err := sqlWindowPartitionKey(execRow, expressions)
+			if err != nil {
+				return err
+			}
+			partitionKeys[groupIndex] = key
+		}
+		row := make(SQLRow, len(columns))
+		for index, item := range query.selects {
+			if states[index] != nil {
+				key := ""
+				if groupIndex := partitionGroupBySelect[index]; groupIndex >= 0 {
+					key = partitionKeys[groupIndex]
+				}
+				state := states[index][key]
+				if state == nil {
+					state = newSQLRunningWindowState(item, control.maxRows)
+					states[index][key] = state
+				}
+				value, err := state.add(execRow)
 				if err != nil {
 					return err
 				}

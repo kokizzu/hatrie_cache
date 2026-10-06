@@ -22931,3 +22931,44 @@ verify-config-watch-index:
 .PHONY: stage-config-watch-index
 stage-config-watch-index:
 	bash scripts/stage-config-watch-index.sh
+red-chu05-partitioned-window:
+	bash scripts/chu05-partitioned-window.sh red
+
+format-chu05-partitioned-window:
+	bash scripts/chu05-partitioned-window.sh format
+
+test-chu05-partitioned-window:
+	bash scripts/chu05-partitioned-window.sh test
+
+test-chu05-partitioned-window-package:
+	bash scripts/chu05-partitioned-window.sh package
+
+race-chu05-partitioned-window:
+	bash scripts/chu05-partitioned-window.sh race
+
+race-chu05-partitioned-window-package:
+	bash scripts/chu05-partitioned-window.sh race-package
+
+vet-chu05-partitioned-window:
+	bash scripts/chu05-partitioned-window.sh vet
+
+status-chu05-partitioned-window:
+	bash scripts/chu05-deliver.sh status
+
+verify-chu05-partitioned-window:
+	bash scripts/chu05-deliver.sh verify
+
+stage-chu05-partitioned-window:
+	bash scripts/chu05-deliver.sh stage
+
+commit-chu05-partitioned-window:
+	bash scripts/chu05-deliver.sh commit
+
+push-chu05-partitioned-window:
+	bash scripts/chu05-deliver.sh push
+
+benchmark-chu05-partitioned-window-before:
+	bash scripts/chu05-partitioned-window.sh baseline
+
+benchmark-chu05-partitioned-window:
+	bash scripts/chu05-partitioned-window.sh benchmark

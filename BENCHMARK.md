@@ -28338,11 +28338,12 @@ streaming external spill: Maximum resident set size: 24908 kbytes
 
 CH-U05 lets a direct `EXTERNAL('name')` source implement
 `ExternalStreamSourceResolver` so `ExecuteSQLQueryRows` can execute the
-bounded, unpartitioned, unordered window subset without materializing the
-result slice. Supported functions are `ROW_NUMBER`, `RANK`, `DENSE_RANK`,
-running `SUM`/`AVG`/`MIN`/`MAX`, and fixed-literal-offset `LAG`/`LEAD`.
-Partitioned, explicitly framed, and window-ordered queries remain outside this
-path. The materialized API and legacy materialized-only resolvers are unchanged.
+bounded, unordered window subset without materializing the result slice.
+Supported functions are `ROW_NUMBER`, `RANK`, `DENSE_RANK`, running
+`SUM`/`AVG`/`MIN`/`MAX`, and fixed-literal-offset `LAG`/`LEAD`. Unordered
+`PARTITION BY` windows retain one bounded state map per observed partition;
+explicitly framed and window-ordered queries remain outside this path. The
+materialized API and legacy materialized-only resolvers are unchanged.
 
 The workload uses a generated 4,096-row external source and the following
 query:
@@ -28390,6 +28391,68 @@ Measured with:
 ```text
 make benchmark-chu05-c245
 make memory-chu05-c245
+```
+
+### CH-U05 Partitioned Unordered Window Extension
+
+The extension keeps the source order while retaining one scalar/ring-buffer
+state per observed `PARTITION BY` key. The workload uses 4,096 rows and 64
+interleaved partitions:
+
+```sql
+FROM EXTERNAL('events') AS event
+SELECT event.id, event.group,
+       ROW_NUMBER() OVER (PARTITION BY event.group) AS row_number,
+       SUM(event.value) OVER (PARTITION BY event.group) AS running_sum,
+       LAG(event.value) OVER (PARTITION BY event.group) AS previous_value
+```
+
+The pre-change materialized baseline was measured before the partitioned
+executor existed. The post-change materialized column is a same-run control;
+the streaming column is the new executor. Five `-count=5` samples used
+`GOMAXPROCS=1` on the same AMD Ryzen 9 5950X host.
+
+| Metric | Before materialized | After materialized control | After partitioned streaming | Streaming vs control |
+| --- | ---: | ---: | ---: | ---: |
+| Median time | 14.94 ms/op | 14.08 ms/op | 10.06 ms/op | 1.40x faster |
+| Cumulative allocation | 7,235,239 B/op | 7,235,235 B/op | 5,771,232 B/op | 1.25x lower, 20.2% lower |
+| Allocation count | 67,384 allocs/op | 67,384 allocs/op | 86,342 allocs/op | 1.28x higher |
+
+The optimization improves latency and cumulative allocation bytes, but creates
+more smaller allocation events for partition-key/state bookkeeping. That is a
+documented tradeoff; ordered and explicitly framed windows remain on the
+materialized path.
+
+Raw pre-change output:
+
+```text
+BenchmarkCHU05ExternalPartitionedWindowMaterialized       15  14941096 ns/op  7235249 B/op  67385 allocs/op
+BenchmarkCHU05ExternalPartitionedWindowMaterialized       18  14684014 ns/op  7235233 B/op  67384 allocs/op
+BenchmarkCHU05ExternalPartitionedWindowMaterialized       16  14811587 ns/op  7235224 B/op  67384 allocs/op
+BenchmarkCHU05ExternalPartitionedWindowMaterialized       15  15673831 ns/op  7235239 B/op  67385 allocs/op
+BenchmarkCHU05ExternalPartitionedWindowMaterialized       15  16801994 ns/op  7235212 B/op  67384 allocs/op
+```
+
+Raw post-change output:
+
+```text
+BenchmarkCHU05ExternalPartitionedWindowMaterialized       16  14600403 ns/op  7235242 B/op  67384 allocs/op
+BenchmarkCHU05ExternalPartitionedWindowMaterialized       16  15460949 ns/op  7235234 B/op  67385 allocs/op
+BenchmarkCHU05ExternalPartitionedWindowMaterialized       16  13817661 ns/op  7235237 B/op  67384 allocs/op
+BenchmarkCHU05ExternalPartitionedWindowMaterialized       16  14084260 ns/op  7235235 B/op  67384 allocs/op
+BenchmarkCHU05ExternalPartitionedWindowMaterialized       18  13978211 ns/op  7235230 B/op  67384 allocs/op
+BenchmarkCHU05ExternalPartitionedWindowStreaming          25  11090065 ns/op  5771232 B/op  86342 allocs/op
+BenchmarkCHU05ExternalPartitionedWindowStreaming          20  11592095 ns/op  5771237 B/op  86342 allocs/op
+BenchmarkCHU05ExternalPartitionedWindowStreaming          22   9899060 ns/op  5771227 B/op  86342 allocs/op
+BenchmarkCHU05ExternalPartitionedWindowStreaming          24  10059471 ns/op  5771236 B/op  86342 allocs/op
+BenchmarkCHU05ExternalPartitionedWindowStreaming          25   9731139 ns/op  5771231 B/op  86342 allocs/op
+```
+
+Measured with:
+
+```text
+make benchmark-chu05-partitioned-window-before
+make benchmark-chu05-partitioned-window
 ```
 
 ## CH-U07 Mutation Lifecycle
