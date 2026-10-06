@@ -98,3 +98,39 @@ func BenchmarkCHU01BaselineAsyncBatcherSubmitAndFlush(b *testing.B) {
 		b.Fatalf("handled = %d, want %d", handled.Load(), b.N)
 	}
 }
+
+func BenchmarkCHU01BaselineAsyncBatcherSubmit64AndFlush(b *testing.B) {
+	const batchSize = 64
+	var handled atomic.Uint64
+	batcher, err := NewAsyncBatcher(AsyncBatcherOptions[int]{
+		Capacity:      batchSize * 2,
+		MaxBatchSize:  batchSize,
+		FlushInterval: time.Hour,
+		Handler: func(_ context.Context, batch []int) error {
+			handled.Add(uint64(len(batch)))
+			return nil
+		},
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		for value := 0; value < batchSize; value++ {
+			if err := batcher.Submit(context.Background(), index*batchSize+value); err != nil {
+				b.Fatal(err)
+			}
+		}
+		if err := batcher.Flush(context.Background()); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.StopTimer()
+	if err := batcher.Close(context.Background()); err != nil {
+		b.Fatal(err)
+	}
+	want := uint64(b.N * batchSize)
+	if handled.Load() != want {
+		b.Fatalf("handled = %d, want %d", handled.Load(), want)
+	}
+}
