@@ -15871,6 +15871,26 @@ The direct path is about 1.29x faster for the global workload and 2.21x
 faster for the filtered workload, while using fewer bytes and allocations in
 both cases.
 
+## TT-016: Versioned Tuple Migrations
+
+Command: `make benchmark-tg16`.
+
+This benchmark uses a three-version tuple schema with two registered forward
+callbacks. The direct path performs the same unpack/transform/repack work by
+hand; the manager adds deterministic plan lookup, cycle-safe registration
+semantics, and format validation at each boundary.
+
+| Path | Median time | Allocated bytes | Allocations | Relative to direct |
+| --- | ---: | ---: | ---: | ---: |
+| Direct unpack/transform/repack | 1.42 us/op | 2,232 B/op | 12 | 1.00x |
+| Migration manager | 1.73 us/op | 2,688 B/op | 17 | 1.22x time, 1.20x bytes, 1.42x allocations |
+
+The manager is intentionally an opt-in migration/restore boundary. Normal
+tuple packing, reads, and field updates do not pay this cost. The measured
+overhead is the tradeoff for deterministic plans, source and target validation,
+cycle protection, and no partial result on callback failure. See
+[TT016_VERSIONED_TUPLE_MIGRATIONS.md](TT016_VERSIONED_TUPLE_MIGRATIONS.md).
+
 ## Gaps Versus Redis
 
 HAT-trie cache intentionally does not try to implement the entire Redis command

@@ -181,6 +181,7 @@ security guidance before exposing it on a network.
 - Versioned compact frontier checkpoint/restore: [FRONTIER_SNAPSHOTS.md](FRONTIER_SNAPSHOTS.md)
 - Bounded as-of retention leases for safe compaction: [FRONTIER_RETENTION.md](FRONTIER_RETENTION.md)
 - Tarantool-style tuple format version negotiation: [TUPLE_FORMAT_NEGOTIATION.md](TUPLE_FORMAT_NEGOTIATION.md)
+- Tarantool-style versioned tuple migration plans: [TT016_VERSIONED_TUPLE_MIGRATIONS.md](TT016_VERSIONED_TUPLE_MIGRATIONS.md), with measurements in [BENCHMARK.md#tt-016-versioned-tuple-migrations](BENCHMARK.md#tt-016-versioned-tuple-migrations)
 - Tarantool-inspired adaptive per-tuple compression: [TT045_TUPLE_COMPRESSION.md](TT045_TUPLE_COMPRESSION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#tt-045-tuple-level-compression)
 - Snapshot-consistent ordered index cursors: [ORDERED_SNAPSHOT_CURSOR.md](ORDERED_SNAPSHOT_CURSOR.md)
 - Opt-in per-space memory quotas: [SPACE_MEMORY_QUOTA.md](SPACE_MEMORY_QUOTA.md)
@@ -4570,6 +4571,13 @@ format version, validates it before field-shape checks, and provides bounded
 `HTV1` encode/decode. Existing `TupleFieldOffsetCache` callers remain
 unchanged. See [`TR020_VERSIONED_TUPLE.md`](TR020_VERSIONED_TUPLE.md) and the
 [TR-20 benchmark](BENCHMARK.md#tr-20-versioned-tuple-boundaries).
+
+When several tuple schema versions must remain readable during a rollout, use
+`hatDataStructure.VersionedTupleMigrationManager` to register the formats and
+forward transforms, inspect the exact version path, and publish only a fully
+validated replacement tuple. It is caller-driven and disabled unless
+constructed explicitly; it does not rewrite storage or change the existing
+tuple path. See [TT016_VERSIONED_TUPLE_MIGRATIONS.md](TT016_VERSIONED_TUPLE_MIGRATIONS.md).
 ### Queue partition ownership
 
 `hatPipeline.QueuePartitionOwnership` provides explicit partition ownership,

@@ -22292,3 +22292,22 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: format-tg16 test-tg16 race-tg16 vet-tg16 benchmark-tg16 status-tg16 stage-tg16 commit-tg16 push-tg16
+format-tg16:
+	@bash scripts/run-tg16.sh format
+test-tg16:
+	@bash scripts/run-tg16.sh test
+race-tg16:
+	@bash scripts/run-tg16.sh race
+vet-tg16:
+	@bash scripts/run-tg16.sh vet
+benchmark-tg16:
+	@bash scripts/run-tg16.sh benchmark
+status-tg16:
+	@bash scripts/run-tg16.sh status
+stage-tg16:
+	@bash scripts/run-tg16.sh stage
+commit-tg16:
+	@bash scripts/run-tg16.sh commit
+push-tg16:
+	@bash scripts/run-tg16.sh push
