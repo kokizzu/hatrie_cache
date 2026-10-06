@@ -21676,6 +21676,10 @@ verify-stage-mg14:
 commit-mg14:
 	bash scripts/mg14-commit.sh
 
+.PHONY: commit-followup-mg14
+commit-followup-mg14:
+	bash scripts/mg14-followup-commit.sh
+
 .PHONY: push-mg14
 push-mg14:
 	bash scripts/mg14-push.sh
