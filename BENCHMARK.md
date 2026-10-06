@@ -1,5 +1,21 @@
 # Benchmark
 
+## T-U03 Stored Procedure Registry
+
+Five `-benchmem -count=5` samples measured a two-argument `int64` sum on an
+AMD Ryzen 9 5950X.
+
+| Operation | Median ns/op | B/op | Allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Direct callback control | 2.198 | 0 | 0 | 1.00x |
+| Bounded registry call | 884.0 | 432 | 8 | 402.2x slower |
+
+Raw samples: `direct 2.205 2.197 2.198 2.223 2.192`; `registry 886.2 890.5
+884.0 876.3 864.6`. The control omits lookup, authorization, value copying,
+limits, timeout setup, and concurrency admission, so this is an opt-in safety
+boundary cost rather than a regression to existing SQL execution. See
+[TU03_STORED_PROCEDURE_REGISTRY.md](TU03_STORED_PROCEDURE_REGISTRY.md).
+
 ## CH-U49 Skip-Index EXPLAIN Diagnostics
 
 This paired clean-worktree benchmark compares the pre-CH-U49 implementation
