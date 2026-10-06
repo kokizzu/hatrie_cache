@@ -153,7 +153,7 @@ func (scheduler *DifferentialTemporalJoinCompactionScheduler) tick(ctx context.C
 		})
 		return
 	}
-	stats, err := scheduler.join.compactDifferentialTemporalJoinContext(ctx, leftFrontier, rightFrontier, now)
+	stats, _, err := scheduler.join.CompactIfNeeded(ctx, leftFrontier, rightFrontier, now)
 	scheduler.report(ctx, DifferentialTemporalJoinCompactionResult{
 		Attempted:      true,
 		Stats:          stats,
