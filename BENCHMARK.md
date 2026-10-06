@@ -32580,3 +32580,20 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+## TR-018 WAL Sync Policy
+
+The benchmark covers the policy decision only; filesystem `fsync` latency is
+storage-dependent and is not included. Five runs on an AMD Ryzen 9 5950X:
+
+| Policy check | Median ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Immediate | 1.988 | 0 | 0 |
+| Periodic | 8.253 | 0 | 0 |
+| Disabled | 1.982 | 0 | 0 |
+
+The zero-value/default policy remains immediate. Periodic adds about 6 ns to
+the decision check but reduces automatic sync frequency; disabled removes
+automatic sync entirely. Those modes trade crash durability for fewer sync
+requests and must be selected explicitly. Existing record encoding remained
+within measurement noise after adoption: legacy encoding was about 5 ns/op and
+AES-GCM framing about 440 ns/op with the same allocation counts.

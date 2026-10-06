@@ -4088,6 +4088,15 @@ source backup and once from the restored copy after journal replay. Its report
 includes `source_state_checksum`, `restored_state_checksum`, and
 `state_checksums_match`; a missing or mismatched checksum fails the rehearsal.
 
+### Configurable WAL Sync
+
+Command journals keep the synchronous `immediate` fsync policy by default. Use
+`periodic` with `SyncInterval` only when a bounded crash-loss window is
+acceptable, or `disabled` when another durability boundary is authoritative.
+`CommandJournal.Sync()` forces an explicit checkpoint in either mode. See
+[TR018_WAL_SYNC_MODES.md](TR018_WAL_SYNC_MODES.md) for configuration, recovery
+semantics, and measured policy overhead.
+
 ### Authenticated WAL Encryption
 
 Command-journal encryption is opt-in through

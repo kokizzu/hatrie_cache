@@ -22292,3 +22292,5 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+tg18-benchmark-journal:
+	bash ./scripts/run-tg18.sh benchmark
