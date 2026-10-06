@@ -22292,3 +22292,5 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+benchmark-chu16-adaptive-low-cardinality:
+	bash scripts/benchmark-chu16-adaptive-low-cardinality.sh
