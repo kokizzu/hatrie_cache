@@ -33241,3 +33241,40 @@ BenchmarkConfigWatchReadResumeMiddle:   102.4 102.1 103.3 102.1 102.4 ns/op
 Both paths use `88 B/op` and `2 allocs/op`. The optimization adds no retained
 index or per-event memory; it replaces the seek scan with a binary search over
 the existing chronological ring.
+
+## CH-065 Compact SQL Hash-Join Buckets
+
+Command: `make benchmark-ch065-hash-join-buckets`.
+Design and correctness notes: [CH065_COMPACT_HASH_JOIN_BUCKETS.md](CH065_COMPACT_HASH_JOIN_BUCKETS.md).
+
+Five `go test -benchmem` samples ran on Linux/amd64 with an AMD Ryzen 9 5950X.
+The fixture builds a 256-key typed hash-join index and probes every key. The
+baseline is the prior `map[key][]int` representation; the optimized path keeps
+one row index inline and promotes only duplicate keys to a posting slice.
+
+| Workload | Before median ns/op | After median ns/op | CPU improvement | Before B/op | After B/op | Memory reduction | Allocs before/after |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Numeric unique keys | 21,111 | 20,680 | 1.02x faster | 20,568 | 11,608 | 43.6% lower | 260 / 260 |
+| String unique keys | 23,913 | 23,412 | 1.02x faster | 23,896 | 15,704 | 34.3% lower | 260 / 260 |
+
+Raw baseline samples:
+
+```text
+BenchmarkC212JoinIndexNumeric: 21533 21111 21319 21141 21100 ns/op; 20568 B/op; 260 allocs/op
+BenchmarkC212JoinIndexString:  23995 23913 23912 23939 24072 ns/op; 23896 B/op; 260 allocs/op
+```
+
+Raw optimized samples:
+
+```text
+BenchmarkC212JoinIndexNumeric: 20308 20680 21117 20879 20478 ns/op; 11608 B/op; 260 allocs/op
+BenchmarkC212JoinIndexString:  23706 23695 23329 23298 23412 ns/op; 15704 B/op; 260 allocs/op
+```
+
+The canonical map control remained slower and larger in the same run: numeric
+median `59,931 ns/op`, `31,880 B/op`, and `771 allocs/op`; string median
+`35,490 ns/op`, `32,040 B/op`, and `771 allocs/op`. The change was retained
+because it reduces retained build bytes without adding allocations or a
+measurable CPU cost in this workload. Duplicate-key correctness and the full
+`hat/hatSql` package tests are covered separately; the benchmark above focuses
+on the allocation-heavy unique-key case where the optimization applies most.

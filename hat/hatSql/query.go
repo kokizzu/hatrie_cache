@@ -8680,14 +8680,33 @@ func executeSQLReorderedInnerHashJoins(q *sqlQuery, resolver SQLSourceResolver, 
 		}
 		var next []sqlExecRow
 		for _, left := range rows {
-			for _, rightIndex := range buckets.Lookup(sqlField(left, leftQualifier, leftField)) {
-				if err := control.addJoinWork(1); err != nil {
-					return nil, true, err
+			key, ok := newSQLJoinProbeKey(sqlField(left, leftQualifier, leftField))
+			if !ok {
+				continue
+			}
+			bucket, found := buckets.lookupBucket(key)
+			if !found {
+				continue
+			}
+			if bucket.isDuplicate() {
+				for _, rightIndex := range buckets.duplicateRowsFor(bucket) {
+					if err := control.addJoinWork(1); err != nil {
+						return nil, true, err
+					}
+					next = append(next, mergeSQLRows(left, right[rightIndex]))
+					if len(next) > maxRows {
+						return nil, true, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxRows)
+					}
 				}
-				next = append(next, mergeSQLRows(left, right[rightIndex]))
-				if len(next) > maxRows {
-					return nil, true, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxRows)
-				}
+				continue
+			}
+			rightIndex := bucket.row()
+			if err := control.addJoinWork(1); err != nil {
+				return nil, true, err
+			}
+			next = append(next, mergeSQLRows(left, right[rightIndex]))
+			if len(next) > maxRows {
+				return nil, true, fmt.Errorf("SQL join exceeds the %d row limit; add a more selective WHERE or ON condition", maxRows)
 			}
 		}
 		detail := "INNER JOIN " + sqlExplainSource(sources[bestSource]) + " ON " + sqlExplainExpression(join.on)

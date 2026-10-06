@@ -3,6 +3,33 @@
 test-tt020:
 	@sh ./scripts/test-tt020.sh test
 
+.PHONY: format-ch065-hash-join-buckets test-ch065-hash-join-buckets test-ch065-hash-join-buckets-all test-ch065-hash-join-buckets-package test-all-ch065-hash-join-buckets race-ch065-hash-join-buckets vet-ch065-hash-join-buckets benchmark-ch065-hash-join-buckets verify-docs-ch065-hash-join-buckets status-ch065-hash-join-buckets stage-ch065-hash-join-buckets commit-ch065-hash-join-buckets push-ch065-hash-join-buckets
+format-ch065-hash-join-buckets:
+	bash scripts/ch065-hash-join-buckets.sh format
+test-ch065-hash-join-buckets:
+	bash scripts/ch065-hash-join-buckets.sh test
+test-ch065-hash-join-buckets-all:
+	bash scripts/ch065-hash-join-buckets.sh test-all
+test-ch065-hash-join-buckets-package:
+	bash scripts/ch065-hash-join-buckets.sh package
+test-all-ch065-hash-join-buckets:
+	bash scripts/ch065-hash-join-buckets.sh all
+race-ch065-hash-join-buckets:
+	bash scripts/ch065-hash-join-buckets.sh race
+vet-ch065-hash-join-buckets:
+	bash scripts/ch065-hash-join-buckets.sh vet
+benchmark-ch065-hash-join-buckets:
+	bash scripts/ch065-hash-join-buckets.sh benchmark
+verify-docs-ch065-hash-join-buckets:
+	bash scripts/ch065-hash-join-buckets.sh verify-docs
+status-ch065-hash-join-buckets:
+	bash scripts/ch065-hash-join-buckets.sh status
+stage-ch065-hash-join-buckets:
+	bash scripts/ch065-hash-join-buckets.sh stage
+commit-ch065-hash-join-buckets:
+	bash scripts/ch065-hash-join-buckets.sh commit
+push-ch065-hash-join-buckets:
+	bash scripts/ch065-hash-join-buckets.sh push
 .PHONY: test-tt020-package
 test-tt020-package:
 	@sh ./scripts/test-tt020.sh package

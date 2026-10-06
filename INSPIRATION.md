@@ -170,6 +170,7 @@ name.
 - [x] C083a ArrayJoin-style row expansion for array and slice values.
 - [x] C084a Array and map aggregate functions with deterministic NULL and duplicate-key semantics.
 - [x] C085 Hash joins.
+- [x] C085a Compact singleton hash-join buckets. The typed SQL hash join keeps a unique right-row index inline in the map value and allocates a posting slice only when a key becomes duplicated, combining ClickHouse-style typed probing with Tarantool-style compact small vectors. See [CH065_COMPACT_HASH_JOIN_BUCKETS.md](CH065_COMPACT_HASH_JOIN_BUCKETS.md) and [BENCHMARK.md](BENCHMARK.md#ch-065-compact-sql-hash-join-buckets).
 - [x] C086 Grace-hash or spillable joins.
 - [x] C087 Runtime Bloom filters for joins.
 - [x] C088 Partial-merge joins for sorted sources via `hatSql.MergeSortedTypedTableJoin`, with callback streaming, duplicate-run handling, SQL NULL/NaN semantics, input validation, and benchmark guide.
