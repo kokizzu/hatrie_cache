@@ -22904,3 +22904,15 @@ verify-tu17-engine-profile:
 .PHONY: codex-tu17-deliver
 codex-tu17-deliver:
 	bash scripts/codex-tu17-deliver.sh
+.PHONY: verify-mu035-snapshot-blocking
+verify-mu035-snapshot-blocking:
+	bash scripts/verify-mu035-snapshot-blocking.sh
+.PHONY: format-mu035-snapshot-blocking
+format-mu035-snapshot-blocking:
+	bash scripts/format-mu035-snapshot-blocking.sh
+.PHONY: benchmark-mu035-snapshot-blocking
+benchmark-mu035-snapshot-blocking:
+	bash scripts/benchmark-mu035-snapshot-blocking.sh
+.PHONY: stage-mu035-snapshot-blocking
+stage-mu035-snapshot-blocking:
+	bash scripts/stage-mu035-snapshot-blocking.sh

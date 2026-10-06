@@ -1,5 +1,28 @@
 # Benchmark
 
+## M-U35 Snapshot Blocking
+
+Environment: Linux/amd64, AMD Ryzen 9 5950X 16-Core Processor. Five
+`-benchmem` samples compare the existing committed-status read with the new
+`Wait` ready-state fast path. Both paths return the same detached status; the
+benchmark does not include source I/O or time spent waiting for a live source.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative |
+| --- | ---: | ---: | ---: | ---: |
+| Existing `Status` on committed snapshot | 94.60 | 72 | 2 | 1.00x |
+| `Wait` on already committed snapshot | 93.57 | 72 | 2 | 0.99x |
+
+Raw samples:
+
+```text
+Status: 93.12, 94.80, 91.64, 94.60, 95.42 ns/op; 72 B/op; 2 allocs/op
+Wait:   93.25, 94.04, 93.32, 95.71, 93.57 ns/op; 72 B/op; 2 allocs/op
+```
+
+The new blocking contract is therefore a control-plane safety feature with no
+measurable ready-path cost in this run. Live waits use one per-cutover channel,
+not a polling goroutine, and are woken by `Commit` or `Abort`.
+
 ## T-U17 Selectable LSM Engine
 
 Environment: Linux/amd64, AMD Ryzen 9 5950X 16-Core Processor. This benchmark

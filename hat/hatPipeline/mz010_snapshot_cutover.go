@@ -1,6 +1,7 @@
 package hatPipeline
 
 import (
+	"context"
 	"errors"
 	"sort"
 	"strings"
@@ -54,6 +55,10 @@ var (
 	// ErrSnapshotCutoverNotTerminal indicates that Forget was requested too
 	// early.
 	ErrSnapshotCutoverNotTerminal = errors.New("hatPipeline: snapshot cutover is not terminal")
+	// ErrSnapshotCutoverContextNil indicates that Wait received no context.
+	ErrSnapshotCutoverContextNil = errors.New("hatPipeline: snapshot cutover wait context is nil")
+	// ErrSnapshotCutoverAborted indicates that Wait observed an aborted cutover.
+	ErrSnapshotCutoverAborted = errors.New("hatPipeline: snapshot cutover was aborted")
 )
 
 // SnapshotCutoverOptions bounds retained cross-source cutover state. Zero
@@ -126,6 +131,7 @@ type snapshotCutoverEntry struct {
 	acknowledgements []SnapshotCutoverAcknowledgement
 	ackReceived      []bool
 	acknowledged     int
+	done             chan struct{}
 }
 
 // SnapshotCutoverCoordinator coordinates an opt-in, bounded cross-source
@@ -189,6 +195,7 @@ func (coordinator *SnapshotCutoverCoordinator) Prepare(spec SnapshotCutoverSpec)
 		sourceIndexes:    make(map[string]int, len(normalized.Sources)),
 		acknowledgements: make([]SnapshotCutoverAcknowledgement, len(normalized.Sources)),
 		ackReceived:      make([]bool, len(normalized.Sources)),
+		done:             make(chan struct{}),
 	}
 	for index, source := range normalized.Sources {
 		entry.sourceIndexes[source.ID] = index
@@ -265,6 +272,7 @@ func (coordinator *SnapshotCutoverCoordinator) Commit(id string) (SnapshotCutove
 		return cloneSnapshotCutoverStatus(entry), ErrSnapshotCutoverNotReady
 	}
 	entry.status.State = SnapshotCutoverCommitted
+	close(entry.done)
 	return cloneSnapshotCutoverStatus(entry), nil
 }
 
@@ -295,7 +303,49 @@ func (coordinator *SnapshotCutoverCoordinator) Abort(id, reason string) (Snapsho
 	}
 	entry.status.State = SnapshotCutoverAborted
 	entry.status.Reason = reason
+	close(entry.done)
 	return cloneSnapshotCutoverStatus(entry), nil
+}
+
+// Wait blocks until id is committed or aborted, then returns a detached status.
+// It does not start source work; callers use it to gate dependent reads on a
+// common cutover state without creating one goroutine per waiter.
+func (coordinator *SnapshotCutoverCoordinator) Wait(ctx context.Context, id string) (SnapshotCutoverStatus, error) {
+	if coordinator == nil {
+		return SnapshotCutoverStatus{}, ErrSnapshotCutoverNil
+	}
+	if ctx == nil {
+		return SnapshotCutoverStatus{}, ErrSnapshotCutoverContextNil
+	}
+	id, err := normalizeSnapshotCutoverText(id, ErrSnapshotCutoverIDEmpty)
+	if err != nil {
+		return SnapshotCutoverStatus{}, err
+	}
+	for {
+		coordinator.mu.RLock()
+		entry, ok := coordinator.cutovers[id]
+		if !ok {
+			coordinator.mu.RUnlock()
+			return SnapshotCutoverStatus{}, ErrSnapshotCutoverNotFound
+		}
+		status := cloneSnapshotCutoverStatus(entry)
+		if entry.status.State == SnapshotCutoverCommitted {
+			coordinator.mu.RUnlock()
+			return status, nil
+		}
+		if entry.status.State == SnapshotCutoverAborted {
+			coordinator.mu.RUnlock()
+			return status, ErrSnapshotCutoverAborted
+		}
+		done := entry.done
+		coordinator.mu.RUnlock()
+
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return status, ctx.Err()
+		}
+	}
 }
 
 // Forget removes a terminal cutover and releases its bounded slot.
