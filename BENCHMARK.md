@@ -32594,3 +32594,27 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## T-G23 Bounded Conflict Introspection
+
+Five `-benchmem -count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The
+existing conflict resolver is measured before and after the opt-in ring log;
+the append path is measured separately with a 1,024-event bounded log.
+
+| Workload | Before median | After median | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Direct conflict resolution | 2.296 ns/op | 2.506 ns/op | 0 | 0 | control variance; no resolver change |
+| Explicit `ConflictEventLog.Append` | n/a | 39.09 ns/op | 0 | 0 | 15.6x versus after control |
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+Resolve before: 2.445 2.298 2.198 2.296 2.213, 0, 0
+Resolve after:  2.539 2.504 2.534 2.506 2.497, 0, 0
+Append after:   39.09 38.99 39.51 37.96 39.93, 0, 0
+```
+
+The ring is opt-in, bounded, redacts keys to caller-supplied digests, detects
+stale cursors instead of silently dropping history, and supports validated
+snapshot restore. Its append cost is paid only when a caller records a
+diagnostic event.

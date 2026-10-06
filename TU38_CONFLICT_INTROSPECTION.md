@@ -74,9 +74,21 @@ append path on the benchmark host:
 
 | Path | Result |
 | --- | ---: |
-| Direct `ResolveConflictVersion` control | 2.6-2.9 ns/op, 0 B/op, 0 allocs/op |
-| `ConflictEventLog.Append` | 38-67 ns/op, 0 B/op, 0 allocs/op |
+| Direct `ResolveConflictVersion` control | 2.506 ns/op, 0 B/op, 0 allocs/op |
+| `ConflictEventLog.Append` | 39.09 ns/op, 0 B/op, 0 allocs/op |
 
 This is an observability tradeoff, not a hot-path optimization. The feature is
 not wired into the default resolver, has fixed event capacity, and only pays
 the append cost when a caller explicitly enables and records diagnostics.
+
+Fresh paired raw samples (`-benchmem -count=5`) on an AMD Ryzen 9 5950X:
+
+```text
+Resolve before: 2.445 2.298 2.198 2.296 2.213 ns/op, 0 B/op, 0 allocs/op
+Resolve after:  2.539 2.504 2.534 2.506 2.497 ns/op, 0 B/op, 0 allocs/op
+Append after:   39.09 38.99 39.51 37.96 39.93 ns/op, 0 B/op, 0 allocs/op
+```
+
+The direct resolver is unchanged; the before/after control spread is normal
+sub-3-nanosecond benchmark variance. The append path is an explicit
+observability cost, not an automatic replication-resolution cost.
