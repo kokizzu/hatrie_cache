@@ -1,5 +1,22 @@
 # Benchmark
 
+## T-G21 Hot Backup With an Exact WAL Coordinate
+
+The paired benchmark target is ready, but no T-G21 timing is claimed yet:
+`hat/hatCache` cannot compile from the current base because unrelated concurrent
+SQL/data-structure work leaves `MaxDataflowTextBytes`, `TypedTableDate`,
+`TypedTableTimestamp`, and aggregate-envelope symbols undefined. The baseline
+`hatBackup` package remains green. Run the following after that pre-existing
+build break is resolved; it records five samples for both the existing
+mutex-held bundle path and the new hot path:
+
+```text
+make benchmark-hot-backup-tg21
+```
+
+The expected tradeoff is lower writer pause during snapshot streaming, with
+similar total archive work and no claimed CPU or memory win until measured.
+
 ## CH-U49 Skip-Index EXPLAIN Diagnostics
 
 This paired clean-worktree benchmark compares the pre-CH-U49 implementation

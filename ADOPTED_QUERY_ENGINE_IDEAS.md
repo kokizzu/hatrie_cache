@@ -768,3 +768,14 @@ non-destructive byte budget. The planner preserves every incremental parent,
 reports unavoidable over-budget state, and leaves payload deletion and WAL
 truncation to the operator. See [TG20_SNAPSHOT_ROTATION.md](TG20_SNAPSHOT_ROTATION.md)
 and [BENCHMARK.md](BENCHMARK.md#tg-020-snapshot-rotation).
+
+## T-G21: Hot Backup With an Exact WAL Coordinate
+
+T-G21 is adopted through `hatCache.CreateHotBackupBundle`. It streams a
+consistent snapshot after a short journal capture barrier, releases the
+journal mutex while bytes are copied, and publishes the exact snapshot/WAL
+sequence with the existing checksummed bundle format. Full snapshot mode is
+supported; filtered and incremental modes retain their existing APIs until
+their storage-specific online contracts are defined. See
+[TG21_HOT_BACKUP.md](TG21_HOT_BACKUP.md) and
+[BENCHMARK.md](BENCHMARK.md#t-g21-hot-backup-with-an-exact-wal-coordinate).

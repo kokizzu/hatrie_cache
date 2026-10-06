@@ -22355,6 +22355,31 @@ push-tg20:
 	bash scripts/run-tg20.sh push
 
 .PHONY: format-tg18 test-tg18 test-cache-tg18 race-tg18 vet-tg18 benchmark-tg18 status-tg18 stage-tg18 commit-tg18 push-tg18
+.PHONY: format-tg21 baseline-tg21 test-tg21 race-tg21 vet-tg21 benchmark-tg21 status-tg21 diff-tg21 stage-tg21 commit-tg21 push-tg21
+format-tg21:
+	bash scripts/tg21.sh format
+baseline-tg21:
+	bash scripts/tg21.sh baseline
+test-tg21:
+	bash scripts/tg21.sh test
+race-tg21:
+	bash scripts/tg21.sh race
+vet-tg21:
+	bash scripts/tg21.sh vet
+benchmark-tg21:
+	bash scripts/tg21.sh benchmark
+status-tg21:
+	bash scripts/tg21.sh status
+diff-tg21:
+	bash scripts/tg21.sh diff
+stage-tg21:
+	bash scripts/tg21.sh stage
+commit-tg21:
+	bash scripts/tg21.sh commit
+push-tg21:
+	bash scripts/tg21.sh push
+
+.PHONY: format-tg18 test-tg18 test-cache-tg18 race-tg18 vet-tg18 benchmark-tg18 status-tg18 stage-tg18 commit-tg18 push-tg18
 format-tg18:
 	bash scripts/run-tg18.sh format
 test-tg18:

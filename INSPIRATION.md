@@ -983,3 +983,9 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   never deletes payloads itself. See
   [TG20_SNAPSHOT_ROTATION.md](TG20_SNAPSHOT_ROTATION.md) and
   [BENCHMARK.md](BENCHMARK.md#tg-020-snapshot-rotation).
+- [x] T-G21 Tarantool-style online hot backup with an exact snapshot/WAL
+  coordinate. `hatCache.CreateHotBackupBundle` releases the journal mutex while
+  snapshot bytes stream and publishes the existing checksummed bundle format;
+  filtered and incremental storage modes remain unchanged. See
+  [TG21_HOT_BACKUP.md](TG21_HOT_BACKUP.md) and
+  [BENCHMARK.md](BENCHMARK.md#t-g21-hot-backup-with-an-exact-wal-coordinate).

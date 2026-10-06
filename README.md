@@ -199,6 +199,7 @@ security guidance before exposing it on a network.
 - Authenticated bounded compact-peer listener: [COMPACT_PEER_LISTENER.md](COMPACT_PEER_LISTENER.md)
 - Clock-independent bounded replica RPO status: [REPLICA_RPO_STATUS.md](REPLICA_RPO_STATUS.md)
 - Online snapshot manifest with exact journal coordinate: [SNAPSHOT_MANIFEST.md](SNAPSHOT_MANIFEST.md)
+- Tarantool-style online hot backup with an exact snapshot/WAL coordinate: [TG21_HOT_BACKUP.md](TG21_HOT_BACKUP.md)
 - Per-space conflict policy registry: [CONFLICT_POLICY.md](CONFLICT_POLICY.md)
 - Named versioned space catalog: [SPACE_CATALOG.md](SPACE_CATALOG.md)
 - Authenticated cursor-after pagination: [CURSOR_PAGINATION.md](CURSOR_PAGINATION.md)
