@@ -22482,3 +22482,50 @@ commit-tg23-conflict-log:
 .PHONY: push-tg23-conflict-log
 push-tg23-conflict-log:
 	bash scripts/tg23-conflict-log.sh push
+.PHONY: format-tg24-stored-procedure
+format-tg24-stored-procedure:
+	bash scripts/tg24-stored-procedure.sh format
+
+.PHONY: baseline-tg24-stored-procedure
+baseline-tg24-stored-procedure:
+	bash scripts/tg24-stored-procedure.sh baseline
+
+.PHONY: test-tg24-stored-procedure
+test-tg24-stored-procedure:
+	bash scripts/tg24-stored-procedure.sh test
+
+.PHONY: test-tg24-stored-procedure-package
+test-tg24-stored-procedure-package:
+	bash scripts/tg24-stored-procedure.sh package
+
+.PHONY: benchmark-tg24-stored-procedure
+benchmark-tg24-stored-procedure:
+	bash scripts/tg24-stored-procedure.sh benchmark
+
+.PHONY: race-tg24-stored-procedure
+race-tg24-stored-procedure:
+	bash scripts/tg24-stored-procedure.sh race
+
+.PHONY: vet-tg24-stored-procedure
+vet-tg24-stored-procedure:
+	bash scripts/tg24-stored-procedure.sh vet
+
+.PHONY: diff-check-tg24-stored-procedure
+diff-check-tg24-stored-procedure:
+	bash scripts/tg24-stored-procedure.sh diff-check
+
+.PHONY: status-tg24-stored-procedure
+status-tg24-stored-procedure:
+	bash scripts/tg24-stored-procedure.sh status
+
+.PHONY: stage-tg24-stored-procedure
+stage-tg24-stored-procedure:
+	bash scripts/tg24-stored-procedure.sh stage
+
+.PHONY: commit-tg24-stored-procedure
+commit-tg24-stored-procedure:
+	bash scripts/tg24-stored-procedure.sh commit
+
+.PHONY: push-tg24-stored-procedure
+push-tg24-stored-procedure:
+	bash scripts/tg24-stored-procedure.sh push

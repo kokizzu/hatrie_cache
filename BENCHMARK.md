@@ -1,5 +1,33 @@
 # Benchmark
 
+## T-U03 Trusted Stored Procedure Registry
+
+The paired benchmark compares the existing versioned scalar-function registry
+with the new opt-in `hatSql.StoredProcedureRegistry`. Both use five local
+benchmark samples on an AMD Ryzen 9 5950X. The lookup comparison measures the
+registry lookup only; the invoke comparison includes the handler call.
+
+| Operation | Existing function registry | Stored procedure registry | Relative |
+|---|---:|---:|---:|
+| Versioned lookup | 75.09 ns/op, 16 B/op, 1 alloc/op | 19.37 ns/op, 0 B/op, 0 alloc/op | 3.88x faster, 16 B fewer |
+| Lookup plus handler | 84.08 ns/op, 16 B/op, 1 alloc/op | 167.2 ns/op, 16 B/op, 2 alloc/op | 1.99x slower, 1 extra alloc |
+
+Raw samples:
+
+```text
+Baseline lookup: 75.04, 74.91, 75.24, 75.81, 75.09 ns/op; 16 B/op; 1 alloc/op
+Baseline invoke: 83.92, 84.08, 83.68, 85.15, 84.84 ns/op; 16 B/op; 1 alloc/op
+Registry lookup: 19.32, 19.37, 19.41, 19.24, 19.44 ns/op; 0 B/op; 0 alloc/op
+Registry invoke: 167.1, 167.8, 167.2, 165.7, 167.3 ns/op; 16 B/op; 2 alloc/op
+```
+
+The direct lookup path is faster because active procedures are indexed by the
+already-normalized procedure name. Protected invocation is slower by design:
+it performs authorization, context checks, top-level argument copying, JSON
+size bounds, and panic conversion. The feature is kept for safety and stable
+versioned lifecycle semantics, not for faster execution than an unguarded
+callback. No SQL, HTTP/2, gRPC, or monitoring path is enabled by default.
+
 ## T-G21 Hot Backup With an Exact WAL Coordinate
 
 The paired benchmark target is ready, but no T-G21 timing is claimed yet:

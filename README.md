@@ -61,6 +61,7 @@ security guidance before exposing it on a network.
 - Conservative public SQL expression monotonicity analysis: [MU028_MONOTONICITY.md](MU028_MONOTONICITY.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mu-028-sql-monotonicity-inference)
 - Opt-in retractable and binary-serializable SQL aggregate capabilities: [MU031_RETRACTABLE_AGGREGATES.md](MU031_RETRACTABLE_AGGREGATES.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mu-031-retractable-aggregate-capabilities)
 - Explicit deterministic, monotonic, and retractable UDF capability metadata: [MU032_UDF_CAPABILITIES.md](MU032_UDF_CAPABILITIES.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mu-032-udf-capability-classification)
+- Opt-in trusted, versioned stored procedure registry with authorization, bounded calls, panic isolation, and metadata-only snapshots: [TU03_STORED_PROCEDURE_REGISTRY.md](TU03_STORED_PROCEDURE_REGISTRY.md), with measurements in [BENCHMARK.md](BENCHMARK.md#t-u03-trusted-stored-procedure-registry)
 - Opt-in nested worker scopes for structured dataflow tasks: [WORKER_SCOPE.md](WORKER_SCOPE.md)
 - Opt-in Materialize-style worker-local exchange batching: [MZ037_WORKER_LOCAL_EXCHANGE.md](MZ037_WORKER_LOCAL_EXCHANGE.md)
 - Opt-in Materialize-style operator yield budgets: [MZ039_OPERATOR_YIELD.md](MZ039_OPERATOR_YIELD.md)
