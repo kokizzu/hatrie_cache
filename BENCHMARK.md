@@ -32671,3 +32671,42 @@ BenchmarkTR018SyncPolicyDecision/disabled-32 2.004 ns/op 0 B/op 0 allocs/op
 BenchmarkTR018SyncPolicyDecision/disabled-32 1.962 ns/op 0 B/op 0 allocs/op
 BenchmarkTR018SyncPolicyDecision/disabled-32 1.923 ns/op 0 B/op 0 allocs/op
 ```
+
+<a id="tg-020-snapshot-rotation"></a>
+## TG-020: Snapshot Rotation
+
+`make benchmark-tg20` measured the new policy on an AMD Ryzen 9 5950X using a
+64-manifest incremental chain. The baseline is the existing single-chain
+`PlanBackupChain` validator; the rotation planner additionally discovers tips,
+selects complete chains, computes retention bytes, and emits deletion
+candidates.
+
+| Operation | Median ns/op | B/op | allocs/op | baseline ratio |
+| --- | ---: | ---: | ---: | ---: |
+| Existing `PlanBackupChain` | 56,314 | 99,963 | 209 | 1.00x |
+| `SnapshotRotationPolicy.Plan` | 243,034 | 288,857 | 590 | 4.32x |
+| `ShouldSnapshot` cadence check | 14.3 | 0 | 0 | allocation-free |
+
+The planner cost is opt-in and paid only during backup rotation planning; it
+does not run on reads, writes, restore, or WAL replay. The complete raw output
+is below. The optimized planner is lower than its initial implementation
+(about 280 microseconds, 377 KB, 784 allocs), while preserving the same safety
+checks.
+
+```text
+BenchmarkTG20SnapshotRotationPlan-32       241333 ns/op 288859 B/op 590 allocs/op
+BenchmarkTG20SnapshotRotationPlan-32       243034 ns/op 288857 B/op 590 allocs/op
+BenchmarkTG20SnapshotRotationPlan-32       242951 ns/op 288858 B/op 590 allocs/op
+BenchmarkTG20SnapshotRotationPlan-32       243593 ns/op 288856 B/op 590 allocs/op
+BenchmarkTG20SnapshotRotationPlan-32       250919 ns/op 288857 B/op 590 allocs/op
+BenchmarkTG20BaselineBackupChainPlan-32     56182 ns/op  99963 B/op 209 allocs/op
+BenchmarkTG20BaselineBackupChainPlan-32     56314 ns/op  99963 B/op 209 allocs/op
+BenchmarkTG20BaselineBackupChainPlan-32     56737 ns/op  99962 B/op 209 allocs/op
+BenchmarkTG20BaselineBackupChainPlan-32     57097 ns/op  99963 B/op 209 allocs/op
+BenchmarkTG20BaselineBackupChainPlan-32     56053 ns/op  99963 B/op 209 allocs/op
+BenchmarkTG20SnapshotRotationDue-32             14.48 ns/op 0 B/op 0 allocs/op
+BenchmarkTG20SnapshotRotationDue-32             13.75 ns/op 0 B/op 0 allocs/op
+BenchmarkTG20SnapshotRotationDue-32             13.48 ns/op 0 B/op 0 allocs/op
+BenchmarkTG20SnapshotRotationDue-32             14.31 ns/op 0 B/op 0 allocs/op
+BenchmarkTG20SnapshotRotationDue-32             14.62 ns/op 0 B/op 0 allocs/op
+```

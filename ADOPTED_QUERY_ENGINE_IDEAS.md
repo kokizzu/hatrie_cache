@@ -758,3 +758,13 @@ explicit durable checkpoint for callers that need one in either relaxed mode.
 Invalid modes and negative intervals fail closed. See
 [TR018_WAL_SYNC_MODES.md](TR018_WAL_SYNC_MODES.md) and
 [BENCHMARK.md](BENCHMARK.md#tr-018-wal-sync-modes).
+
+## T-G20: Snapshot Rotation Policy
+
+T-G20 is adopted through the opt-in `hatBackup.SnapshotRotationPolicy`.
+Automatic scheduling is disabled by default; enabled policies use a one-hour
+default cadence, retain the two newest complete chains, and can enforce a
+non-destructive byte budget. The planner preserves every incremental parent,
+reports unavoidable over-budget state, and leaves payload deletion and WAL
+truncation to the operator. See [TG20_SNAPSHOT_ROTATION.md](TG20_SNAPSHOT_ROTATION.md)
+and [BENCHMARK.md](BENCHMARK.md#tg-020-snapshot-rotation).

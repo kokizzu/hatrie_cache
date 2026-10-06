@@ -977,3 +977,9 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   can force a checkpoint with `CommandJournal.Sync()`. See
   [TR018_WAL_SYNC_MODES.md](TR018_WAL_SYNC_MODES.md) and
   [BENCHMARK.md](BENCHMARK.md#tr-018-wal-sync-modes).
+- [x] T-G20 Tarantool-style opt-in snapshot cadence and rotation policy.
+  `hatBackup.SnapshotRotationPolicy` keeps complete incremental chains,
+  respects an optional byte budget, reports unavoidable over-budget state, and
+  never deletes payloads itself. See
+  [TG20_SNAPSHOT_ROTATION.md](TG20_SNAPSHOT_ROTATION.md) and
+  [BENCHMARK.md](BENCHMARK.md#tg-020-snapshot-rotation).
