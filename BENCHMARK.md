@@ -32580,3 +32580,23 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+## TR-054 Functional Index Small Vector
+
+`FunctionalIndex` uses a bounded small vector through 16 rows, then promotes
+to the existing map/posting representation. Five `-benchmem -count=5` samples
+ran on Linux/amd64, AMD Ryzen 9 5950X. The before run was map-only; the after
+run used the adaptive representation.
+
+| Workload | Before median | After median | Improvement | Before memory | After memory | Before allocs | After allocs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Small upsert, 4 rows | 23.62 ns/op | 11.38 ns/op | 2.08x faster | 0 B/op | 0 B/op | 0 | 0 |
+| Small upsert, 16 rows | 23.83 ns/op | 14.08 ns/op | 1.69x faster | 0 B/op | 0 B/op | 0 | 0 |
+| Small lookup, 4 rows | 13.87 ns/op | 8.035 ns/op | 1.73x faster | 0 B/op | 0 B/op | 0 | 0 |
+| Small lookup, 16 rows | 19.06 ns/op | 17.74 ns/op | 1.07x faster | 0 B/op | 0 B/op | 0 | 0 |
+| Small build, 4 rows | 3,894 ns/op | 155.0 ns/op | 25.1x faster | 27,360 B/op | 464 B/op | 9 | 2 |
+| Small build, 16 rows | 5,010 ns/op | 348.3 ns/op | 14.4x faster | 27,584 B/op | 464 B/op | 21 | 2 |
+| 32-row lookup control | 20.15 ns/op | 20.72 ns/op | 0.97x, 2.8% slower | 0 B/op | 0 B/op | 0 | 0 |
+| 256-row build control | 21,106 ns/op | 21,506 ns/op | 0.98x, 1.9% slower | 32,224 B/op | 33,408 B/op | 169 | 171 |
+
+The 16-row threshold is retained because it captures the large small-index
+memory win while keeping the promotion boundary cost bounded.
