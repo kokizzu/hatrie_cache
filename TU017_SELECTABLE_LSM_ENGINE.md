@@ -60,13 +60,14 @@ Environment: Linux/amd64, AMD Ryzen 9 5950X 16-Core Processor. The benchmark
 opens and closes a fresh Pebble store for each iteration; it measures startup
 selection, not steady-state reads or writes.
 
-| Path | ns/op | B/op | allocs/op | Relative open time |
+| Path | Mean ns/op (3 runs) | Mean B/op | Mean allocs/op | Relative open time |
 | --- | ---: | ---: | ---: | ---: |
-| Existing explicit backend selector | 8,067,000 approximate median | 304,657 approximate median | 591 approximate median | 1.00x |
-| Explicit `pebble-lsm` profile | 8,128,000 approximate median | 303,966 approximate median | 590 approximate median | 1.01x |
+| Existing explicit backend selector | 8,066,044 | 304,377 | 591 | 1.00x |
+| Explicit `pebble-lsm` profile | 8,672,879 | 303,784 | 590 | 1.08x |
 
 Repeated samples varied because each iteration creates and closes a filesystem
-database. The full three-run sample range was 7.98-8.22 ms for the existing
-selector and 8.02-9.87 ms for the profile path. The profile validation adds no
-work to data operations; its only cost is at store open and is within startup
-noise on this workload.
+database. The median of the three run-level samples was 8.000 ms for the
+existing selector and 8.128 ms for the profile path, or 1.02x. The mean was
+8.066 ms versus 8.673 ms, or 1.08x, because one profile run reached 9.87 ms.
+The profile validation adds no work to data operations; its only cost is at
+store open.
