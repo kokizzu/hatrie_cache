@@ -81,6 +81,7 @@ type DifferentialTemporalJoin struct {
 	leftFrontier           uint64
 	rightFrontier          uint64
 	compactionPolicy       *DifferentialTemporalJoinCompactionPolicy
+	compactionScheduler    *DifferentialTemporalJoinCompactionScheduler
 	updatesSinceCompaction uint64
 	lastCompactionAt       time.Time
 }

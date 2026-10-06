@@ -1,5 +1,30 @@
 # Benchmark
 
+## M-U10 Automatic Temporal-Join Compaction
+
+Environment: Linux/amd64, AMD Ryzen 9 5950X 16-Core Processor. The scheduler
+tick benchmarks isolate one decision/compaction tick; they do not include
+wall-clock ticker scheduling.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative |
+| --- | ---: | ---: | ---: | ---: |
+| Existing adaptive recommendation | 75.88 | 0 | 0 | 1.00x |
+| Scheduler idle tick | 78.58 | 0 | 0 | 1.04x, about 3.6% slower |
+| Existing manual compaction | 251,255 | 197,082 | 20 | 1.00x |
+| Scheduler compaction tick | 250,027 | 197,078 | 20 | 1.00x, within noise |
+
+Raw samples:
+
+```text
+adaptive recommendation: 75.45, 74.48, 77.63, 76.26, 75.88 ns/op; 0 B/op; 0 allocs/op
+idle scheduler tick: 79.57, 79.26, 78.39, 78.19, 78.58 ns/op; 0 B/op; 0 allocs/op
+manual compaction: 262841, 244354, 251255 ns/op; 197082, 197071, 197082 B/op; 20 allocs/op
+scheduler compaction tick: 250027, 247946, 252782 ns/op; 197081, 197078, 197080 B/op; 20 allocs/op
+```
+
+The feature is default-off and adds one goroutine/ticker only after explicit
+startup. It is an automation/safety feature, not a compaction-throughput win.
+
 ## CH-U52 Typed SQL Dictionary Keys
 
 Five `-benchmem` samples used 1,024 `int64` dictionary entries and repeated

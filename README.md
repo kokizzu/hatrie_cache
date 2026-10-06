@@ -112,6 +112,7 @@ security guidance before exposing it on a network.
 - SQL transaction savepoints with private rollback semantics: [TR034_SQL_SAVEPOINTS.md](TR034_SQL_SAVEPOINTS.md), with measured snapshot-clone cost in [BENCHMARK.md](BENCHMARK.md#tr-034-sql-savepoints)
 - Opt-in typed-table MVCC snapshot views with explicit compaction: [TR035_TYPED_TABLE_MVCC.md](TR035_TYPED_TABLE_MVCC.md), with measurements in [BENCHMARK.md](BENCHMARK.md#opt-in-typed-table-mvcc-snapshots)
 - Materialize-inspired frontier compaction debt and blocked-lease metrics: [MZ04_FRONTIER_COMPACTION_METRICS.md](MZ04_FRONTIER_COMPACTION_METRICS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-04-frontier-compaction-debt-metrics)
+- Materialize-inspired opt-in automatic temporal-join compaction with sealed-frontier scheduling: [MU010_AUTOMATIC_COMPACTION.md](MU010_AUTOMATIC_COMPACTION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#m-u10-automatic-temporal-join-compaction)
 - Materialize-inspired per-operator frontier lag metrics: [MZ043_OPERATOR_FRONTIER_LAG.md](MZ043_OPERATOR_FRONTIER_LAG.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-043-operator-frontier-lag)
 - Materialize-inspired active read-hold diagnostics: [MZ027_READ_HOLD_DIAGNOSTICS.md](MZ027_READ_HOLD_DIAGNOSTICS.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-27-read-hold-lifecycle-diagnostics)
 - Materialize-inspired TAIL progress heartbeats: [MZ025_TAIL_HEARTBEAT.md](MZ025_TAIL_HEARTBEAT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-25-tail-progress-and-heartbeats)

@@ -22874,3 +22874,25 @@ codex-tu21-commit:
 .PHONY: codex-tu21-push
 codex-tu21-push:
 	bash scripts/codex-tu21-push.sh
+codex-mu10-test:
+	bash scripts/codex-mu10-test.sh
+codex-mu10-benchmark:
+	bash scripts/codex-mu10-benchmark.sh
+codex-mu10-format:
+	bash scripts/codex-mu10-format.sh
+codex-mu10-compact-benchmark:
+	bash scripts/codex-mu10-compact-benchmark.sh
+
+codex-mu10-race:
+	bash scripts/codex-mu10-race.sh
+
+codex-mu10-package:
+	bash scripts/codex-mu10-package.sh
+
+codex-mu10-vet:
+	bash scripts/codex-mu10-vet.sh
+codex-mu10-commit:
+	bash scripts/codex-mu10-commit.sh
+
+codex-mu10-push:
+	bash scripts/codex-mu10-push.sh
