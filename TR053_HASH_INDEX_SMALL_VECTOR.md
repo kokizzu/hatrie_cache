@@ -17,9 +17,9 @@ Runs used Go benchmarks with `-benchmem -count=5` on the same AMD Ryzen 9
 
 | Workload | Before median | After median | Improvement | Before memory | After memory | Before allocs | After allocs |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| 16-entry unique upsert | 30.22 ns/op | 13.54 ns/op | 2.23x faster | 0 B/op | 0 B/op | 0 | 0 |
-| 512-entry unique upsert | 31.06 ns/op | 30.93 ns/op | 1.00x, within noise | 0 B/op | 0 B/op | 0 | 0 |
-| 16-entry unique build | 1,290 ns/op | 500.7 ns/op | 2.58x faster | 1,968 B/op | 608 B/op | 9 | 2 |
+| 16-entry unique upsert | 31.05 ns/op | 14.72 ns/op | 2.11x faster | 0 B/op | 0 B/op | 0 | 0 |
+| 512-entry unique upsert | 32.92 ns/op | 32.87 ns/op | 1.00x, within noise | 0 B/op | 0 B/op | 0 | 0 |
+| 16-entry unique build | 1,455 ns/op | 510.7 ns/op | 2.85x faster | 1,968 B/op | 608 B/op | 9 | 2 |
 
 The small-build representation uses 3.24x fewer allocated bytes and 4.5x fewer
 allocations. The large-index control has no measured regression in the recorded

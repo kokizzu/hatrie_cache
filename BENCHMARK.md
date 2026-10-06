@@ -32589,22 +32589,22 @@ an AMD Ryzen 9 5950X.
 
 | Benchmark | Before median | After median | Improvement | Before memory | After memory | Before allocs | After allocs |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| `BenchmarkTR053UniqueSmallUpsert` | 30.22 ns/op | 13.54 ns/op | 2.23x faster | 0 B/op | 0 B/op | 0 | 0 |
-| `BenchmarkTR053UniqueLargeUpsert` | 31.06 ns/op | 30.93 ns/op | 1.00x, within noise | 0 B/op | 0 B/op | 0 | 0 |
-| `BenchmarkTR053UniqueSmallBuild` | 1,290 ns/op | 500.7 ns/op | 2.58x faster | 1,968 B/op | 608 B/op | 9 | 2 |
+| `BenchmarkTR053UniqueSmallUpsert` | 31.05 ns/op | 14.72 ns/op | 2.11x faster | 0 B/op | 0 B/op | 0 | 0 |
+| `BenchmarkTR053UniqueLargeUpsert` | 32.92 ns/op | 32.87 ns/op | 1.00x, within noise | 0 B/op | 0 B/op | 0 | 0 |
+| `BenchmarkTR053UniqueSmallBuild` | 1,455 ns/op | 510.7 ns/op | 2.85x faster | 1,968 B/op | 608 B/op | 9 | 2 |
 
 Raw before samples:
 
 ```text
-BenchmarkTR053UniqueSmallUpsert: 30.22 29.71 30.38 30.36 28.94 ns/op
-BenchmarkTR053UniqueLargeUpsert: 29.04 31.07 29.90 31.06 31.07 ns/op
-BenchmarkTR053UniqueSmallBuild:  1306 1302 1290 1290 1279 ns/op, 1968 B/op, 9 allocs/op
+BenchmarkTR053BaselineUniqueSmallUpsert: 31.05 32.17 31.05 31.57 30.31 ns/op
+BenchmarkTR053BaselineUniqueLargeUpsert: 32.64 32.66 33.40 33.57 32.92 ns/op
+BenchmarkTR053BaselineUniqueSmallBuild:  1539 1449 1466 1428 1455 ns/op, 1968 B/op, 9 allocs/op
 ```
 
 Raw after samples:
 
 ```text
-BenchmarkTR053UniqueSmallUpsert: 13.78 14.16 13.47 12.93 13.54 ns/op
-BenchmarkTR053UniqueLargeUpsert: 31.45 30.93 30.99 30.59 30.35 ns/op
-BenchmarkTR053UniqueSmallBuild:  517.4 528.0 488.2 491.2 500.7 ns/op, 608 B/op, 2 allocs/op
+BenchmarkTR053UniqueSmallUpsert: 14.58 14.72 14.66 14.74 15.11 ns/op
+BenchmarkTR053UniqueLargeUpsert: 32.57 32.87 32.68 33.10 32.88 ns/op
+BenchmarkTR053UniqueSmallBuild:  508.0 510.4 510.7 520.5 522.4 ns/op, 608 B/op, 2 allocs/op
 ```
