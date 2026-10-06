@@ -22339,3 +22339,14 @@ commit-tu21:
 
 push-tu21:
 	bash scripts/deliver-tu21.sh push
+test-tu21-versioned:
+	bash scripts/test-tu21-versioned.sh
+
+race-tu21-versioned:
+	bash scripts/race-tu21-versioned.sh
+
+vet-tu21-versioned:
+	bash scripts/vet-tu21-versioned.sh
+
+benchmark-tu21-versioned:
+	bash scripts/benchmark-tu21-versioned.sh

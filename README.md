@@ -4774,3 +4774,9 @@ CRC-protected snapshots. It is default-off and does not automatically route
 requests or execute conversion callbacks. See
 [TU21_SPACE_MIGRATION.md](TU21_SPACE_MIGRATION.md) for the recovery contract,
 limits, security notes, and measured cost.
+
+For concrete reversible schema changes, use the separate
+`hatSchema.VersionedMigrationManager`, which validates `Schema`/`Migration`
+transitions, protects rollback with client-version admission, and verifies a
+SHA-256 schema-fingerprint checkpoint during restore. See
+[TU21_VERSIONED_MIGRATION_MANAGER.md](TU21_VERSIONED_MIGRATION_MANAGER.md).
