@@ -22292,3 +22292,36 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: verify-c235-task-profiler
+verify-c235-task-profiler:
+	bash scripts/verify-c235-task-profiler.sh
+
+.PHONY: test-c235-task-profiler
+test-c235-task-profiler:
+	bash scripts/test-c235-task-profiler.sh
+
+.PHONY: benchmark-c235-task-profiler-baseline
+benchmark-c235-task-profiler-baseline:
+	bash scripts/benchmark-c235-task-profiler-baseline.sh
+
+.PHONY: benchmark-c235-task-profiler
+benchmark-c235-task-profiler:
+	bash scripts/benchmark-c235-task-profiler.sh
+
+.PHONY: format-c235-task-profiler
+format-c235-task-profiler:
+	bash scripts/format-c235-task-profiler.sh
+
+.PHONY: race-c235-task-profiler vet-c235-task-profiler
+race-c235-task-profiler:
+	bash scripts/race-c235-task-profiler.sh
+
+vet-c235-task-profiler:
+	bash scripts/vet-c235-task-profiler.sh
+
+.PHONY: commit-c235-task-profiler push-c235-task-profiler
+commit-c235-task-profiler:
+	bash scripts/commit-c235-task-profiler.sh
+
+push-c235-task-profiler:
+	bash scripts/push-c235-task-profiler.sh

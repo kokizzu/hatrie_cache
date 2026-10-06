@@ -32580,3 +32580,25 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+# C235: Table-Part-Column Task Profiler
+
+The C235 profiler is an opt-in, bounded aggregation store for caller-supplied
+read/write task observations. The benchmark measures repeated updates to one
+existing identity, which is the steady-state path after the identity has been
+admitted.
+
+Command: `make benchmark-c235-task-profiler`
+
+Machine: AMD Ryzen 9 5950X 16-Core Processor, `linux/amd64`.
+
+| Path | Run 1 ns/op | Run 2 ns/op | Run 3 ns/op | B/op | allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Direct map baseline | 59.27 | 59.15 | 59.75 | 0 | 0 | 1.00x |
+| `SQLTaskProfiler.Record` | 88.95 | 89.84 | 93.52 | 0 | 0 | 1.50-1.58x slower |
+
+The profiler adds bounded identity validation and synchronized aggregation, so
+the CPU overhead is expected. It retains the zero-allocation property for an
+existing identity. The profiler remains opt-in; deployments that do not call
+`Record` pay no task-profiler cost. See [C235_TASK_PROFILER.md](C235_TASK_PROFILER.md)
+for API, limits, and interpretation guidance.
