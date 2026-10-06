@@ -22435,3 +22435,50 @@ commit-tg22:
 .PHONY: push-tg22
 push-tg22:
 	bash scripts/tg22.sh push
+.PHONY: baseline-tg23-conflict-log
+baseline-tg23-conflict-log:
+	bash scripts/tg23-conflict-log.sh baseline
+
+.PHONY: format-tg23-conflict-log
+format-tg23-conflict-log:
+	bash scripts/tg23-conflict-log.sh format
+
+.PHONY: test-tg23-conflict-log
+test-tg23-conflict-log:
+	bash scripts/tg23-conflict-log.sh test
+
+.PHONY: package-tg23-conflict-log
+package-tg23-conflict-log:
+	bash scripts/tg23-conflict-log.sh package
+
+.PHONY: benchmark-tg23-conflict-log
+benchmark-tg23-conflict-log:
+	bash scripts/tg23-conflict-log.sh benchmark
+
+.PHONY: race-tg23-conflict-log
+race-tg23-conflict-log:
+	bash scripts/tg23-conflict-log.sh race
+
+.PHONY: vet-tg23-conflict-log
+vet-tg23-conflict-log:
+	bash scripts/tg23-conflict-log.sh vet
+
+.PHONY: status-tg23-conflict-log
+status-tg23-conflict-log:
+	bash scripts/tg23-conflict-log.sh status
+
+.PHONY: diff-check-tg23-conflict-log
+diff-check-tg23-conflict-log:
+	bash scripts/tg23-conflict-log.sh diff-check
+
+.PHONY: stage-tg23-conflict-log
+stage-tg23-conflict-log:
+	bash scripts/tg23-conflict-log.sh stage
+
+.PHONY: commit-tg23-conflict-log
+commit-tg23-conflict-log:
+	bash scripts/tg23-conflict-log.sh commit
+
+.PHONY: push-tg23-conflict-log
+push-tg23-conflict-log:
+	bash scripts/tg23-conflict-log.sh push

@@ -31828,6 +31828,20 @@ reservation path also stayed at zero allocations.
 Raw samples and the latency/throughput tradeoff are documented in
 [TU37_REPLICA_APPLIER_THROTTLE.md](TU37_REPLICA_APPLIER_THROTTLE.md).
 
+<a id="tu38-conflict-introspection"></a>
+## T-U38: Conflict Introspection
+
+Measured with `make benchmark-tg23-conflict-log` on the same benchmark host:
+
+| Path | ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Direct `ResolveConflictVersion` control | 2.6-2.9 | 0 | 0 |
+| Opt-in `ConflictEventLog.Append` | 38-67 | 0 | 0 |
+
+The append path is intentionally not wired into default conflict resolution.
+It adds bounded diagnostic retention only when explicitly enabled, and its
+tradeoff is documented in [TU38_CONFLICT_INTROSPECTION.md](TU38_CONFLICT_INTROSPECTION.md).
+
 <a id="m033-batched-logical-timestamp-oracle"></a>
 ## M033: Batched Logical Timestamp Oracle
 
