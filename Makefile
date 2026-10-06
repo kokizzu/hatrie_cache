@@ -22330,3 +22330,24 @@ commit-tg17:
 	@bash scripts/run-tg17.sh commit
 push-tg17:
 	@bash scripts/run-tg17.sh push
+.PHONY: format-tg18 test-tg18 test-cache-tg18 race-tg18 vet-tg18 benchmark-tg18 status-tg18 stage-tg18 commit-tg18 push-tg18
+format-tg18:
+	bash scripts/run-tg18.sh format
+test-tg18:
+	bash scripts/run-tg18.sh test
+test-cache-tg18:
+	bash scripts/run-tg18.sh test-cache
+race-tg18:
+	bash scripts/run-tg18.sh race
+vet-tg18:
+	bash scripts/run-tg18.sh vet
+benchmark-tg18:
+	bash scripts/run-tg18.sh benchmark
+status-tg18:
+	bash scripts/run-tg18.sh status
+stage-tg18:
+	bash scripts/run-tg18.sh stage
+commit-tg18:
+	bash scripts/run-tg18.sh commit
+push-tg18:
+	bash scripts/run-tg18.sh push

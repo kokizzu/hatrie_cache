@@ -32633,3 +32633,41 @@ BenchmarkTT017VersionedTupleSpaceUpgrade/direct_migrate-32 799756 ns/op 1212423 
 BenchmarkTT017VersionedTupleSpaceUpgrade/direct_migrate-32 865231 ns/op 1212423 B/op 9216 allocs/op
 BenchmarkTT017VersionedTupleSpaceUpgrade/direct_migrate-32 846866 ns/op 1212423 B/op 9216 allocs/op
 ```
+<a id="tr-018-wal-sync-modes"></a>
+## TR-018: WAL Sync Modes
+
+`make tg18-benchmark-journal` measures the allocation-free policy decision,
+not filesystem sync latency. Five samples were recorded on an AMD Ryzen 9
+5950X:
+
+| Policy | Median ns/op | B/op | allocs/op | vs immediate |
+| --- | ---: | ---: | ---: | ---: |
+| Immediate | 1.977 | 0 | 0 | 1.00x |
+| Periodic | 8.058 | 0 | 0 | 4.08x |
+| Disabled | 1.962 | 0 | 0 | 0.99x |
+
+The periodic policy adds about 6.08 ns to the decision compared with the
+immediate policy, while the actual sync cost remains filesystem-dependent.
+Immediate remains the safe default; periodic and disabled modes trade crash
+durability for fewer automatic sync calls and require explicit operational
+acceptance.
+
+Raw samples:
+
+```text
+BenchmarkTR018SyncPolicyDecision/immediate-32 1.948 ns/op 0 B/op 0 allocs/op
+BenchmarkTR018SyncPolicyDecision/immediate-32 1.897 ns/op 0 B/op 0 allocs/op
+BenchmarkTR018SyncPolicyDecision/immediate-32 1.984 ns/op 0 B/op 0 allocs/op
+BenchmarkTR018SyncPolicyDecision/immediate-32 1.977 ns/op 0 B/op 0 allocs/op
+BenchmarkTR018SyncPolicyDecision/immediate-32 1.991 ns/op 0 B/op 0 allocs/op
+BenchmarkTR018SyncPolicyDecision/periodic-32 8.057 ns/op 0 B/op 0 allocs/op
+BenchmarkTR018SyncPolicyDecision/periodic-32 8.138 ns/op 0 B/op 0 allocs/op
+BenchmarkTR018SyncPolicyDecision/periodic-32 8.058 ns/op 0 B/op 0 allocs/op
+BenchmarkTR018SyncPolicyDecision/periodic-32 7.923 ns/op 0 B/op 0 allocs/op
+BenchmarkTR018SyncPolicyDecision/periodic-32 8.103 ns/op 0 B/op 0 allocs/op
+BenchmarkTR018SyncPolicyDecision/disabled-32 1.958 ns/op 0 B/op 0 allocs/op
+BenchmarkTR018SyncPolicyDecision/disabled-32 1.989 ns/op 0 B/op 0 allocs/op
+BenchmarkTR018SyncPolicyDecision/disabled-32 2.004 ns/op 0 B/op 0 allocs/op
+BenchmarkTR018SyncPolicyDecision/disabled-32 1.962 ns/op 0 B/op 0 allocs/op
+BenchmarkTR018SyncPolicyDecision/disabled-32 1.923 ns/op 0 B/op 0 allocs/op
+```

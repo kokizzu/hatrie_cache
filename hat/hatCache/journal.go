@@ -98,6 +98,21 @@ const (
 // import hat/hatJournal directly.
 type CommandJournalOptions = hatJournal.Options
 
+// CommandJournalSyncMode is the compatibility-facing alias for the journal
+// package's fsync policy.
+type CommandJournalSyncMode = hatJournal.SyncMode
+
+const (
+	CommandJournalSyncModeImmediate = hatJournal.SyncModeImmediate
+	CommandJournalSyncModePeriodic  = hatJournal.SyncModePeriodic
+	CommandJournalSyncModeDisabled  = hatJournal.SyncModeDisabled
+)
+
+// ParseCommandJournalSyncMode parses the public journal sync policy spelling.
+func ParseCommandJournalSyncMode(value string) (CommandJournalSyncMode, error) {
+	return hatJournal.ParseSyncMode(value)
+}
+
 // InspectCommandJournal validates a journal without modifying it. It combines
 // portable framing and sequence inspection with cache-specific command
 // validation, so a successful report is safe to use as a restore preflight.
@@ -222,6 +237,7 @@ type CommandJournal struct {
 	groupCommitWindow     time.Duration
 	groupCommitMaxBatch   int
 	adaptiveGroupCommit   bool
+	syncPolicy            *hatJournal.SyncPolicy
 	segmentMaxBytes       int64
 	segmentCompression    CommandJournalSegmentCompression
 	retainedSegments      int
@@ -276,6 +292,10 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 		return nil, err
 	}
 	options = normalized
+	syncPolicy, err := hatJournal.NewSyncPolicy(options.SyncMode, options.SyncInterval)
+	if err != nil {
+		return nil, err
+	}
 	format := options.Format
 	var encryptor *hatJournal.RecordEncryptor
 	if options.Encryption.Enabled() {
@@ -347,6 +367,7 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 		groupCommitWindow:     options.GroupCommitWindow,
 		groupCommitMaxBatch:   options.GroupCommitMaxBatch,
 		adaptiveGroupCommit:   options.AdaptiveGroupCommit,
+		syncPolicy:            syncPolicy,
 		segmentMaxBytes:       options.SegmentMaxBytes,
 		segmentCompression:    options.SegmentCompression,
 		retainedSegments:      options.RetainedSegments,
@@ -1696,6 +1717,18 @@ func (journal *CommandJournal) Sequence() uint64 {
 	return journal.lastSequenceLocked()
 }
 
+// Sync forces the current journal bytes to the operating system regardless of
+// the configured collection policy. It is the explicit durability boundary
+// for periodic and disabled modes.
+func (journal *CommandJournal) Sync() error {
+	if journal == nil {
+		return ErrNilCommandJournal
+	}
+	journal.mu.Lock()
+	defer journal.mu.Unlock()
+	return journal.syncNowLocked(time.Time{})
+}
+
 // WithPersistenceBarrier runs persist while journal appends and applications
 // are paused. The callback receives the latest fully applied sequence, allowing
 // persistent data and its replay watermark to be committed atomically.
@@ -1912,13 +1945,44 @@ func resolveJournalReplicationJobs(journal *CommandJournal, jobs []replicationJo
 }
 
 func (journal *CommandJournal) syncLocked() error {
-	if journal.syncHook != nil {
-		return journal.syncHook()
-	}
-	if journal.file == nil {
+	if journal.file == nil && journal.syncHook == nil {
 		return ErrCommandJournalClosed
 	}
-	return journal.file.Sync()
+	if journal.syncPolicy != nil {
+		switch journal.syncPolicy.Mode() {
+		case hatJournal.SyncModeDisabled:
+			return nil
+		case hatJournal.SyncModePeriodic:
+			now := time.Now()
+			if !journal.syncPolicy.ShouldSync(now) {
+				return nil
+			}
+			return journal.syncNowLocked(now)
+		}
+	}
+	return journal.syncNowLocked(time.Time{})
+}
+
+func (journal *CommandJournal) syncNowLocked(now time.Time) error {
+	if journal.syncHook != nil {
+		if err := journal.syncHook(); err != nil {
+			return err
+		}
+	} else {
+		if journal.file == nil {
+			return ErrCommandJournalClosed
+		}
+		if err := journal.file.Sync(); err != nil {
+			return err
+		}
+	}
+	if journal.syncPolicy != nil && journal.syncPolicy.Mode() == hatJournal.SyncModePeriodic {
+		if now.IsZero() {
+			now = time.Now()
+		}
+		journal.syncPolicy.MarkSynced(now)
+	}
+	return nil
 }
 
 func (journal *CommandJournal) rollbackFailedAppendLocked(state commandJournalAppendState, cause error) error {

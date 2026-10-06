@@ -971,3 +971,9 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   and retryable record failures. See
   [TT017_VERSIONED_TUPLE_SPACE_UPGRADES.md](TT017_VERSIONED_TUPLE_SPACE_UPGRADES.md)
   and [BENCHMARK.md](BENCHMARK.md#tt-017-versioned-tuple-space-upgrades).
+- [x] T-G18 Tarantool-style configurable WAL sync modes. `hatJournal.Options`
+  now supports immediate, periodic, and explicitly disabled collection sync
+  policies while preserving immediate sync as the zero-value default; callers
+  can force a checkpoint with `CommandJournal.Sync()`. See
+  [TR018_WAL_SYNC_MODES.md](TR018_WAL_SYNC_MODES.md) and
+  [BENCHMARK.md](BENCHMARK.md#tr-018-wal-sync-modes).

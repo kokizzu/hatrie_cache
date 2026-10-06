@@ -747,3 +747,14 @@ space-level and callback-level error causes. Scheduling, durability,
 replication, and distributed fencing remain caller-owned. See
 [TT017_VERSIONED_TUPLE_SPACE_UPGRADES.md](TT017_VERSIONED_TUPLE_SPACE_UPGRADES.md)
 and [BENCHMARK.md](BENCHMARK.md#tt-017-versioned-tuple-space-upgrades).
+
+## T-G18: Configurable WAL Sync Modes
+
+T-G18 is adopted through `hatJournal.Options.SyncMode` and
+`SyncInterval`. Immediate sync remains the zero-value default; periodic mode
+limits automatic syncs to the configured interval, and disabled mode removes
+automatic `fsync` only when explicitly selected. `CommandJournal.Sync()` is an
+explicit durable checkpoint for callers that need one in either relaxed mode.
+Invalid modes and negative intervals fail closed. See
+[TR018_WAL_SYNC_MODES.md](TR018_WAL_SYNC_MODES.md) and
+[BENCHMARK.md](BENCHMARK.md#tr-018-wal-sync-modes).

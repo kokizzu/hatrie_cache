@@ -183,6 +183,7 @@ security guidance before exposing it on a network.
 - Tarantool-style tuple format version negotiation: [TUPLE_FORMAT_NEGOTIATION.md](TUPLE_FORMAT_NEGOTIATION.md)
 - Tarantool-style versioned tuple migration plans: [TT016_VERSIONED_TUPLE_MIGRATIONS.md](TT016_VERSIONED_TUPLE_MIGRATIONS.md), with measurements in [BENCHMARK.md#tt-016-versioned-tuple-migrations](BENCHMARK.md#tt-016-versioned-tuple-migrations)
 - Tarantool-style online versioned tuple-space upgrades: [TT017_VERSIONED_TUPLE_SPACE_UPGRADES.md](TT017_VERSIONED_TUPLE_SPACE_UPGRADES.md), with bounded steps, lazy reads, normalized writes, and retryable failures measured in [BENCHMARK.md#tt-017-versioned-tuple-space-upgrades](BENCHMARK.md#tt-017-versioned-tuple-space-upgrades)
+- Tarantool-style configurable WAL sync modes: [TR018_WAL_SYNC_MODES.md](TR018_WAL_SYNC_MODES.md), with immediate-safe defaults, periodic sync intervals, disabled-mode warnings, explicit `Sync()`, and policy measurements in [BENCHMARK.md#tr-018-wal-sync-modes](BENCHMARK.md#tr-018-wal-sync-modes)
 - Tarantool-inspired adaptive per-tuple compression: [TT045_TUPLE_COMPRESSION.md](TT045_TUPLE_COMPRESSION.md), with measurements in [BENCHMARK.md](BENCHMARK.md#tt-045-tuple-level-compression)
 - Snapshot-consistent ordered index cursors: [ORDERED_SNAPSHOT_CURSOR.md](ORDERED_SNAPSHOT_CURSOR.md)
 - Opt-in per-space memory quotas: [SPACE_MEMORY_QUOTA.md](SPACE_MEMORY_QUOTA.md)
