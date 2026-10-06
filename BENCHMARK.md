@@ -32580,3 +32580,43 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## C240 Read-Only Backup Attachment
+
+Measured on 2026-10-06 with `make benchmark-c240-read-only-backup`, Go benchmarks using a 64 KiB manifest file in an in-memory object store on an AMD Ryzen 9 5950X. The restore reference includes the existing staging, SHA-256 verification, filesystem sync, and publish path; it is intentionally not the same operation as a lazy read.
+
+| Operation | Median-ish result across 5 runs | Allocated bytes/op | Allocs/op | Relative CPU vs restore |
+| --- | ---: | ---: | ---: | ---: |
+| `OpenReadOnly` (manifest only) | 4.30 us/op | 2,096 | 23 | 1,100x less |
+| `ReadOnlyBackup.ReadFile` (read and retain 64 KiB) | 57.6 us/op | 139,326 | 29 | 82x less |
+| `ReadOnlyBackup.OpenFile` + stream to discard | 33.1 us/op | 738 | 13 | 140x less |
+| Existing `Restore` reference | 4.72 ms/op | 44,732 | 170 | 1x |
+
+Streaming is the relevant low-memory path: it does not retain the payload and uses about 60x fewer allocated bytes than restore. `ReadFile` intentionally retains the returned 64 KiB payload, so its allocation is higher than restore even though it avoids filesystem work. `OpenReadOnly` only loads the manifest and does not fetch payload objects until `OpenFile`/`ReadFile`.
+
+Raw output:
+
+```text
+BenchmarkC240ReadOnlyOpen-32          54141  4322 ns/op     2096 B/op  23 allocs/op
+BenchmarkC240ReadOnlyOpen-32          55087  4389 ns/op     2096 B/op  23 allocs/op
+BenchmarkC240ReadOnlyOpen-32          54262  4304 ns/op     2096 B/op  23 allocs/op
+BenchmarkC240ReadOnlyOpen-32          55551  4163 ns/op     2096 B/op  23 allocs/op
+BenchmarkC240ReadOnlyOpen-32          57836  4076 ns/op     2096 B/op  23 allocs/op
+BenchmarkC240ReadOnlyReadFile-32       4406 56040 ns/op   139282 B/op  29 allocs/op
+BenchmarkC240ReadOnlyReadFile-32       4038 57817 ns/op   139333 B/op  29 allocs/op
+BenchmarkC240ReadOnlyReadFile-32       3895 57590 ns/op   139307 B/op  29 allocs/op
+BenchmarkC240ReadOnlyReadFile-32       4020 57434 ns/op   139349 B/op  29 allocs/op
+BenchmarkC240ReadOnlyReadFile-32       4191 57696 ns/op   139335 B/op  29 allocs/op
+BenchmarkC240ReadOnlyStreamFile-32     7240 33311 ns/op      739 B/op  13 allocs/op
+BenchmarkC240ReadOnlyStreamFile-32     7262 33195 ns/op      739 B/op  13 allocs/op
+BenchmarkC240ReadOnlyStreamFile-32     7339 32950 ns/op      738 B/op  13 allocs/op
+BenchmarkC240ReadOnlyStreamFile-32     7094 32964 ns/op      738 B/op  13 allocs/op
+BenchmarkC240ReadOnlyStreamFile-32     7123 33144 ns/op      738 B/op  13 allocs/op
+BenchmarkC240RestoreReference-32         63 4934515 ns/op    44838 B/op 170 allocs/op
+BenchmarkC240RestoreReference-32         68 4938058 ns/op    44685 B/op 170 allocs/op
+BenchmarkC240RestoreReference-32         72 4674254 ns/op    44670 B/op 170 allocs/op
+BenchmarkC240RestoreReference-32         68 4719587 ns/op    44812 B/op 170 allocs/op
+BenchmarkC240RestoreReference-32         64 4635134 ns/op    44657 B/op 170 allocs/op
+```
+
+The comparison is operational rather than apples-to-apples: read-only streaming is for inspection/query-adjacent consumers, while restore is still required to materialize a durable database directory.

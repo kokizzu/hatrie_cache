@@ -4765,3 +4765,17 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+
+## Read-Only Backup Reads
+
+`hatBackup.ObjectStoreTarget.OpenReadOnly` opens an object-store backup without restoring it. The returned `ReadOnlyBackup` fetches only the verified manifest initially, exposes defensive `Manifest` and `Files` metadata copies, and streams a selected manifest file through the existing context, encryption, size, and SHA-256 checks.
+
+```go
+view, err := target.OpenReadOnly(ctx)
+if err != nil {
+	return err
+}
+payload, err := view.ReadFile(ctx, "snapshot.bin")
+```
+
+This handle is read-only and lazy; use `ObjectStoreTarget.Restore` when a durable filesystem database is required. Closing a partially consumed file drains and verifies the remaining payload.

@@ -73,7 +73,7 @@ operator control remain the preferred deployment model.
 - [ ] C237 Explain output for projection selection and estimated I/O cost.
 - [ ] C238 Mutation queue progress with rows remaining and elapsed estimates.
 - [ ] C239 Part-merge backlog, amplification, and age metrics.
-- [ ] C240 Read-only backup database attachment for querying backup parts in place.
+- [x] C240 Read-only backup attachment for verified, lazy file reads in place. `hatBackup.ObjectStoreTarget.OpenReadOnly` fetches only the manifest at open time, streams exact manifest paths on demand, verifies size/SHA-256 at EOF or close, and never restores or mutates live state. This is the storage-reader slice; SQL querying over backup parts remains separate work.
 - [ ] C241 Incremental backup chunk deduplication across snapshots.
 - [ ] C242 Parallel restore of independent parts with bounded concurrency.
 - [ ] C243 Remote-part read-through caching with immutable checksum keys.

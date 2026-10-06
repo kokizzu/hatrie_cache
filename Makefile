@@ -22292,3 +22292,35 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+
+.PHONY: test-c240-read-only-backup
+test-c240-read-only-backup:
+	@bash scripts/test-c240-read-only-backup.sh
+
+.PHONY: format-c240-read-only-backup
+format-c240-read-only-backup:
+	@bash scripts/format-c240-read-only-backup.sh
+
+.PHONY: benchmark-c240-read-only-backup
+benchmark-c240-read-only-backup:
+	@bash scripts/benchmark-c240-read-only-backup.sh
+
+.PHONY: verify-c240-read-only-backup
+verify-c240-read-only-backup:
+	@bash scripts/verify-c240-read-only-backup.sh
+
+.PHONY: status-c240-read-only-backup
+status-c240-read-only-backup:
+	@bash scripts/status-c240-read-only-backup.sh
+
+.PHONY: stage-c240-read-only-backup
+stage-c240-read-only-backup:
+	@bash scripts/stage-c240-read-only-backup.sh
+
+.PHONY: commit-c240-read-only-backup
+commit-c240-read-only-backup:
+	@bash scripts/commit-c240-read-only-backup.sh
+
+.PHONY: push-c240-read-only-backup
+push-c240-read-only-backup:
+	@bash scripts/push-c240-read-only-backup.sh
