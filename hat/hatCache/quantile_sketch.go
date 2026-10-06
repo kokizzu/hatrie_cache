@@ -154,6 +154,9 @@ func (ht *HatTrie) UpsertQuantileSketch(key string, epsilon float64) error {
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if err := ht.replicaWriteError(); err != nil {
+		return err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.UpsertQuantileSketch(key, epsilon)
 	}
@@ -195,6 +198,9 @@ func (ht *HatTrie) AddQuantileSketch(key string, val float64, vals ...float64) Q
 func (ht *HatTrie) AddQuantileSketchChecked(key string, val float64, vals ...float64) (QuantileEstimate, error) {
 	if ht == nil {
 		return QuantileEstimate{}, ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return QuantileEstimate{}, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.AddQuantileSketchChecked(key, val, vals...)

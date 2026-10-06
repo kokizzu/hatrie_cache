@@ -194,6 +194,9 @@ func (ht *HatTrie) UpsertHyperLogLog(key string, precision uint8) error {
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if err := ht.replicaWriteError(); err != nil {
+		return err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.UpsertHyperLogLog(key, precision)
 	}
@@ -229,6 +232,9 @@ func (ht *HatTrie) AddHyperLogLog(key string, val interface{}, vals ...interface
 func (ht *HatTrie) AddHyperLogLogChecked(key string, val interface{}, vals ...interface{}) (uint64, error) {
 	if ht == nil {
 		return 0, ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return 0, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.AddHyperLogLogChecked(key, val, vals...)

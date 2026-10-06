@@ -56,6 +56,9 @@ func (ht *HatTrie) RunAtomic(build func(*AtomicCommandBatch) error) (CacheComman
 	if ht == nil {
 		return CacheCommandResponse{}, ErrNilHatTrie
 	}
+	if err := ht.replicaWriteError(); err != nil {
+		return CacheCommandResponse{}, err
+	}
 	if build == nil {
 		return CacheCommandResponse{}, ErrNilAtomicCallback
 	}

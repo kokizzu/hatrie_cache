@@ -152,6 +152,9 @@ func (ht *HatTrie) UpsertFenwickTree(key string, size uint64) error {
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if err := ht.replicaWriteError(); err != nil {
+		return err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.UpsertFenwickTree(key, size)
 	}
@@ -193,6 +196,9 @@ func (ht *HatTrie) AddFenwickTree(key string, index uint64, delta int64) (Fenwic
 func (ht *HatTrie) AddFenwickTreeChecked(key string, index uint64, delta int64) (FenwickTreeUpdate, bool, error) {
 	if ht == nil {
 		return FenwickTreeUpdate{}, false, ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return FenwickTreeUpdate{}, false, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.AddFenwickTreeChecked(key, index, delta)

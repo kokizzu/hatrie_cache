@@ -3746,6 +3746,7 @@ type HatTrie struct {
 	nativeCommandBatchScratch          nativeCommandBatchScratch
 	sqlResultCache                     atomic.Pointer[SQLResultCache]
 	localPartitions                    atomic.Pointer[localPartitionSet]
+	replicaReadOnlyGate                atomic.Pointer[replicaReadOnlyGateRef]
 	expires                            map[string]uint32
 	expirations                        expirationHeap
 	expirationCleanerSignals           *expirationCleanerSignalSet
@@ -4321,6 +4322,9 @@ func (ht *HatTrie) ExpireChecked(key string, ttl time.Duration) (bool, error) {
 	if ht == nil {
 		return false, ErrNilHatTrie
 	}
+	if err := ht.replicaWriteError(); err != nil {
+		return false, err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.ExpireChecked(key, ttl)
 	}
@@ -4361,6 +4365,9 @@ func (ht *HatTrie) ExpireAtChecked(key string, at time.Time) (bool, error) {
 	if ht == nil {
 		return false, ErrNilHatTrie
 	}
+	if err := ht.replicaWriteError(); err != nil {
+		return false, err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.ExpireAtChecked(key, at)
 	}
@@ -4392,6 +4399,9 @@ func (ht *HatTrie) Persist(key string) bool {
 func (ht *HatTrie) PersistChecked(key string) (bool, error) {
 	if ht == nil {
 		return false, ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return false, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.PersistChecked(key)
@@ -4483,6 +4493,9 @@ func (ht *HatTrie) VacuumExpired() int {
 	if ht == nil {
 		return 0
 	}
+	if ht.replicaWriteError() != nil {
+		return 0
+	}
 	if partitions := ht.localPartitionSet(); partitions != nil {
 		results, _ := runLocalPartitionTasks(partitions, func(child *HatTrie) (int, error) {
 			return child.VacuumExpired(), nil
@@ -4539,6 +4552,9 @@ func (ht *HatTrie) StartExpirationCleanerContext(ctx context.Context, interval t
 }
 
 func (ht *HatTrie) vacuumExpiredIfOpen() bool {
+	if ht.replicaWriteError() != nil {
+		return true
+	}
 	if partitions := ht.localPartitionSet(); partitions != nil {
 		results, _ := runLocalPartitionTasks(partitions, func(child *HatTrie) (bool, error) {
 			return child.vacuumExpiredIfOpen(), nil
@@ -6235,6 +6251,9 @@ func (ht *HatTrie) HydrateLevelDBReferences() (int, error) {
 	if ht == nil {
 		return 0, ErrNilHatTrie
 	}
+	if err := ht.replicaWriteError(); err != nil {
+		return 0, err
+	}
 	ht.mu.Lock()
 	defer ht.mu.Unlock()
 
@@ -6353,6 +6372,9 @@ func (ht *HatTrie) DeleteChecked(key string) (bool, error) {
 	if ht == nil {
 		return false, ErrNilHatTrie
 	}
+	if err := ht.replicaWriteError(); err != nil {
+		return false, err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.DeleteChecked(key)
 	}
@@ -6384,6 +6406,9 @@ func (ht *HatTrie) UpsertCounter(key string, val int32) {
 func (ht *HatTrie) UpsertCounterChecked(key string, val int32) error {
 	if ht == nil {
 		return ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.UpsertCounterChecked(key, val)
@@ -6424,6 +6449,9 @@ func (ht *HatTrie) IncrementCounterChecked(key string, by int32) (int32, error) 
 func (ht *HatTrie) incrementCounterChecked(key string, by int32, checkOverflow bool) (int32, bool, error) {
 	if ht == nil {
 		return 0, false, ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return 0, false, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.incrementCounterChecked(key, by, checkOverflow)
@@ -6517,6 +6545,9 @@ func (ht *HatTrie) UpsertStringChecked(key string, val string) error {
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if err := ht.replicaWriteError(); err != nil {
+		return err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.UpsertStringChecked(key, val)
 	}
@@ -6552,6 +6583,9 @@ func (ht *HatTrie) AppendString(key string, str string) {
 func (ht *HatTrie) AppendStringChecked(key string, str string) (string, error) {
 	if ht == nil {
 		return "", ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return "", err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.AppendStringChecked(key, str)
@@ -6601,6 +6635,9 @@ func (ht *HatTrie) PrependString(key string, str string) {
 func (ht *HatTrie) PrependStringChecked(key string, str string) (string, error) {
 	if ht == nil {
 		return "", ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return "", err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.PrependStringChecked(key, str)
@@ -6697,6 +6734,9 @@ func (ht *HatTrie) UpsertBytes(key string, val []byte) {
 func (ht *HatTrie) UpsertBytesChecked(key string, val []byte) error {
 	if ht == nil {
 		return ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.UpsertBytesChecked(key, val)
@@ -6855,6 +6895,9 @@ func (ht *HatTrie) UpsertMapChecked(key string, val Map) error {
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if err := ht.replicaWriteError(); err != nil {
+		return err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.UpsertMapChecked(key, val)
 	}
@@ -6928,6 +6971,9 @@ func (ht *HatTrie) PutMapChecked(key string, subkey string, val interface{}) err
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if err := ht.replicaWriteError(); err != nil {
+		return err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.PutMapChecked(key, subkey, val)
 	}
@@ -6940,6 +6986,9 @@ func (ht *HatTrie) PutMapChecked(key string, subkey string, val interface{}) err
 func (ht *HatTrie) PutMapEntriesChecked(key string, fields Map) error {
 	if ht == nil {
 		return ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.PutMapEntriesChecked(key, fields)
@@ -7130,6 +7179,9 @@ func (ht *HatTrie) UpsertSliceChecked(key string, val Slice) error {
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if err := ht.replicaWriteError(); err != nil {
+		return err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.UpsertSliceChecked(key, val)
 	}
@@ -7185,6 +7237,9 @@ func (ht *HatTrie) PushSlice(key string, val interface{}, vals ...interface{}) {
 func (ht *HatTrie) PushSliceChecked(key string, val interface{}, vals ...interface{}) error {
 	if ht == nil {
 		return ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.PushSliceChecked(key, val, vals...)
@@ -7251,6 +7306,9 @@ func (ht *HatTrie) PopSliceChecked(key string) (interface{}, bool, error) {
 	if ht == nil {
 		return nil, false, ErrNilHatTrie
 	}
+	if err := ht.replicaWriteError(); err != nil {
+		return nil, false, err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.PopSliceChecked(key)
 	}
@@ -7291,6 +7349,9 @@ func (ht *HatTrie) ShiftSlice(key string) interface{} {
 func (ht *HatTrie) ShiftSliceChecked(key string) (interface{}, bool, error) {
 	if ht == nil {
 		return nil, false, ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return nil, false, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.ShiftSliceChecked(key)
@@ -7439,6 +7500,9 @@ func (ht *HatTrie) UpsertSetChecked(key string, val Set) error {
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if err := ht.replicaWriteError(); err != nil {
+		return err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.UpsertSetChecked(key, val)
 	}
@@ -7493,6 +7557,9 @@ func (ht *HatTrie) AddSet(key string, val interface{}, vals ...interface{}) int 
 func (ht *HatTrie) AddSetChecked(key string, val interface{}, vals ...interface{}) (int, error) {
 	if ht == nil {
 		return 0, ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return 0, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.AddSetChecked(key, val, vals...)
@@ -7585,6 +7652,9 @@ func (ht *HatTrie) RemoveSet(key string, val interface{}, vals ...interface{}) i
 func (ht *HatTrie) RemoveSetChecked(key string, val interface{}, vals ...interface{}) (int, error) {
 	if ht == nil {
 		return 0, ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return 0, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.RemoveSetChecked(key, val, vals...)

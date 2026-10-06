@@ -297,6 +297,9 @@ func (ht *HatTrie) UpsertBloomFilter(key string, expectedItems uint64, falsePosi
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if err := ht.replicaWriteError(); err != nil {
+		return err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.UpsertBloomFilter(key, expectedItems, falsePositiveRate)
 	}
@@ -337,6 +340,9 @@ func (ht *HatTrie) AddBloomFilter(key string, val interface{}, vals ...interface
 func (ht *HatTrie) AddBloomFilterChecked(key string, val interface{}, vals ...interface{}) (int, error) {
 	if ht == nil {
 		return 0, ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return 0, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.AddBloomFilterChecked(key, val, vals...)

@@ -22576,3 +22576,28 @@ commit-mu33-compaction-admission:
 .PHONY: push-mu33-compaction-admission
 push-mu33-compaction-admission:
 	bash scripts/mu33-compaction-admission.sh push
+.PHONY: test-tg26-gate race-tg26-gate vet-tg26-gate format-tg26-tu06 test-tg26-tu06 benchmark-tg26-tu06 test-package-tg26-tu06 race-tg26-tu06 vet-tg26-tu06 stage-tg26-tu06 commit-tg26-tu06 push-tg26-tu06
+test-tg26-gate:
+	bash scripts/tu06-replica-read-only.sh gate
+race-tg26-gate:
+	bash scripts/tu06-replica-read-only.sh gate-race
+vet-tg26-gate:
+	bash scripts/tu06-replica-read-only.sh gate-vet
+format-tg26-tu06:
+	bash scripts/tu06-replica-read-only.sh format
+test-tg26-tu06:
+	bash scripts/tu06-replica-read-only.sh test
+benchmark-tg26-tu06:
+	bash scripts/tu06-replica-read-only.sh benchmark
+test-package-tg26-tu06:
+	bash scripts/tu06-replica-read-only.sh test-package
+race-tg26-tu06:
+	bash scripts/tu06-replica-read-only.sh race
+vet-tg26-tu06:
+	bash scripts/tu06-replica-read-only.sh vet
+stage-tg26-tu06:
+	bash scripts/tu06-replica-read-only.sh stage
+commit-tg26-tu06:
+	bash scripts/tu06-replica-read-only.sh commit
+push-tg26-tu06:
+	bash scripts/tu06-replica-read-only.sh push

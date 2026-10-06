@@ -86,6 +86,9 @@ func (ht *HatTrie) MergeTopK(key string, other TopK) error {
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if err := ht.replicaWriteError(); err != nil {
+		return err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.MergeTopK(key, other)
 	}

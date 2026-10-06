@@ -97,6 +97,9 @@ func (ht *HatTrie) UpsertSparseBitsetChecked(key string) error {
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if err := ht.replicaWriteError(); err != nil {
+		return err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.UpsertSparseBitsetChecked(key)
 	}
@@ -128,6 +131,9 @@ func (ht *HatTrie) AddSparseBitset(key string, value uint64, values ...uint64) i
 func (ht *HatTrie) AddSparseBitsetChecked(key string, value uint64, values ...uint64) (int, error) {
 	if ht == nil {
 		return 0, ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return 0, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.AddSparseBitsetChecked(key, value, values...)
@@ -164,6 +170,9 @@ func (ht *HatTrie) RemoveSparseBitset(key string, value uint64, values ...uint64
 func (ht *HatTrie) RemoveSparseBitsetChecked(key string, value uint64, values ...uint64) (int, error) {
 	if ht == nil {
 		return 0, ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return 0, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.RemoveSparseBitsetChecked(key, value, values...)

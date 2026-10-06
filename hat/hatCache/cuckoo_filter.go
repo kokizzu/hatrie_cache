@@ -665,6 +665,9 @@ func (ht *HatTrie) UpsertCuckooFilter(key string, capacity uint64, falsePositive
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if err := ht.replicaWriteError(); err != nil {
+		return err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.UpsertCuckooFilter(key, capacity, falsePositiveRate)
 	}
@@ -706,6 +709,9 @@ func (ht *HatTrie) AddCuckooFilter(key string, val interface{}, vals ...interfac
 func (ht *HatTrie) AddCuckooFilterChecked(key string, val interface{}, vals ...interface{}) (int, error) {
 	if ht == nil {
 		return 0, ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return 0, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.AddCuckooFilterChecked(key, val, vals...)
@@ -810,6 +816,9 @@ func (ht *HatTrie) DeleteCuckooFilter(key string, val interface{}, vals ...inter
 func (ht *HatTrie) DeleteCuckooFilterChecked(key string, val interface{}, vals ...interface{}) (int, error) {
 	if ht == nil {
 		return 0, ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return 0, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.DeleteCuckooFilterChecked(key, val, vals...)

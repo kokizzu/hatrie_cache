@@ -4781,3 +4781,12 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+## Replica-wide read-only gate
+
+Replicas can opt into `hatReplication.ReplicaReadOnlyGate` through
+`hatCache.HatTrie.SetReplicaReadOnlyGate`. The default is off. While enabled,
+public data mutations return `hatReplication.ErrReplicaReadOnly` through their
+`Checked` variants, legacy no-error mutators leave data unchanged, and reads
+continue to work. Partition children share the gate; journal and snapshot
+replay keeps its private apply exception. See
+[TU06_REPLICA_READ_ONLY.md](TU06_REPLICA_READ_ONLY.md).

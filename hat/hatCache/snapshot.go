@@ -296,6 +296,9 @@ func (ht *HatTrie) LoadSnapshot(path string) error {
 }
 
 func (ht *HatTrie) LoadSnapshotWithMetadata(path string) (SnapshotMetadata, error) {
+	if err := ht.replicaWriteError(); err != nil {
+		return SnapshotMetadata{}, err
+	}
 	return ht.loadSnapshotStaged(path)
 }
 

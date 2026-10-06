@@ -585,6 +585,9 @@ func (ht *HatTrie) UpsertCountMinSketch(key string, width uint64, depth uint8) e
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if err := ht.replicaWriteError(); err != nil {
+		return err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.UpsertCountMinSketch(key, width, depth)
 	}
@@ -670,6 +673,9 @@ func (ht *HatTrie) IncrementCountMinSketch(key string, val interface{}, count ui
 func (ht *HatTrie) IncrementCountMinSketchChecked(key string, val interface{}, count uint32, vals ...interface{}) (uint64, error) {
 	if ht == nil {
 		return 0, ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return 0, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.IncrementCountMinSketchChecked(key, val, count, vals...)

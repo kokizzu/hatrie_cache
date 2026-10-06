@@ -130,6 +130,11 @@ func (ht *HatTrie) ExecuteCommand(request CacheCommandRequest) CacheCommandRespo
 	if ht == nil {
 		return commandError(ErrNilHatTrie.Error())
 	}
+	if replicaRequestMutates(request) {
+		if err := ht.replicaWriteError(); err != nil {
+			return commandError(err.Error())
+		}
+	}
 	if strings.EqualFold(strings.TrimSpace(request.Command), "BATCH") && request.Atomic {
 		ht.commandTransactionMu.Lock()
 		defer ht.commandTransactionMu.Unlock()
@@ -4053,7 +4058,7 @@ func executePreparedInternalReplicationCommand(trie *HatTrie, request CacheComma
 		}
 		return CacheCommandResponse{OK: true, Message: "internal value stored"}
 	case "INTERNALDEL":
-		if trie.Delete(strings.TrimSpace(request.Key)) {
+		if trie.deleteInternal(strings.TrimSpace(request.Key)) {
 			return CacheCommandResponse{OK: true, Message: "internal value deleted"}
 		}
 		return CacheCommandResponse{OK: true, Message: "key not found"}

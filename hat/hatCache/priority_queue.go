@@ -480,6 +480,9 @@ func (ht *HatTrie) UpsertPriorityQueueChecked(key string, val PriorityQueue) err
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if err := ht.replicaWriteError(); err != nil {
+		return err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.UpsertPriorityQueueChecked(key, val)
 	}
@@ -526,6 +529,9 @@ func (ht *HatTrie) PushPriorityQueue(key string, priority int64, val interface{}
 func (ht *HatTrie) PushPriorityQueueChecked(key string, priority int64, val interface{}, vals ...interface{}) (int, error) {
 	if ht == nil {
 		return 0, ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return 0, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.PushPriorityQueueChecked(key, priority, val, vals...)
@@ -615,6 +621,9 @@ func (ht *HatTrie) PopPriorityQueue(key string) (PriorityItem, bool) {
 func (ht *HatTrie) PopPriorityQueueChecked(key string) (PriorityItem, bool, error) {
 	if ht == nil {
 		return PriorityItem{}, false, ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return PriorityItem{}, false, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.PopPriorityQueueChecked(key)

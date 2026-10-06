@@ -116,6 +116,9 @@ func (ht *HatTrie) UpsertRoaringBitmapChecked(key string) error {
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if err := ht.replicaWriteError(); err != nil {
+		return err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.UpsertRoaringBitmapChecked(key)
 	}
@@ -149,6 +152,9 @@ func (ht *HatTrie) AddRoaringBitmap(key string, value uint32, values ...uint32) 
 func (ht *HatTrie) AddRoaringBitmapChecked(key string, value uint32, values ...uint32) (int, error) {
 	if ht == nil {
 		return 0, ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return 0, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.AddRoaringBitmapChecked(key, value, values...)
@@ -187,6 +193,9 @@ func (ht *HatTrie) RemoveRoaringBitmap(key string, value uint32, values ...uint3
 func (ht *HatTrie) RemoveRoaringBitmapChecked(key string, value uint32, values ...uint32) (int, error) {
 	if ht == nil {
 		return 0, ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return 0, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.RemoveRoaringBitmapChecked(key, value, values...)

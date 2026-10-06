@@ -39,6 +39,9 @@ func (ht *HatTrie) CheckIntegrity() (IntegrityReport, error) {
 // RepairIntegrity rebuilds the trie and typed backing storage atomically, then
 // validates the repaired result. On a failed rebuild, live storage is retained.
 func (ht *HatTrie) RepairIntegrity() (IntegrityRepairResult, error) {
+	if err := ht.replicaWriteError(); err != nil {
+		return IntegrityRepairResult{}, err
+	}
 	before, err := ht.CheckIntegrity()
 	if err != nil {
 		return IntegrityRepairResult{}, err

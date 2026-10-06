@@ -282,6 +282,14 @@ func (ht *HatTrie) executeStructuredBatchDirect(ctx context.Context, request *ha
 }
 
 func (ht *HatTrie) executeStructuredBatchDirectPrepared(ctx context.Context, request *hatriecachev1.StructuredBatchRequest, sharedKey, sharedSubkey, sharedValue string, hasSharedKey, hasSharedSubkey, hasSharedValue bool, guaranteedIntegerResults int) *hatriecachev1.StructuredBatchResponse {
+	if structuredBatchMutates(request.GetOperations()) {
+		if err := ht.replicaWriteError(); err != nil {
+			response := newStructuredBatchResponse(request.GetBatchId(), len(request.GetOperations()))
+			response.Ok = false
+			response.Error = err.Error()
+			return response
+		}
+	}
 	if ht.structuredBatchRequiresCommandLoopPrepared(request, sharedKey, sharedSubkey, hasSharedKey, hasSharedSubkey) {
 		return ht.executeStructuredBatchCommandLoopPrepared(ctx, request, sharedKey, sharedSubkey, sharedValue, hasSharedKey, hasSharedSubkey, hasSharedValue)
 	}

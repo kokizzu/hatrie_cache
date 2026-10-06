@@ -608,6 +608,9 @@ func (ht *HatTrie) UpsertRadixTreeChecked(key string) error {
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if err := ht.replicaWriteError(); err != nil {
+		return err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.UpsertRadixTreeChecked(key)
 	}
@@ -647,6 +650,9 @@ func (ht *HatTrie) PutRadixTree(key string, subkey string, val interface{}) bool
 func (ht *HatTrie) PutRadixTreeChecked(key string, subkey string, val interface{}) (bool, error) {
 	if ht == nil {
 		return false, ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return false, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.PutRadixTreeChecked(key, subkey, val)
@@ -700,6 +706,9 @@ func (ht *HatTrie) PutRadixTreeEntries(key string, entries Map) int {
 func (ht *HatTrie) PutRadixTreeEntriesChecked(key string, entries Map) (int, error) {
 	if ht == nil {
 		return 0, ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return 0, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.PutRadixTreeEntriesChecked(key, entries)
@@ -786,6 +795,9 @@ func (ht *HatTrie) DeleteRadixTree(key string, subkey string) bool {
 func (ht *HatTrie) DeleteRadixTreeChecked(key string, subkey string) (bool, error) {
 	if ht == nil {
 		return false, ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return false, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.DeleteRadixTreeChecked(key, subkey)

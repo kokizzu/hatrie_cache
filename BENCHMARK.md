@@ -32816,3 +32816,16 @@ BenchmarkMU33CompactionControllerSubmitWithBoundaryAdmission-32  977780  1132 ns
 BenchmarkMU33CompactionControllerSubmitWithBoundaryAdmission-32  975918  1167 ns/op  248 B/op  5 allocs/op
 BenchmarkMU33CompactionControllerSubmitWithBoundaryAdmission-32  949398  1140 ns/op  248 B/op  5 allocs/op
 ```
+## T-U06 Replica-wide read-only enforcement
+
+The focused regression target is `make test-tg26-tu06`; the package gate test is
+`make test-tg26-gate`. The benchmark target compares the existing writable
+`UpsertStringChecked` path with the same path while an attached gate is
+writable: `make benchmark-tg26-tu06`.
+
+No trustworthy HatTrie benchmark number is recorded yet. Both the focused test
+and benchmark currently stop at unrelated pre-existing `hat/hatSql` build
+errors (`MaxDataflowTextBytes`, `TypedTableDate`, and `TypedTableTimestamp` are
+undefined on the TG26 base). The independent gate transition test passes, and
+the benchmark remains in the repository so the CPU/allocation comparison can
+be captured as soon as that base build break is repaired.

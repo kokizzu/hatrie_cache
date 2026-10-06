@@ -601,6 +601,9 @@ func (ht *HatTrie) UpsertTopK(key string, capacity uint64) error {
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if err := ht.replicaWriteError(); err != nil {
+		return err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.UpsertTopK(key, capacity)
 	}
@@ -642,6 +645,9 @@ func (ht *HatTrie) AddTopK(key string, val interface{}, count uint64, vals ...in
 func (ht *HatTrie) AddTopKChecked(key string, val interface{}, count uint64, vals ...interface{}) (TopKEstimate, error) {
 	if ht == nil {
 		return TopKEstimate{}, ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return TopKEstimate{}, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.AddTopKChecked(key, val, count, vals...)

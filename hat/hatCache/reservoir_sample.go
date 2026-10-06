@@ -565,6 +565,9 @@ func (ht *HatTrie) UpsertReservoirSample(key string, capacity uint64) error {
 	if ht == nil {
 		return ErrNilHatTrie
 	}
+	if err := ht.replicaWriteError(); err != nil {
+		return err
+	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.UpsertReservoirSample(key, capacity)
 	}
@@ -606,6 +609,9 @@ func (ht *HatTrie) AddReservoirSample(key string, val interface{}, vals ...inter
 func (ht *HatTrie) AddReservoirSampleChecked(key string, val interface{}, vals ...interface{}) (ReservoirSampleUpdate, error) {
 	if ht == nil {
 		return ReservoirSampleUpdate{}, ErrNilHatTrie
+	}
+	if err := ht.replicaWriteError(); err != nil {
+		return ReservoirSampleUpdate{}, err
 	}
 	if partition := ht.localPartitionForKey(key); partition != nil {
 		return partition.AddReservoirSampleChecked(key, val, vals...)
