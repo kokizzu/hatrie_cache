@@ -22292,3 +22292,27 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: codex-format-m-g21
+codex-format-m-g21:
+	bash scripts/format-m-g21.sh
+
+.PHONY: codex-test-m-g21
+codex-test-m-g21:
+	bash scripts/test-m-g21.sh
+
+.PHONY: codex-benchmark-m-g21
+codex-benchmark-m-g21:
+	bash scripts/benchmark-m-g21.sh
+
+.PHONY: codex-commit-m-g21
+codex-commit-m-g21:
+	bash scripts/commit-m-g21.sh
+
+
+.PHONY: codex-race-m-g21
+codex-race-m-g21:
+	bash scripts/race-m-g21.sh
+
+.PHONY: codex-vet-m-g21
+codex-vet-m-g21:
+	bash scripts/vet-m-g21.sh
