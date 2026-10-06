@@ -19,6 +19,57 @@ func executeSQLAutoNativeDataflow(ctx context.Context, query *sqlQuery, resolver
 	if control == nil || resolver == nil {
 		return SQLQueryResult{}, false, nil
 	}
+	if joinPlan, joinEligible := sqlAutoNativeInnerJoinEligible(query, resolver, options); joinEligible {
+		leftRows, err := resolver.ResolveSQLSource(query.from.kind, query.from.key)
+		if err != nil {
+			return SQLQueryResult{}, true, err
+		}
+		if err := control.check(); err != nil {
+			return SQLQueryResult{}, true, err
+		}
+		if len(leftRows) > control.maxRows {
+			return SQLQueryResult{}, true, fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, control.maxRows)
+		}
+		rightRows, err := resolver.ResolveSQLSource(query.joins[0].source.kind, query.joins[0].source.key)
+		if err != nil {
+			return SQLQueryResult{}, true, err
+		}
+		if err := control.check(); err != nil {
+			return SQLQueryResult{}, true, err
+		}
+		if len(rightRows) > control.maxRows {
+			return SQLQueryResult{}, true, fmt.Errorf("SQL source %q exceeds the %d row limit", query.joins[0].source.alias, control.maxRows)
+		}
+		started := time.Now()
+		nativeContext := control.ctx
+		if control.yieldEvery > 0 {
+			nativeContext = control.executionContext()
+		}
+		resultRows, err := executeNativeSQLDataflowJoin(nativeContext, query, joinPlan, leftRows, rightRows)
+		if err != nil {
+			return SQLQueryResult{}, true, err
+		}
+		if err := control.check(); err != nil {
+			return SQLQueryResult{}, true, err
+		}
+		inputRows := len(leftRows) + len(rightRows)
+		outputRows := len(resultRows)
+		elapsed := time.Since(started).Nanoseconds()
+		result := SQLQueryResult{
+			Columns: sqlColumns(query.selects),
+			Rows:    resultRows,
+		}
+		if recordPlan {
+			result.Plan = []SQLExplainStep{{
+				Node:             "NATIVE DATAFLOW",
+				Detail:           detail,
+				ActualInputRows:  &inputRows,
+				ActualOutputRows: &outputRows,
+				ElapsedNanos:     &elapsed,
+			}}
+		}
+		return result, true, nil
+	}
 	rows, err := resolver.ResolveSQLSource(query.from.kind, query.from.key)
 	if err != nil {
 		return SQLQueryResult{}, true, err
@@ -173,6 +224,9 @@ func sqlAutoNativeGroupedOrderedEligible(query *sqlQuery, resolver SQLSourceReso
 }
 
 func sqlAutoNativeDataflowPlanDetail(query *sqlQuery, resolver SQLSourceResolver, options SQLQueryOptions) (string, bool) {
+	if _, ok := sqlAutoNativeInnerJoinEligible(query, resolver, options); ok {
+		return "automatic inner hash join batch execution", true
+	}
 	if sqlAutoNativeDataflowEligible(query, resolver, options) {
 		return "automatic scalar batch execution", true
 	}

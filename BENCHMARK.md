@@ -32580,3 +32580,67 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## M052z Automatic Native Inner Hash Join
+
+M052z automatically selects a direct native batch path for the narrow default
+shape of one `CACHE`/`KEYS` source joined to one `CACHE`/`KEYS` source with a
+single binary equality key, scalar `WHERE`, and scalar projection. The native
+path builds one right-side hash map and evaluates filter/projection directly on
+the joined rows. Outer joins, richer plans, specialized resolvers, and explicit
+resource-budget options remain on the ordinary executor.
+
+Command:
+
+```text
+make benchmark-m052z
+```
+
+Five `-benchmem` samples were collected on Linux/amd64 with an AMD Ryzen 9
+5950X. The workload joins 256 left rows to 256 right rows across 64 integer
+keys, producing duplicate-key matches and projects two fields. The fallback
+sets `SQLQueryOptions.DisableNativeDataflow = true`.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Before automatic native join | 1,248,385 | 1,681,451 | 9,219 | baseline |
+| After automatic native join | 986,293 | 968,682 | 7,900 | 1.27x faster vs pre-feature; 1.74x less heap; 1.17x fewer allocations |
+| After ordinary fallback control | 1,270,260 | 1,681,434 | 9,219 | paired control |
+
+The paired post-change comparison is `1.29x` faster, with `1.74x` lower
+allocation bytes and `1.17x` fewer allocations. Raw samples (`ns/op B/op
+allocs/op`):
+
+```text
+before automatic:
+1256563 1681469 9219
+1247333 1681436 9219
+1210797 1681451 9219
+1248385 1681459 9219
+1250149 1681406 9219
+
+before fallback:
+1221684 1681444 9219
+1253096 1681448 9219
+1250869 1681430 9219
+1248011 1681462 9219
+1232324 1681399 9219
+
+after automatic native:
+935577 968692 7900
+1014944 968681 7900
+986293 968687 7900
+981390 968682 7900
+997483 968681 7900
+
+after fallback control:
+1315003 1681465 9219
+1289388 1681434 9219
+1270260 1681434 9219
+1261518 1681448 9219
+1246557 1681430 9219
+```
+
+Correctness is guarded by `make test-m052z` and `make race-m052z`, which compare
+automatic rows against the disabled-native executor and cover duplicate keys,
+NULL join keys, scalar filtering, and the unsupported outer-join fallback.

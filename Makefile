@@ -21720,6 +21720,28 @@ format-m052:
 test-m052:
 	@bash scripts/test-m052.sh
 
+.PHONY: test-m052z race-m052z benchmark-m052z status-m052z rename-m052z-branch commit-m052z push-m052z
+test-m052z:
+	@bash scripts/test-m052z.sh
+
+race-m052z:
+	@bash scripts/race-m052z.sh
+
+benchmark-m052z:
+	@bash scripts/benchmark-m052z.sh
+
+status-m052z:
+	@bash scripts/status-m052z.sh
+
+rename-m052z-branch:
+	@bash scripts/rename-m052z-branch.sh
+
+commit-m052z:
+	@bash scripts/commit-m052z.sh
+
+push-m052z:
+	@bash scripts/push-m052z.sh
+
 .PHONY: benchmark-m052
 benchmark-m052:
 	@bash scripts/benchmark-m052.sh
