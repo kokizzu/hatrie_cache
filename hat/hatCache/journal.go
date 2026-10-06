@@ -235,6 +235,9 @@ type CommandJournal struct {
 	subscriptionWake      chan struct{}
 	subscriptionCount     uint64
 	subscriptions         map[*CommandJournalSubscription]struct{}
+	asyncCommandMu        sync.Mutex
+	asyncCommandSubmissions map[*CommandJournalSubmission]struct{}
+	asyncCommandCounters   asyncCommandQueueCounters
 	closeErr              error
 	syncHook              func() error
 	writeHook             func([]byte) (int, error)

@@ -28932,6 +28932,43 @@ An earlier atomic-counter experiment produced about a 5% submit regression and
 was removed before acceptance. The final counters are protected by the
 buffer's existing mutex. Status snapshots allocate a small response slice;
 the default path does not instantiate the registry or routes.
+
+<a id="chu23-journal-backed-async-command-controls"></a>
+### Journal-Backed Async Command Controls
+
+This comparison measures the journal-backed `SubmitAsyncCommand` path added for
+the payload-free queue status and operator flush API. The benchmark uses
+`GOMAXPROCS=1`, `-cpu=1`, `-benchmem`, and three samples on the same AMD Ryzen 9
+5950X Linux host. The workload itself uses `RunParallel`, so these are
+throughput samples rather than single-goroutine latency measurements. The
+clean-parent samples were run from a temporary detached worktree and that
+worktree was removed after the run.
+
+Raw command: `make benchmark-chu23-queue-control` for the feature; the clean
+parent used the same benchmark with the feature files absent.
+
+| Workload | Clean parent samples ns/op | Feature samples ns/op | Feature / parent | Parent B/op | Feature B/op | Parent allocs/op | Feature allocs/op |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `sync_execute` | 722,411 / 727,553 / 696,829 | 881,851 / 804,019 / 847,141 | 1.17x | 1,555 | 1,556 | 6 | 6 |
+| `async_submit_wait` | 889,019 / 720,236 / 697,653 | 830,076 / 857,126 / 825,008 | 1.15x | 1,619 | 1,621 | 6 | 6 |
+| `async_admission` | 12,679 / 13,563 / 12,956 | 15,940 / 30,150 / 16,412 | 1.27x | 924 | 924 | 3 | 3 |
+
+The ratio uses the median sample. The async-control implementation preserves
+allocation count and bytes/op in these workloads, but adds about 15% to the
+waited async path and about 27% to admission-only throughput on this run. The
+new status snapshot and empty flush benchmarks are allocation-free:
+
+```text
+BenchmarkCHU23AsyncCommandQueueStats       21.54 / 22.19 / 21.57 ns/op   0 B/op   0 allocs/op
+BenchmarkCHU23AsyncCommandQueueFlushEmpty   13.89 / 13.76 / 13.41 ns/op   0 B/op   0 allocs/op
+```
+
+This is an operational-control feature, not a throughput optimization. It is
+accepted because it is opt-in, keeps synchronous/default behavior unchanged,
+does not retain command payloads, and makes queue backlog and explicit flush
+observable to authenticated operators. The focused tests and race test cover
+the barrier, cancellation, default-off routing, authentication, and payload
+privacy behavior.
 ## M-U01 Durable Connector Lifecycle State
 
 The five-run benchmark uses 64 connectors with history limit 8, half paused,

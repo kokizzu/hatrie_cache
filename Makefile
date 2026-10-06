@@ -17911,6 +17911,47 @@ vet-chu23:
 test-chu23-all:
 	sh scripts/test-chu23-all.sh
 
+.PHONY: format-chu23-queue-control
+format-chu23-queue-control:
+	bash scripts/format-chu23-queue-control.sh
+
+.PHONY: test-chu23-queue-control
+test-chu23-queue-control:
+	bash scripts/test-chu23-queue-control.sh
+
+.PHONY: test-chu23-async-regression
+test-chu23-async-regression:
+	bash scripts/test-chu23-async-regression.sh
+
+.PHONY: race-chu23-queue-control
+race-chu23-queue-control:
+	bash scripts/race-chu23-queue-control.sh
+.PHONY: vet-chu23-queue-control
+vet-chu23-queue-control:
+	bash scripts/vet-chu23-queue-control.sh
+
+.PHONY: benchmark-chu23-queue-control
+benchmark-chu23-queue-control:
+	bash scripts/benchmark-chu23-queue-control.sh
+
+.PHONY: status-chu23-queue-control
+status-chu23-queue-control:
+	bash scripts/status-chu23-queue-control.sh
+
+
+.PHONY: stage-chu23-queue-control
+stage-chu23-queue-control:
+	bash scripts/stage-chu23-queue-control.sh
+
+.PHONY: commit-chu23-queue-control
+commit-chu23-queue-control:
+	bash scripts/commit-chu23-queue-control.sh
+
+.PHONY: push-chu23-queue-control
+push-chu23-queue-control:
+	bash scripts/push-chu23-queue-control.sh
+
+
 verify-chu23-docs:
 	sh scripts/verify-chu23-docs.sh
 

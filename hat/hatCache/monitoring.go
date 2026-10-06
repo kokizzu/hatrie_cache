@@ -662,6 +662,8 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	server.HandleFunc("/api/commands/slow", handler.handleSlowCommands)
 	if handler.options.AsyncCommands {
 		server.HandleFunc("/api/commands/status", handler.handleAsyncCommandStatus)
+		server.HandleFunc("/api/commands/async", handler.handleAsyncCommandQueue)
+		server.HandleFunc("/api/commands/async/flush", handler.handleAsyncCommandQueueFlush)
 	}
 	if handler.options.AsyncInsertQueues != nil {
 		server.HandleFunc("/api/async-inserts", handler.handleAsyncInsertQueues)
@@ -1610,6 +1612,8 @@ func monitoringOpenAPIDocumentWithAsyncInsertQueues(asyncCommands, asyncInsertQu
 	}
 	if asyncCommands {
 		paths["/api/commands/status"] = map[string]interface{}{"get": map[string]interface{}{"operationId": "getAsyncCommandStatus", "responses": map[string]interface{}{"200": jsonResponse}}}
+		paths["/api/commands/async"] = map[string]interface{}{"get": map[string]interface{}{"operationId": "getAsyncCommandQueue", "responses": map[string]interface{}{"200": jsonResponse}}}
+		paths["/api/commands/async/flush"] = map[string]interface{}{"post": map[string]interface{}{"operationId": "flushAsyncCommandQueue", "responses": map[string]interface{}{"200": jsonResponse}}}
 	}
 	if asyncInsertQueues {
 		paths["/api/async-inserts"] = map[string]interface{}{"get": map[string]interface{}{"operationId": "getAsyncInsertQueues", "responses": map[string]interface{}{"200": jsonResponse}}}

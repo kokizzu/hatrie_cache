@@ -3204,7 +3204,10 @@ The monitoring server exposes JSON APIs at `/api/health`, `/api/stats`,
 `/api/memory`, `/api/entries`, `/api/storage`, `/api/storage/flush`,
 `/api/storage/compact`,
 `/api/audit`, `/api/topology`, `/api/election`, `/api/replication`,
-`/api/journal`, and `/api/commands`, plus
+`/api/journal`, and `/api/commands`. With `AsyncCommands` enabled, the
+authenticated `/api/commands/status`, `/api/commands/async`, and
+`/api/commands/async/flush` queue controls are also available; they remain
+disabled by default.
 Prometheus metrics at `/metrics`.
 Prometheus output includes cache counters plus audit and protection counters:
 `hatrie_cache_audit_events_total`, `hatrie_cache_audit_errors_total`,

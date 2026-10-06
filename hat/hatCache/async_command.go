@@ -58,12 +58,13 @@ func (status AsyncCommandSubmissionStatus) String() string {
 type CommandJournalSubmission struct {
 	done chan struct{}
 
-	mu        sync.Mutex
-	completed bool
-	sequence  uint64
-	status    AsyncCommandSubmissionStatus
-	response  CacheCommandResponse
-	err       error
+	mu                sync.Mutex
+	completed         bool
+	sequence          uint64
+	status            AsyncCommandSubmissionStatus
+	response          CacheCommandResponse
+	err               error
+	completionJournal *CommandJournal
 }
 
 func newCommandJournalSubmission() *CommandJournalSubmission {
@@ -187,7 +188,11 @@ func (submission *CommandJournalSubmission) completeState(status AsyncCommandSub
 	submission.err = err
 	submission.completed = true
 	close(submission.done)
+	completionJournal := submission.completionJournal
 	submission.mu.Unlock()
+	if completionJournal != nil {
+		completionJournal.completeAsyncCommand(submission, status)
+	}
 }
 
 // SubmitAsyncCommand admits one journaled write without waiting for the
@@ -221,6 +226,7 @@ func (journal *CommandJournal) submitAsyncCommand(trie *HatTrie, request CacheCo
 		return nil, err
 	}
 	submission := newCommandJournalSubmission()
+	submission.completionJournal = journal
 	job := &commandJournalJob{
 		trie:           trie,
 		request:        request,
@@ -235,12 +241,10 @@ func (journal *CommandJournal) submitAsyncCommand(trie *HatTrie, request CacheCo
 	if !journal.accepting {
 		return nil, ErrCommandJournalClosed
 	}
-	select {
-	case journal.groupCommitJobs <- job:
+	if journal.tryAdmitAsyncCommand(submission, job) {
 		return submission, nil
-	default:
-		return nil, ErrCommandJournalAsyncQueueFull
 	}
+	return nil, ErrCommandJournalAsyncQueueFull
 }
 
 func (job *commandJournalJob) complete(response CacheCommandResponse) {

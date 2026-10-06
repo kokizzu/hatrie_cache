@@ -55,6 +55,49 @@ buffers and journals. The queue status is operational telemetry, not a
 durability acknowledgment; callers that need durability wait on the returned
 `AsyncInsertSubmission`.
 
+## Journal-Backed Async Commands
+
+The command journal also exposes a bounded async-write queue when it is opened
+with group commit enabled. This path is separate from the caller-owned buffer
+registry above and is disabled unless the caller opts into it:
+
+```go
+journal, err := hatriecache.OpenCommandJournalWithOptions(path,
+	hatriecache.CommandJournalOptions{GroupCommitMaxBatch: 64})
+if err != nil {
+	return err
+}
+
+handler := hatriecache.NewMonitoringHandler(trie, hatriecache.MonitoringOptions{
+	AuthToken:     os.Getenv("HATRIE_AUTH_TOKEN"),
+	Journal:       journal,
+	AsyncCommands: true,
+})
+```
+
+With `MonitoringOptions.AsyncCommands: true`, the existing monitoring
+authentication protects these additional routes:
+
+```text
+GET  /api/commands/async
+POST /api/commands/async/flush
+```
+
+The status response contains only queue shape and counters, never command keys,
+values, or idempotency tokens:
+
+```json
+{"queue":{"enabled":true,"capacity":64,"queue_depth":2,"pending":3,"accepted":100,"completed":96,"rejected":1,"failed":0}}
+```
+
+`QueueDepth` counts jobs waiting in the journal worker channel. `Pending`
+includes jobs being synced or applied. `POST /api/commands/async/flush`
+waits for the async commands admitted before its barrier and returns the
+post-flush counters. A canceled request cancels only the operator wait; it
+does not cancel an admitted write. A journal without group commit returns an
+unsupported error and does not expose these routes. The queue retains only
+bounded submission handles while work is in flight.
+
 ## Measurement
 
 The benchmark uses one CPU, a 64-command batch, a 128-command buffer, five
@@ -68,3 +111,6 @@ initial atomic-counter experiment was about 5% slower and was removed. Queue
 status for one registered queue measured a 174.3 ns/op median, 160 B/op, and
 3 allocations/op. The cost is paid only when callers request a snapshot; the
 default path remains off.
+
+The journal-backed command-queue measurements are recorded in
+[BENCHMARK.md](BENCHMARK.md#chu23-journal-backed-async-command-controls).
