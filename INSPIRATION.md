@@ -965,3 +965,9 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   four normalized `GROUP BY` keys use an inline linear index and promote to the
   existing map for larger groups; see [CHG02_SMALL_GROUP_INDEX.md](CHG02_SMALL_GROUP_INDEX.md)
   and [BENCHMARK.md](BENCHMARK.md#chg02-small-cardinality-group-by-index).
+- [x] T-G17 Tarantool-style online versioned tuple-space upgrades. The opt-in
+  `hatDataStructure.VersionedTupleSpace` supports bounded caller-driven steps,
+  lazy read migration, target-normalized writes, generation-safe publication,
+  and retryable record failures. See
+  [TT017_VERSIONED_TUPLE_SPACE_UPGRADES.md](TT017_VERSIONED_TUPLE_SPACE_UPGRADES.md)
+  and [BENCHMARK.md](BENCHMARK.md#tt-017-versioned-tuple-space-upgrades).

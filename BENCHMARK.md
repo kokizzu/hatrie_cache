@@ -32600,3 +32600,36 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+<a id="tt-017-versioned-tuple-space-upgrades"></a>
+## TT-017: Versioned Tuple-Space Upgrades
+
+`make benchmark-tg17` compares the online controller with a direct
+`VersionedTupleMigrationManager.MigrateTo` loop for 1,024 old tuples. Five
+samples were recorded on an AMD Ryzen 9 5950X; each benchmark operation covers
+all 1,024 records.
+
+| Path | Median ns/op | B/op | allocs/op | Time vs online | Bytes vs online | Allocs vs online |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Online `VersionedTupleSpace` | 1,515,545 | 1,386,929 | 13,333 | 1.00x | 1.00x | 1.00x |
+| Direct migration control | 846,866 | 1,212,423 | 9,216 | 0.56x | 0.87x | 0.69x |
+
+The online controller therefore costs about 1.79x time, 1.14x bytes, and
+1.45x allocations versus the direct conversion loop. This is an intentional
+control-plane tradeoff for bounded scheduling, lazy reads, status, retries,
+and generation-safe publication; it is opt-in and does not change existing
+tuple paths.
+
+Raw samples:
+
+```text
+BenchmarkTT017VersionedTupleSpaceUpgrade/space_upgrade-32 1515545 ns/op 1386929 B/op 13333 allocs/op
+BenchmarkTT017VersionedTupleSpaceUpgrade/space_upgrade-32 1494176 ns/op 1386929 B/op 13333 allocs/op
+BenchmarkTT017VersionedTupleSpaceUpgrade/space_upgrade-32 1486340 ns/op 1386929 B/op 13333 allocs/op
+BenchmarkTT017VersionedTupleSpaceUpgrade/space_upgrade-32 1542192 ns/op 1386928 B/op 13333 allocs/op
+BenchmarkTT017VersionedTupleSpaceUpgrade/space_upgrade-32 1586659 ns/op 1386927 B/op 13333 allocs/op
+BenchmarkTT017VersionedTupleSpaceUpgrade/direct_migrate-32 855811 ns/op 1212426 B/op 9216 allocs/op
+BenchmarkTT017VersionedTupleSpaceUpgrade/direct_migrate-32 807051 ns/op 1212422 B/op 9216 allocs/op
+BenchmarkTT017VersionedTupleSpaceUpgrade/direct_migrate-32 799756 ns/op 1212423 B/op 9216 allocs/op
+BenchmarkTT017VersionedTupleSpaceUpgrade/direct_migrate-32 865231 ns/op 1212423 B/op 9216 allocs/op
+BenchmarkTT017VersionedTupleSpaceUpgrade/direct_migrate-32 846866 ns/op 1212423 B/op 9216 allocs/op
+```

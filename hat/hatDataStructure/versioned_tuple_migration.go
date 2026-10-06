@@ -57,6 +57,22 @@ type versionedTupleMigrationExecution struct {
 	apply  VersionedTupleMigrationFunc
 }
 
+type versionedTupleMigrationCallbackError struct {
+	from uint64
+	to   uint64
+	err  error
+}
+
+func (err *versionedTupleMigrationCallbackError) Error() string {
+	return fmt.Sprintf("%v: %d -> %d: %v", ErrVersionedTupleMigrationCallback, err.from, err.to, err.err)
+}
+
+func (err *versionedTupleMigrationCallbackError) Unwrap() error { return err.err }
+
+func (err *versionedTupleMigrationCallbackError) Is(target error) bool {
+	return target == ErrVersionedTupleMigrationCallback || errors.Is(err.err, target)
+}
+
 // VersionedTupleMigrationManager keeps immutable tuple formats and one
 // forward migration step per source version. It is an opt-in control-plane
 // helper: normal VersionedTuple validation and updates remain unchanged, and
@@ -258,7 +274,11 @@ func (manager *VersionedTupleMigrationManager) MigrateTo(tuple VersionedTuple, t
 		}
 		migrated, err := execution.apply(values)
 		if err != nil {
-			return VersionedTuple{}, fmt.Errorf("%w: %d -> %d: %v", ErrVersionedTupleMigrationCallback, execution.from, execution.to, err)
+			return VersionedTuple{}, &versionedTupleMigrationCallbackError{
+				from: execution.from,
+				to:   execution.to,
+				err:  err,
+			}
 		}
 		next, err := execution.target.PackVersioned(migrated)
 		if err != nil {
