@@ -32581,6 +32581,30 @@ The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
 
+## MZ-052 Dataflow Snapshot Cache
+
+Five `-benchmem -count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The
+paired benchmark builds a 2,048-node, 2,047-edge chain outside the timed
+region and repeatedly requests its snapshot. The before run uses the
+pre-cache implementation; the after run retains a bounded snapshot and
+returns detached node and edge slices for each caller.
+
+| Workload | Before median | After median | CPU improvement | Before B/op | After B/op | Before allocs/op | After allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Repeated `Snapshot` | 463,408 ns/op | 34,821 ns/op | 13.3x faster | 163,840 | 131,076 | 3 | 2 |
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+Before: 464953 463408 469896 454892 459587, 163842/163840/163840/163840/163840, 3
+After:  34543 34821 35133 34855 34079, 131077/131077/131076/131076/131076, 2
+```
+
+The cache is invalidated by node and edge mutations and is not retained for
+graphs above the default node or edge bounds. The measured win applies to
+repeated reads of an unchanged graph; the retained snapshot is the explicit
+bounded-memory cost.
+
 ## MZ-052 Dataflow Topological-Order Cache
 
 Five `-benchmem -count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The

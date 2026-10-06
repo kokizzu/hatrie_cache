@@ -26,27 +26,27 @@ are retained. A detached slice is still copied for each caller.
 
 ## Measurement
 
-Five `-benchtime=100ms -count=5` samples were collected on Linux/amd64 with
-an AMD Ryzen 9 5950X. The benchmark builds a 2,048-node, 2,047-edge chain
-once, then repeatedly calls `Snapshot`.
+Five `-benchmem -count=5` samples were collected on Linux/amd64 with an AMD
+Ryzen 9 5950X. The retained benchmark fixture builds a 2,048-node,
+2,047-edge chain once, then repeatedly calls `Snapshot`. The same fixture and
+benchmark are run before and after the cache is adopted.
 
 | Workload | Before | After | Improvement | Before memory | After memory | Before allocs | After allocs |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Repeated `Snapshot` | 460,904 ns/op | 34,896 ns/op | 13.2x faster | 163,840 B/op | 131,123 B/op | 3 | 2 |
+| Repeated `Snapshot` | 463,408 ns/op | 34,821 ns/op | 13.3x faster | 163,840 B/op | 131,076 B/op | 3 | 2 |
 
 Raw before samples:
 
 ```text
-451655 466281 451225 460904 463146 ns/op, 163840 B/op, 3 allocs/op
+464953 463408 469896 454892 459587 ns/op, 163842/163840/163840/163840/163840 B/op, 3 allocs/op
 ```
 
 Raw after samples:
 
 ```text
-33409 37682 38094 34896 33400 ns/op, 131120/131124/131123/131126/131115 B/op, 2 allocs/op
+34543 34821 35133 34855 34079 ns/op, 131077/131077/131076/131076/131076 B/op, 2 allocs/op
 ```
 
 The cache trades a bounded retained snapshot for substantially lower repeated
 CPU and transient allocation cost. Mutations release both derived caches, and
 the size guard disables retention above the default graph bounds.
-
