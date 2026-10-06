@@ -69,7 +69,7 @@ operator control remain the preferred deployment model.
 - [ ] C233 Per-query CPU-time budgets with cooperative cancellation.
 - [ ] C234 Query profiler records for stage time, bytes, and allocations.
 - [ ] C235 Read/write task profiler aggregation by table part and column.
-- [ ] C236 Explain output for data-skipping-index decisions and rejected marks.
+- [x] C236 Explain output for data-skipping-index decisions and rejected marks. Already covered by the C022/CH024 explain-pruning implementation; see [C236_DATA_SKIPPING_EXPLAIN.md](C236_DATA_SKIPPING_EXPLAIN.md), [COLUMNAR_RANGE_SKIPPING.md](COLUMNAR_RANGE_SKIPPING.md), and [CH024_SKIP_INDEX_USEFULNESS.md](CH024_SKIP_INDEX_USEFULNESS.md).
 - [ ] C237 Explain output for projection selection and estimated I/O cost.
 - [ ] C238 Mutation queue progress with rows remaining and elapsed estimates.
 - [ ] C239 Part-merge backlog, amplification, and age metrics.

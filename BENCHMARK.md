@@ -32580,3 +32580,17 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+# C236: Data-Skipping Explain Output
+
+C236 is implemented by the existing C022/CH024 explain-pruning path. The
+focused rerun on an AMD Ryzen 9 5950X, Linux/amd64, produced these raw samples:
+
+| Benchmark | Raw ns/op samples | Median ns/op | B/op | allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| `EXPLAIN ANALYZE` | 17423, 17418, 16976, 17142, 17710 | 17418 | 15868-15870 | 124 |
+| plan wire bytes | 1230, 1263, 1284, 1238, 1249 | 1249 | 505 | 2 |
+
+The structured explain payload adds 129 bytes to the legacy plan in the wire
+benchmark. The current C236 behavior and the separate CH024 before/after raw
+run are documented in [C236_DATA_SKIPPING_EXPLAIN.md](C236_DATA_SKIPPING_EXPLAIN.md).

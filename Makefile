@@ -22292,3 +22292,9 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: commit-c236-index-explain push-c236-index-explain
+commit-c236-index-explain:
+	bash scripts/commit-c236-index-explain.sh
+
+push-c236-index-explain:
+	bash scripts/push-c236-index-explain.sh
