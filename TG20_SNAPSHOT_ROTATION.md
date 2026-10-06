@@ -60,14 +60,15 @@ existing manifest/reference checks.
 ## Cost
 
 The cadence check is allocation-free. On the benchmark host, the median was
-about 14.3 ns/op with 0 B/op and 0 allocs/op. Planning a 64-manifest chain was
-about 243 microseconds, 289 KB, and 590 allocations after removing redundant
-chain cloning. The existing single-chain validator was about 56 microseconds,
-100 KB, and 209 allocations. This overhead is paid only when an operator asks
-for a rotation plan; no write, read, or backup hot path calls it automatically.
+13.75 ns/op with 0 B/op and 0 allocs/op. Planning a 64-manifest chain was
+236.1 microseconds, 288.9 KB, and 590 allocations after removing redundant
+chain cloning. The existing single-chain validator was 55.3 microseconds,
+99.96 KB, and 209 allocations. This overhead is paid only when an operator
+asks for a rotation plan; no write, read, or backup hot path calls it
+automatically.
 
 The benchmark target is:
 
 ```text
-make benchmark-tg20
+go test ./hat/hatBackup -run '^$' -bench 'TG20|SnapshotRotation' -benchmem -count=5
 ```

@@ -32580,3 +32580,28 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## T-G20 Snapshot Rotation
+
+Five `-benchmem -count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The
+baseline validates one existing 64-manifest backup chain. The rotation path
+plans retention across the same 64-manifest chain, complete parent links, and
+a byte budget; the cadence path checks whether an enabled policy is due.
+
+| Workload | Median ns/op | B/op | Allocs/op | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| Existing single-chain validation | 55,336 | 99,963 | 209 | baseline |
+| T-G20 rotation plan | 236,072 | 288,857 | 590 | 4.27x CPU, 2.89x memory, 2.82x allocations |
+| T-G20 cadence check | 13.75 | 0 | 0 | allocation-free policy check |
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+Existing chain: 54348 54550 54068 56414 55336, 99962/99963/99963/99963/99963, 209
+Rotation plan:  244409 236248 240514 234892 236072, 288858/288856/288857/288857/288857, 590
+Cadence check:  13.65 13.75 13.89 13.63 14.17, 0, 0
+```
+
+The planner is intentionally non-destructive and opt-in. It retains complete
+incremental chains, reports unavoidable over-budget states, and never runs on
+normal reads, writes, or backup creation unless the operator calls it.
