@@ -32785,3 +32785,34 @@ BenchmarkTG20SnapshotRotationDue-32             13.48 ns/op 0 B/op 0 allocs/op
 BenchmarkTG20SnapshotRotationDue-32             14.31 ns/op 0 B/op 0 allocs/op
 BenchmarkTG20SnapshotRotationDue-32             14.62 ns/op 0 B/op 0 allocs/op
 ```
+## MU-033 As-Of Compaction Admission
+
+Command: `make benchmark-mu33-compaction-admission`
+
+The benchmark compares the existing `CompactionController.Submit` plus
+`Run` path with the opt-in `SubmitWithBoundaryAdmission` path. Each result is
+the median of five runs on AMD Ryzen 9 5950X, Go `linux/amd64`.
+
+| Path | Median ns/op | B/op | Allocs/op | Relative latency |
+| --- | ---: | ---: | ---: | ---: |
+| Existing controller path | 1,065 | 184 | 4 | 1.00x |
+| Boundary-admitted path | 1,161 | 248 | 5 | 1.09x slower |
+
+Relative cost for the opt-in path is +96 ns/op, +64 B/op, and +1 alloc/op.
+The existing path remains unchanged; this feature is kept for its
+execution-time retention guarantee rather than a performance gain.
+
+Raw result:
+
+```text
+BenchmarkMU33BaselineCompactionControllerSubmitRun-32  1000000  1066 ns/op  184 B/op  4 allocs/op
+BenchmarkMU33BaselineCompactionControllerSubmitRun-32   960472  1063 ns/op  184 B/op  4 allocs/op
+BenchmarkMU33BaselineCompactionControllerSubmitRun-32  1000000  1071 ns/op  184 B/op  4 allocs/op
+BenchmarkMU33BaselineCompactionControllerSubmitRun-32  1000000  1065 ns/op  184 B/op  4 allocs/op
+BenchmarkMU33BaselineCompactionControllerSubmitRun-32  1000000  1060 ns/op  184 B/op  4 allocs/op
+BenchmarkMU33CompactionControllerSubmitWithBoundaryAdmission-32  972364  1161 ns/op  248 B/op  5 allocs/op
+BenchmarkMU33CompactionControllerSubmitWithBoundaryAdmission-32  884792  1178 ns/op  248 B/op  5 allocs/op
+BenchmarkMU33CompactionControllerSubmitWithBoundaryAdmission-32  977780  1132 ns/op  248 B/op  5 allocs/op
+BenchmarkMU33CompactionControllerSubmitWithBoundaryAdmission-32  975918  1167 ns/op  248 B/op  5 allocs/op
+BenchmarkMU33CompactionControllerSubmitWithBoundaryAdmission-32  949398  1140 ns/op  248 B/op  5 allocs/op
+```

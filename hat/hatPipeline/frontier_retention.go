@@ -28,6 +28,12 @@ var (
 	// ErrFrontierRetentionLeaseNotFound indicates an unknown or already
 	// released lease.
 	ErrFrontierRetentionLeaseNotFound = errors.New("hatPipeline: frontier retention lease is not found")
+	// ErrFrontierRetentionCompactionInProgress indicates that an as-of lease
+	// older than an active compaction boundary would be unsafe to acquire.
+	ErrFrontierRetentionCompactionInProgress = errors.New("hatPipeline: frontier retention compaction is in progress")
+	// ErrFrontierRetentionCompactionPermitNotFound indicates an invalid permit
+	// release.
+	ErrFrontierRetentionCompactionPermitNotFound = errors.New("hatPipeline: frontier retention compaction permit is not found")
 )
 
 const (
@@ -50,6 +56,18 @@ type FrontierRetentionLease struct {
 	AsOf       uint64
 }
 
+// FrontierCompactionPermit reserves one safe compaction boundary. Release is
+// idempotent, so a storage callback can defer it without coordinating with a
+// caller-owned cleanup path.
+type FrontierCompactionPermit struct {
+	registry   *FrontierRetentionRegistry
+	frontierID string
+	boundary   uint64
+	noop       bool
+	once       sync.Once
+	releaseErr error
+}
+
 // FrontierRetentionSnapshot reports the active retention state for one
 // frontier. SafeCompactionBefore is the largest boundary the caller may pass
 // to a compactor that removes history strictly before that boundary.
@@ -63,12 +81,15 @@ type FrontierRetentionSnapshot struct {
 	CompactionDebt       uint64
 	BlockedByLease       bool
 	BlockingLeaseCount   int
+	CompactionBoundary   uint64
+	CompactionActive     bool
 }
 
 type frontierRetentionState struct {
 	leases             map[uint64]FrontierRetentionLease
 	minimum            uint64
 	blockingLeaseCount int
+	compactionBoundary uint64
 }
 
 // FrontierRetentionRegistry coordinates bounded historical-read leases with a
@@ -125,6 +146,9 @@ func (registry *FrontierRetentionRegistry) Acquire(frontierID string, asOf uint6
 	if registry.leaseCount >= registry.maxLeases {
 		return FrontierRetentionLease{}, ErrFrontierRetentionLeaseLimit
 	}
+	if state := registry.states[frontierID]; state != nil && state.compactionBoundary != 0 && asOf < state.compactionBoundary {
+		return FrontierRetentionLease{}, ErrFrontierRetentionCompactionInProgress
+	}
 	if err := registry.checkTimestamp(frontierID, asOf); err != nil {
 		return FrontierRetentionLease{}, err
 	}
@@ -147,6 +171,104 @@ func (registry *FrontierRetentionRegistry) Acquire(frontierID string, asOf uint6
 	}
 	registry.leaseCount++
 	return lease, nil
+}
+
+// BeginCompaction waits until history strictly before boundary is safe to
+// remove, then reserves that boundary so newer as-of leases cannot re-open the
+// unsafe range before the storage callback starts. The permit must be released
+// after the callback completes.
+func (registry *FrontierRetentionRegistry) BeginCompaction(ctx context.Context, frontierID string, boundary uint64) (*FrontierCompactionPermit, error) {
+	if registry == nil {
+		return nil, ErrFrontierRetentionRegistryNil
+	}
+	if frontierID == "" {
+		return nil, ErrFrontierIDEmpty
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if boundary == 0 {
+		return &FrontierCompactionPermit{registry: registry, frontierID: frontierID, noop: true}, nil
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		frontier, err := registry.frontierSnapshot(frontierID)
+		if err != nil {
+			return nil, err
+		}
+		if frontier.Lower < boundary {
+			if err := registry.frontiers.WaitUntil(ctx, frontierID, boundary); err != nil {
+				return nil, err
+			}
+			continue
+		}
+
+		registry.mu.Lock()
+		if registry.closed {
+			registry.mu.Unlock()
+			return nil, ErrFrontierRetentionClosed
+		}
+		state := registry.states[frontierID]
+		blocked := state != nil && (state.compactionBoundary != 0 || (len(state.leases) > 0 && state.minimum < boundary))
+		if !blocked {
+			if state == nil {
+				state = &frontierRetentionState{leases: make(map[uint64]FrontierRetentionLease)}
+				registry.states[frontierID] = state
+			}
+			state.compactionBoundary = boundary
+			registry.mu.Unlock()
+			return &FrontierCompactionPermit{registry: registry, frontierID: frontierID, boundary: boundary}, nil
+		}
+		if registry.notify == nil {
+			registry.notify = make(chan struct{})
+		}
+		notify := registry.notify
+		registry.mu.Unlock()
+		select {
+		case <-notify:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+}
+
+// Release relinquishes the compaction reservation. It is safe to call more
+// than once; all calls after the first return the first release result.
+func (permit *FrontierCompactionPermit) Release() error {
+	if permit == nil {
+		return ErrFrontierRetentionCompactionPermitNotFound
+	}
+	permit.once.Do(func() {
+		if permit.noop {
+			return
+		}
+		if permit.registry == nil || permit.frontierID == "" {
+			permit.releaseErr = ErrFrontierRetentionCompactionPermitNotFound
+			return
+		}
+		permit.releaseErr = permit.registry.releaseCompaction(permit.frontierID, permit.boundary)
+	})
+	return permit.releaseErr
+}
+
+func (registry *FrontierRetentionRegistry) releaseCompaction(frontierID string, boundary uint64) error {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if registry.closed {
+		return ErrFrontierRetentionClosed
+	}
+	state := registry.states[frontierID]
+	if state == nil || state.compactionBoundary != boundary {
+		return ErrFrontierRetentionCompactionPermitNotFound
+	}
+	state.compactionBoundary = 0
+	if len(state.leases) == 0 {
+		delete(registry.states, frontierID)
+	}
+	registry.signalLocked()
+	return nil
 }
 
 // Release removes one active lease. Releasing the same lease twice returns
@@ -212,8 +334,10 @@ func (registry *FrontierRetentionRegistry) SafeCompactionBefore(frontierID strin
 	state := registry.states[frontierID]
 	minimum := uint64(0)
 	hasState := state != nil
+	compactionActive := false
 	if hasState {
 		minimum = state.minimum
+		compactionActive = state.compactionBoundary != 0
 	}
 	registry.mu.RUnlock()
 	snapshot, err := registry.frontierSnapshot(frontierID)
@@ -223,6 +347,9 @@ func (registry *FrontierRetentionRegistry) SafeCompactionBefore(frontierID strin
 	safe := snapshot.Lower
 	if hasState && minimum < safe {
 		safe = minimum
+	}
+	if compactionActive {
+		safe = 0
 	}
 	return safe, nil
 }
@@ -301,10 +428,14 @@ func (registry *FrontierRetentionRegistry) Snapshot(frontierID string) (Frontier
 	minimum := uint64(0)
 	blockingLeaseCount := 0
 	hasState := state != nil
+	compactionBoundary := uint64(0)
+	compactionActive := false
 	if state != nil {
 		leaseCount = len(state.leases)
 		minimum = state.minimum
 		blockingLeaseCount = state.blockingLeaseCount
+		compactionBoundary = state.compactionBoundary
+		compactionActive = compactionBoundary != 0
 	}
 	registry.mu.RUnlock()
 	frontier, err := registry.frontierSnapshot(frontierID)
@@ -312,8 +443,11 @@ func (registry *FrontierRetentionRegistry) Snapshot(frontierID string) (Frontier
 		return FrontierRetentionSnapshot{}, err
 	}
 	safe := frontier.Lower
-	if state != nil && minimum < safe {
+	if hasState && minimum < safe {
 		safe = minimum
+	}
+	if compactionActive {
+		safe = 0
 	}
 	if !hasState {
 		minimum = frontier.Lower
@@ -337,6 +471,8 @@ func (registry *FrontierRetentionRegistry) Snapshot(frontierID string) (Frontier
 		CompactionDebt:       debt,
 		BlockedByLease:       blockedByLease,
 		BlockingLeaseCount:   blockingLeaseCount,
+		CompactionBoundary:   compactionBoundary,
+		CompactionActive:     compactionActive,
 	}, nil
 }
 
@@ -414,7 +550,7 @@ func (registry *FrontierRetentionRegistry) retentionWaitChannel(frontierID strin
 		return nil, false, ErrFrontierRetentionClosed
 	}
 	state := registry.states[frontierID]
-	if state == nil || state.minimum >= boundary {
+	if state == nil || (state.compactionBoundary == 0 && state.minimum >= boundary) {
 		return nil, false, nil
 	}
 	if registry.notify == nil {

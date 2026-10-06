@@ -22529,3 +22529,50 @@ commit-tg24-stored-procedure:
 .PHONY: push-tg24-stored-procedure
 push-tg24-stored-procedure:
 	bash scripts/tg24-stored-procedure.sh push
+.PHONY: format-mu33-compaction-admission
+format-mu33-compaction-admission:
+	bash scripts/mu33-compaction-admission.sh format
+
+.PHONY: baseline-mu33-compaction-admission
+baseline-mu33-compaction-admission:
+	bash scripts/mu33-compaction-admission.sh baseline
+
+.PHONY: test-mu33-compaction-admission
+test-mu33-compaction-admission:
+	bash scripts/mu33-compaction-admission.sh test
+
+.PHONY: test-mu33-compaction-admission-package
+test-mu33-compaction-admission-package:
+	bash scripts/mu33-compaction-admission.sh package
+
+.PHONY: benchmark-mu33-compaction-admission
+benchmark-mu33-compaction-admission:
+	bash scripts/mu33-compaction-admission.sh benchmark
+
+.PHONY: race-mu33-compaction-admission
+race-mu33-compaction-admission:
+	bash scripts/mu33-compaction-admission.sh race
+
+.PHONY: vet-mu33-compaction-admission
+vet-mu33-compaction-admission:
+	bash scripts/mu33-compaction-admission.sh vet
+
+.PHONY: diff-check-mu33-compaction-admission
+diff-check-mu33-compaction-admission:
+	bash scripts/mu33-compaction-admission.sh diff-check
+
+.PHONY: status-mu33-compaction-admission
+status-mu33-compaction-admission:
+	bash scripts/mu33-compaction-admission.sh status
+
+.PHONY: stage-mu33-compaction-admission
+stage-mu33-compaction-admission:
+	bash scripts/mu33-compaction-admission.sh stage
+
+.PHONY: commit-mu33-compaction-admission
+commit-mu33-compaction-admission:
+	bash scripts/mu33-compaction-admission.sh commit
+
+.PHONY: push-mu33-compaction-admission
+push-mu33-compaction-admission:
+	bash scripts/mu33-compaction-admission.sh push
