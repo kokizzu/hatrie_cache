@@ -19,6 +19,8 @@ var (
 	ErrCompactionRequestInvalid = errors.New("hatriecache: compaction request is invalid")
 	// ErrCompactionControllerScheduleRejected reports an internal scheduler mismatch.
 	ErrCompactionControllerScheduleRejected = errors.New("hatriecache: compaction controller schedule was rejected")
+	// ErrCompactionRetentionInvalid reports incomplete retention-gate metadata.
+	ErrCompactionRetentionInvalid = errors.New("hatriecache: compaction retention gate is invalid")
 )
 
 const (
@@ -43,7 +45,20 @@ type CompactionRequest struct {
 	Target         string
 	Priority       int
 	EstimatedBytes uint64
-	Run            func(context.Context) error
+	// RetentionGate optionally blocks the operation until it is safe to remove
+	// history before RetentionBoundary on RetentionFrontier. A nil gate keeps
+	// the existing zero-overhead request path.
+	RetentionGate     CompactionRetentionGate
+	RetentionFrontier string
+	RetentionBoundary uint64
+	Run               func(context.Context) error
+}
+
+// CompactionRetentionGate is the minimal retention contract required by the
+// storage scheduler. hatPipeline.FrontierRetentionRegistry satisfies it
+// without making hatStorage depend on the pipeline package.
+type CompactionRetentionGate interface {
+	WaitUntilSafe(ctx context.Context, frontierID string, boundary uint64) error
 }
 
 // CompactionJobState is the bounded lifecycle state of one optimize request.
@@ -122,6 +137,14 @@ func (controller *CompactionController) Submit(request CompactionRequest) (Compa
 	if target == "" || request.Run == nil {
 		return CompactionJob{}, false, ErrCompactionRequestInvalid
 	}
+	frontier := strings.TrimSpace(request.RetentionFrontier)
+	if request.RetentionGate == nil {
+		if frontier != "" || request.RetentionBoundary != 0 {
+			return CompactionJob{}, false, ErrCompactionRetentionInvalid
+		}
+	} else if frontier == "" {
+		return CompactionJob{}, false, ErrCompactionRetentionInvalid
+	}
 
 	controller.mu.Lock()
 	defer controller.mu.Unlock()
@@ -148,12 +171,31 @@ func (controller *CompactionController) Submit(request CompactionRequest) (Compa
 	controller.targetIDs[target] = job.ID
 	controller.order = append(controller.order, job.ID)
 	controller.active++
-	queued, err := controller.scheduler.ScheduleWithPriorityAndIO(target, request.Priority, request.EstimatedBytes, func(ctx context.Context) error {
-		controller.start(job.ID)
-		err := request.Run(ctx)
-		controller.finish(job.ID, err)
-		return err
-	})
+	runCallback := request.Run
+	priority := request.Priority
+	estimatedBytes := request.EstimatedBytes
+	retentionGate := request.RetentionGate
+	retentionBoundary := request.RetentionBoundary
+	var run func(context.Context) error
+	if retentionGate == nil {
+		run = func(ctx context.Context) error {
+			controller.start(job.ID)
+			err := runCallback(ctx)
+			controller.finish(job.ID, err)
+			return err
+		}
+	} else {
+		run = func(ctx context.Context) error {
+			controller.start(job.ID)
+			err := retentionGate.WaitUntilSafe(ctx, frontier, retentionBoundary)
+			if err == nil {
+				err = runCallback(ctx)
+			}
+			controller.finish(job.ID, err)
+			return err
+		}
+	}
+	queued, err := controller.scheduler.ScheduleWithPriorityAndIO(target, priority, estimatedBytes, run)
 	if err != nil {
 		controller.removeActiveLocked(job.ID)
 		return CompactionJob{}, false, err

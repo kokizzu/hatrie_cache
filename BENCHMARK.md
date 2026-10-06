@@ -32726,3 +32726,20 @@ The build allocation is transient and should not be read as retained index
 size. This is a good tradeoff for repeated selective reads, but not for a
 single lookup; conditional indexes are therefore opt-in and are not built
 automatically.
+## M-U33 Storage Compaction Retention Gate
+
+The focused controller benchmark creates, submits, and runs one compaction
+request per iteration with `-benchmem -count=5` on Linux/amd64 (AMD Ryzen 9
+5950X). The clean-base legacy path was measured before the implementation; the
+feature branch was then measured with both legacy and immediate-gate requests.
+
+| Benchmark | Runs | Time range | Memory | Allocs | Relative note |
+| --- | ---: | ---: | ---: | ---: | --- |
+| clean base legacy | 5 | 1,087-1,122 ns/op | 1,392 B/op | 15 | baseline |
+| feature legacy | 5 | 967-1,028 ns/op | 1,360 B/op | 15 | no default allocation regression |
+| feature immediate gate | 5 | 1,029-1,080 ns/op | 1,408 B/op | 15 | +48 B/op versus feature legacy; opt-in safety cost |
+
+The legacy timing difference is within ordinary run-to-run variance; the
+important invariant is unchanged allocation count and no retention work when
+the gate is nil. Full semantics and limitations are in
+[MU033_STORAGE_RETENTION_GATE.md](MU033_STORAGE_RETENTION_GATE.md).
