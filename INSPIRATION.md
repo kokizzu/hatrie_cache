@@ -587,6 +587,7 @@ Materialize's Timely/Differential Dataflow runtime.
 - [x] M094 Persistent-shard leases and fencing; fully covered by the durable local lease implementation in M094a.
 - [x] M094a Non-blocking local persistent-shard leases with separate advisory lock files, durable monotonic fencing tokens, atomic state publication, stale-token validation, renewal, inspection, and corruption/path-safety tests; see [PERSISTENT_SHARD_LEASES.md](PERSISTENT_SHARD_LEASES.md).
 - [x] M095 Snapshot hydration with progress reporting.
+- [x] M-U36 Arrangement hydration status and admission. Typed aggregate and join arrangements expose checkpoint/source progress and context-aware readiness waits without source rereads; see [MU036_HYDRATION_ADMISSION.md](MU036_HYDRATION_ADMISSION.md) and [BENCHMARK.md](BENCHMARK.md#mu-036-arrangement-hydration-admission).
 - [x] M096 Per-column dictionary compression for arrangements.
 - [x] M096a Deterministic low-cardinality string dictionary codec.
 - [x] M096b Bounded dictionary admission avoids allocating row codes for columns that exceed the existing size bound; an eight-entry stack prefix preserves the low-cardinality path.

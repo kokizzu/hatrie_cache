@@ -33241,3 +33241,33 @@ BenchmarkConfigWatchReadResumeMiddle:   102.4 102.1 103.3 102.1 102.4 ns/op
 Both paths use `88 B/op` and `2 allocs/op`. The optimization adds no retained
 index or per-event memory; it replaces the seek scan with a binary search over
 the existing chronological ring.
+
+## M-U36 Arrangement Hydration Admission
+
+The feature adds opt-in status snapshots and blocking readiness waits for typed
+aggregate and join arrangements. The benchmark intentionally exercises the
+ordinary no-wait maintenance path, because that is the path that must remain
+cheap when callers do not use admission waits. It hydrates one aggregate batch
+with no waiter and measures `Hydrate` plus the existing maintenance work.
+
+Environment: Linux/amd64, AMD Ryzen 9 5950X, `GOMAXPROCS=1`,
+`-benchtime=200ms -count=5`. The control is the same clean base commit before
+the signaling fields and methods were added. Values are five-run medians.
+
+| Path | Raw ns/op samples | Median ns/op | B/op | allocs/op | Relative time | Memory change |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Before, no admission waiter | 1049, 1043, 1072, 1055, 1072 | 1055 | 592 | 5 | 1.000x | baseline |
+| After, no admission waiter | 1061, 1042, 1051, 1056, 1095 | 1056 | 592 | 5 | 1.001x | 0 B/op, 0 allocs/op |
+
+Raw commands:
+
+```sh
+make benchmark-mu36-before
+make benchmark-mu36
+```
+
+The measured no-wait path is effectively neutral: one additional nanosecond in
+the median and no allocation or byte change. The blocking wait path is a
+control-plane operation and is covered by correctness and race tests rather
+than this per-maintenance benchmark. Its notification channel is allocated
+only after a waiter observes stale progress.

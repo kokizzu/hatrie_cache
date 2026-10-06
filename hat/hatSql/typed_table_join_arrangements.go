@@ -40,9 +40,11 @@ type TypedTableJoinArrangements struct {
 }
 
 type typedTableJoinArrangementEntry struct {
-	mu   sync.Mutex
-	join *TypedTableJoin
-	refs int
+	mu           sync.Mutex
+	join         *TypedTableJoin
+	refs         int
+	ready        chan struct{}
+	hydrationErr error
 }
 
 // TypedTableJoinArrangement is a reference-counted lease on a shared join.
@@ -102,7 +104,11 @@ func (arrangement *TypedTableJoinArrangement) ApplyLeft(changes []TypedTableChan
 	}
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
-	return entry.join.ApplyLeft(changes)
+	err = entry.join.ApplyLeft(changes)
+	if err != nil || entry.ready != nil || entry.hydrationErr != nil {
+		entry.signalHydrationLocked(err)
+	}
+	return err
 }
 func (arrangement *TypedTableJoinArrangement) ApplyRight(changes []TypedTableChange) error {
 	entry, err := arrangement.activeEntry()
@@ -111,7 +117,11 @@ func (arrangement *TypedTableJoinArrangement) ApplyRight(changes []TypedTableCha
 	}
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
-	return entry.join.ApplyRight(changes)
+	err = entry.join.ApplyRight(changes)
+	if err != nil || entry.ready != nil || entry.hydrationErr != nil {
+		entry.signalHydrationLocked(err)
+	}
+	return err
 }
 func (arrangement *TypedTableJoinArrangement) Freshness() (TypedTableJoinArrangementFreshness, error) {
 	entry, err := arrangement.activeEntry()
@@ -151,20 +161,27 @@ func (arrangement *TypedTableJoinArrangement) Hydrate(limit int) (TypedTableJoin
 	rightBefore := entry.join.RightCheckpoint()
 	leftChanges, leftSourceSequence, err := entry.join.left.ChangesAfter(leftBefore, limit)
 	if err != nil {
+		entry.signalHydrationLocked(err)
 		return TypedTableJoinArrangementHydration{}, err
 	}
 	rightChanges, rightSourceSequence, err := entry.join.right.ChangesAfter(rightBefore, limit)
 	if err != nil {
+		entry.signalHydrationLocked(err)
 		return TypedTableJoinArrangementHydration{}, err
 	}
 	if err := entry.join.ApplyLeft(leftChanges); err != nil {
+		entry.signalHydrationLocked(err)
 		return TypedTableJoinArrangementHydration{}, err
 	}
 	if err := entry.join.ApplyRight(rightChanges); err != nil {
+		entry.signalHydrationLocked(err)
 		return TypedTableJoinArrangementHydration{}, err
 	}
 	leftAfter := entry.join.LeftCheckpoint()
 	rightAfter := entry.join.RightCheckpoint()
+	if entry.ready != nil || entry.hydrationErr != nil {
+		entry.signalHydrationLocked(nil)
+	}
 	return TypedTableJoinArrangementHydration{
 		LeftBefore: leftBefore, LeftAfter: leftAfter, LeftSourceSequence: leftSourceSequence, LeftApplied: len(leftChanges),
 		RightBefore: rightBefore, RightAfter: rightAfter, RightSourceSequence: rightSourceSequence, RightApplied: len(rightChanges),

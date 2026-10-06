@@ -1269,6 +1269,37 @@ deliver-sql-alert-rules:
 test-sql-refresh-scheduler:
 	sh ./scripts/test-sql-refresh-scheduler.sh
 
+.PHONY: red-mu36 baseline-mu36 format-mu36 test-mu36 test-mu36-package benchmark-mu36 race-mu36 race-mu36-package vet-mu36 repo-mu36 stage-mu36 status-mu36 commit-mu36 push-mu36
+red-mu36:
+	bash scripts/mu36-hydration.sh red
+
+baseline-mu36:
+	bash scripts/mu36-hydration.sh baseline
+
+format-mu36:
+	bash scripts/mu36-hydration.sh format
+
+test-mu36:
+	bash scripts/mu36-hydration.sh test
+
+test-mu36-package:
+	bash scripts/mu36-hydration.sh package
+
+benchmark-mu36:
+	bash scripts/mu36-hydration.sh benchmark
+
+race-mu36:
+	bash scripts/mu36-hydration.sh race
+
+race-mu36-package:
+	bash scripts/mu36-hydration.sh race-package
+
+vet-mu36:
+	bash scripts/mu36-hydration.sh vet
+
+repo-mu36:
+	bash scripts/mu36-hydration.sh repo
+
 deliver-sql-refresh-scheduler:
 	sh ./scripts/deliver-sql-refresh-scheduler.sh
 
@@ -22931,3 +22962,14 @@ verify-config-watch-index:
 .PHONY: stage-config-watch-index
 stage-config-watch-index:
 	bash scripts/stage-config-watch-index.sh
+stage-mu36:
+	bash scripts/mu36-deliver.sh stage
+
+status-mu36:
+	bash scripts/mu36-deliver.sh status
+
+commit-mu36:
+	bash scripts/mu36-deliver.sh commit
+
+push-mu36:
+	bash scripts/mu36-deliver.sh push
