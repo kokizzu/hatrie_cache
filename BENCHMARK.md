@@ -39443,3 +39443,18 @@ Raw automatic samples were `21195, 20945, 19975, 20190, 20317 ns/op`,
 18166, 18712, 18219, 18209 ns/op`, `13024 B/op`, and `136 allocs/op`.
 Automatic capture is opt-in because the diagnostic path costs about 11.5% CPU,
 5.4% bytes, and 17.6% allocations over ordinary profiling in this workload.
+
+## T-U04 SQL Runtime Function Resolver
+
+Five `-benchmem` samples were measured on an AMD Ryzen 9 5950X, linux/amd64.
+The direct path is the existing bounded runtime called with native values; the
+resolver path includes SQL interface conversion and vectorized batch dispatch.
+
+| Workload | Direct bounded runtime | SQL runtime resolver | Relative |
+| --- | ---: | ---: | --- |
+| One integer call | 106.6 ns/op, 160 B/op, 2 allocs/op | 226.9 ns/op, 208 B/op, 4 allocs/op | 2.13x CPU, 1.30x bytes |
+| 256 integer calls/batch | 21,935 ns/op, 42,264 B/op, 258 allocs/op | 30,980 ns/op, 63,144 B/op, 263 allocs/op | 1.41x CPU, 1.49x bytes |
+
+The resolver is explicit and default-off; the overhead is only paid by callers
+that install the SQL adapter. Run `make codex-tu04-sql-runtime-benchmark` to
+reproduce the focused measurements.
