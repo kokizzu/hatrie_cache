@@ -95,6 +95,12 @@ type Options struct {
 	SegmentCompression  SegmentCompression
 	GroupCommitWindow   time.Duration
 	GroupCommitMaxBatch int
+	// SyncMode controls the fsync boundary for completed collections. The zero
+	// value is SyncModeImmediate.
+	SyncMode SyncMode
+	// SyncInterval is used only by SyncModePeriodic. Zero uses
+	// DefaultSyncInterval.
+	SyncInterval time.Duration
 	// AdaptiveGroupCommit shortens the collection window when queued writers
 	// indicate pressure. It is disabled by default for compatibility.
 	AdaptiveGroupCommit bool
@@ -113,6 +119,10 @@ func ValidateOptions(options Options) (Options, error) {
 		return Options{}, err
 	}
 	segmentCompression, err := ParseSegmentCompression(string(options.SegmentCompression))
+	if err != nil {
+		return Options{}, err
+	}
+	syncMode, syncInterval, err := normalizeSyncPolicy(options.SyncMode, options.SyncInterval)
 	if err != nil {
 		return Options{}, err
 	}
@@ -155,6 +165,8 @@ func ValidateOptions(options Options) (Options, error) {
 	}
 	options.Format = format
 	options.SegmentCompression = segmentCompression
+	options.SyncMode = syncMode
+	options.SyncInterval = syncInterval
 	options.Encryption = encryption
 	return options, nil
 }
