@@ -32579,4 +32579,75 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
+
+## CH-U16 Adaptive Low-Cardinality Admission
+
+Command:
+
+```text
+make benchmark-chu16-adaptive-low-cardinality
+```
+
+This benchmark compares the existing bounded dictionary builder with the
+opt-in adaptive builder. Both runs used five samples on the same AMD Ryzen
+workstation. The adaptive builder keeps a dictionary for low-cardinality data,
+then switches to an exact raw-value representation when the configured
+distinct-value or sampled-ratio limit is reached.
+
+| Workload | Existing median | Adaptive median | Relative time | Existing memory | Adaptive memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 256 rows, dictionary remains | 190,443 ns/op | 217,098 ns/op | 1.14x slower | 82,232 B/op, 13 allocs/op | 82,520 B/op, 14 allocs/op |
+| 4,096 rows, dictionary remains | 1,108,272 ns/op | 1,127,762 ns/op | 1.02x slower | 525,776 B/op, 27 allocs/op | 526,064 B/op, 28 allocs/op |
+| 10,000 distinct rows, high-cardinality fallback | raw slice control: 55,487 ns/op | 166,800 ns/op | 3.01x slower than raw control | 163,840 B/op, 1 alloc/op | 668,792 B/op, 17 allocs/op |
+
+The third row is a capability control, not an equivalent implementation: the
+existing dictionary builder rejects 10,000 distinct values at its configured
+limit, while the raw slice accepts them without dictionary metadata. It shows
+that callers which already know their input is high-cardinality should use a
+raw representation directly. The adaptive builder is intended for callers
+whose cardinality is unknown and which need one bounded API that preserves
+correctness instead of failing when the dictionary becomes unsuitable.
+
+The existing builder and its defaults remain unchanged. The adaptive builder
+is opt-in, and its fallback has exact `ValueAt` and `Contains` behavior;
+`LookupCode` is unavailable after fallback and `Cardinality` uses a temporary
+scratch set rather than retaining another long-lived map.
+
+## CH-U16 Adaptive Low-Cardinality Admission
+
+Command:
+
+```text
+make benchmark-chu16-adaptive-low-cardinality
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The adaptive
+builder is opt-in. It keeps a sorted dictionary for repeated values and uses a
+bounded sample before switching to exact raw strings for a high-cardinality
+input.
+
+| Workload | Existing control median | Adaptive median | Relative result |
+| --- | ---: | ---: | --- |
+| 256 distinct values | 190,443 ns/op, 82,232 B/op, 13 allocs/op | 217,098 ns/op, 82,520 B/op, 14 allocs/op | 1.14x slower, +288 B, +1 alloc |
+| 4,096 distinct values | 1,108,272 ns/op, 525,776 B/op, 27 allocs/op | 1,127,762 ns/op, 526,064 B/op, 28 allocs/op | 1.02x slower, +288 B, +1 alloc |
+| 10,000 distinct values | Plain raw slice: 55,487 ns/op, 163,840 B/op, 1 alloc/op | 166,800 ns/op, 668,792 B/op, 17 allocs/op | 3.01x slower, 4.08x bytes, 17x allocs |
+
+The existing dictionary builder rejects the 10,000-distinct case at its
+distinct limit. The raw slice is therefore a capability control, not an
+equivalent dictionary implementation. Adaptive admission trades CPU and
+temporary memory for accepting unknown-cardinality input without losing rows;
+known high-cardinality callers should choose raw storage directly. Existing
+low-cardinality defaults and SQL selection are unchanged. See
+[CHU16_ADAPTIVE_LOW_CARDINALITY.md](CHU16_ADAPTIVE_LOW_CARDINALITY.md).
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+BenchmarkCHU16BaselineDictionaryBuild256: 190872 190443 188499 190608 189633; 82232; 13
+BenchmarkCHU16AdaptiveDictionaryBuild256: 217098 214602 214206 217147 218874; 82520; 14
+BenchmarkCHU16BaselineDictionaryBuild4096: 1113757 1123453 1092532 1108272 1093075; 525776; 27
+BenchmarkCHU16AdaptiveDictionaryBuild4096: 1147235 1131302 1116513 1123108 1127762; 526064; 28
+BenchmarkCHU16BaselinePlainBuild10000: 51309 54079 56032 58533 55487; 163840; 1
+BenchmarkCHU16AdaptiveFallbackBuild10000: 165694 163298 166800 169895 183179; 668792; 17
+```
 existing JSON and data-bearing subscription paths are not changed.
