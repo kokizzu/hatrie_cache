@@ -22292,3 +22292,32 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+test-c231-workload-groups:
+	bash scripts/test-c231-workload-groups.sh
+
+format-c231-workload-groups:
+	bash scripts/format-c231-workload-groups.sh
+
+benchmark-c231-workload-groups:
+	bash scripts/benchmark-c231-workload-groups.sh
+
+race-c231-workload-groups:
+	bash scripts/race-c231-workload-groups.sh
+
+test-c231-cache-api:
+	bash scripts/test-c231-cache-api.sh
+
+vet-c231-workload-groups:
+	bash scripts/vet-c231-workload-groups.sh
+
+test-c231-package:
+	bash scripts/test-c231-package.sh
+
+review-c231-workload-groups:
+	bash scripts/review-c231-workload-groups.sh
+
+commit-c231-workload-groups:
+	bash scripts/commit-c231-workload-groups.sh
+
+push-c231-workload-groups:
+	bash scripts/push-c231-workload-groups.sh

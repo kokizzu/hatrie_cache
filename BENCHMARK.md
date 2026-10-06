@@ -32580,3 +32580,25 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+# C231 Workload Groups
+
+Benchmark command:
+
+```text
+make benchmark-c231-workload-groups
+```
+
+Three runs on the benchmark host (`AMD Ryzen 9 5950X`, Go `1.26.6`):
+
+| Path | Time | Memory | Allocs |
+| --- | ---: | ---: | ---: |
+| Default governor, memory admission off | 1.440-1.480 us/op | 3,976 B/op | 18/op |
+| Memory budget enabled, reservation fits | 1.441-1.457 us/op | 3,976 B/op | 18/op |
+| Reservation acquire/release primitive | 8.252-8.309 ns/op | 0 B/op | 0/op |
+
+The opt-in memory path stayed within run-to-run noise and did not increase
+allocations for the measured query. It is a resource-safety feature: under
+contention, the tradeoff is intentional queueing and conservative admission,
+not higher query throughput. See [C231_WORKLOAD_GROUPS.md](C231_WORKLOAD_GROUPS.md)
+for semantics and limitations.

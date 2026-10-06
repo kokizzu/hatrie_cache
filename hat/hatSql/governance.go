@@ -15,6 +15,10 @@ import (
 // reached its configured MaxQueuedQueries limit.
 var ErrNamespaceQueryQueueFull = errors.New("namespace query queue is full")
 
+// ErrNamespaceQueryMemoryBudgetExceeded indicates that one query's declared
+// reservation cannot fit in the namespace memory budget.
+var ErrNamespaceQueryMemoryBudgetExceeded = errors.New("namespace query memory budget exceeded")
+
 // ErrNamespaceQueryRateLimited indicates that a namespace has exhausted its
 // configured MaxQueriesPerWindow allowance.
 var ErrNamespaceQueryRateLimited = errors.New("namespace query rate limit exceeded")
@@ -23,7 +27,12 @@ var ErrNamespaceQueryRateLimited = errors.New("namespace query rate limit exceed
 // shutdown.
 var ErrNamespaceQueryGovernorClosed = errors.New("namespace query governor is closed")
 
-const defaultNamespaceQueryWindow = time.Minute
+const (
+	defaultNamespaceQueryWindow = time.Minute
+	// MaxNamespaceMemoryBytes prevents overflow-prone or accidental memory
+	// policy values while leaving practical deployments ample headroom.
+	MaxNamespaceMemoryBytes int64 = 1 << 50
+)
 
 // NamespaceResourceLimits caps resources available to queries in one namespace.
 // Zero leaves a limit unset. Timeout is wall-clock time, which bounds CPU work
@@ -49,15 +58,19 @@ type NamespaceResourceLimits struct {
 	MaxJoinWork         int
 	MaxJoinBytes        int
 	MaxResultBytes      int
-	MaxWorkers          int
-	MaxSortBytes        int
-	MaxGroupBytes       int
-	MaxGroupKeys        int
-	MaxSetBytes         int
-	MaxSpillBytes       int
-	MaxRecursionDepth   int
-	Timeout             time.Duration
-	SpillDirectory      string
+	// MaxMemoryBytes bounds the sum of declared in-memory reservations for
+	// concurrently admitted queries in this namespace. Zero disables memory
+	// admission. It is intentionally separate from per-operator byte limits.
+	MaxMemoryBytes    int64
+	MaxWorkers        int
+	MaxSortBytes      int
+	MaxGroupBytes     int
+	MaxGroupKeys      int
+	MaxSetBytes       int
+	MaxSpillBytes     int
+	MaxRecursionDepth int
+	Timeout           time.Duration
+	SpillDirectory    string
 }
 
 // NamespaceResourceProfile separates advisory soft limits from enforced hard
@@ -97,6 +110,9 @@ func (limits NamespaceResourceLimits) Apply(options SQLQueryOptions) SQLQueryOpt
 	options.MaxSpillBytes = applyPositiveLimit(options.MaxSpillBytes, limits.MaxSpillBytes)
 	options.MaxRecursionDepth = applyPositiveLimit(options.MaxRecursionDepth, limits.MaxRecursionDepth)
 	options.Timeout = applyDurationLimit(options.Timeout, limits.Timeout)
+	if limits.MaxMemoryBytes > 0 {
+		options.MemoryReservationBytes = namespaceQueryMemoryReservation(options, limits.MaxMemoryBytes)
+	}
 	if limits.SpillDirectory != "" {
 		options.SpillDirectory = limits.SpillDirectory
 	}
@@ -117,6 +133,13 @@ func applyRowLimit(requested, maximum int) int {
 }
 
 func applyPositiveLimit(requested, maximum int) int {
+	if maximum > 0 && (requested == 0 || requested > maximum) {
+		return maximum
+	}
+	return requested
+}
+
+func applyPositiveInt64Limit(requested, maximum int64) int64 {
 	if maximum > 0 && (requested == 0 || requested > maximum) {
 		return maximum
 	}
@@ -170,6 +193,12 @@ func (limits NamespaceResourceLimits) validate() error {
 	if limits.QueryWindow < 0 {
 		return fmt.Errorf("namespace resource limit query window must not be negative")
 	}
+	if limits.MaxMemoryBytes < 0 {
+		return fmt.Errorf("namespace resource limit max memory bytes must not be negative")
+	}
+	if limits.MaxMemoryBytes > MaxNamespaceMemoryBytes {
+		return fmt.Errorf("namespace resource limit max memory bytes exceed %d", MaxNamespaceMemoryBytes)
+	}
 	return nil
 }
 
@@ -183,6 +212,7 @@ type NamespaceQueryGovernor struct {
 
 	mu                 sync.Mutex
 	gates              map[string]*namespaceQueryGate
+	memoryBudgets      map[string]*namespaceQueryMemoryBudget
 	quotas             map[string]*namespaceQueryQuota
 	computePools       map[string]*hatPipeline.WorkStealingPool
 	defaultComputePool *hatPipeline.WorkStealingPool
@@ -227,6 +257,7 @@ func NewNamespaceQueryGovernorWithProfiles(defaults NamespaceResourceProfile, na
 		namespaces:     make(map[string]NamespaceResourceLimits, len(copyNamespaces)),
 		softNamespaces: make(map[string]NamespaceResourceLimits, len(copyNamespaces)),
 		gates:          make(map[string]*namespaceQueryGate),
+		memoryBudgets:  make(map[string]*namespaceQueryMemoryBudget),
 		quotas:         make(map[string]*namespaceQueryQuota),
 	}
 	for namespace, profile := range copyNamespaces {
@@ -296,6 +327,7 @@ func capNamespaceSoftLimits(soft, hard NamespaceResourceLimits) NamespaceResourc
 	soft.MaxJoinWork = capNamespaceLimit(soft.MaxJoinWork, hard.MaxJoinWork)
 	soft.MaxJoinBytes = capNamespaceLimit(soft.MaxJoinBytes, hard.MaxJoinBytes)
 	soft.MaxResultBytes = capNamespaceLimit(soft.MaxResultBytes, hard.MaxResultBytes)
+	soft.MaxMemoryBytes = capNamespaceInt64Limit(soft.MaxMemoryBytes, hard.MaxMemoryBytes)
 	soft.MaxWorkers = capNamespaceLimit(soft.MaxWorkers, hard.MaxWorkers)
 	soft.MaxSortBytes = capNamespaceLimit(soft.MaxSortBytes, hard.MaxSortBytes)
 	soft.MaxGroupBytes = capNamespaceLimit(soft.MaxGroupBytes, hard.MaxGroupBytes)
@@ -321,6 +353,13 @@ func capNamespaceDuration(soft, hard time.Duration) time.Duration {
 	return soft
 }
 
+func capNamespaceInt64Limit(soft, hard int64) int64 {
+	if soft > 0 && hard > 0 && soft > hard {
+		return hard
+	}
+	return soft
+}
+
 func tightenNamespaceLimits(defaults, override NamespaceResourceLimits) NamespaceResourceLimits {
 	return NamespaceResourceLimits{
 		MaxConcurrentQueries: applyPositiveLimit(defaults.MaxConcurrentQueries, override.MaxConcurrentQueries),
@@ -334,6 +373,7 @@ func tightenNamespaceLimits(defaults, override NamespaceResourceLimits) Namespac
 		MaxJoinWork:          applyPositiveLimit(defaults.MaxJoinWork, override.MaxJoinWork),
 		MaxJoinBytes:         applyPositiveLimit(defaults.MaxJoinBytes, override.MaxJoinBytes),
 		MaxResultBytes:       applyPositiveLimit(defaults.MaxResultBytes, override.MaxResultBytes),
+		MaxMemoryBytes:       applyPositiveInt64Limit(defaults.MaxMemoryBytes, override.MaxMemoryBytes),
 		MaxWorkers:           applyPositiveLimit(defaults.MaxWorkers, override.MaxWorkers),
 		MaxSortBytes:         applyPositiveLimit(defaults.MaxSortBytes, override.MaxSortBytes),
 		MaxGroupBytes:        applyPositiveLimit(defaults.MaxGroupBytes, override.MaxGroupBytes),
@@ -455,6 +495,41 @@ func (governor *NamespaceQueryGovernor) gateFor(namespace string, limits Namespa
 	return gate
 }
 
+func (governor *NamespaceQueryGovernor) memoryBudgetFor(namespace string, limits NamespaceResourceLimits) *namespaceQueryMemoryBudget {
+	if governor == nil || limits.MaxMemoryBytes <= 0 {
+		return nil
+	}
+	governor.mu.Lock()
+	defer governor.mu.Unlock()
+	if budget := governor.memoryBudgets[namespace]; budget != nil {
+		return budget
+	}
+	budget := newNamespaceQueryMemoryBudget(limits.MaxMemoryBytes, limits.MaxQueuedQueries)
+	governor.memoryBudgets[namespace] = budget
+	return budget
+}
+
+// namespaceQueryMemoryReservation returns the amount a workload group reserves
+// before execution. Explicit declarations win; otherwise the largest existing
+// in-memory operator limit is used. An otherwise unbounded query reserves the
+// whole configured group budget, which is conservative but prevents silent
+// overcommit.
+func namespaceQueryMemoryReservation(options SQLQueryOptions, capacity int64) int64 {
+	if options.MemoryReservationBytes > 0 {
+		return options.MemoryReservationBytes
+	}
+	reservation := int64(options.MaxJoinBytes)
+	for _, value := range []int{options.MaxResultBytes, options.MaxSortBytes, options.MaxGroupBytes, options.MaxGroupMergeBytes, options.MaxSetBytes} {
+		if int64(value) > reservation {
+			reservation = int64(value)
+		}
+	}
+	if reservation == 0 {
+		return capacity
+	}
+	return reservation
+}
+
 func (governor *NamespaceQueryGovernor) computePoolFor(namespace string, limits NamespaceResourceLimits) *hatPipeline.WorkStealingPool {
 	if governor == nil || limits.ComputeWorkers <= 0 {
 		return nil
@@ -514,6 +589,14 @@ func (governor *NamespaceQueryGovernor) Execute(ctx context.Context, namespace, 
 		ctx = context.Background()
 	}
 	limits := governor.limitsFor(namespace)
+	options = limits.Apply(options)
+	if budget := governor.memoryBudgetFor(namespace, limits); budget != nil {
+		reservation := namespaceQueryMemoryReservation(options, limits.MaxMemoryBytes)
+		if err := budget.acquire(ctx, reservation); err != nil {
+			return SQLQueryResult{}, err
+		}
+		defer budget.release(reservation)
+	}
 	gate := governor.gateFor(namespace, limits)
 	if gate != nil {
 		if err := gate.acquire(ctx); err != nil {
@@ -524,7 +607,6 @@ func (governor *NamespaceQueryGovernor) Execute(ctx context.Context, namespace, 
 	if quota := governor.quotaFor(namespace, limits); quota != nil && !quota.allow(time.Now()) {
 		return SQLQueryResult{}, ErrNamespaceQueryRateLimited
 	}
-	options = limits.Apply(options)
 	if pool := governor.computePoolFor(namespace, limits); pool != nil {
 		result, err := executeSQLQueryOnComputePool(pool, ctx, source, resolver, parameters, options)
 		if errors.Is(err, hatPipeline.ErrWorkStealingPoolClosed) {
@@ -671,4 +753,127 @@ func (gate *namespaceQueryGate) removeWaiterLocked(target *namespaceQueryWaiter)
 		gate.waiters = gate.waiters[:len(gate.waiters)-1]
 		return
 	}
+}
+
+// namespaceQueryMemoryBudget is a FIFO, context-aware reservation queue. It
+// accounts declared working-set reservations rather than sampling the Go heap,
+// so admission remains deterministic and does not require a stop-the-world
+// runtime measurement.
+type namespaceQueryMemoryBudget struct {
+	mu        sync.Mutex
+	capacity  int64
+	maxQueued int
+	used      int64
+	waiters   []*namespaceQueryMemoryWaiter
+}
+
+type namespaceQueryMemoryWaiter struct {
+	ready     chan struct{}
+	amount    int64
+	granted   bool
+	cancelled bool
+}
+
+func newNamespaceQueryMemoryBudget(capacity int64, maxQueued int) *namespaceQueryMemoryBudget {
+	return &namespaceQueryMemoryBudget{capacity: capacity, maxQueued: maxQueued}
+}
+
+func (budget *namespaceQueryMemoryBudget) acquire(ctx context.Context, amount int64) error {
+	if budget == nil || amount <= 0 {
+		return nil
+	}
+	if amount > budget.capacity {
+		return ErrNamespaceQueryMemoryBudgetExceeded
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	budget.mu.Lock()
+	if len(budget.waiters) == 0 && amount <= budget.capacity-budget.used {
+		budget.used += amount
+		budget.mu.Unlock()
+		return nil
+	}
+	if budget.maxQueued > 0 && len(budget.waiters) >= budget.maxQueued {
+		budget.mu.Unlock()
+		return ErrNamespaceQueryQueueFull
+	}
+	waiter := &namespaceQueryMemoryWaiter{ready: make(chan struct{}), amount: amount}
+	budget.waiters = append(budget.waiters, waiter)
+	budget.mu.Unlock()
+
+	select {
+	case <-waiter.ready:
+		if err := ctx.Err(); err != nil {
+			budget.release(amount)
+			return err
+		}
+		return nil
+	case <-ctx.Done():
+		budget.mu.Lock()
+		if !waiter.granted {
+			waiter.cancelled = true
+			budget.removeWaiterLocked(waiter)
+			budget.mu.Unlock()
+			return ctx.Err()
+		}
+		budget.mu.Unlock()
+		budget.release(amount)
+		return ctx.Err()
+	}
+}
+
+func (budget *namespaceQueryMemoryBudget) release(amount int64) {
+	if budget == nil || amount <= 0 {
+		return
+	}
+	budget.mu.Lock()
+	if amount >= budget.used {
+		budget.used = 0
+	} else {
+		budget.used -= amount
+	}
+	budget.grantWaitersLocked()
+	budget.mu.Unlock()
+}
+
+func (budget *namespaceQueryMemoryBudget) grantWaitersLocked() {
+	for len(budget.waiters) > 0 {
+		waiter := budget.waiters[0]
+		if waiter.cancelled {
+			budget.waiters[0] = nil
+			budget.waiters = budget.waiters[1:]
+			continue
+		}
+		if waiter.amount > budget.capacity-budget.used {
+			return
+		}
+		budget.waiters[0] = nil
+		budget.waiters = budget.waiters[1:]
+		waiter.granted = true
+		budget.used += waiter.amount
+		close(waiter.ready)
+	}
+}
+
+func (budget *namespaceQueryMemoryBudget) removeWaiterLocked(target *namespaceQueryMemoryWaiter) {
+	for index, waiter := range budget.waiters {
+		if waiter != target {
+			continue
+		}
+		copy(budget.waiters[index:], budget.waiters[index+1:])
+		budget.waiters[len(budget.waiters)-1] = nil
+		budget.waiters = budget.waiters[:len(budget.waiters)-1]
+		budget.grantWaitersLocked()
+		return
+	}
+}
+
+func (budget *namespaceQueryMemoryBudget) usedBytes() int64 {
+	if budget == nil {
+		return 0
+	}
+	budget.mu.Lock()
+	defer budget.mu.Unlock()
+	return budget.used
 }

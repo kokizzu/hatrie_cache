@@ -106,6 +106,7 @@ const (
 	DefaultSQLQueryManagerHistoryCapacity      = hatSql.DefaultSQLQueryManagerHistoryCapacity
 	DefaultSQLQueryManagerComputeQueueCapacity = hatSql.DefaultSQLQueryManagerComputeQueueCapacity
 	MaxSQLQueryManagerComputeWorkers           = hatSql.MaxSQLQueryManagerComputeWorkers
+	MaxNamespaceMemoryBytes                    = hatSql.MaxNamespaceMemoryBytes
 	MaxSQLQueryThreads                         = hatSql.MaxSQLQueryThreads
 	MaxSQLQueryManagerComputeQueueCapacity     = hatSql.MaxSQLQueryManagerComputeQueueCapacity
 	MaxNamespaceComputeWorkers                 = hatSql.MaxSQLQueryManagerComputeWorkers
@@ -119,10 +120,11 @@ const (
 )
 
 var (
-	ErrSQLQueryLogClosed            = hatSql.ErrSQLQueryLogClosed
-	ErrSQLQueryLogRecordInvalid     = hatSql.ErrSQLQueryLogRecordInvalid
-	ErrSQLQueryManagerClosed        = hatSql.ErrSQLQueryManagerClosed
-	ErrNamespaceQueryGovernorClosed = hatSql.ErrNamespaceQueryGovernorClosed
+	ErrSQLQueryLogClosed                  = hatSql.ErrSQLQueryLogClosed
+	ErrSQLQueryLogRecordInvalid           = hatSql.ErrSQLQueryLogRecordInvalid
+	ErrSQLQueryManagerClosed              = hatSql.ErrSQLQueryManagerClosed
+	ErrNamespaceQueryMemoryBudgetExceeded = hatSql.ErrNamespaceQueryMemoryBudgetExceeded
+	ErrNamespaceQueryGovernorClosed       = hatSql.ErrNamespaceQueryGovernorClosed
 )
 
 type SQLSourceResolver = hatSql.SourceResolver
