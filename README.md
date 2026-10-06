@@ -56,6 +56,7 @@ security guidance before exposing it on a network.
 - SDK-neutral OpenTelemetry-compatible SQL query and operator spans: [QUERY_TRACING.md](QUERY_TRACING.md)
 - Replication queue and wire-byte metrics: [REPLICATION_METRICS.md](REPLICATION_METRICS.md)
 - Replication pause and resume operations: [REPLICATION_OPERATIONS.md](REPLICATION_OPERATIONS.md)
+- Snapshot-plus-journal bootstrap with staged activation and fencing: [TU09_SNAPSHOT_WAL_JOIN.md](TU09_SNAPSHOT_WAL_JOIN.md)
 - Shared exact typed-table aggregate state: [TYPED_TABLE_ARRANGEMENTS.md](TYPED_TABLE_ARRANGEMENTS.md)
 - Opt-in bounded background view and rollup refreshes: [REFRESH_SCHEDULER.md](REFRESH_SCHEDULER.md)
 - Shared compiled JSON subcolumn paths for repeated lookups: [JSON_SUBCOLUMNS.md](JSON_SUBCOLUMNS.md)

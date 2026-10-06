@@ -22294,3 +22294,10 @@ push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
 bench-tu17-space-engine:
 	bash scripts/benchmark-tu17-space-engine.sh
+.PHONY: test-tu09-snapshot-join
+test-tu09-snapshot-join:
+	bash scripts/codex-tu09-test.sh
+
+.PHONY: benchmark-tu09-snapshot-join
+benchmark-tu09-snapshot-join:
+	bash scripts/benchmark-tu09-snapshot-join.sh
