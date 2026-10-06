@@ -397,9 +397,11 @@ type QueryOptions = SQLQueryOptions
 // SQLPreparedQueryCacheStats reports immutable parsed-template reuse. Values
 // bound to `$n` are never stored in this cache.
 type SQLPreparedQueryCacheStats struct {
-	Entries int
-	Hits    uint64
-	Misses  uint64
+	Entries    int
+	Hits       uint64
+	Misses     uint64
+	Admissions uint64
+	Evictions  uint64
 }
 
 // PreparedQueryCacheStats reports parsed-template cache reuse.
@@ -417,6 +419,8 @@ type SQLPreparedQueryCache struct {
 	order                 *list.List
 	hits                  uint64
 	misses                uint64
+	admissions            uint64
+	evictions             uint64
 }
 
 type sqlPreparedQueryCacheEntry struct {
@@ -452,7 +456,13 @@ func (cache *SQLPreparedQueryCache) Stats() SQLPreparedQueryCacheStats {
 	}
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
-	return SQLPreparedQueryCacheStats{Entries: len(cache.entries), Hits: cache.hits, Misses: cache.misses}
+	return SQLPreparedQueryCacheStats{
+		Entries:    len(cache.entries),
+		Hits:       cache.hits,
+		Misses:     cache.misses,
+		Admissions: cache.admissions,
+		Evictions:  cache.evictions,
+	}
 }
 
 var defaultSQLPreparedQueryCache = NewSQLPreparedQueryCache(256)

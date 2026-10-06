@@ -32580,3 +32580,28 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## CH-G14 Prepared-Plan Admission And Eviction Metrics
+
+Commands:
+
+```sh
+make benchmark-chg14-before
+make benchmark-chg14-after
+```
+
+Five `-count=5` `-benchmem` samples were run on Linux/amd64 with an AMD Ryzen
+9 5950X. The before target temporarily excludes only the new failing regression
+test and restores it with a trap; both runs use the same prepared-cache
+benchmarks.
+
+| Workload | Before median ns/op | After median ns/op | CPU change | B/op before/after | Allocs/op before/after |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| exact cache hit | 27.37 | 27.91 | 1.02x slower | 0 / 0 | 0 / 0 |
+| normalized alias hit | 14.65 | 14.56 | 1.01x faster | 0 / 0 | 0 / 0 |
+| schema-versioned hit | 25.60 | 25.50 | 1.00x faster | 0 / 0 | 0 / 0 |
+
+The small CPU differences are within benchmark noise. The feature adds two
+bounded `uint64` counters (16 bytes per cache object) and no per-query heap
+allocation. Raw semantics and the default cache behavior are documented in
+[CHG14_PREPARED_PLAN_METRICS.md](CHG14_PREPARED_PLAN_METRICS.md).

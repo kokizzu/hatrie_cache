@@ -21633,6 +21633,42 @@ push-cleanup-tooling:
 # END safe test temporary cleanup
 
 .PHONY: test
+.PHONY: test-chg14
+test-chg14:
+	go test ./hat/hatSql -run '^TestCHG14PreparedQueryCache' -count=1
+
+.PHONY: test-chg14-package
+test-chg14-package:
+	bash scripts/test-chg14-package.sh
+
+.PHONY: benchmark-chg14-before
+benchmark-chg14-before:
+	bash scripts/benchmark-chg14-before.sh
+
+.PHONY: benchmark-chg14-after
+benchmark-chg14-after:
+	bash scripts/benchmark-chg14-after.sh
+
+.PHONY: format-chg14
+format-chg14:
+	bash scripts/format-chg14.sh
+
+.PHONY: race-chg14
+race-chg14:
+	bash scripts/race-chg14.sh
+
+.PHONY: vet-chg14
+vet-chg14:
+	bash scripts/vet-chg14.sh
+
+.PHONY: review-chg14
+review-chg14:
+	bash scripts/review-chg14.sh
+
+.PHONY: commit-chg14
+commit-chg14:
+	bash scripts/commit-chg14.sh
+
 test:
 	bash ./scripts/test-all.sh
 
