@@ -18,6 +18,7 @@ paths=(
 	scripts/test-chg14-package.sh
 	scripts/review-chg14.sh
 	scripts/commit-chg14.sh
+	scripts/push-chg14.sh
 )
 
 printf '%s\n' 'worktree status:'

@@ -21669,6 +21669,10 @@ review-chg14:
 commit-chg14:
 	bash scripts/commit-chg14.sh
 
+.PHONY: push-chg14
+push-chg14:
+	bash scripts/push-chg14.sh
+
 test:
 	bash ./scripts/test-all.sh
 
