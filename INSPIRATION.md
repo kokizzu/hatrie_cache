@@ -636,6 +636,7 @@ explicit regional partitioning and simple backups over automatic sharding.
 - [x] T014 Equality index iterators.
 - [x] T015 Ordered range iterators. `OrderedIndex.Range` returns an allocation-free iterator over inclusive bounds.
 - [x] T016 Partial-key search. Composite ordered keys can express a prefix range with smallest/largest suffix bounds; the iterator uses binary-searched bounds and a bounded immutable subslice.
+- [x] T-G16 Versioned tuple migration manager. `hatDataStructure.VersionedTupleMigrationManager` registers immutable tuple formats and deterministic forward transforms, rejects duplicate/cyclic paths, and returns atomic validated replacements; ordinary tuple operations remain unchanged. See [TT016_VERSIONED_TUPLE_MIGRATIONS.md](TT016_VERSIONED_TUPLE_MIGRATIONS.md).
 - [x] T017 Explicit NULL index semantics.
 - [x] T018 Collation-aware string ordering.
 - [x] T019 Unique constraints and duplicate-key errors.
