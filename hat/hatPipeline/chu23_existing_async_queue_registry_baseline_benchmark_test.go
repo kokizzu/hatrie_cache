@@ -7,7 +7,7 @@ import (
 
 func BenchmarkCHU23BaselineBatcherStats(b *testing.B) {
 	batcher, err := NewAsyncBatcher(AsyncBatcherOptions[int]{
-		Capacity:    1,
+		Capacity:     1,
 		MaxBatchSize: 1,
 		Handler: func(context.Context, []int) error {
 			return nil
@@ -27,7 +27,7 @@ func BenchmarkCHU23BaselineBatcherStats(b *testing.B) {
 
 func BenchmarkCHU23BaselineBatcherFlush(b *testing.B) {
 	batcher, err := NewAsyncBatcher(AsyncBatcherOptions[int]{
-		Capacity:    1,
+		Capacity:     1,
 		MaxBatchSize: 1,
 		Handler: func(context.Context, []int) error {
 			return nil
