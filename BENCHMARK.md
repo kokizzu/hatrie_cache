@@ -32580,3 +32580,27 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## MZ-052 Dataflow Topological-Order Cache
+
+Five `-benchmem -count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The
+paired benchmark builds a 2,048-node, 2,047-edge chain outside the timed
+region and repeatedly requests its topological order. The before run uses the
+pre-cache implementation; the after run uses the cached result with a fresh
+detached slice for each caller.
+
+| Workload | Before median | After median | CPU improvement | Before B/op | After B/op | Before allocs/op | After allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Repeated `TopologicalOrder` | 362,282 ns/op | 9,693 ns/op | 37.4x faster | 174,752 | 32,769 | 11 | 1 |
+
+Raw samples (`ns/op`, `B/op`, `allocs/op`):
+
+```text
+Before: 362282 366807 361827 364450 360386, 174752, 11
+After:  9609 9361 9693 10353 11923, 32769, 1
+```
+
+The cache is invalidated by node and edge mutations. The first order request
+after a mutation still pays the original sort cost, and callers still pay for
+their detached result slice; the measured win applies to repeated reads of an
+unchanged graph.

@@ -24,24 +24,25 @@ caller, preserving the previous ownership contract.
 
 ## Measurement
 
-Five `-benchtime=100ms -count=5` samples were collected on Linux/amd64 with
-an AMD Ryzen 9 5950X. The benchmark builds a 2,048-node, 2,047-edge chain
-once, then repeatedly asks for its topological order.
+Five `-benchmem -count=5` samples were collected on Linux/amd64 with an AMD
+Ryzen 9 5950X. The retained benchmark fixture builds a 2,048-node,
+2,047-edge chain once, then repeatedly asks for its topological order. The
+same fixture and benchmark are run before and after the cache is adopted.
 
 | Workload | Before | After | Improvement | Before memory | After memory | Before allocs | After allocs |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Repeated `TopologicalOrder` | 369,834 ns/op | 9,479 ns/op | 39.0x faster | 174,752 B/op | 32,785 B/op | 11 | 1 |
+| Repeated `TopologicalOrder` | 362,282 ns/op | 9,693 ns/op | 37.4x faster | 174,752 B/op | 32,769 B/op | 11 | 1 |
 
 Raw before samples:
 
 ```text
-376467 373637 369834 368043 368238 ns/op, 174752 B/op, 11 allocs/op
+362282 366807 361827 364450 360386 ns/op, 174752 B/op, 11 allocs/op
 ```
 
 Raw after samples:
 
 ```text
-9763 9479 9115 9854 8758 ns/op, 32785/32785/32782/32785/32785 B/op, 1 alloc/op
+9609 9361 9693 10353 11923 ns/op, 32769 B/op, 1 alloc/op
 ```
 
 The first call after a mutation still pays the original sort cost, while the
