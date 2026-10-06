@@ -989,3 +989,9 @@ in [BENCHMARK.md](BENCHMARK.md#rejected-t042-partitioned-parallel-journal-replay
   filtered and incremental storage modes remain unchanged. See
   [TG21_HOT_BACKUP.md](TG21_HOT_BACKUP.md) and
   [BENCHMARK.md](BENCHMARK.md#t-g21-hot-backup-with-an-exact-wal-coordinate).
+- [x] T-G22 Tarantool-style backup WAL retention leases. Snapshot capture
+  atomically registers a process-local lease at its journal coordinate, and
+  single-file plus segmented compaction honor the oldest active lease until
+  the backup or replay consumer releases it. The default remains off. See
+  [TG22_BACKUP_WAL_RETENTION.md](TG22_BACKUP_WAL_RETENTION.md) and
+  [BENCHMARK.md](BENCHMARK.md#t-g22-backup-wal-retention-leases).

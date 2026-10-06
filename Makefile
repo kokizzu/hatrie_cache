@@ -22400,3 +22400,38 @@ commit-tg18:
 	bash scripts/run-tg18.sh commit
 push-tg18:
 	bash scripts/run-tg18.sh push
+.PHONY: test-tg22
+test-tg22:
+	bash scripts/test-tg22.sh
+
+.PHONY: format-tg22
+format-tg22:
+	bash scripts/format-tg22.sh
+
+.PHONY: benchmark-tg22
+benchmark-tg22:
+	bash scripts/benchmark-tg22.sh
+
+.PHONY: race-tg22
+race-tg22:
+	bash scripts/tg22.sh race
+
+.PHONY: vet-tg22
+vet-tg22:
+	bash scripts/tg22.sh vet
+
+.PHONY: check-tg22
+check-tg22:
+	bash scripts/tg22.sh check
+
+.PHONY: stage-tg22
+stage-tg22:
+	bash scripts/tg22.sh stage
+
+.PHONY: commit-tg22
+commit-tg22:
+	bash scripts/tg22.sh commit
+
+.PHONY: push-tg22
+push-tg22:
+	bash scripts/tg22.sh push

@@ -35,6 +35,9 @@ and the exact `SnapshotManifest` used to create it.
   `RestoreBackupBundle` validate and restore hot bundles.
 - Bundle publication remains atomic. Cancellation or a failed checksum leaves
   the previous destination bundle untouched.
+- T-G22 automatically holds a process-local backup retention lease from the
+  snapshot barrier through bundle publication, so concurrent compaction cannot
+  remove the WAL needed by the bundle while it is being created.
 - The default `CreateBackupBundle` API remains available for compatibility.
 
 Hot backup currently supports full snapshot-mode bundles. Filtered snapshots,

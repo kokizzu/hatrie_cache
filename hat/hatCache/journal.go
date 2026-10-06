@@ -257,6 +257,7 @@ type CommandJournal struct {
 	recordBatchChunkBytes int
 	outboxRetainFrom      uint64
 	projectionWatermarks  map[string]uint64
+	backupRetentionLeases map[*CommandJournalBackupRetentionLease]struct{}
 	idempotency           commandIdempotencyState
 	replayProgress        *commandJournalReplayProgressState
 }
@@ -2021,8 +2022,8 @@ func (journal *CommandJournal) compactLocked(throughSequence uint64) error {
 	if journal.outboxRetainFrom > 0 && throughSequence >= journal.outboxRetainFrom {
 		throughSequence = journal.outboxRetainFrom - 1
 	}
-	if projectionThrough, protected := journal.projectionRetentionThroughLocked(); protected && throughSequence > projectionThrough {
-		throughSequence = projectionThrough
+	if retentionThrough, protected := journal.retentionThroughLocked(); protected && throughSequence > retentionThrough {
+		throughSequence = retentionThrough
 	}
 	if err := journal.closeAppendFileLocked(); err != nil {
 		return err

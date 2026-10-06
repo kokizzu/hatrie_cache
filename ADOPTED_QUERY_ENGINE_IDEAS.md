@@ -779,3 +779,14 @@ supported; filtered and incremental modes retain their existing APIs until
 their storage-specific online contracts are defined. See
 [TG21_HOT_BACKUP.md](TG21_HOT_BACKUP.md) and
 [BENCHMARK.md](BENCHMARK.md#t-g21-hot-backup-with-an-exact-wal-coordinate).
+
+## T-G22: Backup WAL Retention Leases
+
+T-G22 adds opt-in `CommandJournalBackupRetentionLease` protection. The lease
+is acquired at the exact snapshot barrier, keeps later WAL available through
+slow transfer or replay, and is released after the consumer finishes. Hot
+backup uses it automatically; custom streams can use
+`WriteSnapshotWithManifestAndBackupRetentionLease`. Single-file and segmented
+compaction both honor the oldest active lease. See
+[TG22_BACKUP_WAL_RETENTION.md](TG22_BACKUP_WAL_RETENTION.md) and
+[BENCHMARK.md](BENCHMARK.md#t-g22-backup-wal-retention-leases).

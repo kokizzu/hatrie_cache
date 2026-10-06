@@ -90,13 +90,18 @@ func CreateHotBackupBundleWithContext(ctx context.Context, path string, trie *Ha
 
 	snapshotPath := filepath.Join(tmpDir, backupBundleSnapshotPath)
 	var snapshotManifest SnapshotManifest
+	var snapshotLease *CommandJournalBackupRetentionLease
 	if err := writeFileAtomicStream(snapshotPath, func(writer io.Writer) error {
 		var err error
-		snapshotManifest, err = journal.WriteSnapshotWithManifest(trie, backupContextWriter{ctx: ctx, Writer: writer}, format)
+		snapshotManifest, snapshotLease, err = journal.WriteSnapshotWithManifestAndBackupRetentionLease(trie, backupContextWriter{ctx: ctx, Writer: writer}, format)
 		return err
 	}); err != nil {
+		if snapshotLease != nil {
+			snapshotLease.Release()
+		}
 		return HotBackupResult{}, err
 	}
+	defer snapshotLease.Release()
 	if err := checkBackupContext(ctx); err != nil {
 		return HotBackupResult{}, err
 	}

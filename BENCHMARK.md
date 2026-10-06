@@ -17,6 +17,22 @@ make benchmark-hot-backup-tg21
 The expected tradeoff is lower writer pause during snapshot streaming, with
 similar total archive work and no claimed CPU or memory win until measured.
 
+## T-G22 Backup WAL Retention Leases
+
+The focused benchmark target is ready, but no T-G22 timing is claimed yet:
+`hat/hatCache` cannot compile from the current base because unrelated concurrent
+SQL/data-structure work leaves `MaxDataflowTextBytes`, `TypedTableDate`,
+`TypedTableTimestamp`, and aggregate-envelope symbols undefined. Run the
+following after that pre-existing build break is resolved; it compares the
+retention-boundary lookup with zero, one, and four active leases:
+
+```text
+make benchmark-tg22
+```
+
+No CPU, memory, or bandwidth improvement is claimed. The feature trades
+temporary WAL retention for correctness during slow online backup and replay.
+
 ## CH-U49 Skip-Index EXPLAIN Diagnostics
 
 This paired clean-worktree benchmark compares the pre-CH-U49 implementation

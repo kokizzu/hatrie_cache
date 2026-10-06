@@ -50,6 +50,67 @@ func (journal *CommandJournal) WriteSnapshotWithManifest(trie *HatTrie, writer i
 	}, nil
 }
 
+// WriteSnapshotWithManifestAndBackupRetentionLease streams a point-in-time
+// snapshot and atomically acquires a lease at the captured journal coordinate.
+// The caller must release the lease after the snapshot and any required WAL
+// transfer are complete.
+func (journal *CommandJournal) WriteSnapshotWithManifestAndBackupRetentionLease(trie *HatTrie, writer io.Writer, format SnapshotFormat) (SnapshotManifest, *CommandJournalBackupRetentionLease, error) {
+	return journal.writeSnapshotWithManifestAndBackupRetentionLease(trie, writer, format)
+}
+
+func (journal *CommandJournal) writeSnapshotWithManifestAndBackupRetentionLease(trie *HatTrie, writer io.Writer, format SnapshotFormat) (SnapshotManifest, *CommandJournalBackupRetentionLease, error) {
+	if journal == nil {
+		return SnapshotManifest{}, nil, ErrNilCommandJournal
+	}
+	if trie == nil {
+		return SnapshotManifest{}, nil, ErrNilHatTrie
+	}
+	if writer == nil {
+		return SnapshotManifest{}, nil, errors.New("hatriecache: snapshot writer is nil")
+	}
+	format, err := ParseSnapshotFormat(string(format))
+	if err != nil {
+		return SnapshotManifest{}, nil, err
+	}
+
+	manifestWriter := snapshotManifestWriter{writer: writer, digest: sha256.New()}
+	metadata, lease, err := journal.writeSnapshotWithFormatAndBackupRetentionLease(trie, &manifestWriter, format)
+	if err != nil {
+		return SnapshotManifest{}, nil, err
+	}
+	return SnapshotManifest{
+		JournalSequence: metadata.JournalSequence,
+		Format:          format,
+		SizeBytes:       manifestWriter.size,
+		SHA256:          hex.EncodeToString(manifestWriter.digest.Sum(nil)),
+	}, lease, nil
+}
+
+func (journal *CommandJournal) writeSnapshotWithFormatAndBackupRetentionLease(trie *HatTrie, writer io.Writer, format SnapshotFormat) (SnapshotMetadata, *CommandJournalBackupRetentionLease, error) {
+	journal.snapshotMu.Lock()
+	defer journal.snapshotMu.Unlock()
+	journal.mu.Lock()
+	if journal.closed {
+		journal.mu.Unlock()
+		return SnapshotMetadata{}, nil, ErrCommandJournalClosed
+	}
+	journal.mu.Unlock()
+
+	var lease *CommandJournalBackupRetentionLease
+	capture, sequence, err := trie.captureSnapshotStreamForStoreAtBarrier(nil, nil, journal.snapshotCaptureBarrierWithBackupRetentionLease(&lease))
+	if err != nil {
+		if lease != nil {
+			lease.Release()
+		}
+		return SnapshotMetadata{}, nil, err
+	}
+	if err := writeStreamSnapshot(writer, sequence, format, capture); err != nil {
+		lease.Release()
+		return SnapshotMetadata{}, nil, err
+	}
+	return SnapshotMetadata{JournalSequence: sequence}, lease, nil
+}
+
 type snapshotManifestWriter struct {
 	writer io.Writer
 	digest hash.Hash

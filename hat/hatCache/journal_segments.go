@@ -322,7 +322,7 @@ func (journal *CommandJournal) pruneSegmentsLocked() error {
 		if journal.outboxRetainFrom > 0 && segment.end >= journal.outboxRetainFrom {
 			break
 		}
-		if projectionThrough, protected := journal.projectionRetentionThroughLocked(); protected && segment.end > projectionThrough {
+		if retentionThrough, protected := journal.retentionThroughLocked(); protected && segment.end > retentionThrough {
 			break
 		}
 		if err := os.Remove(segment.path); err != nil {
