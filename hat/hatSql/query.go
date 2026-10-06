@@ -335,6 +335,10 @@ type SQLQueryOptions struct {
 	QueryID            string
 	SlowQueryThreshold time.Duration
 	Observer           SQLQueryObserver
+	// ProfileAllocations adds process-wide allocation deltas to query events.
+	// It is disabled by default because runtime statistics reads add measurable
+	// overhead. Concurrent goroutines may contribute to the reported delta.
+	ProfileAllocations bool
 	// IndexAdvisor records candidate index fields only for observed slow scans.
 	// Nil preserves the existing privacy-safe telemetry-only behavior.
 	IndexAdvisor *SQLIndexAdvisor
@@ -674,6 +678,8 @@ type sqlQueryObservation struct {
 	recorder               *SQLSlowQueryRecorder
 	started                time.Time
 	threshold              time.Duration
+	profileAllocations     bool
+	allocationStart        sqlQueryAllocationSnapshot
 	planSnapshotEnabled    bool
 	requiredSourceFrontier *uint64
 	asOfFrontier           *uint64
@@ -684,13 +690,18 @@ func newSQLQueryObservation(options SQLQueryOptions) sqlQueryObservation {
 	if id == "" && (options.Observer != nil || options.SlowQueryRecorder != nil || options.PlanSnapshot != nil) {
 		id = fmt.Sprintf("sql-%d", sqlQueryIDSequence.Add(1))
 	}
+	profileAllocations := options.ProfileAllocations && (options.Observer != nil || options.SlowQueryRecorder != nil)
 	observation := sqlQueryObservation{
 		id:                  id,
 		observer:            options.Observer,
 		recorder:            options.SlowQueryRecorder,
 		started:             time.Now(),
 		threshold:           options.SlowQueryThreshold,
+		profileAllocations:  profileAllocations,
 		planSnapshotEnabled: options.PlanSnapshot != nil,
+	}
+	if profileAllocations {
+		observation.allocationStart = readSQLQueryAllocationSnapshot()
 	}
 	if observation.planSnapshotEnabled {
 		if options.RequireSourceFrontier {
@@ -740,6 +751,11 @@ func (observation sqlQueryObservation) finishSummary(outputRows, outputColumns, 
 		OutputColumns: outputColumns,
 		ResultBytes:   resultBytes,
 		OK:            err == nil,
+	}
+	if observation.profileAllocations {
+		allocationEnd := readSQLQueryAllocationSnapshot()
+		event.AllocatedBytes = sqlQueryAllocationDelta(allocationEnd.bytes, observation.allocationStart.bytes)
+		event.AllocatedObjects = sqlQueryAllocationDelta(allocationEnd.objects, observation.allocationStart.objects)
 	}
 	event.Slow = observation.threshold > 0 && time.Duration(event.ElapsedNanos) >= observation.threshold
 	if err != nil {

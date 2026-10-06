@@ -32580,3 +32580,38 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## C234 Query Profiler Allocation Accounting
+
+Commands:
+
+```sh
+make benchmark-c234-query-profiler-baseline
+make benchmark-c234-query-profiler
+```
+
+Three `-count=3` samples on Linux/amd64, AMD Ryzen 9 5950X. The fixture is a
+single observed `FROM VALUES (1) ... SELECT` query. The baseline was captured
+before the C234 fields and allocation snapshots were implemented.
+
+### Raw Results
+
+| Path | Run 1 | Run 2 | Run 3 |
+| --- | ---: | ---: | ---: |
+| Before, default observer | 8,109 ns/op; 6,069 B; 65 allocs | 7,924 ns/op; 6,069 B; 65 allocs | 7,820 ns/op; 6,068 B; 65 allocs |
+| After, default observer | 7,305 ns/op; 6,069 B; 65 allocs | 7,237 ns/op; 6,069 B; 65 allocs | 7,160 ns/op; 6,069 B; 65 allocs |
+| After, `ProfileAllocations` | 40,311 ns/op; 6,098 B; 65 allocs | 40,534 ns/op; 6,097 B; 65 allocs | 40,492 ns/op; 6,097 B; 65 allocs |
+
+### Median Comparison
+
+| Workload | Median ns/op | B/op | Allocs/op | Comparison |
+| --- | ---: | ---: | ---: | --- |
+| Before, default observer | 7,924 | 6,069 | 65 | baseline |
+| After, default observer | 7,237 | 6,069 | 65 | 1.09x faster; no heap or allocation-count change |
+| After, `ProfileAllocations` | 40,492 | 6,097 | 65 | 5.60x slower than default; +28 B/op; no extra allocs |
+
+The default path does not call `runtime.ReadMemStats`. Allocation profiling is
+therefore a diagnostic mode with a clear CPU tradeoff, not a default execution
+optimization. Whole-query counters are process-wide deltas and can include
+concurrent goroutine activity. Per-stage allocation fields remain caller-
+supplied in `SQLQueryProfileSample`.

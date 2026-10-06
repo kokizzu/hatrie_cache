@@ -25,8 +25,13 @@ func (fn QueryObserverFunc) ObserveSQLQuery(event QueryEvent) {
 // QueryEvent is an execution summary suitable for a structured log or metric.
 // It deliberately excludes SQL text, cache keys, predicates, and row values.
 type QueryEvent struct {
-	QueryID            string          `json:"query_id"`
-	ElapsedNanos       int64           `json:"elapsed_ns"`
+	QueryID      string `json:"query_id"`
+	ElapsedNanos int64  `json:"elapsed_ns"`
+	// AllocatedBytes and AllocatedObjects are process-wide allocation deltas
+	// captured only when SQLQueryOptions.ProfileAllocations is enabled. Other
+	// goroutines may contribute to these counters while a query runs.
+	AllocatedBytes     uint64          `json:"allocated_bytes,omitempty"`
+	AllocatedObjects   uint64          `json:"allocated_objects,omitempty"`
 	OutputRows         int             `json:"output_rows"`
 	OutputColumns      int             `json:"output_columns"`
 	ResultBytes        int             `json:"result_bytes"`

@@ -45,16 +45,19 @@ type SQLQueryProfilerOptions struct {
 	SampleEvery                uint64
 }
 
-// SQLQueryProfileSample is one privacy-safe operator observation. CPUTime and
-// BlockedTime are supplied by the caller's instrumentation; the profiler does
-// not inspect query text or collect process-wide stack traces.
+// SQLQueryProfileSample is one privacy-safe operator observation. CPUTime,
+// BlockedTime, and allocation counters are supplied by the caller's
+// instrumentation; the profiler does not inspect query text or collect
+// process-wide stack traces.
 type SQLQueryProfileSample struct {
-	Operator    string        `json:"operator"`
-	CPUTime     time.Duration `json:"cpu_time"`
-	BlockedTime time.Duration `json:"blocked_time"`
-	Rows        uint64        `json:"rows"`
-	Bytes       uint64        `json:"bytes"`
-	Timestamp   time.Time     `json:"timestamp"`
+	Operator         string        `json:"operator"`
+	CPUTime          time.Duration `json:"cpu_time"`
+	BlockedTime      time.Duration `json:"blocked_time"`
+	Rows             uint64        `json:"rows"`
+	Bytes            uint64        `json:"bytes"`
+	AllocatedBytes   uint64        `json:"allocated_bytes,omitempty"`
+	AllocatedObjects uint64        `json:"allocated_objects,omitempty"`
+	Timestamp        time.Time     `json:"timestamp"`
 }
 
 // SQLQueryMemorySample is one caller-supplied operator memory observation.

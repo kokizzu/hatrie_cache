@@ -22292,3 +22292,36 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+.PHONY: test-c234-query-profiler
+test-c234-query-profiler:
+	bash scripts/test-c234-query-profiler.sh
+
+.PHONY: format-c234-query-profiler
+format-c234-query-profiler:
+	bash scripts/format-c234-query-profiler.sh
+
+.PHONY: race-c234-query-profiler
+race-c234-query-profiler:
+	bash scripts/race-c234-query-profiler.sh
+
+.PHONY: vet-c234-query-profiler
+vet-c234-query-profiler:
+	bash scripts/vet-c234-query-profiler.sh
+
+.PHONY: commit-c234-query-profiler
+commit-c234-query-profiler:
+	bash scripts/commit-c234-query-profiler.sh
+
+.PHONY: push-c234-query-profiler
+push-c234-query-profiler:
+	bash scripts/push-c234-query-profiler.sh
+
+
+
+.PHONY: benchmark-c234-query-profiler
+benchmark-c234-query-profiler:
+	bash scripts/benchmark-c234-query-profiler.sh
+
+.PHONY: benchmark-c234-query-profiler-baseline
+benchmark-c234-query-profiler-baseline:
+	bash scripts/benchmark-c234-query-profiler-baseline.sh
