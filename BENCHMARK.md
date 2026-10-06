@@ -2,20 +2,20 @@
 
 ## T-U46 Index Cardinality And Hot-Key Statistics
 
-This paired clean-worktree benchmark compares the same typed-index fixture at
-the last accepted baseline and with T-U46. Seven samples used
-`-benchtime=500ms`, `-benchmem`, and Go 1.26.5. Lower `ns/op` is better; the
-ratio is `after / before`, so values below 1.00x are faster. All measured
-paths reported `0 B/op` and `0 allocs/op`.
+This paired benchmark compares the same typed-index fixture before and after
+T-U46. Five `-benchmem -count=5` samples were collected on Linux/amd64 with
+an AMD Ryzen 9 5950X. Lower `ns/op` is better; the ratio is `after / before`,
+so values below 1.00x are faster. All measured paths reported `0 B/op` and
+`0 allocs/op`.
 
 | Operation | Before median | After median | Relative result |
 | --- | ---: | ---: | ---: |
-| Hash lookup, stats detached | 29.38 ns/op | 28.96 ns/op | 0.986x, 1.4% faster |
-| Functional lookup, stats detached | 41.54 ns/op | 37.70 ns/op | 0.908x, 9.2% faster |
-| Ordered seek, no automatic stats | 99.77 ns/op | 103.3 ns/op | 1.04x, noisy unchanged path |
-| Hash lookup, stats attached | n/a | 76.45 ns/op | 2.64x versus detached after |
-| Functional lookup, stats attached | n/a | 77.70 ns/op | 2.06x versus detached after |
-| Ordered seek plus manual observation | n/a | 151.3 ns/op | 1.46x versus detached after |
+| Hash lookup, stats detached | 29.33 ns/op | 29.70 ns/op | 1.01x, 1.3% slower and within noise |
+| Functional lookup, stats detached | 39.35 ns/op | 38.09 ns/op | 0.968x, 3.2% faster and within noise |
+| Ordered seek, no automatic stats | 101.0 ns/op | 102.5 ns/op | 1.01x, 1.5% slower and within noise |
+| Hash lookup, stats attached | n/a | 77.52 ns/op | 2.61x versus detached after |
+| Functional lookup, stats attached | n/a | 78.06 ns/op | 2.05x versus detached after |
+| Ordered seek plus manual observation | n/a | 147.6 ns/op | 1.44x versus detached after |
 
 The ordered implementation intentionally has no observer field or branch. Its
 small difference is process noise between separate benchmark processes, not a
@@ -28,25 +28,25 @@ not per element.
 Raw default samples (`ns/op`):
 
 ```text
-hash before: 30.07 29.46 29.17 29.38 28.69 28.95 32.54
-hash after:  28.38 28.79 28.96 29.52 28.93 29.36 31.50
-functional before: 42.68 41.54 42.42 40.74 43.05 41.31 39.00
-functional after:  40.05 40.57 41.65 37.70 35.17 37.40 36.69
-ordered before: 94.47 94.56 98.89 102.7 99.77 103.2 112.0
-ordered after:  97.66 113.8 101.3 112.1 104.5 102.1 103.3
+hash before: 29.02 29.12 29.59 29.33 29.80
+hash after:  29.70 30.01 29.36 27.44 30.02
+functional before: 39.07 39.42 39.19 39.37 39.35
+functional after:  37.55 38.09 37.48 38.10 38.71
+ordered before: 95.00 100.6 102.1 101.0 101.7
+ordered after:  102.5 96.68 105.7 101.0 103.7
 ```
 
 Raw enabled-statistics samples (`ns/op`):
 
 ```text
-hash attached: 76.54 77.09 76.38 77.07 76.45 75.58 75.95
-functional attached: 78.44 83.11 78.08 77.70 75.15 74.94 71.86
-ordered manual: 137.9 154.2 151.3 151.3 151.7 150.0 150.9
+hash attached: 75.57 76.88 77.69 77.52 78.47
+functional attached: 79.51 78.06 75.94 78.43 77.55
+ordered manual: 149.6 144.1 147.5 148.6 147.6
 ```
 
-Reproduce through the repository command API with
-`make codex-tu46-targeted-benchmark`; its raw files are written under `/tmp`
-and are removed by the normal Codex cleanup target.
+Reproduce with `go test ./hat/hatDataStructure -run '^$' -bench
+'TU46|TUF46|WithStats|IndexStats' -benchmem -count=5`. The retained baseline
+benchmark and the feature benchmarks use the same 1,024-key fixture.
 
 ## CH-U49 Skip-Index EXPLAIN Diagnostics
 
