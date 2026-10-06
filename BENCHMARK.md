@@ -15199,7 +15199,7 @@ payload shape before assuming it beats HTTP JSON.
 
 ## HAT-trie Command Families
 
-HAT-trie cache currently has 94 canonical command groups in `ExecuteCommand`,
+HAT-trie cache currently has 97 canonical command groups in `ExecuteCommand`,
 plus Redis-style aliases for several probabilistic and compact structures. The
 command set is strongest where Redis is also strong as a data-structure server:
 strings, counters, TTLs, lists/queues, sets, priority queues/sorted-set-like
@@ -33241,3 +33241,51 @@ BenchmarkConfigWatchReadResumeMiddle:   102.4 102.1 103.3 102.1 102.4 ns/op
 Both paths use `88 B/op` and `2 allocs/op`. The optimization adds no retained
 index or per-event memory; it replaces the seek scan with a binary search over
 the existing chronological ring.
+## T-U19 Durable Tuple Field-Operation Journal
+
+Command:
+
+```text
+make codex-tu19-benchmark
+```
+
+The feature adds the durable `TUPLESET`, `TUPLEGET`, and `TUPLEUPDATE`
+commands.
+
+The low-level comparison uses the same three-field versioned tuple and the
+same set/splice/int64-add batch. `ApplyUpdates(format, ...)` is the previous
+format-validating path; `ApplyFieldUpdates(...)` is the durable-replay path,
+which retains the tuple version without requiring the full schema on every
+replay operation.
+
+Representative raw output from five runs on an AMD Ryzen 9 5950X:
+
+```text
+BenchmarkTU19VersionedTupleApplyUpdatesWithFormat-32  1000000  282.5 ns/op  32 B/op  2 allocs/op
+BenchmarkTU19VersionedTupleApplyUpdatesWithFormat-32  1000000  281.8 ns/op  32 B/op  2 allocs/op
+BenchmarkTU19VersionedTupleApplyUpdatesWithFormat-32  1000000  277.8 ns/op  32 B/op  2 allocs/op
+BenchmarkTU19VersionedTupleApplyUpdatesWithFormat-32   957000  279.6 ns/op  32 B/op  2 allocs/op
+BenchmarkTU19VersionedTupleApplyUpdatesWithFormat-32   924208  287.6 ns/op  32 B/op  2 allocs/op
+BenchmarkTU19VersionedTupleApplyFieldUpdates-32       1554972  190.7 ns/op  32 B/op  2 allocs/op
+BenchmarkTU19VersionedTupleApplyFieldUpdates-32       1539538  195.3 ns/op  32 B/op  2 allocs/op
+BenchmarkTU19VersionedTupleApplyFieldUpdates-32       1529154  192.4 ns/op  32 B/op  2 allocs/op
+BenchmarkTU19VersionedTupleApplyFieldUpdates-32       1550065  194.7 ns/op  32 B/op  2 allocs/op
+BenchmarkTU19VersionedTupleApplyFieldUpdates-32       1538870  194.3 ns/op  32 B/op  2 allocs/op
+BenchmarkTU19TupleCommandPayloadSizes-32  1000000000  0.2487 ns/op  28.00 tuple-bytes  89.00 tupleset-json-bytes  202.0 tupleupdate-json-bytes  2.270 update-over-set  0 B/op  0 allocs/op
+BenchmarkTU19TupleCommandPayloadSizes-32  1000000000  0.2513 ns/op  28.00 tuple-bytes  89.00 tupleset-json-bytes  202.0 tupleupdate-json-bytes  2.270 update-over-set  0 B/op  0 allocs/op
+BenchmarkTU19TupleCommandPayloadSizes-32  1000000000  0.2524 ns/op  28.00 tuple-bytes  89.00 tupleset-json-bytes  202.0 tupleupdate-json-bytes  2.270 update-over-set  0 B/op  0 allocs/op
+BenchmarkTU19TupleCommandPayloadSizes-32  1000000000  0.2470 ns/op  28.00 tuple-bytes  89.00 tupleset-json-bytes  202.0 tupleupdate-json-bytes  2.270 update-over-set  0 B/op  0 allocs/op
+BenchmarkTU19TupleCommandPayloadSizes-32  1000000000  0.2481 ns/op  28.00 tuple-bytes  89.00 tupleset-json-bytes  202.0 tupleupdate-json-bytes  2.270 update-over-set  0 B/op  0 allocs/op
+```
+
+| Path | Median CPU | Allocated | Relative CPU |
+|---|---:|---:|---:|
+| Existing format-validating update | 281.8 ns/op median | 32 B/op, 2 allocs/op | 1.00x |
+| Durable-replay field update | 194.3 ns/op median | 32 B/op, 2 allocs/op | 1.45x faster |
+
+The command-payload benchmark reports 28 raw tuple bytes, 89 JSON bytes for
+`TUPLESET`, and 202 JSON bytes for the three-operation `TUPLEUPDATE` fixture:
+`update-over-set=2.270`. This is a measured bandwidth regression for a small
+tuple with many operations. Field updates reduce transferred data only when
+the changed fields and operation metadata are smaller than the complete tuple;
+base64 and JSON metadata remain part of the public JSON transport cost.

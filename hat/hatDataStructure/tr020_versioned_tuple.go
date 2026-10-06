@@ -112,6 +112,22 @@ func (tuple VersionedTuple) ApplyUpdates(format TupleFormat, updates []TupleFiel
 	return VersionedTuple{version: tuple.version, tuple: updated}, nil
 }
 
+// ApplyFieldUpdates applies a previously validated field-operation batch while
+// retaining the tuple's schema version. Use ApplyUpdates when a full
+// TupleFormat is available; this method is for durable replay, where the
+// versioned tuple carries the format identity but the replay stream need not
+// carry the complete schema definition.
+func (tuple VersionedTuple) ApplyFieldUpdates(updates []TupleFieldUpdate) (VersionedTuple, error) {
+	if tuple.version == 0 {
+		return VersionedTuple{}, ErrVersionedTupleInvalid
+	}
+	updated, err := tuple.tuple.ApplyUpdates(updates)
+	if err != nil {
+		return VersionedTuple{}, err
+	}
+	return VersionedTuple{version: tuple.version, tuple: updated}, nil
+}
+
 // MarshalVersionedTuple encodes a bounded HTV1 envelope. Each field is
 // represented by a uvarint length plus one followed by bytes; zero denotes
 // SQL NULL, preserving the distinction between NULL and an empty field.

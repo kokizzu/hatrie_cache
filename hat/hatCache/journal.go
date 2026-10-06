@@ -3,6 +3,7 @@ package hatCache
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -2483,6 +2484,18 @@ func commandShouldJournal(request CacheCommandRequest) bool {
 	}
 
 	switch command {
+	case "TUPLESET":
+		if request.TTLSeconds != nil || request.UnixSeconds != nil {
+			return false
+		}
+		_, err := tupleCommandPayload(request)
+		return err == nil
+	case "TUPLEUPDATE":
+		if request.TTLSeconds != nil || request.UnixSeconds != nil {
+			return false
+		}
+		_, err := tupleCommandFieldUpdates(request.Values)
+		return err == nil
 	case "SET", "SETSTR":
 		response, ok := validateOptionalCommandExpiration(request.TTLSeconds, request.UnixSeconds)
 		return !ok || response.OK
@@ -2651,6 +2664,12 @@ func normalizeJournalRequest(request CacheCommandRequest, now time.Time) CacheCo
 	case "EXPIRE":
 		out.Command = "EXPIREAT"
 		normalizeRelativeTTL(&out, now)
+	case "TUPLESET":
+		out.Command = command
+		if payload, err := tupleCommandPayload(request); err == nil {
+			out.Value = base64.StdEncoding.EncodeToString(payload)
+			out.BinaryValue = nil
+		}
 	default:
 		out.Command = command
 	}

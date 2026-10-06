@@ -22931,3 +22931,33 @@ verify-config-watch-index:
 .PHONY: stage-config-watch-index
 stage-config-watch-index:
 	bash scripts/stage-config-watch-index.sh
+codex-tu19-test-ds:
+	@bash ./scripts/test-tu19-ds.sh
+
+codex-tu19-test-cache:
+	@bash ./scripts/test-tu19-cache.sh
+
+.PHONY: codex-tu19-format
+codex-tu19-format:
+	bash scripts/format-tu19.sh
+.PHONY: codex-tu19-benchmark
+codex-tu19-benchmark:
+	bash scripts/benchmark-tu19.sh
+.PHONY: codex-tu19-package
+codex-tu19-package:
+	bash scripts/test-tu19-package.sh
+
+.PHONY: codex-tu19-race
+codex-tu19-race:
+	bash scripts/race-tu19.sh
+
+.PHONY: codex-tu19-vet
+codex-tu19-vet:
+	bash scripts/vet-tu19.sh
+
+.PHONY: codex-tu19-status
+codex-tu19-status:
+	bash scripts/status-tu19.sh
+.PHONY: codex-tu19-ship
+codex-tu19-ship:
+	bash scripts/ship-tu19.sh

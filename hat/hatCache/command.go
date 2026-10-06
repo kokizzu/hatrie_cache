@@ -170,6 +170,12 @@ func (ht *HatTrie) executeCommand(request CacheCommandRequest) CacheCommandRespo
 	}
 
 	switch command {
+	case "TUPLEGET":
+		return executeTupleGetCommand(ht, key)
+	case "TUPLESET":
+		return executeTupleSetCommand(ht, key, request)
+	case "TUPLEUPDATE":
+		return executeTupleUpdateCommand(ht, key, request)
 	case "GET", "GETSTR":
 		value, ok, err := ht.commandValue(key)
 		if err != nil {

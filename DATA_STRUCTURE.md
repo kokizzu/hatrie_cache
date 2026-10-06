@@ -170,6 +170,32 @@ Input:
 Output: `COUNTRB` is `"2"`; prefix contains the `user:7` entry; the Fenwick
 range result is `"7"` for this single update.
 
+## Versioned tuples
+
+| Data structure | Commands | Input | Output |
+| --- | --- | --- | --- |
+| Versioned tuple | `TUPLESET`, `TUPLEGET`, `TUPLEUPDATE` | `TUPLESET` takes marshaled versioned-tuple bytes as `BinaryValue` or base64 `value`; `TUPLEUPDATE` takes bounded field operations in `values`. | `TUPLEGET` returns base64 tuple bytes; updates are atomic and journal-replayable. |
+
+`TUPLEUPDATE` supports `set`, `splice`, and `add_int64`. Field indexes must be
+unique within a batch; `add_int64` uses signed big-endian int64 bytes. The
+batch is limited to 4096 operations and rejects malformed bytes, overflow,
+unknown kinds, and TTL options.
+
+Input:
+
+```json
+{"command":"TUPLESET","key":"order:1","value":"<base64 tuple bytes>"}
+{"command":"TUPLEUPDATE","key":"order:1","values":[
+  {"index":0,"kind":"add_int64","delta":5},
+  {"index":1,"kind":"set","value":"YWZ0ZXI="}
+]}
+{"command":"TUPLEGET","key":"order:1"}
+```
+
+Output: `TUPLEGET` returns `{"ok":true,"message":"ok","value":"<base64 tuple bytes>"}`.
+The complete command contract and replay compatibility rules are in
+[TU019_DURABLE_TUPLE_FIELD_JOURNAL.md](TU019_DURABLE_TUPLE_FIELD_JOURNAL.md).
+
 ## Command-by-command state transitions
 
 This is the practical manual for a first-time user. `∅` means the key does not
@@ -211,6 +237,14 @@ an existing TTL, and returns `value:"0"` without changing state on a mismatch.
 `SET`, `SETINT`, and every `CREATE*` command replace a live
 value of another type at the same key. `INC` rejects non-counters and 32-bit
 overflow. A positive `ttl_seconds` is required for `*X` and `EXPIRE`.
+
+### Versioned tuples
+
+| Command | Before state | Request | Reply | After state |
+| --- | --- | --- | --- | --- |
+| `TUPLESET` | `order:1=∅` | `{"key":"order:1","value":"<base64 tuple bytes>"}` | `stored versioned tuple` | `order:1=<versioned tuple>` |
+| `TUPLEGET` | `order:1=<versioned tuple>` | `{"key":"order:1"}` | `value:"<base64 tuple bytes>"` | unchanged |
+| `TUPLEUPDATE` | `order:1=<versioned tuple>` | `{"key":"order:1","values":[{"index":0,"kind":"add_int64","delta":5}]}` | `updated versioned tuple` | field 0 is increased by 5 |
 
 ### Map, deque, set, and priority queue
 
