@@ -39458,3 +39458,21 @@ resolver path includes SQL interface conversion and vectorized batch dispatch.
 The resolver is explicit and default-off; the overhead is only paid by callers
 that install the SQL adapter. Run `make codex-tu04-sql-runtime-benchmark` to
 reproduce the focused measurements.
+
+## CH-U29 Namespace Tier Lifecycle
+
+Five `-benchmem` samples were measured on an AMD Ryzen 9 5950X, linux/amd64.
+The workload plans 64 parts and produces 62 moves. The direct path is the
+existing `StorageTierPolicy.PlanStorageTierMoves`; the CH-U29 path derives ages
+from lifecycle timestamps and performs a namespace policy lookup first.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Relative |
+| --- | ---: | ---: | ---: | --- |
+| Existing direct tier planner | 6,679 | 8,872 | 4 | baseline |
+| CH-U29 namespace lifecycle planner | 8,325 | 11,560 | 5 | 1.25x CPU, +30.3% bytes, +1 alloc |
+| Existing single tier selection | 12.85 | 0 | 0 | unchanged control |
+
+The namespace adapter is opt-in and deliberately does not alter the existing
+direct planner or selection path. Its measured cost is the namespace lookup,
+timestamp-to-age conversion, and temporary lifecycle-part slice. See
+[CHU29_NAMESPACE_TIER_LIFECYCLE.md](CHU29_NAMESPACE_TIER_LIFECYCLE.md).
