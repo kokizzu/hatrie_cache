@@ -81,3 +81,18 @@ func BenchmarkTU06UpsertStringWritableGate(b *testing.B) {
 		}
 	}
 }
+
+func TestReplicaReadOnlyGatePreservesClosedCleanerState(t *testing.T) {
+	trie := CreateHatTrie()
+	gate := hatReplication.NewReplicaReadOnlyGate()
+	trie.SetReplicaReadOnlyGate(gate)
+	gate.SetReadOnly("replica maintenance")
+	trie.Destroy()
+
+	if trie.vacuumExpiredIfOpen() {
+		t.Fatal("vacuumExpiredIfOpen() = true after destroy, want false")
+	}
+	if trie.vacuumExpiredOnMemoryPressureIfOpen(1) {
+		t.Fatal("vacuumExpiredOnMemoryPressureIfOpen() = true after destroy, want false")
+	}
+}

@@ -4552,9 +4552,6 @@ func (ht *HatTrie) StartExpirationCleanerContext(ctx context.Context, interval t
 }
 
 func (ht *HatTrie) vacuumExpiredIfOpen() bool {
-	if ht.replicaWriteError() != nil {
-		return true
-	}
 	if partitions := ht.localPartitionSet(); partitions != nil {
 		results, _ := runLocalPartitionTasks(partitions, func(child *HatTrie) (bool, error) {
 			return child.vacuumExpiredIfOpen(), nil
@@ -4571,6 +4568,9 @@ func (ht *HatTrie) vacuumExpiredIfOpen() bool {
 
 	if ht.root == nil {
 		return false
+	}
+	if ht.replicaWriteError() != nil {
+		return true
 	}
 	ht.vacuumExpiredLocked()
 	return true
@@ -4676,6 +4676,9 @@ func (ht *HatTrie) vacuumExpiredOnMemoryPressureIfOpen(maxAllocBytes uint64) boo
 		return false
 	}
 	if mem.Alloc < maxAllocBytes {
+		return true
+	}
+	if ht.replicaWriteError() != nil {
 		return true
 	}
 	ht.vacuumExpiredLocked()
