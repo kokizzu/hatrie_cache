@@ -32580,3 +32580,29 @@ Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
 The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
+
+## M-G14 Sink Delivery Retry Queue
+
+Commands:
+
+```sh
+make benchmark-mg14-baseline
+make benchmark-mg14
+```
+
+Five `-count=5` samples on Linux/amd64, AMD Ryzen 9 5950X. The baseline is
+the existing single-sink `VisibilityQueue` path; it does not include the
+per-sink map, synchronization, lease fencing, attempt accounting, or
+dead-letter retention supplied by `SinkRetryQueue`.
+
+| Workload | Existing primitive median ns/op | `SinkRetryQueue` median ns/op | CPU cost | Existing B/op | Queue B/op | Existing allocs/op | Queue allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Lease + ack | 89.39 | 227.0 | 2.54x slower | 0 | 0 | 0 | 0 |
+| Lease + retry | 86.72 | 209.2 | 2.41x slower | 0 | 0 | 0 | 0 |
+
+The queue is therefore an operational correctness feature, not a faster
+replacement for the bare primitive. Its memory is bounded by configured
+capacity, dead-letter retention, active lease payloads, and one state entry
+per sink; no steady-state heap allocations were observed in either measured
+hot path. See [MG14_SINK_DELIVERY_RETRY_QUEUE.md](MG14_SINK_DELIVERY_RETRY_QUEUE.md)
+for defaults, recovery boundaries, and integration guidance.

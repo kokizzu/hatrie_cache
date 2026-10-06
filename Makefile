@@ -21632,6 +21632,54 @@ push-cleanup-tooling:
 	bash ./scripts/push-cleanup-tooling.sh
 # END safe test temporary cleanup
 
+.PHONY: test-mg14
+test-mg14:
+	bash scripts/mg14-test.sh
+
+.PHONY: benchmark-mg14-baseline
+benchmark-mg14-baseline:
+	bash scripts/mg14-benchmark-baseline.sh
+
+.PHONY: format-mg14
+format-mg14:
+	bash scripts/mg14-format.sh
+
+.PHONY: benchmark-mg14
+benchmark-mg14:
+	bash scripts/mg14-benchmark.sh
+
+.PHONY: race-mg14
+race-mg14:
+	bash scripts/mg14-race.sh
+
+.PHONY: vet-mg14
+vet-mg14:
+	bash scripts/mg14-vet.sh
+
+.PHONY: test-mg14-package
+test-mg14-package:
+	bash scripts/mg14-package-test.sh
+
+.PHONY: verify-mg14-docs
+verify-mg14-docs:
+	bash scripts/mg14-doc-verify.sh
+
+.PHONY: stage-mg14
+stage-mg14:
+	bash scripts/mg14-stage.sh
+
+.PHONY: verify-stage-mg14
+verify-stage-mg14:
+	bash scripts/mg14-stage-verify.sh
+
+.PHONY: commit-mg14
+commit-mg14:
+	bash scripts/mg14-commit.sh
+
+.PHONY: push-mg14
+push-mg14:
+	bash scripts/mg14-push.sh
+
 .PHONY: test
 test:
 	bash ./scripts/test-all.sh

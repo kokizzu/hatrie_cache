@@ -250,6 +250,7 @@ security guidance before exposing it on a network.
 - Kafka table source batches with durable partition checkpoints, replay markers, snapshot/restore, and post-apply consumer commits: [CH046_KAFKA_TABLE_SOURCE.md](CH046_KAFKA_TABLE_SOURCE.md)
 - Atomic SQL source transaction grouping: [SQL_SOURCE_TRANSACTION_GROUPING.md](SQL_SOURCE_TRANSACTION_GROUPING.md)
 - SQL sink progress and acknowledged frontiers: [SQL_SINK_PROGRESS.md](SQL_SINK_PROGRESS.md)
+- Materialize-style bounded per-sink delivery retries with lease fencing and poison replay: [MG14_SINK_DELIVERY_RETRY_QUEUE.md](MG14_SINK_DELIVERY_RETRY_QUEUE.md)
 - Exactly-once sink idempotency keys and durable checkpoints: [MU018_EXACTLY_ONCE_SINK.md](MU018_EXACTLY_ONCE_SINK.md)
 - Materialize-style bounded sink delivery audit history: [MZ023_SINK_DELIVERY_AUDIT.md](MZ023_SINK_DELIVERY_AUDIT.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-23-sink-delivery-audit)
 - Materialize-style frontier-aware lookup-join caching: [MZ030_LOOKUP_JOIN_CACHE.md](MZ030_LOOKUP_JOIN_CACHE.md), with measurements in [BENCHMARK.md](BENCHMARK.md#mz-30-frontier-aware-lookup-join-cache)
