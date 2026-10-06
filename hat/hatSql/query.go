@@ -190,7 +190,11 @@ const MaxSQLOperatorYieldEvery = 1 << 20
 // SQLQueryOptions bounds one query. Zero uses the safe default or disables an
 // optional byte/work budget; Timeout derives a deadline from ctx.
 type SQLQueryOptions struct {
-	MaxRows int
+	// WorkloadPriority influences namespace admission when a governor is used.
+	// Higher values are preferred while queued; zero preserves FIFO behavior.
+	// It is a scheduling hint, not a resource-limit bypass.
+	WorkloadPriority int
+	MaxRows          int
 	// MaxIntermediateRows tightens the row bound applied to query stages such
 	// as joins, array joins, and streamed operators. Zero keeps the existing
 	// MaxRows/default behavior.

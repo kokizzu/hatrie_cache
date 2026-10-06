@@ -516,8 +516,14 @@ func (governor *NamespaceQueryGovernor) Execute(ctx context.Context, namespace, 
 	limits := governor.limitsFor(namespace)
 	gate := governor.gateFor(namespace, limits)
 	if gate != nil {
-		if err := gate.acquire(ctx); err != nil {
-			return SQLQueryResult{}, err
+		var acquireErr error
+		if options.WorkloadPriority == 0 {
+			acquireErr = gate.acquire(ctx)
+		} else {
+			acquireErr = gate.acquireWithPriority(ctx, options.WorkloadPriority)
+		}
+		if acquireErr != nil {
+			return SQLQueryResult{}, acquireErr
 		}
 		defer gate.release()
 	}
@@ -581,21 +587,28 @@ func (quota *namespaceQueryQuota) allow(now time.Time) bool {
 	return true
 }
 
-// namespaceQueryGate bounds one namespace while admitting waiters in arrival
-// order. A canceled waiter is removed before it can consume a released slot.
+// namespaceQueryGate bounds one namespace. The default path admits waiters in
+// arrival order; the optional priority path uses aging so a continuously busy
+// namespace cannot starve an older low-priority waiter.
 type namespaceQueryGate struct {
-	mu        sync.Mutex
-	capacity  int
-	maxQueued int
-	running   int
-	waiters   []*namespaceQueryWaiter
+	mu           sync.Mutex
+	capacity     int
+	maxQueued    int
+	running      int
+	waiters      []*namespaceQueryWaiter
+	nextSequence uint64
 }
 
 type namespaceQueryWaiter struct {
 	ready     chan struct{}
 	granted   bool
 	cancelled bool
+	priority  int
+	skipped   uint64
+	sequence  uint64
 }
+
+const maxNamespaceQueryPriority = 1 << 20
 
 func newNamespaceQueryGate(capacity int, maxQueued ...int) *namespaceQueryGate {
 	queueLimit := 0
@@ -619,7 +632,49 @@ func (gate *namespaceQueryGate) acquire(ctx context.Context) error {
 		gate.mu.Unlock()
 		return ErrNamespaceQueryQueueFull
 	}
-	waiter := &namespaceQueryWaiter{ready: make(chan struct{})}
+	waiter := &namespaceQueryWaiter{ready: make(chan struct{}), sequence: gate.nextSequence}
+	gate.nextSequence++
+	gate.waiters = append(gate.waiters, waiter)
+	gate.mu.Unlock()
+
+	select {
+	case <-waiter.ready:
+		if err := ctx.Err(); err != nil {
+			gate.release()
+			return err
+		}
+		return nil
+	case <-ctx.Done():
+		gate.mu.Lock()
+		if !waiter.granted {
+			waiter.cancelled = true
+			gate.removeWaiterLocked(waiter)
+			gate.mu.Unlock()
+			return ctx.Err()
+		}
+		gate.mu.Unlock()
+		gate.release()
+		return ctx.Err()
+	}
+}
+
+func (gate *namespaceQueryGate) acquireWithPriority(ctx context.Context, priority int) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	priority = normalizeNamespaceQueryPriority(priority)
+	gate.mu.Lock()
+	if gate.running < gate.capacity && len(gate.waiters) == 0 {
+		gate.running++
+		gate.mu.Unlock()
+		return nil
+	}
+	if gate.maxQueued > 0 && len(gate.waiters) >= gate.maxQueued {
+		gate.mu.Unlock()
+		return ErrNamespaceQueryQueueFull
+	}
+	waiter := &namespaceQueryWaiter{ready: make(chan struct{}), priority: priority, sequence: gate.nextSequence}
+	gate.nextSequence++
 	gate.waiters = append(gate.waiters, waiter)
 	gate.mu.Unlock()
 
@@ -647,18 +702,55 @@ func (gate *namespaceQueryGate) acquire(ctx context.Context) error {
 func (gate *namespaceQueryGate) release() {
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
-	for len(gate.waiters) > 0 {
-		waiter := gate.waiters[0]
-		gate.waiters[0] = nil
-		gate.waiters = gate.waiters[1:]
-		if waiter.cancelled {
-			continue
-		}
+	waiter := gate.nextWaiterLocked()
+	if waiter != nil {
 		waiter.granted = true
 		close(waiter.ready)
 		return
 	}
 	gate.running--
+}
+
+func (gate *namespaceQueryGate) nextWaiterLocked() *namespaceQueryWaiter {
+	active := gate.waiters[:0]
+	for _, waiter := range gate.waiters {
+		if waiter != nil && !waiter.cancelled {
+			active = append(active, waiter)
+		}
+	}
+	gate.waiters = active
+	if len(gate.waiters) == 0 {
+		return nil
+	}
+	bestIndex := 0
+	bestScore := int64(gate.waiters[0].priority) + int64(gate.waiters[0].skipped)
+	for index := 1; index < len(gate.waiters); index++ {
+		waiter := gate.waiters[index]
+		score := int64(waiter.priority) + int64(waiter.skipped)
+		if score > bestScore || score == bestScore && waiter.sequence < gate.waiters[bestIndex].sequence {
+			bestIndex, bestScore = index, score
+		}
+	}
+	selected := gate.waiters[bestIndex]
+	for index, waiter := range gate.waiters {
+		if index != bestIndex {
+			waiter.skipped++
+		}
+	}
+	copy(gate.waiters[bestIndex:], gate.waiters[bestIndex+1:])
+	gate.waiters[len(gate.waiters)-1] = nil
+	gate.waiters = gate.waiters[:len(gate.waiters)-1]
+	return selected
+}
+
+func normalizeNamespaceQueryPriority(priority int) int {
+	if priority > maxNamespaceQueryPriority {
+		return maxNamespaceQueryPriority
+	}
+	if priority < -maxNamespaceQueryPriority {
+		return -maxNamespaceQueryPriority
+	}
+	return priority
 }
 
 func (gate *namespaceQueryGate) removeWaiterLocked(target *namespaceQueryWaiter) {

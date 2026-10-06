@@ -1,5 +1,27 @@
 # Benchmark
 
+## CH-U39 Workload Admission Priorities
+
+The namespace admission benchmark measured the existing FIFO control and the
+new opt-in priority path on an AMD Ryzen 9 5950X. Five samples were collected
+per case; every case used `0 B/op` and `0 allocs/op`.
+
+| Case | Median ns/op | Relative to same-run control |
+| --- | ---: | ---: |
+| Pre-feature clean FIFO run | 8.591 | 0.89x |
+| Same-run FIFO control | 9.621 | 1.00x |
+| `WorkloadPriority=0` | 9.627 | 1.00x |
+| `WorkloadPriority=10` | 10.44 | 1.09x |
+| Priority selection, 2 waiters | 15.78 | 1.64x |
+| Priority selection, 8 waiters | 34.68 | 3.60x |
+| Priority selection, 64 waiters | 230.2 | 23.93x |
+
+The priority selector is an O(waiters) scan with aging and no allocation. The
+zero-priority path is effectively unchanged from the FIFO control. The feature
+is a fairness capability under contention, not a raw throughput optimization.
+See [CHU39_WORKLOAD_PRIORITY.md](CHU39_WORKLOAD_PRIORITY.md) for raw samples,
+the scheduling contract, and benchmark commands.
+
 ## CH-U49 Skip-Index EXPLAIN Diagnostics
 
 This paired clean-worktree benchmark compares the pre-CH-U49 implementation
