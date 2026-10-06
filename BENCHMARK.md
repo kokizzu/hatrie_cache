@@ -32595,16 +32595,16 @@ same four string keys through `FunctionalMultikeyIndex`.
 
 | Workload | Baseline median | Candidate median | Improvement |
 | --- | ---: | ---: | ---: |
-| Steady upsert | 127.3 ns/op, 64 B/op, 1 alloc/op | 91.07 ns/op, 64 B/op, 1 alloc/op | 1.40x faster |
-| Build 10,000 rows | 4,646,924 ns/op, 2,999,132 B/op, 18,404 allocs/op | 4,160,671 ns/op, 2,999,133 B/op, 18,404 allocs/op | 1.12x faster, allocation-neutral |
+| Steady upsert | 133.2 ns/op, 64 B/op, 1 alloc/op | 93.83 ns/op, 64 B/op, 1 alloc/op | 1.42x faster |
+| Build 10,000 rows | 4,785,386 ns/op, 2,999,132 B/op, 18,404 allocs/op | 4,355,862 ns/op, 2,999,133 B/op, 18,404 allocs/op | 1.10x faster, allocation-neutral |
 
 Raw samples:
 
 ```text
-BenchmarkTU23BaselineUpsert: 126.4, 127.3, 126.1, 131.5, 130.1 ns/op
-BenchmarkTU23CandidateUpsert: 90.49, 91.07, 90.66, 91.34, 91.17 ns/op
-BenchmarkTU23BaselineBuild10000: 4.495568, 4.646924, 4.658944, 4.588183, 4.672716 ms/op
-BenchmarkTU23CandidateBuild10000: 4.050207, 4.147414, 4.163414, 4.203848, 4.160671 ms/op
+BenchmarkTU23BaselineUpsert: 133.9, 132.2, 134.7, 131.8, 133.2 ns/op
+BenchmarkTU23CandidateUpsert: 93.83, 94.08, 93.83, 94.69, 93.75 ns/op
+BenchmarkTU23BaselineBuild10000: 4.778707, 4.845788, 4.744967, 4.786488, 4.785386 ms/op
+BenchmarkTU23CandidateBuild10000: 4.355862, 4.398024, 4.420382, 4.351006, 4.290361 ms/op
 ```
 
 The candidate is opt-in and keeps existing string-index defaults unchanged. See [TU23_FUNCTIONAL_MULTIKEY.md](TU23_FUNCTIONAL_MULTIKEY.md).

@@ -46,8 +46,8 @@ keys per row and 10,000 prepared rows.
 
 | Workload | Baseline median | Candidate median | Improvement |
 | --- | ---: | ---: | ---: |
-| Steady upsert | 127.3 ns/op, 64 B/op, 1 alloc/op | 91.07 ns/op, 64 B/op, 1 alloc/op | 1.40x faster |
-| Build 10,000 rows | 4,646,924 ns/op, 2,999,132 B/op, 18,404 allocs/op | 4,160,671 ns/op, 2,999,133 B/op, 18,404 allocs/op | 1.12x faster, allocation-neutral |
+| Steady upsert | 133.2 ns/op, 64 B/op, 1 alloc/op | 93.83 ns/op, 64 B/op, 1 alloc/op | 1.42x faster |
+| Build 10,000 rows | 4,785,386 ns/op, 2,999,132 B/op, 18,404 allocs/op | 4,355,862 ns/op, 2,999,133 B/op, 18,404 allocs/op | 1.10x faster, allocation-neutral |
 
 Run the permanent benchmark with `make benchmark-tu23-functional-multikey`.
 Raw samples are recorded in `BENCHMARK.md`.
