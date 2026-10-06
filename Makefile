@@ -22292,3 +22292,26 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+test-ch-g32:
+	bash scripts/test-ch-g32.sh
+
+benchmark-ch-g32-baseline:
+	bash scripts/benchmark-ch-g32-baseline.sh
+
+benchmark-ch-g32:
+	bash scripts/benchmark-ch-g32.sh
+
+race-ch-g32:
+	bash scripts/race-ch-g32.sh
+
+vet-ch-g32:
+	bash scripts/vet-ch-g32.sh
+
+commit-ch-g32:
+	bash scripts/commit-ch-g32.sh
+
+push-ch-g32:
+	bash scripts/push-ch-g32.sh
+
+format-ch-g32:
+	bash scripts/format-ch-g32.sh

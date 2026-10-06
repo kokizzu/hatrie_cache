@@ -28121,6 +28121,26 @@ enqueue work. The feature earns its cost only when those lifecycle guarantees
 replace ad-hoc maintenance scheduling; it should not replace a direct callback
 in a hot query loop. See [CHU12_BACKGROUND_INDEX_REBUILD_QUEUE.md](CHU12_BACKGROUND_INDEX_REBUILD_QUEUE.md).
 
+## CH-G32 Unified Asynchronous Maintenance Queue
+
+This opt-in control benchmark compares the existing index-only queue with the
+generic `SQLMaintenanceQueue` wrapper. Both paths create a bounded queue,
+enqueue one task, read its status, and close it. The run uses
+`make benchmark-ch-g32`, `-benchmem -benchtime=100ms -count=3`, and the same
+AMD Ryzen 9 5950X Linux/amd64 host.
+
+| Operation | Three raw samples (ns/op) | Median | B/op | Allocs/op | Relative latency |
+|---|---|---:|---:|---:|---:|
+| Existing index-only queue | 1,045, 1,119, 1,143 | 1,119 | 1,528 | 12 | `1.00x` |
+| Generic maintenance queue | 1,310, 1,270, 1,273 | 1,273 | 1,560 | 14 | `1.14x` |
+
+The generic queue pays a small opt-in wrapper cost for maintenance-kind
+metadata and status conversion. The existing index-only queue keeps its
+original footprint and all workers remain disabled by default. This feature
+adds scheduling, cancellation, progress, and bounded history; it is not a
+hot-path query optimization. See
+[CHG32_UNIFIED_MAINTENANCE_QUEUE.md](CHG32_UNIFIED_MAINTENANCE_QUEUE.md).
+
 <a id="tt-011-point-in-time-snapshot-restore"></a>
 ## TT-011 Point-in-Time Snapshot Restore
 
