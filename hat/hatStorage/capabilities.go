@@ -51,11 +51,12 @@ type Engine interface {
 
 // Inspection is a portable store report suitable for operator APIs.
 type Inspection struct {
-	Backend      Backend      `json:"backend"`
-	Path         string       `json:"path"`
-	Format       Format       `json:"format"`
-	Capabilities []Capability `json:"capabilities"`
-	Properties   Properties   `json:"properties"`
+	Backend      Backend       `json:"backend"`
+	Profile      EngineProfile `json:"profile"`
+	Path         string        `json:"path"`
+	Format       Format        `json:"format"`
+	Capabilities []Capability  `json:"capabilities"`
+	Properties   Properties    `json:"properties"`
 }
 
 // Supports reports whether the inspected store supports capability.
@@ -101,12 +102,17 @@ func Inspect(store Inspector) (Inspection, error) {
 	if path == "" {
 		return Inspection{}, fmt.Errorf("storage path is required")
 	}
+	profile, err := ProfileForBackend(backend)
+	if err != nil {
+		return Inspection{}, err
+	}
 	properties, err := store.Properties()
 	if err != nil {
 		return Inspection{}, err
 	}
 	return Inspection{
 		Backend:      backend,
+		Profile:      profile,
 		Path:         path,
 		Format:       format,
 		Capabilities: Capabilities(backend),

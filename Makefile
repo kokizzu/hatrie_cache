@@ -22896,3 +22896,11 @@ codex-mu10-commit:
 
 codex-mu10-push:
 	bash scripts/codex-mu10-push.sh
+
+.PHONY: verify-tu17-engine-profile
+verify-tu17-engine-profile:
+	bash scripts/verify-tu17-engine-profile.sh
+
+.PHONY: codex-tu17-deliver
+codex-tu17-deliver:
+	bash scripts/codex-tu17-deliver.sh

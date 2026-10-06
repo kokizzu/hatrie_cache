@@ -2325,6 +2325,12 @@ backend marker at `<DB_PATH>.backend` preserves the selected engine, and an
 existing non-empty path without a marker is treated as legacy LevelDB. Use
 `DB_BACKEND=leveldb` for the previous engine or `DB_BACKEND=pebble` to require
 Pebble explicitly. A marker mismatch is rejected before opening the database;
+library users that need an explicit per-store or per-SQL-namespace choice can
+use `hatStorage.ProfileForBackend` with
+`hatCache.OpenPersistentStoreWithProfile`. The resulting
+`hatStorage.Inspect` report includes the selected engine's qualitative
+read/write, compaction, backup, and recovery tradeoffs. See
+[`TU017_SELECTABLE_LSM_ENGINE.md`](TU017_SELECTABLE_LSM_ENGINE.md).
 do not switch an existing directory in place. Migrate through a snapshot or
 backup/restore workflow and keep the adjacent marker in filesystem backups.
 

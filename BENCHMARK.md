@@ -1,5 +1,33 @@
 # Benchmark
 
+## T-U17 Selectable LSM Engine
+
+Environment: Linux/amd64, AMD Ryzen 9 5950X 16-Core Processor. This benchmark
+opens and closes a fresh Pebble store per iteration, so it measures explicit
+engine selection at startup rather than steady-state command performance.
+
+| Path | ns/op | B/op | allocs/op | Relative |
+| --- | ---: | ---: | ---: | ---: |
+| Existing explicit backend selector | 8,067,000 approximate median | 304,657 approximate median | 591 approximate median | 1.00x |
+| Explicit `pebble-lsm` profile | 8,128,000 approximate median | 303,966 approximate median | 590 approximate median | 1.01x |
+
+Raw samples from three `-benchtime=3s` runs:
+
+```text
+backend-selector: 7,999,916 ns/op, 304,657 B/op, 591 allocs/op
+backend-selector: 8,216,308 ns/op, 305,124 B/op, 592 allocs/op
+backend-selector: 7,981,908 ns/op, 303,349 B/op, 590 allocs/op
+explicit-profile: 8,128,396 ns/op, 303,966 B/op, 590 allocs/op
+explicit-profile: 9,870,063 ns/op, 303,868 B/op, 590 allocs/op
+explicit-profile: 8,020,177 ns/op, 303,517 B/op, 589 allocs/op
+```
+
+The profile path adds validation only during store open. It does not add a
+per-read or per-write branch, and its allocation/retained-byte results were
+slightly lower in this run. The filesystem-open variance is larger than the
+metadata validation itself, so this is documented as a selection feature, not
+as a throughput optimization.
+
 ## M-U10 Automatic Temporal-Join Compaction
 
 Environment: Linux/amd64, AMD Ryzen 9 5950X 16-Core Processor. The scheduler
