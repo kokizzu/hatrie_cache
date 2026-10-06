@@ -22311,3 +22311,22 @@ commit-tg16:
 	@bash scripts/run-tg16.sh commit
 push-tg16:
 	@bash scripts/run-tg16.sh push
+.PHONY: format-tg17 test-tg17 race-tg17 vet-tg17 benchmark-tg17 status-tg17 stage-tg17 commit-tg17 push-tg17
+format-tg17:
+	@bash scripts/run-tg17.sh format
+test-tg17:
+	@bash scripts/run-tg17.sh test
+race-tg17:
+	@bash scripts/run-tg17.sh race
+vet-tg17:
+	@bash scripts/run-tg17.sh vet
+benchmark-tg17:
+	@bash scripts/run-tg17.sh benchmark
+status-tg17:
+	@bash scripts/run-tg17.sh status
+stage-tg17:
+	@bash scripts/run-tg17.sh stage
+commit-tg17:
+	@bash scripts/run-tg17.sh commit
+push-tg17:
+	@bash scripts/run-tg17.sh push

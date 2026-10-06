@@ -735,3 +735,15 @@ Adopted as opt-in `hatStorage.CompactionDiagnostics`: bounded arrangement regist
 ## Materialize M-U41: Webhook Event Idempotency
 
 Adopted as opt-in `hatSql.WebhookEventDeduplicator`: bounded source/event-ID admission, payload-fingerprint conflict detection, expiry, deterministic CRC-protected HWE1 snapshots, and atomic restore. The caller owns application, durable storage, acknowledgement, and HTTP/webhook wiring; existing defaults remain unchanged. See [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md) and [BENCHMARK.md](BENCHMARK.md#m-u41-webhook-event-idempotency).
+
+## T-G17: Online Versioned Tuple-Space Upgrades
+
+T-G17 is adopted as the opt-in `hatDataStructure.VersionedTupleSpace`. It
+keeps recovery imports at their source version, upgrades older records in
+bounded caller-selected batches, lazily upgrades hot reads, normalizes writes
+to the active target, and uses generation checks before publishing a migrated
+copy. Failed callbacks leave the source record intact and preserve both the
+space-level and callback-level error causes. Scheduling, durability,
+replication, and distributed fencing remain caller-owned. See
+[TT017_VERSIONED_TUPLE_SPACE_UPGRADES.md](TT017_VERSIONED_TUPLE_SPACE_UPGRADES.md)
+and [BENCHMARK.md](BENCHMARK.md#tt-017-versioned-tuple-space-upgrades).
