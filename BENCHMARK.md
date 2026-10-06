@@ -33116,3 +33116,22 @@ admission in the current pointer-lease API. It should surround mutation
 operations at a safety boundary, not be placed inside an already protected
 inner loop. The implementation was retained because its value is blocking
 drain semantics and explicit origin policy, not raw speed.
+## T-U21 Versioned Space Migration Manager
+
+Command: `make codex-tu21-benchmark`
+
+Five runs on Linux/amd64, AMD Ryzen 9 5950X, `-benchtime=200ms -count=5 -cpu=1`.
+The baseline is the existing direct two-step `Preview` loop; manager apply uses
+the same schema changes with no-op callbacks, and snapshot measures the
+clone-safe recovery image after apply.
+
+| Workload | Raw ns/op samples | Median ns/op | B/op | allocs/op |
+| --- | --- | ---: | ---: | ---: |
+| Direct `Preview` sequence baseline | 1624, 1633, 1676, 1669, 1662 | 1662 | 2160 | 8 |
+| Manager `Apply` with no-op callbacks | 8068, 7655, 7567, 7437, 7446 | 7567 | 10992 | 74 |
+| Manager `Snapshot` | 1854, 1922, 1957, 1967, 1872 | 1922 | 3344 | 13 |
+
+Manager apply is 4.56x the baseline latency, 5.09x the bytes, and 9.25x the
+allocations for this tiny two-step example. That is control-plane overhead for
+precondition checking, progress, callback isolation, resumability, rollback,
+and snapshot-safe state; it must not be placed in a per-row execution path.

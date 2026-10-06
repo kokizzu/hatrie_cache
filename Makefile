@@ -22835,3 +22835,42 @@ commit-chg18-session-settings:
 	bash scripts/deliver-chg18-session-settings.sh commit
 push-chg18-session-settings:
 	bash scripts/deliver-chg18-session-settings.sh push
+.PHONY: codex-tu21-test
+codex-tu21-test:
+	bash scripts/codex-tu21-test.sh
+.PHONY: codex-tu21-format
+codex-tu21-format:
+	bash scripts/codex-tu21-format.sh
+.PHONY: codex-tu21-benchmark
+codex-tu21-benchmark:
+	bash scripts/codex-tu21-benchmark.sh
+.PHONY: codex-tu21-race
+codex-tu21-race:
+	bash scripts/codex-tu21-race.sh
+
+.PHONY: codex-tu21-vet
+codex-tu21-vet:
+	bash scripts/codex-tu21-vet.sh
+.PHONY: codex-tu21-package-test
+codex-tu21-package-test:
+	bash scripts/codex-tu21-package-test.sh
+
+.PHONY: codex-tu21-full-test
+codex-tu21-full-test:
+	bash scripts/codex-tu21-full-test.sh
+
+.PHONY: codex-tu21-status
+codex-tu21-status:
+	bash scripts/codex-tu21-status.sh
+
+.PHONY: codex-tu21-stage
+codex-tu21-stage:
+	bash scripts/codex-tu21-stage.sh
+
+.PHONY: codex-tu21-commit
+codex-tu21-commit:
+	bash scripts/codex-tu21-commit.sh
+
+.PHONY: codex-tu21-push
+codex-tu21-push:
+	bash scripts/codex-tu21-push.sh
