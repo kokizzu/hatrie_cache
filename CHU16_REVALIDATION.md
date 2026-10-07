@@ -72,9 +72,9 @@ B/op:  100752 100622 100613 100706 100724
 The candidate medians are 548.2 ns/op and 681 B/op for post-churn updates,
 and 89,571 ns/op, 100,706 B/op, 802 allocs/op for the transition. These runs
 do not reproduce the old documented speedup: steady-state medians are tied,
-and the transition is 8.7% slower with one extra allocation. Fixed-iteration
-comparison is pending because benchmark-selected iteration counts differ and
-affect cumulative allocation accounting. Do not claim a new performance win.
+and the transition is 8.7% slower with one extra allocation. The subsequent
+fixed-iteration comparison below controls differing work counts and cumulative
+allocation accounting. Do not claim a new performance win.
 
 The fixed-iteration comparison subsequently passed on both implementations:
 `make codex-chu16-compare-post-churn` uses 200,000 iterations, seven repeats,
@@ -106,13 +106,42 @@ and records the limitations of the earlier benchmark claim.
   `make codex-chu16-baseline-checkpoints` reproduced all three on unchanged
   `ea851bc4` in a separate detached worktree, with `-count=5`: both restore
   tests failed all five times and the nondeterminism test failed three times.
-  These failures predate this candidate. Wider compatibility remains
-  unverified; the SQL suite must not be reported as passing.
+  These failures predate this candidate. They were resolved in the later
+  checkpoint integration described below; other packages remain unverified.
 - Reviewed cleanup of this experiment's unused temporary artifacts.
 
-The delivery branch is based directly on existing implementation commit
-`2c0f8ad0`; it changes no production code. Its own
+The initial delivery commit `518d7dfa` is based directly on existing
+implementation commit `2c0f8ad0` and changes no production code. Its own
 `make race-chu16-adaptive-dictionary` and
 `make vet-chu16-adaptive-dictionary` both passed. The test and race targets
 now include explicit-dictionary precedence, which their previous expression
-omitted. Full-package failures above remain explicitly unresolved.
+omitted.
+
+## Existing checkpoint fix integrated
+
+A history audit found the existing published fix `4bce61ca` (2026-10-02).
+The dictionary branch lacked this fix even though several other published
+branches contained it. Aggregate group keys are generated lazily, so capture
+could serialize empty keys, reject its own checkpoint on restore, and produce
+unstable group ordering. The existing fix calls `aggregate.ensureGroupKeys()`
+before collecting checkpoint groups. It was reused unchanged, with provenance,
+as `4947f9b1`; no second implementation was developed.
+
+Before integration, the unchanged patch was applied in a detached worktree
+based on `518d7dfa`. Verification through the shared repository Makefile:
+
+- `make codex-checkpoint-revalidation-package`: full `hat/hatSql` suite passed
+  (4.389 seconds).
+- `make codex-checkpoint-revalidation-focused`: all aggregate arrangement
+  checkpoint tests passed ten repetitions (0.012 seconds).
+- `make codex-checkpoint-revalidation-race`: the same checkpoint tests passed
+  five repetitions under the race detector (1.052 seconds).
+
+Initial focused/race attempts encountered shared Go cache permission errors.
+A task-specific `GOCACHE` avoids that environmental issue. Two intermediate
+wrappers returned shell errors after successful Go output because the wrapper
+was edited while still running; those are not counted as successful targets.
+The focused result above is from a clean rerun of the stable wrapper.
+
+This resolves the three reproduced SQL failures on the delivery branch. It
+does not establish a dictionary speedup or verify unrelated packages.
