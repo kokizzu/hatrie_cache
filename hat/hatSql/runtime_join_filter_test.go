@@ -113,6 +113,116 @@ func TestRuntimeJoinBloomFilterPreservesSelectiveInnerJoinResults(t *testing.T) 
 	}
 }
 
+func TestRuntimeJoinBloomFilterPushesLeftOnlyWhere(t *testing.T) {
+	left := make([]hatSql.SQLRow, 0, 128)
+	for index := 0; index < 128; index++ {
+		left = append(left, hatSql.SQLRow{
+			"id": index,
+			"k":  fmt.Sprintf("key-%03d", index),
+		})
+	}
+	right := make([]hatSql.SQLRow, 0, 16)
+	for index := 0; index < 16; index++ {
+		right = append(right, hatSql.SQLRow{
+			"id": 1000 + index,
+			"k":  fmt.Sprintf("key-%03d", index),
+		})
+	}
+	resolver := &runtimeJoinFilterResolver{sources: map[string][]hatSql.SQLRow{
+		"left":  left,
+		"right": right,
+	}}
+	query := "FROM CACHE('left') AS l JOIN CACHE('right') AS r ON l.k = r.k WHERE l.id < 16 SELECT l.id, r.id AS right_id"
+
+	baseline, err := hatSql.ExecuteSQLQuery(query, resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filtered, err := hatSql.ExecuteSQLQueryContext(context.Background(), query, resolver, hatSql.QueryOptions{RuntimeJoinBloomFilter: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprintf("%#v", filtered.Rows) != fmt.Sprintf("%#v", baseline.Rows) {
+		t.Fatalf("filtered rows = %#v, baseline = %#v", filtered.Rows, baseline.Rows)
+	}
+	if len(filtered.Rows) != 16 {
+		t.Fatalf("filtered rows = %d, want 16", len(filtered.Rows))
+	}
+	plan, err := hatSql.ExecuteSQLQueryContext(context.Background(), "EXPLAIN ANALYZE "+query, resolver, hatSql.QueryOptions{RuntimeJoinBloomFilter: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasRuntimeJoinFilterStep(plan.Plan) {
+		t.Fatalf("filtered plan = %#v, want runtime join filter for left-only WHERE", plan.Plan)
+	}
+}
+
+func TestRuntimeJoinBloomFilterFallsBackForMixedWhere(t *testing.T) {
+	resolver := &runtimeJoinFilterResolver{sources: map[string][]hatSql.SQLRow{
+		"left":  {{"id": 1, "k": "found"}, {"id": 2, "k": "missing"}},
+		"right": {{"id": 11, "k": "found"}},
+	}}
+	query := "FROM CACHE('left') AS l JOIN CACHE('right') AS r ON l.k = r.k WHERE l.id > 0 AND r.id > 0 SELECT l.id, r.id AS right_id"
+	baseline, err := hatSql.ExecuteSQLQuery(query, resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filtered, err := hatSql.ExecuteSQLQueryContext(context.Background(), query, resolver, hatSql.QueryOptions{RuntimeJoinBloomFilter: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprintf("%#v", filtered.Rows) != fmt.Sprintf("%#v", baseline.Rows) {
+		t.Fatalf("filtered rows = %#v, baseline = %#v", filtered.Rows, baseline.Rows)
+	}
+	if hasRuntimeJoinFilterStep(filtered.Plan) {
+		t.Fatalf("mixed WHERE plan = %#v, runtime filter must fall back", filtered.Plan)
+	}
+}
+
+func TestRuntimeJoinBloomFilterPushesRightOnlyWhere(t *testing.T) {
+	left := make([]hatSql.SQLRow, 0, 128)
+	for index := 0; index < 128; index++ {
+		left = append(left, hatSql.SQLRow{
+			"id": index,
+			"k":  fmt.Sprintf("key-%03d", index),
+		})
+	}
+	right := make([]hatSql.SQLRow, 0, 16)
+	for index := 0; index < 16; index++ {
+		right = append(right, hatSql.SQLRow{
+			"id": 1000 + index,
+			"k":  fmt.Sprintf("key-%03d", index),
+		})
+	}
+	resolver := &runtimeJoinFilterResolver{sources: map[string][]hatSql.SQLRow{
+		"left":  left,
+		"right": right,
+	}}
+	query := "FROM CACHE('left') AS l JOIN CACHE('right') AS r ON l.k = r.k WHERE r.id < 1008 SELECT l.id, r.id AS right_id"
+
+	baseline, err := hatSql.ExecuteSQLQuery(query, resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filtered, err := hatSql.ExecuteSQLQueryContext(context.Background(), query, resolver, hatSql.QueryOptions{RuntimeJoinBloomFilter: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprintf("%#v", filtered.Rows) != fmt.Sprintf("%#v", baseline.Rows) {
+		t.Fatalf("filtered rows = %#v, baseline = %#v", filtered.Rows, baseline.Rows)
+	}
+	if len(filtered.Rows) != 8 {
+		t.Fatalf("filtered rows = %d, want 8", len(filtered.Rows))
+	}
+	plan, err := hatSql.ExecuteSQLQueryContext(context.Background(), "EXPLAIN ANALYZE "+query, resolver, hatSql.QueryOptions{RuntimeJoinBloomFilter: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasRuntimeJoinFilterStep(plan.Plan) {
+		t.Fatalf("right-only WHERE plan = %#v, want runtime join filter", plan.Plan)
+	}
+}
+
 func TestRuntimeJoinBloomFilterDoesNotChangeLeftJoinNullExtension(t *testing.T) {
 	resolver := &runtimeJoinFilterResolver{sources: map[string][]hatSql.SQLRow{
 		"left": {

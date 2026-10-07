@@ -32754,3 +32754,32 @@ Ryzen 9 5950X, linux/amd64.
 
 Raw output and the explicit index-memory tradeoff are recorded in
 [CHU44_SQL_UPPER_FUNCTIONAL_INDEX.md](CHU44_SQL_UPPER_FUNCTIONAL_INDEX.md).
+
+## CH-U14 Runtime Join Filter Predicate Pushdown
+
+Command:
+
+```sh
+make benchmark-chu14-runtime-filter
+```
+
+The existing runtime-filter mode was measured before and after adding
+side-local `WHERE` evaluation. The workload has 100,000 left rows, 512 right
+rows, and `WHERE r.id < 1000256`, leaving 256 right rows eligible. Five samples
+were collected on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Workload | Before ns/op | After ns/op | CPU improvement | Before B/op | After B/op | Heap improvement | Before allocs/op | After allocs/op | Allocation improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Runtime filter + right-only `WHERE` | 54,693,754 | 10,021,917 | 5.46x faster | 48,634,488 | 3,083,583 | 15.78x lower | 303,918 | 105,194 | 2.89x fewer |
+
+Raw samples:
+
+```text
+Before runtime_filter: 54693754 51870698 65773369 62163206 44633584 ns/op
+After runtime_filter:  9839053 10021917 10070852 9933090 10058308 ns/op
+Before: 48634408-48634628 B/op, 303914-303920 allocs/op
+After:  3083554-3083593 B/op, 105194 allocs/op
+```
+
+The full runtime-filter tradeoff, including selective, balanced, and hot-key
+workloads, is documented in [SQL_RUNTIME_JOIN_FILTER.md](SQL_RUNTIME_JOIN_FILTER.md).

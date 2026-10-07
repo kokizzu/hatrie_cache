@@ -14,9 +14,13 @@ func BenchmarkSQLRuntimeJoinFilter(b *testing.B) {
 		leftRows   int
 		rightRows  int
 		hotKey     bool
+		leftWhere  bool
+		rightWhere bool
 		resultRows int
 	}{
 		{name: "selective_100k_left_512_right", leftRows: 100000, rightRows: 512, resultRows: 512},
+		{name: "selective_where_100k_left_512_right", leftRows: 100000, rightRows: 512, leftWhere: true, resultRows: 512},
+		{name: "selective_right_where_100k_left_512_right", leftRows: 100000, rightRows: 512, rightWhere: true, resultRows: 256},
 		{name: "balanced_1k_left_1k_right", leftRows: 1024, rightRows: 1024, resultRows: 1024},
 		{name: "hot_key_100k_left_1_right", leftRows: 100000, rightRows: 1, hotKey: true, resultRows: 100000},
 	}
@@ -36,11 +40,18 @@ func benchmarkSQLRuntimeJoinFilter(b *testing.B, benchmark struct {
 	leftRows   int
 	rightRows  int
 	hotKey     bool
+	leftWhere  bool
+	rightWhere bool
 	resultRows int
 }, options hatSql.QueryOptions) {
 	b.Helper()
 	resolver := newRuntimeJoinFilterBenchmarkResolver(benchmark.leftRows, benchmark.rightRows, benchmark.hotKey)
 	query := "FROM CACHE('left') AS l JOIN CACHE('right') AS r ON l.k = r.k SELECT l.id, r.id AS right_id"
+	if benchmark.leftWhere {
+		query = "FROM CACHE('left') AS l JOIN CACHE('right') AS r ON l.k = r.k WHERE l.id < 512 SELECT l.id, r.id AS right_id"
+	} else if benchmark.rightWhere {
+		query = "FROM CACHE('left') AS l JOIN CACHE('right') AS r ON l.k = r.k WHERE r.id < 1000256 SELECT l.id, r.id AS right_id"
+	}
 	b.ReportAllocs()
 	for b.Loop() {
 		result, err := hatSql.ExecuteSQLQueryContext(context.Background(), query, resolver, options)

@@ -5078,7 +5078,11 @@ const sqlRuntimeJoinFilterFalsePositiveRate = 0.01
 // still in the resolver's streaming callback. The established materialized
 // executor remains authoritative for every other query shape.
 func sqlRuntimeJoinFilterStreamable(query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl) (bool, error) {
-	if query == nil || resolver == nil || control == nil || !control.options.RuntimeJoinBloomFilter || control.options.MaxJoinBytes > 0 || control.options.Workers > 0 || query.from == nil || query.sample != nil || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 1 || query.where.kind != "" || query.having.kind != "" || query.distinct || len(query.groupBy) != 0 || len(query.orderBy) != 0 || query.offset != 0 || query.limit >= 0 || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || sqlQueryHasSubqueryExpression(query) || query.indexHint.Mode != "" {
+	if query == nil || resolver == nil || control == nil || !control.options.RuntimeJoinBloomFilter || control.options.MaxJoinBytes > 0 || control.options.Workers > 0 || query.from == nil || query.sample != nil || len(query.ctes) != 0 || len(query.unions) != 0 || len(query.joins) != 1 || query.having.kind != "" || query.distinct || len(query.groupBy) != 0 || len(query.orderBy) != 0 || query.offset != 0 || query.limit >= 0 || sqlQueryHasAggregate(query) || sqlQueryHasWindow(query) || sqlQueryHasSubqueryExpression(query) || query.indexHint.Mode != "" {
+		return false, nil
+	}
+	whereLeft, whereRight := sqlRuntimeJoinFilterWhereSides(query)
+	if query.where.kind != "" && (!whereLeft && !whereRight || query.where.window != nil || sqlExprHasAggregate(query.where) || sqlExprHasCustomFunction(query.where, nil)) {
 		return false, nil
 	}
 	join := query.joins[0]
@@ -5117,6 +5121,15 @@ func sqlRuntimeJoinFilterStreamable(query *sqlQuery, resolver SQLSourceResolver,
 	return true, nil
 }
 
+func sqlRuntimeJoinFilterWhereSides(query *sqlQuery) (left, right bool) {
+	if query == nil || query.where.kind == "" || query.from == nil || len(query.joins) != 1 {
+		return false, false
+	}
+	left = sqlExprReferencesOnlyAlias(query.where, query.from.alias)
+	right = sqlExprReferencesOnlyAlias(query.where, query.joins[0].source.alias)
+	return left, right
+}
+
 // executeSQLRuntimeJoinFilter builds the smaller right-side hash table from a
 // stream, then streams the left side through a bounded Bloom filter. A Bloom
 // miss is only a work skip; all rows that pass it still use the exact hash
@@ -5142,6 +5155,8 @@ func executeSQLRuntimeJoinFilter(query *sqlQuery, resolver SQLSourceResolver, co
 	}
 
 	joinStarted := time.Now()
+	whereLeft, whereRight := sqlRuntimeJoinFilterWhereSides(query)
+	evaluationGroup := make([]sqlExecRow, 1)
 	rightBuckets := make(map[string]sqlExecRow)
 	rightDuplicates := make(map[string][]sqlExecRow)
 	rightRows := 0
@@ -5153,6 +5168,17 @@ func executeSQLRuntimeJoinFilter(query *sqlQuery, resolver SQLSourceResolver, co
 			return fmt.Errorf("SQL source %q exceeds the %d row limit", join.source.alias, maxRows)
 		}
 		rightRows++
+		if whereRight {
+			right := sqlExecRow{sources: map[string]SQLRow{join.source.alias: row}, order: []string{join.source.alias}}
+			evaluationGroup[0] = right
+			whereValue := evalSQLExpr(query.where, evaluationGroup, right)
+			if err := sqlExpressionError(whereValue); err != nil {
+				return err
+			}
+			if !sqlTruthy(whereValue) {
+				return nil
+			}
+		}
 		key, ok := sqlHashJoinKey(row[rightField])
 		if ok {
 			right := sqlExecRow{sources: map[string]SQLRow{join.source.alias: row}, order: []string{join.source.alias}}
@@ -5182,13 +5208,31 @@ func executeSQLRuntimeJoinFilter(query *sqlQuery, resolver SQLSourceResolver, co
 
 	columns := sqlColumns(query.selects)
 	result := SQLQueryResult{Columns: columns}
-	evaluationGroup := make([]sqlExecRow, 1)
+	var leftSources map[string]SQLRow
+	var leftOrder []string
+	if whereLeft {
+		leftSources = make(map[string]SQLRow, 1)
+		leftOrder = []string{query.from.alias}
+	}
 	leftRows, filterProbes, filterSkipped := 0, 0, 0
 	leftErr := streamSQLSourceRowsWithPartitionPredicates(ctx, *query.from, resolver, sqlQueryPartitionPredicates(query), func(row SQLRow) error {
 		if leftRows >= maxRows {
 			return fmt.Errorf("SQL source %q exceeds the %d row limit", query.from.alias, maxRows)
 		}
 		leftRows++
+		var left sqlExecRow
+		if whereLeft {
+			leftSources[query.from.alias] = row
+			left = sqlExecRow{sources: leftSources, order: leftOrder}
+			evaluationGroup[0] = left
+			whereValue := evalSQLExpr(query.where, evaluationGroup, left)
+			if err := sqlExpressionError(whereValue); err != nil {
+				return err
+			}
+			if !sqlTruthy(whereValue) {
+				return nil
+			}
+		}
 		key, ok := sqlHashJoinKey(row[leftField])
 		if !ok {
 			return nil
@@ -5204,7 +5248,9 @@ func executeSQLRuntimeJoinFilter(query *sqlQuery, resolver SQLSourceResolver, co
 		if !exists {
 			return nil
 		}
-		left := sqlExecRow{sources: map[string]SQLRow{query.from.alias: row}, order: []string{query.from.alias}}
+		if !whereLeft {
+			left = sqlExecRow{sources: map[string]SQLRow{query.from.alias: row}, order: []string{query.from.alias}}
+		}
 		duplicates := rightDuplicates[key]
 		for candidateIndex := -1; candidateIndex < len(duplicates); candidateIndex++ {
 			if candidateIndex >= 0 {

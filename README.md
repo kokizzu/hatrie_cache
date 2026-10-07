@@ -4771,3 +4771,14 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+
+## Runtime Join Filter Predicate Pushdown
+
+When `SQLQueryOptions.RuntimeJoinBloomFilter` is enabled, eligible direct
+`CACHE` inner-equality joins can evaluate a `WHERE` predicate that references
+only one join side while that side is streamed. This avoids inserting rejected
+right rows into the hash/Bloom state and avoids probing rejected left rows.
+Mixed-side predicates and unsupported query shapes fall back to the existing
+executor, and the option remains disabled by default. See
+[SQL_RUNTIME_JOIN_FILTER.md](SQL_RUNTIME_JOIN_FILTER.md) for the contract,
+correctness coverage, tradeoffs, and benchmark results.
