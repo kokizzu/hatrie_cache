@@ -22294,3 +22294,17 @@ push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
 bench-tu17-space-engine:
 	bash scripts/benchmark-tu17-space-engine.sh
+
+.PHONY: test-chu35-optimize-adapter race-chu35-optimize-adapter vet-chu35-optimize-adapter readme-chu35-optimize-adapter benchmark-chu35-optimize-adapter verify-chu35-optimize-adapter
+test-chu35-optimize-adapter:
+	bash scripts/run-chu35-optimize-adapter.sh test
+race-chu35-optimize-adapter:
+	bash scripts/run-chu35-optimize-adapter.sh race
+vet-chu35-optimize-adapter:
+	bash scripts/run-chu35-optimize-adapter.sh vet
+readme-chu35-optimize-adapter:
+	bash scripts/run-chu35-optimize-adapter.sh readme
+benchmark-chu35-optimize-adapter:
+	bash scripts/run-chu35-optimize-adapter.sh benchmark
+verify-chu35-optimize-adapter:
+	bash scripts/run-chu35-optimize-adapter.sh verify

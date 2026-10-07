@@ -12,15 +12,24 @@ adds a bounded control layer over the existing `CompactionScheduler`:
 - every admitted job has a numeric ID, attempt count, retry state, and a
   bounded error string;
 - successful status history is bounded and evicted oldest-first;
-- no background goroutine, HTTP route, SQL parser rule, filesystem path
-  interpretation, or default scheduler is introduced.
+- the optional `hatCache.MonitoringOptions` adapter exposes a strict
+  `POST /api/storage/optimize` route only when both a controller and a
+  caller-owned target resolver are injected;
+- no background goroutine, SQL parser rule, filesystem path interpretation,
+  or default scheduler is introduced.
 
-The last point is deliberate. The existing monitoring `/api/storage/compact`
-route already performs a synchronous backend-specific range compaction. A
-generic SQL or HTTP `OPTIMIZE` command would need a backend-owned target
-catalog, authorization policy, and lifecycle integration that this package
-cannot infer safely. Callers can expose the controller through their own
-authenticated operator surface.
+The route is deliberately opt-in. The resolver receives the authenticated
+request and must authorize the logical target, map it to a callback, and
+return a `hatStorage.CompactionRequest`; the monitoring package never
+interprets filesystem paths or storage-engine names. The request body is:
+
+```json
+{"target":"events/part-0001","priority":10,"estimated_bytes":33554432}
+```
+
+The route submits the request and synchronously drains the caller-owned
+controller, returning the job snapshot and bounded run counters. The existing
+monitoring `/api/storage/compact` route is unchanged.
 
 ## Example
 
@@ -66,14 +75,20 @@ isolates control-plane overhead and intentionally excludes real merge I/O.
 
 | Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op |
 | --- | --- | ---: | ---: | ---: |
-| Existing `CompactionScheduler` | 34,521; 29,589; 30,360; 37,445; 36,661 | 34,521 | 17,513 | 35 |
-| `CompactionController` | 162,499; 172,362; 153,163; 148,213; 150,976 | 153,163 | 39,453 | 193 |
+| Existing `CompactionScheduler` | 25,739; 25,916; 26,058; 26,250; 26,963 | 26,058 | 17,512 | 35 |
+| `CompactionController` | 95,168; 95,103; 96,366; 95,222; 95,860 | 95,222 | 39,446 | 193 |
 
-The controller costs 4.44x CPU, 2.25x measured heap, and 5.51x allocations
+The controller costs 3.65x CPU, 2.25x measured heap, and 5.51x allocations
 on this empty-control benchmark. That is not an optimization of the hot
 scheduler path. It is an explicitly opt-in operator/control feature whose
 status and bounded-history guarantees account for the cost; direct scheduler
 callers retain the lower-overhead path.
+
+The HTTP adapter adds its own control-plane cost. Five `-benchmem` samples of
+the no-op request path measured 5,489; 5,534; 5,473; 5,846; and 5,766 ns/op,
+with a median of 5,534 ns/op, 8,384 B/op, and 45 allocs/op. This includes JSON
+decoding, request dispatch, resolver invocation, controller execution, and
+JSON encoding; it is not comparable to real merge I/O.
 
 ## Safety
 
@@ -86,10 +101,9 @@ truncates callback errors to 512 bytes.
 ## Verification
 
 ```text
-make test-chu35
-make test-chu35-package
-make race-chu35
-make vet-chu35
-make benchmark-chu35
-make verify-chu35
+make test-chu35-optimize-adapter
+make race-chu35-optimize-adapter
+make vet-chu35-optimize-adapter
+make benchmark-chu35-optimize-adapter
+make verify-chu35-optimize-adapter
 ```

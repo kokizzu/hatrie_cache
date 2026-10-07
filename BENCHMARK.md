@@ -32097,12 +32097,18 @@ compaction throughput claim.
 
 | Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
 | --- | --- | ---: | ---: | ---: | ---: |
-| Existing `CompactionScheduler` | 34,521; 29,589; 30,360; 37,445; 36,661 | 34,521 | 17,513 | 35 | 1.00x |
-| Opt-in `CompactionController` | 162,499; 172,362; 153,163; 148,213; 150,976 | 153,163 | 39,453 | 193 | 4.44x |
+| Existing `CompactionScheduler` | 25,739; 25,916; 26,058; 26,250; 26,963 | 26,058 | 17,512 | 35 | 1.00x |
+| Opt-in `CompactionController` | 95,168; 95,103; 96,366; 95,222; 95,860 | 95,222 | 39,446 | 193 | 3.65x |
 
 The controller is retained as an opt-in status/control capability, not as a
 replacement for the lower-overhead scheduler. Full semantics and safety
 boundaries are in [CHU35_OPTIMIZE_CONTROL.md](CHU35_OPTIMIZE_CONTROL.md).
+
+The optional HTTP adapter was measured separately with a no-op resolver and
+callback. Five samples were `5,489; 5,534; 5,473; 5,846; 5,766 ns/op`, with
+median `5,534 ns/op`, `8,384 B/op`, and `45 allocs/op`. This includes request
+JSON decoding and response encoding; it is an operator-path cost, not a merge
+throughput result.
 
 ## CH-U36 Stable SQL System Parts Catalog
 

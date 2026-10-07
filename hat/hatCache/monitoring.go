@@ -29,6 +29,7 @@ import (
 	"hatrie_cache/hat/hatReplication"
 	"hatrie_cache/hat/hatSchema"
 	"hatrie_cache/hat/hatSql"
+	"hatrie_cache/hat/hatStorage"
 	"hatrie_cache/hat/hatTrace"
 	"hatrie_cache/internal/jsonwire"
 )
@@ -100,6 +101,12 @@ type MonitoringOptions struct {
 	// non-positive value uses the 1 GiB default.
 	SQLRowBinaryImportMaxBytes int64
 	Metrics                    *APIMetrics
+	// OptimizeController enables the opt-in bounded optimize route when paired
+	// with OptimizeResolver. It is disabled by default.
+	OptimizeController *hatStorage.CompactionController
+	// OptimizeResolver validates a public target and supplies its caller-owned
+	// storage operation. The monitoring package never interprets target paths.
+	OptimizeResolver MonitoringOptimizeResolver
 	// SourceFrontier optionally exposes per-source progress in /metrics. It is
 	// disabled when nil for backward compatibility.
 	SourceFrontier *hatMetrics.SourceFrontierRegistry
@@ -194,12 +201,33 @@ type MonitoringHandler struct {
 	journalCursor         *commandJournalCursorCodec
 	journalCursorErr      error
 	storageMu             sync.Mutex
+	optimizeMu            sync.Mutex
 	storage               monitoringStorageState
 	sqlFunctions          *SQLFunctionRegistry
 	asyncCommandsMu       sync.Mutex
 	asyncCommands         map[string]monitoringAsyncCommandEntry
 	asyncCommandOrder     []string
 	slowCommands          *monitoringSlowCommandCapture
+}
+
+// MonitoringOptimizeRequest is the bounded public input for one opt-in
+// optimize request. The resolver remains responsible for authorization and
+// mapping the logical target to a storage operation.
+type MonitoringOptimizeRequest struct {
+	Target         string `json:"target"`
+	Priority       int    `json:"priority,omitempty"`
+	EstimatedBytes uint64 `json:"estimated_bytes,omitempty"`
+}
+
+// MonitoringOptimizeResolver turns an authenticated monitoring request into
+// a caller-owned compaction operation. Returning an error rejects the request
+// before it is admitted to the controller.
+type MonitoringOptimizeResolver func(context.Context, MonitoringOptimizeRequest) (hatStorage.CompactionRequest, error)
+
+type monitoringOptimizeResponse struct {
+	Accepted bool                     `json:"accepted"`
+	Job      hatStorage.CompactionJob `json:"job"`
+	Run      hatStorage.CompactionRun `json:"run"`
 }
 
 type monitoringSQLResolver struct {
@@ -675,6 +703,9 @@ func (handler *MonitoringHandler) Handler() http.Handler {
 	server.HandleFunc("/api/storage", handler.handleStorage)
 	server.HandleFunc("/api/storage/flush", handler.handleStorageFlush)
 	server.HandleFunc("/api/storage/compact", handler.handleStorageCompact)
+	if handler.options.OptimizeController != nil && handler.options.OptimizeResolver != nil {
+		server.HandleFunc("/api/storage/optimize", handler.handleStorageOptimize)
+	}
 	server.HandleFunc("/api/topology", handler.handleTopology)
 	server.HandleFunc("/api/election", handler.handleElection)
 	server.HandleFunc("/api/replication", handler.handleReplication)
@@ -3433,6 +3464,83 @@ func (handler *MonitoringHandler) handleStorageCompact(w http.ResponseWriter, r 
 	handler.recordStorageCompact(result)
 	handler.auditHTTP(r, AuditEvent{Action: "storage.compact", OK: true, Status: http.StatusOK, Details: map[string]interface{}{"store": result.Store, "start_key": result.StartKey, "limit_key": result.LimitKey, "duration_millis": result.DurationMillis}})
 	writeJSON(w, result)
+}
+
+func (handler *MonitoringHandler) handleStorageOptimize(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if requestContextDone(w, r) {
+		return
+	}
+	decoder, closeBody, bodyTooLarge, ok := monitoringJSONDecoder(w, r)
+	if !ok {
+		return
+	}
+	defer closeBody()
+	decoder.DisallowUnknownFields()
+	var request MonitoringOptimizeRequest
+	if err := decoder.Decode(&request); err != nil && !errors.Is(err, io.EOF) {
+		writeInvalidMonitoringRequest(w, err, bodyTooLarge(), "invalid storage optimize request")
+		return
+	} else if err == nil {
+		var extra struct{}
+		if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+			writeInvalidMonitoringRequest(w, err, bodyTooLarge(), "invalid storage optimize request")
+			return
+		}
+	}
+	if writeMonitoringRequestTooLarge(w, bodyTooLarge()) {
+		return
+	}
+	request.Target = strings.TrimSpace(request.Target)
+	if request.Target == "" {
+		writeJSONStatus(w, http.StatusBadRequest, commandError("optimize target is required"))
+		return
+	}
+	details := map[string]interface{}{"target": request.Target, "priority": request.Priority, "estimated_bytes": request.EstimatedBytes}
+	if requestContextDone(w, r) {
+		return
+	}
+	if handler.rejectDangerousHTTP(w, r, "storage.optimize", details) {
+		return
+	}
+	controller := handler.options.OptimizeController
+	resolver := handler.options.OptimizeResolver
+	if controller == nil || resolver == nil {
+		writeJSONStatus(w, http.StatusConflict, commandError("storage optimize is not configured"))
+		return
+	}
+	compaction, err := resolver(r.Context(), request)
+	if err != nil {
+		handler.auditHTTP(r, AuditEvent{Action: "storage.optimize", OK: false, Status: http.StatusBadRequest, Message: err.Error(), Details: details})
+		writeJSONStatus(w, http.StatusBadRequest, commandError(err.Error()))
+		return
+	}
+	job, accepted, err := controller.Submit(compaction)
+	if err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, hatStorage.ErrCompactionControllerQueueFull) {
+			status = http.StatusTooManyRequests
+		}
+		handler.auditHTTP(r, AuditEvent{Action: "storage.optimize", OK: false, Status: status, Message: err.Error(), Details: details})
+		writeJSONStatus(w, status, commandError(err.Error()))
+		return
+	}
+	handler.optimizeMu.Lock()
+	run, runErr := controller.Run(r.Context())
+	handler.optimizeMu.Unlock()
+	if runErr != nil {
+		handler.auditHTTP(r, AuditEvent{Action: "storage.optimize", OK: false, Status: http.StatusInternalServerError, Message: runErr.Error(), Details: details})
+		writeJSONStatus(w, http.StatusInternalServerError, commandError(runErr.Error()))
+		return
+	}
+	if status, ok := controller.Status(job.ID); ok {
+		job = status
+	}
+	handler.auditHTTP(r, AuditEvent{Action: "storage.optimize", OK: true, Status: http.StatusOK, Details: details})
+	writeJSON(w, monitoringOptimizeResponse{Accepted: accepted, Job: job, Run: run})
 }
 
 func (handler *MonitoringHandler) handleTopology(w http.ResponseWriter, r *http.Request) {

@@ -4769,3 +4769,33 @@ memory estimates without changing default EXPLAIN output.
 - Opt-in bounded per-arrangement compaction diagnostics with deterministic history: [MU037_COMPACTION_DIAGNOSTICS.md](MU037_COMPACTION_DIAGNOSTICS.md)
 
 - Opt-in bounded webhook/event-ID deduplication with CRC-protected snapshots: [MU041_WEBHOOK_IDEMPOTENCY.md](MU041_WEBHOOK_IDEMPOTENCY.md)
+
+## Optional Optimize Control
+
+The importable `hatStorage.CompactionController` can be exposed through the
+monitoring server without enabling it globally. Set both
+`hatCache.MonitoringOptions.OptimizeController` and
+`hatCache.MonitoringOptions.OptimizeResolver`; otherwise
+`POST /api/storage/optimize` is not registered. The resolver must authorize
+the request target and return the caller-owned compaction callback:
+
+```go
+options := hatCache.MonitoringOptions{
+    OptimizeController: controller,
+    OptimizeResolver: func(ctx context.Context, request hatCache.MonitoringOptimizeRequest) (hatStorage.CompactionRequest, error) {
+        return hatStorage.CompactionRequest{
+            Target: request.Target,
+            Priority: request.Priority,
+            EstimatedBytes: request.EstimatedBytes,
+            Run: func(ctx context.Context) error { return mergeAuthorizedPart(ctx, request.Target) },
+        }, nil
+    },
+}
+```
+
+The strict JSON request is `{"target":"events/part-0001","priority":10,"estimated_bytes":33554432}`.
+The route runs synchronously through the bounded controller and returns the
+job snapshot. It does not interpret filesystem paths, start a background
+worker, or change the existing `/api/storage/compact` route. See
+[CHU35_OPTIMIZE_CONTROL.md](CHU35_OPTIMIZE_CONTROL.md) for measurements and
+the control-plane tradeoff.
