@@ -94,7 +94,12 @@ if err := transaction.Commit(); err != nil {
 
 The constructor requires `SQLSerializableAggregateState` and captures one
 defensive binary snapshot. A callback error or panic restores that initial
-snapshot and leaves the transaction open; `Commit` keeps the accumulated state
+snapshot and leaves the transaction open only if restoration succeeds. If
+restoration returns an error or panics, the transaction closes and rejects
+`Add`, `Retract`, `Merge`, `Finalize`, `Commit`, and `Rollback`. The caller must
+discard the underlying state because it may be partially mutated. The returned
+error preserves both the mutation and restoration errors through `errors.Is`.
+`Commit` keeps the accumulated state
 and `Rollback` restores the initial state and closes the transaction.
 `ErrSQLAggregateCallbackPanic` converts callback and snapshot panics into
 errors. The wrapper is single-owner and does not add synchronization.
@@ -160,6 +165,52 @@ Raw samples are recorded in
 [BENCHMARK.md](BENCHMARK.md#mu-031-retractable-aggregate-capabilities).
 
 ## Verification
+
+### Failed restoration regression (2026-10-07)
+
+Baseline `f4039d3d` contains the transaction implementation from `c5f3bd97`.
+The new `TestMU031AggregateTransactionFailedRecoveryClosesBoundary` fails on
+that baseline for Add/Retract/Merge with both an erroring and a panicking
+restore callback: the restoration error is not discoverable through
+`errors.Is`, and `Commit` succeeds after failed recovery. The fix closes only
+this failed-recovery path and preserves both error causes. Existing successful
+rollback/reuse behavior continues to pass.
+
+Verification via the recovery checkout's Makefile targets:
+
+- `make codex-mu031-recovery-test`: failed before the fix, passed after it.
+- `make codex-mu031-recovery-package`: full `hat/hatSql` package passed.
+- `make codex-mu031-recovery-race`: transaction regressions passed under race.
+- `make codex-mu031-recovery-vet`: SQL package passed.
+
+Published equivalents are `make test-mu031-m043`,
+`make test-mu031-package-m043`, `make race-mu031-m043` (broader full-package
+race coverage), and `make vet-mu031-m043`. Other packages and the broader
+published race target were not rerun for this isolated transaction change.
+
+`make codex-mu031-recovery-compare` ran the existing DirectAdd,
+TransactionAdd, and TransactionCreate benchmarks sequentially in separate
+baseline/candidate worktrees, five samples each at `-benchtime=200ms -cpu=1`
+with `-benchmem`. Host: Linux/amd64, Ryzen 9 5950X, Go 1.26.6.
+An earlier candidate run overlapped compilation and is excluded from this
+comparison. No speedup is claimed; this is a correctness fix.
+
+| Path | Baseline median ns/op | Fixed median ns/op | B/op (both) | allocs/op (both) |
+| --- | ---: | ---: | ---: | ---: |
+| Direct Add control | 0.4779 | 0.4842 | 0 | 0 |
+| Transaction Add | 8.214 | 8.232 | 0 | 0 |
+| Transaction construction | 98.86 | 90.43 | 88 | 4 |
+
+Raw successful transaction Add samples (ns/op): baseline
+`8.309, 8.230, 8.200, 8.214, 8.200`; fixed
+`8.427, 8.232, 8.339, 7.864, 7.806`.
+Construction samples: baseline `91.34, 92.47, 101.7, 98.86, 98.97`;
+fixed `89.27, 89.47, 90.43, 128.0, 93.15`.
+The success-path allocation counts are unchanged and Add medians differ by
+0.2%. Failure now retains both causes in the error chain and releases the
+snapshot; callers cannot commit or reuse a transaction whose recovery failed.
+
+### Original capability checks
 
 ```text
 make test-mu031-retractable-aggregate

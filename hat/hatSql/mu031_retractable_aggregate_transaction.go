@@ -17,9 +17,11 @@ var (
 )
 
 // SQLAggregateTransaction applies aggregate callbacks against one initial
-// binary snapshot. Any callback error or panic restores that snapshot, while
+// binary snapshot. A mutation callback error or panic restores that snapshot, while
 // Commit keeps the accumulated state and closes the transaction. The wrapper
 // is single-owner and opt-in; direct SQLAggregateState calls are unchanged.
+// If restoring the snapshot fails, the transaction closes and the caller must
+// discard the underlying state, whose contents can no longer be trusted.
 type SQLAggregateTransaction struct {
 	state       SQLSerializableAggregateState
 	retractable SQLRetractableAggregateState
@@ -54,7 +56,8 @@ func NewSQLAggregateTransaction(state SQLAggregateState) (*SQLAggregateTransacti
 }
 
 // Add atomically adds one value. A callback error or panic restores the
-// transaction's initial state and leaves the transaction open for reuse.
+// transaction's initial state and leaves the transaction open for reuse only
+// if restoration succeeds.
 func (transaction *SQLAggregateTransaction) Add(value interface{}) error {
 	return transaction.apply("add", func() error {
 		return transaction.state.Add(value)
@@ -140,7 +143,9 @@ func (transaction *SQLAggregateTransaction) apply(operation string, callback fun
 			return
 		}
 		if restoreErr := transaction.restoreSnapshot(); restoreErr != nil {
-			err = fmt.Errorf("%w: %s; restore failed: %v", err, operation, restoreErr)
+			transaction.closed = true
+			transaction.snapshot = nil
+			err = fmt.Errorf("%w: %s; restore failed: %w", err, operation, restoreErr)
 		}
 	}()
 	return callback()
