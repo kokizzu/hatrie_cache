@@ -728,6 +728,17 @@ throughput for bounded foreground impact. See
 [TU37_REPLICA_APPLIER_THROTTLE.md](TU37_REPLICA_APPLIER_THROTTLE.md) and
 [BENCHMARK.md](BENCHMARK.md#tu37-replica-applier-throttling).
 
+## T-U38: Conflict Introspection Stream
+
+Adopted as an opt-in, bounded in-memory redacted conflict stream. The
+`hatReplication.ConflictInspectionLog` ring records the selected policy,
+conflicting versions, SHA-256 key digest, and winner/rejected decision with
+cursor reads and explicit overwrite detection. `ResolveAndRecord` preserves
+the existing conflict policy behavior, while persistence, transport, and
+durable retention remain caller-owned. See
+[TU38_CONFLICT_INTROSPECTION.md](TU38_CONFLICT_INTROSPECTION.md) and
+[BENCHMARK.md](BENCHMARK.md#tu38-conflict-introspection).
+
 ## M033: Batched Logical Timestamp Oracle
 
 M033 is partially adopted through the opt-in

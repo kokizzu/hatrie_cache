@@ -31867,6 +31867,30 @@ reservation path also stayed at zero allocations.
 Raw samples and the latency/throughput tradeoff are documented in
 [TU37_REPLICA_APPLIER_THROTTLE.md](TU37_REPLICA_APPLIER_THROTTLE.md).
 
+<a id="tu38-conflict-introspection"></a>
+## T-U38 Conflict Introspection
+
+Commands: `make codex-tu38-baseline` and `make codex-tu38-benchmark`.
+
+The feature is opt-in. The baseline is the existing registry resolution path;
+the recording path resolves and appends one redacted event to a fixed-capacity
+ring. Read measures copying a bounded 64-event page. Five `-benchmem` samples
+ran on Linux/amd64 with an AMD Ryzen 9 5950X.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative result |
+| --- | --- | ---: | ---: | ---: | --- |
+| Existing registry resolve | `16.98; 18.90; 19.93; 18.10; 20.29` | `18.90` | `0` | `0` | baseline |
+| Opt-in `ResolveAndRecord` | `210.3; 206.2; 202.3; 206.6; 211.1` | `206.6` | `128` | `2` | `10.93x` latency, +128 B, +2 allocs |
+| Read 64 retained events | `1639; 1865; 1793; 1612; 1692` | `1692` | `10880` | `1` | bounded page copy |
+
+The direct and ordinary registry resolution benchmarks remained allocation-free
+in the same run. The explicit diagnostic path is consequently not a free
+fast-path: callers should enable it only when conflict auditability is worth
+the measured CPU and allocation cost. The ring bounds retained memory, and the
+feature does not start a worker or alter storage and wire defaults. Full API,
+privacy, and retention semantics are documented in
+[TU38_CONFLICT_INTROSPECTION.md](TU38_CONFLICT_INTROSPECTION.md).
+
 <a id="m033-batched-logical-timestamp-oracle"></a>
 ## M033: Batched Logical Timestamp Oracle
 
