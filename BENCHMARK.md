@@ -32726,3 +32726,27 @@ The build allocation is transient and should not be read as retained index
 size. This is a good tradeoff for repeated selective reads, but not for a
 single lookup; conditional indexes are therefore opt-in and are not built
 automatically.
+# T-U34 Per-Space WAL Sync Policy
+
+Baseline and feature numbers use the same `BenchmarkTR007GroupCommitFixed`
+workload on the AMD Ryzen 9 5950X host. Values are medians of five runs. The
+clean base is commit `c84021f2`.
+
+| Version | ns/op | B/op | allocs/op | Relative CPU |
+| --- | ---: | ---: | ---: | ---: |
+| Clean base | 2,170,570 | 16,249 | 90 | 1.00x |
+| Feature branch | 2,171,869 | 16,259 | 90 | 1.00x |
+
+The difference is within filesystem and scheduler noise; the feature did not
+increase allocation or measured group-commit cost. The policy-decision cost is
+only paid when the caller configures the opt-in map:
+
+| Decision path | ns/op | B/op | allocs/op | Relative to legacy |
+| --- | ---: | ---: | ---: | ---: |
+| Legacy nil-policy fast path | 2.166 | 0 | 0 | 1.00x |
+| Disabled policy lookup | 12.64 | 0 | 0 | 5.83x |
+| Periodic policy lookup | 13.94 | 0 | 0 | 6.44x |
+
+The absolute lookup cost is tens of nanoseconds and does not include the
+filesystem sync itself. The policy is default-off, and mixed batches retain
+the strongest durability requirement.

@@ -103,6 +103,10 @@ type Options struct {
 	RetainedBytes       int64
 	IdempotencyCapacity int
 	Encryption          EncryptionOptions
+	// SpaceSyncPolicies is nil by default. Named policies are applied only by
+	// callers that use the space-aware command-journal API; unknown or empty
+	// spaces retain the legacy synchronous behavior.
+	SpaceSyncPolicies map[string]SpaceSyncPolicy
 }
 
 // ValidateOptions verifies journal options and returns a copy with a
@@ -153,9 +157,14 @@ func ValidateOptions(options Options) (Options, error) {
 	if err != nil {
 		return Options{}, err
 	}
+	spaceSyncPolicies, err := normalizeSpaceSyncPolicies(options.SpaceSyncPolicies)
+	if err != nil {
+		return Options{}, err
+	}
 	options.Format = format
 	options.SegmentCompression = segmentCompression
 	options.Encryption = encryption
+	options.SpaceSyncPolicies = spaceSyncPolicies
 	return options, nil
 }
 

@@ -62,11 +62,16 @@ const (
 // CommandJournalSegmentCompression is retained for compatibility. New
 // integrations can use hat/hatJournal.SegmentCompression directly.
 type CommandJournalSegmentCompression = hatJournal.SegmentCompression
+type CommandJournalSpaceSyncMode = hatJournal.SpaceSyncMode
+type CommandJournalSpaceSyncPolicy = hatJournal.SpaceSyncPolicy
 
 const (
 	CommandJournalSegmentCompressionNone    = hatJournal.SegmentCompressionNone
 	CommandJournalSegmentCompressionZstd    = hatJournal.SegmentCompressionZstd
 	DefaultCommandJournalSegmentCompression = hatJournal.DefaultSegmentCompression
+	CommandJournalSpaceSyncSynchronous      = hatJournal.SpaceSyncSynchronous
+	CommandJournalSpaceSyncPeriodic         = hatJournal.SpaceSyncPeriodic
+	CommandJournalSpaceSyncDisabled         = hatJournal.SpaceSyncDisabled
 )
 
 // ParseCommandJournalSegmentCompression is retained for compatibility. New
@@ -196,6 +201,7 @@ type commandJournalJob struct {
 	trie           *HatTrie
 	request        CacheCommandRequest
 	journalRequest CacheCommandRequest
+	space          string
 	idempotency    commandIdempotencyCheck
 	operation      *snapshotOperation
 	submission     *CommandJournalSubmission
@@ -222,6 +228,8 @@ type CommandJournal struct {
 	groupCommitWindow     time.Duration
 	groupCommitMaxBatch   int
 	adaptiveGroupCommit   bool
+	spaceSyncPolicies     map[string]hatJournal.SpaceSyncPolicy
+	lastSpaceSync         time.Time
 	segmentMaxBytes       int64
 	segmentCompression    CommandJournalSegmentCompression
 	retainedSegments      int
@@ -347,6 +355,7 @@ func OpenCommandJournalWithOptions(path string, options CommandJournalOptions) (
 		groupCommitWindow:     options.GroupCommitWindow,
 		groupCommitMaxBatch:   options.GroupCommitMaxBatch,
 		adaptiveGroupCommit:   options.AdaptiveGroupCommit,
+		spaceSyncPolicies:     options.SpaceSyncPolicies,
 		segmentMaxBytes:       options.SegmentMaxBytes,
 		segmentCompression:    options.SegmentCompression,
 		retainedSegments:      options.RetainedSegments,
@@ -413,6 +422,78 @@ func (journal *CommandJournal) groupCommitEnabled() bool {
 	return journal.groupCommitMaxBatch > 1
 }
 
+func (journal *CommandJournal) shouldSyncSpaceLocked(space string, now time.Time) bool {
+	if len(journal.spaceSyncPolicies) == 0 {
+		return true
+	}
+	policy, ok := journal.spaceSyncPolicies[strings.TrimSpace(space)]
+	if !ok {
+		return true
+	}
+	switch policy.Mode {
+	case hatJournal.SpaceSyncSynchronous:
+		return true
+	case hatJournal.SpaceSyncDisabled:
+		return false
+	case hatJournal.SpaceSyncPeriodic:
+		return journal.lastSpaceSync.IsZero() || now.Sub(journal.lastSpaceSync) >= policy.Interval
+	default:
+		return true
+	}
+}
+
+func (journal *CommandJournal) shouldSyncJobsLocked(jobs []*commandJournalJob, now time.Time) bool {
+	if len(journal.spaceSyncPolicies) == 0 {
+		return true
+	}
+	for _, job := range jobs {
+		if journal.shouldSyncSpaceLocked(job.space, now) {
+			return true
+		}
+	}
+	return false
+}
+
+func (journal *CommandJournal) shouldSyncIdempotentEntriesLocked(entries []commandJournalIdempotentGroupEntry, now time.Time) bool {
+	if len(journal.spaceSyncPolicies) == 0 {
+		return true
+	}
+	for _, entry := range entries {
+		if journal.shouldSyncSpaceLocked(entry.job.space, now) {
+			return true
+		}
+	}
+	return false
+}
+
+func (journal *CommandJournal) syncForJobsLocked(jobs []*commandJournalJob) error {
+	if len(journal.spaceSyncPolicies) == 0 {
+		return journal.syncLocked()
+	}
+	if !journal.shouldSyncJobsLocked(jobs, time.Now()) {
+		return nil
+	}
+	if err := journal.syncLocked(); err != nil {
+		return err
+	}
+	journal.lastSpaceSync = time.Now()
+	return nil
+}
+
+func (journal *CommandJournal) syncForIdempotentEntriesLocked(entries []commandJournalIdempotentGroupEntry) error {
+	if len(journal.spaceSyncPolicies) == 0 {
+		return journal.syncLocked()
+	}
+	if !journal.shouldSyncIdempotentEntriesLocked(entries, time.Now()) {
+		return nil
+	}
+	if err := journal.syncLocked(); err != nil {
+		return err
+	}
+	journal.lastSpaceSync = time.Now()
+	return nil
+}
+
 func adaptiveGroupCommitWindow(window time.Duration, maxBatch, queued int) time.Duration {
 	if window <= 0 || maxBatch <= 1 || queued <= 0 {
 		return window
@@ -424,12 +505,20 @@ func adaptiveGroupCommitWindow(window time.Duration, maxBatch, queued int) time.
 }
 
 func (journal *CommandJournal) ExecuteCommand(trie *HatTrie, request CacheCommandRequest) CacheCommandResponse {
+	return journal.ExecuteCommandWithSpace(trie, "", request)
+}
+
+// ExecuteCommandWithSpace executes and journals a command under an explicit
+// space identity. Space policies are opt-in and only affect the filesystem
+// sync barrier; command order and the on-disk record format remain unchanged.
+func (journal *CommandJournal) ExecuteCommandWithSpace(trie *HatTrie, space string, request CacheCommandRequest) CacheCommandResponse {
 	if journal == nil {
 		return commandError(ErrNilCommandJournal.Error())
 	}
 	if trie == nil {
 		return commandError(ErrNilHatTrie.Error())
 	}
+	space = strings.TrimSpace(space)
 	if !commandShouldJournal(request) {
 		return trie.ExecuteCommand(request)
 	}
@@ -443,6 +532,7 @@ func (journal *CommandJournal) ExecuteCommand(trie *HatTrie, request CacheComman
 			trie:           trie,
 			request:        request,
 			journalRequest: journalRequest,
+			space:          space,
 			idempotency:    check,
 			result:         make(chan CacheCommandResponse, 1),
 		})
@@ -460,9 +550,16 @@ func (journal *CommandJournal) ExecuteCommand(trie *HatTrie, request CacheComman
 	} else if duplicate {
 		return response
 	}
-	appendState, err := journal.appendLockedWithIdempotency(journalRequest, commandIdempotencyFingerprintData(check))
+	syncRequired := true
+	if len(journal.spaceSyncPolicies) > 0 {
+		syncRequired = journal.shouldSyncSpaceLocked(space, time.Now())
+	}
+	appendState, err := journal.appendLockedWithIdempotencyAndSync(journalRequest, commandIdempotencyFingerprintData(check), syncRequired)
 	if err != nil {
 		return commandError(err.Error())
+	}
+	if syncRequired && len(journal.spaceSyncPolicies) > 0 {
+		journal.lastSpaceSync = time.Now()
 	}
 	response := trie.ExecuteCommand(request)
 	if !response.OK {
@@ -625,7 +722,7 @@ func (journal *CommandJournal) processGroupCommit(batch []*commandJournalJob) {
 			failCommandJournalJobs(pending, err)
 			return
 		}
-		if err := journal.syncLocked(); err != nil {
+		if err := journal.syncForJobsLocked(pending); err != nil {
 			err = journal.rollbackPreparedBatchLocked(batchState, err)
 			failCommandJournalJobs(pending, err)
 			return
@@ -763,7 +860,7 @@ func (journal *CommandJournal) processIdempotentGroupCommitLocked(batch []*comma
 			failCommandJournalIdempotentGroupEntries(entries, err)
 			return
 		}
-		if err := journal.syncLocked(); err != nil {
+		if err := journal.syncForIdempotentEntriesLocked(entries); err != nil {
 			err = journal.rollbackPreparedBatchLocked(batchState, err)
 			failCommandJournalIdempotentGroupEntries(entries, err)
 			return
@@ -1743,12 +1840,18 @@ func (journal *CommandJournal) appendLocked(request CacheCommandRequest) (comman
 }
 
 func (journal *CommandJournal) appendLockedWithIdempotency(request CacheCommandRequest, fingerprint []byte) (commandJournalAppendState, error) {
+	return journal.appendLockedWithIdempotencyAndSync(request, fingerprint, true)
+}
+
+func (journal *CommandJournal) appendLockedWithIdempotencyAndSync(request CacheCommandRequest, fingerprint []byte, syncRequired bool) (commandJournalAppendState, error) {
 	appendState, err := journal.appendWithoutSyncLockedWithIdempotency(request, fingerprint)
 	if err != nil {
 		return commandJournalAppendState{}, journal.rollbackFailedAppendLocked(appendState, err)
 	}
-	if err := journal.syncLocked(); err != nil {
-		return commandJournalAppendState{}, journal.rollbackFailedAppendLocked(appendState, err)
+	if syncRequired {
+		if err := journal.syncLocked(); err != nil {
+			return commandJournalAppendState{}, journal.rollbackFailedAppendLocked(appendState, err)
+		}
 	}
 	return appendState, nil
 }

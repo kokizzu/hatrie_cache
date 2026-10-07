@@ -22294,3 +22294,29 @@ push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
 bench-tu17-space-engine:
 	bash scripts/benchmark-tu17-space-engine.sh
+format-tu34-per-space-wal:
+	bash scripts/run-tu34-per-space-wal.sh format
+
+test-tu34-per-space-wal:
+	bash scripts/run-tu34-per-space-wal.sh test
+
+test-tu34-full:
+	bash scripts/run-tu34-per-space-wal.sh full
+
+test-tu34-root:
+	bash scripts/run-tu34-per-space-wal.sh root
+
+test-tu34-all:
+	bash scripts/run-tu34-per-space-wal.sh all
+
+race-tu34-per-space-wal:
+	bash scripts/run-tu34-per-space-wal.sh race
+
+vet-tu34-per-space-wal:
+	bash scripts/run-tu34-per-space-wal.sh vet
+
+benchmark-tu34-per-space-wal:
+	bash scripts/run-tu34-per-space-wal.sh benchmark
+
+verify-tu34-per-space-wal:
+	bash scripts/run-tu34-per-space-wal.sh verify

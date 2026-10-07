@@ -310,6 +310,7 @@ security guidance before exposing it on a network.
 - Compact progress-only subscription frames: [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md)
 - Opt-in encrypted object-store backups and key rotation: [BACKUP_ENCRYPTION.md](BACKUP_ENCRYPTION.md)
 - Opt-in authenticated WAL encryption and key rotation: [TR008_WAL_ENCRYPTION.md](TR008_WAL_ENCRYPTION.md)
+- Opt-in per-space WAL sync policy with synchronous, periodic, and disabled barriers: [TU34_PER_SPACE_WAL_SYNC.md](TU34_PER_SPACE_WAL_SYNC.md), with measured decision and journal overhead in [BENCHMARK.md](BENCHMARK.md#t-u34-per-space-wal-sync-policy)
 - Part/WAL-consistent backup manifests with per-file checksums: [CHU50_PART_WAL_CONSISTENCY.md](CHU50_PART_WAL_CONSISTENCY.md), with measurements in [BENCHMARK.md](BENCHMARK.md#ch-u50-partwal-consistent-backup-manifest)
 - Bounded asynchronous journal writes and completion status: [ASYNC_COMMAND_SUBMISSION.md](ASYNC_COMMAND_SUBMISSION.md)
 - Opt-in asynchronous HTTP command admission, wait modes, and polling: [ASYNC_HTTP_COMMANDS.md](ASYNC_HTTP_COMMANDS.md)
