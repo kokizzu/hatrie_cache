@@ -22292,5 +22292,18 @@ commit-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh commit
 push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
+
+.PHONY: benchmark-tu39-space-changefeed test-tu39-space-changefeed race-tu39-space-changefeed vet-tu39-space-changefeed
+benchmark-tu39-space-changefeed:
+	bash scripts/benchmark-tu39-space-changefeed.sh benchmark
+
+test-tu39-space-changefeed:
+	bash scripts/benchmark-tu39-space-changefeed.sh test
+
+race-tu39-space-changefeed:
+	bash scripts/benchmark-tu39-space-changefeed.sh race
+
+vet-tu39-space-changefeed:
+	bash scripts/benchmark-tu39-space-changefeed.sh vet
 bench-tu17-space-engine:
 	bash scripts/benchmark-tu17-space-engine.sh

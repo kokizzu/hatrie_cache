@@ -32673,6 +32673,33 @@ The raw samples and frame contract are in
 [M-U47_PROGRESS_FRAMES.md](M-U47_PROGRESS_FRAMES.md). The codec is explicit:
 existing JSON and data-bearing subscription paths are not changed.
 
+## T-U39 Named-Space Changefeed
+
+Commands:
+
+```sh
+make test-tu39-space-changefeed
+make race-tu39-space-changefeed
+make vet-tu39-space-changefeed
+make benchmark-tu39-space-changefeed
+```
+
+Five `-benchtime=100ms` samples on Linux/amd64, AMD Ryzen 9 5950X. The
+baseline is a bounded append-and-drop slice copying key and value separately;
+the candidate is the fixed-ring `hatReplication.SpaceChangefeed`.
+
+| Workload | Naive median | SpaceChangefeed median | CPU result | Naive B/op | Candidate B/op | Memory result | Naive allocs/op | Candidate allocs/op | Allocation result |
+| --- | ---: | ---: | --- | ---: | ---: | --- | ---: | --- |
+| Publish | 106.4 ns | 43.61 ns | 2.44x faster | 329 | 48 | 6.85x lower | 2 | 1 | 2.00x fewer |
+| Read 64 events | 3,831 ns | 2,131 ns | 1.80x faster | 7,448 | 7,576 | 1.02x higher | 130 | 3 | 43.3x fewer |
+
+Read allocation bytes are effectively neutral in this fixture and are 1.7%
+higher because the candidate returns one contiguous owned payload buffer. The
+retained feed remains bounded by its fixed event ring and byte budget, while
+the naive slice can retain discarded payload pointers in its backing array.
+Raw samples and the recovery/backpressure contract are in
+[TU39_SPACE_CHANGEFEED.md](TU39_SPACE_CHANGEFEED.md).
+
 ## T-U17 Selectable Vinyl-Style Space Engine
 
 Command:
