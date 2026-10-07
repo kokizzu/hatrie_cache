@@ -30,10 +30,12 @@ existing dictionary representation: each row stores a `uint32` code and the
 distinct values are retained once. If the sample exceeds 32 values, the probe
 is discarded and the column stays plain for its lifetime.
 
-The decision is deliberately one-shot and conservative. It does not run an
-ongoing eviction or demotion policy, so high-churn workloads do not pay a
-background re-encoding cost. Updates before admission add observed values to
-the bounded probe; they can only make promotion less likely.
+The admission decision is deliberately bounded and conservative. After a
+column is promoted, an adaptive column continues to check the same 1:8
+distinct-value-to-row ratio on appends and updates. If churn crosses that
+ratio, it is converted back to plain string slots once, preserving all values
+and releasing dictionary codes, maps, and counts. The demotion is one-way for
+that column, so it cannot oscillate between layouts.
 
 NULL values remain NULL and do not become dictionary entries. `DictionaryEncoded`
 columns with only NULL values are also readable without indexing an empty
@@ -80,6 +82,7 @@ alive, so its `B/op` difference is not a retained-heap measurement.
 
 ## Scope
 
-This covers adaptive admission for typed-table string columns. It does not
-change the default representation, automatically alter schemas, add runtime
-demotion, or replace the separate immutable low-cardinality column API.
+This covers adaptive admission and one-way churn demotion for typed-table
+string columns. It does not change the default representation, automatically
+alter schemas, re-promote after demotion, or replace the separate immutable
+low-cardinality column API.

@@ -29564,6 +29564,24 @@ Raw benchmark samples after shape capture:
 10970 ns/op 9288 B/op 71 allocs/op
 ```
 
+## CH-U16 Adaptive Dictionary Churn Follow-up
+
+The same promoted-then-unique-update workload was run five times on Linux
+amd64 with an AMD Ryzen 9 5950X. The clean-base harness leaves the promoted
+dictionary in place; the feature harness demotes it after the distinct-to-row
+ratio crosses 1:8. `B/op` is cumulative allocation reported by Go, not a
+direct post-GC retained-heap sample.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative CPU | Relative B/op |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Clean base, no demotion | 61,680; 57,457; 58,354; 59,657; 57,698 | 58,354 | 52,827 | 308 | 1.00x | 1.00x |
+| CH-U16 one-way demotion | 34,977; 34,972; 35,097; 35,753; 35,000 | 35,000 | 25,259 | 298 | 0.60x; 1.67x faster | 0.48x; 2.09x lower |
+
+The feature reduces this high-churn workload by about 1.67x CPU, 2.09x
+cumulative allocation, and 3.2% allocations. The demotion is opt-in through
+`DictionaryAdaptive`, one-way, and leaves explicit `DictionaryEncoded` columns
+unchanged. See [CHU16_ADAPTIVE_LOW_CARDINALITY.md](CHU16_ADAPTIVE_LOW_CARDINALITY.md).
+
 ## CHU40 Dependency-Aware Result Invalidation
 
 Command: `make benchmark-chu40-dependency-invalidation`

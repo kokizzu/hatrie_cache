@@ -178,19 +178,20 @@ type TypedTableChange struct {
 }
 
 type typedTableColumnStorage struct {
-	kind                TypedTableKind
-	strings             []string
-	dictionary          bool
-	adaptiveDictionary  *typedTableDictionaryProbe
-	dictionaryValues    []string
-	dictionaryCodes     []uint32
-	dictionaryPositions map[string]uint32
-	dictionaryCounts    []uint32
-	dictionaryFree      []uint32
-	int64s              []int64
-	floats              []float64
-	bools               []bool
-	valid               []bool
+	kind                      TypedTableKind
+	strings                   []string
+	dictionary                bool
+	adaptiveDictionary        *typedTableDictionaryProbe
+	adaptiveDictionaryEnabled bool
+	dictionaryValues          []string
+	dictionaryCodes           []uint32
+	dictionaryPositions       map[string]uint32
+	dictionaryCounts          []uint32
+	dictionaryFree            []uint32
+	int64s                    []int64
+	floats                    []float64
+	bools                     []bool
+	valid                     []bool
 }
 
 type typedTableDictionaryProbe struct {
@@ -227,6 +228,7 @@ func (storage *typedTableColumnStorage) append(value TypedTableValue) {
 			if value.Valid {
 				storage.dictionaryCodes[len(storage.dictionaryCodes)-1] = storage.retainDictionaryValue(value.String)
 			}
+			storage.maybeDemoteAdaptiveDictionary()
 		} else {
 			storage.strings = append(storage.strings, value.String)
 			storage.observeAdaptiveDictionary(value)
@@ -254,6 +256,7 @@ func (storage *typedTableColumnStorage) set(index int, value TypedTableValue) {
 			} else {
 				storage.dictionaryCodes[index] = 0
 			}
+			storage.maybeDemoteAdaptiveDictionary()
 		} else {
 			storage.strings[index] = value.String
 			storage.noteAdaptiveDictionaryValue(value)
@@ -450,6 +453,29 @@ func (storage *typedTableColumnStorage) promoteAdaptiveDictionary() {
 	storage.adaptiveDictionary = nil
 }
 
+func (storage *typedTableColumnStorage) maybeDemoteAdaptiveDictionary() {
+	if !storage.dictionary || !storage.adaptiveDictionaryEnabled {
+		return
+	}
+	if len(storage.dictionaryValues) <= len(storage.valid)/typedTableDictionaryProbeDistinctDenominator {
+		return
+	}
+	values := make([]string, len(storage.valid))
+	for index, valid := range storage.valid {
+		if valid {
+			values[index] = storage.dictionaryValues[storage.dictionaryCodes[index]]
+		}
+	}
+	storage.dictionary = false
+	storage.adaptiveDictionaryEnabled = false
+	storage.strings = values
+	storage.dictionaryValues = nil
+	storage.dictionaryCodes = nil
+	storage.dictionaryPositions = nil
+	storage.dictionaryCounts = nil
+	storage.dictionaryFree = nil
+}
+
 // TypedTable is a schema-checked row store with per-column primitive slices.
 // It is opt-in and implements the established source-resolver contracts.
 type TypedTable struct {
@@ -550,6 +576,7 @@ func NewTypedTable(schema TypedTableSchema) (*TypedTable, error) {
 			table.columns[index].dictionaryPositions = make(map[string]uint32)
 		} else if column.Kind == TypedTableString && column.DictionaryAdaptive {
 			table.columns[index].adaptiveDictionary = &typedTableDictionaryProbe{}
+			table.columns[index].adaptiveDictionaryEnabled = true
 		}
 	}
 	if table.generated {

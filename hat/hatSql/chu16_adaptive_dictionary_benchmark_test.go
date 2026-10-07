@@ -5,6 +5,8 @@ import (
 	"testing"
 )
 
+var chu16AdaptiveChurnSink TypedTableValue
+
 func BenchmarkCHU16TypedTableStringStorage(b *testing.B) {
 	for _, test := range []struct {
 		name               string
@@ -53,5 +55,25 @@ func BenchmarkCHU16TypedTableStringStorage(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+func BenchmarkCHU16AdaptiveDictionaryChurn(b *testing.B) {
+	const rows = typedTableDictionaryProbeRows
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		storage := typedTableColumnStorage{
+			kind:                      TypedTableString,
+			adaptiveDictionary:        &typedTableDictionaryProbe{},
+			adaptiveDictionaryEnabled: true,
+		}
+		for index := 0; index < rows; index++ {
+			storage.append(TypedString("team-a"))
+		}
+		for index := 0; index < rows; index++ {
+			storage.set(index, TypedString(fmt.Sprintf("churn-%d", index)))
+		}
+		chu16AdaptiveChurnSink = storage.value(0)
 	}
 }
