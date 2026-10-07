@@ -1,12 +1,14 @@
 # Product Idea Gaps
 
 This is the current implementation queue for ideas compared with ClickHouse,
-Materialize, and Tarantool. It contains 50 candidate gaps for each product.
-The audit was performed against the exported Go packages, S| T-U44 | Slab fragmentation diagnostics | Implemented: opt-in portable heap placement, allocator metadata, reusable idle bytes, and stack footprint from runtime counters. | Platform portability and sampling cost; no default-path work or measured allocations. |L surface, server
+Materialize, and Tarantool. It retains the original 50 ideas for each product
+and lists additional ideas separately.
+The audit was performed against the exported Go packages, SQL surface, server
 commands, monitoring APIs, backup/restore paths, and current documentation on
-2026-09-12. A row is retained only when the repository has no complete,
-end-to-end equivalent; a specialized or opt-in partial implementation is
-called out in the gap column.
+2026-09-12. Rows retain their identifiers after adoption; specialized or opt-in
+partial implementations are called out in the gap column. Status describes
+this branch and may lag implementations published on other branches, so audit
+history and source before selecting a new feature.
 
 These are candidates, not promises. Each implementation must add a focused
 test first, run the failing test, implement the smallest complete contract,
@@ -21,7 +23,7 @@ tradeoffs are documented and its commit is published.
 |---|---|---|---|
 | CH-U01 | Durable asynchronous-insert deduplication | Partially adopted by `hatCache.AsyncInsertBuffer`: keyed journaled writes use the durable command-journal fingerprint ledger and survive replay; the generic `hatPipeline.AsyncBatcher` and server-level async-insert queue lifecycle remain caller-owned. | Crash/restart replay, bounded ledger memory, eviction horizon, and duplicate-byte measurements. See [CHU01_DURABLE_ASYNC_INSERT_DEDUP.md](CHU01_DURABLE_ASYNC_INSERT_DEDUP.md). |
 | CH-U02 | Unified external `ORDER BY` spill | Adopted for direct `EXTERNAL('name')` sources when the resolver implements `ExternalStreamSourceResolver`; materialized resolvers retain the established fallback. | Stable ties, NULL/collation behavior, cancellation cleanup, disk quota, and RSS versus CPU. See [CHU02_EXTERNAL_ORDER_SPILL.md](CHU02_EXTERNAL_ORDER_SPILL.md). |
-| CH-U03 | Versioned partial aggregate wire states | `hatDataStructure.AggregateStateEnvelope` now provides bounded, checksummed HAG1 envelopes, and S| T-U48 | Idempotent remote-call retry policy | Peer calls lack a method-aware retry/backoff policy tied to idempotency keys and fencing tokens. | No duplicate mutation, jitter, and observability. |L exposes mergeable HLL and t-digest state pairs; broader aggregate kinds and a generic registry remain open. See [CH042_APPROX_DISTINCT_STATE.md](CH042_APPROX_DISTINCT_STATE.md) and [CHU43_TDIGEST_STATE.md](CHU43_TDIGEST_STATE.md). | Exact merge, schema/version rejection, bounded state size, and wider wire-size coverage. |
+| CH-U03 | Versioned partial aggregate wire states | `hatDataStructure.AggregateStateEnvelope` now provides bounded, checksummed HAG1 envelopes, and SQL exposes mergeable HLL and t-digest state pairs; broader aggregate kinds and a generic registry remain open. See [CH042_APPROX_DISTINCT_STATE.md](CH042_APPROX_DISTINCT_STATE.md) and [CHU43_TDIGEST_STATE.md](CHU43_TDIGEST_STATE.md). | Exact merge, schema/version rejection, bounded state size, and wider wire-size coverage. |
 | CH-U04 | External `DISTINCT` spill | Adopted for direct `EXTERNAL('name')` sources when the resolver implements `ExternalStreamSourceResolver`; materialized resolvers retain the established fallback. | Exact type/NULL semantics, duplicate elimination, cleanup, and memory ceiling. See [CHU04_EXTERNAL_DISTINCT_SPILL.md](CHU04_EXTERNAL_DISTINCT_SPILL.md). |
 | CH-U05 | External window-function state | Adopted for direct `EXTERNAL('name')` sources with `ExternalStreamSourceResolver` for a bounded subset: unpartitioned, unordered running windows and fixed-offset `LEAD`; generic partitioned/order-dependent window spill remains open. | Frame correctness, stable ordering, cancellation, and temporary-file limits. See [CHU05_EXTERNAL_WINDOW_STREAM.md](CHU05_EXTERNAL_WINDOW_STREAM.md). |
 | CH-U06 | Persistent lightweight delete bitmap | Typed-table patch parts now use a compact in-memory row-existence mask; persistent stored-part delete bitmaps remain open. | Read correctness, update/delete interaction, compaction, and retained-byte crossover. |
@@ -129,7 +131,7 @@ tradeoffs are documented and its commit is published.
 
 | ID | Candidate | Current gap | Adoption gate |
 |---|---|---|---|
-| T-U52 | Per-peer adaptive breaker policy | `hatPeer.ConnectionPool` now supports opt-in bounded cooldown backoff after failed probes and decay after recovery; failure-class-specific thresholds remain caller policy. | Preserve deterministic operator bounds, avoid false opens, keep the default disabled, and validate recovery behavior. |
+| T-U01 | Pooled peer connections | Implemented as opt-in `hatPeer.ConnectionPool`: bounded open/idle connections, context-aware acquisition, bounded dial retry/backoff, connection reuse, and shutdown. Transport authentication remains caller-owned. See [PEER_CONNECTION_POOL.md](PEER_CONNECTION_POOL.md). | Cancellation, authentication, pool shutdown, and connection reuse cost; documented benchmarks model handshake work rather than network throughput. |
 | T-U02 | Authenticated compact peer daemon integration | `hatPeer` now provides an explicit bounded listener with fixed-size version/feature negotiation, mandatory authorization, optional TLS enforcement, admission limits, handshake deadlines, and clean session shutdown; full cluster membership remains caller-owned. | Complete compatibility evolution, flow-control policy, and head-of-line behavior without enabling a daemon by default. |
 | T-U03 | Stored procedure registry | External extension boundaries exist, but no trusted in-process stored function registry exposes stable call semantics. | Authorization, panic isolation, and versioning. |
 | T-U04 | Sandboxed stored Lua/runtime functions | Adopted for opt-in `-tags luajit` SQL UDFs: no standard libraries, bounded instruction and observed-memory budgets, source/batch caps, scalar-only conversion, and recovery after quota errors. | The memory ceiling is sampled rather than a process-wide allocator quota; CGO/LuaJIT remains an explicit deployment dependency. See [TU04_SANDBOXED_LUA.md](TU04_SANDBOXED_LUA.md). |
@@ -172,13 +174,30 @@ tradeoffs are documented and its commit is published.
 | T-U41 | Snapshot-consistent iterator cursors | `hatDataStructure.OrderedIndex.SnapshotCursor` now provides an opt-in zero-copy stable view across concurrent mutations, with explicit seek/close/EOF semantics and existing copy-on-write retention; named-space registry wiring remains caller-owned. | Memory bound, invalidation, and repeatable ordering. |
 | T-U42 | Cursor `after` pagination contract | `hatDataStructure.CursorTokenCodec` now provides bounded HMAC-authenticated index/schema-bound continuation tokens, and ordered cursors resume after the complete (key, ID) position; transport and SQL endpoint integration remain caller-owned. | Schema/version binding, tamper resistance, and no skipped rows. |
 | T-U43 | Per-space memory quotas | `hatStorage.SpaceMemoryQuota` and its registry now provide opt-in named-space byte admission with atomic reserve/release, deterministic snapshots, and default zero integration overhead; callers still declare logical bytes and release them on free. | Accurate attribution, no deadlock, and default zero overhead. |
-| T-U44 | Slab fragmentation diagnostics | Runtime heap metrics do not expose allocator classes, fragmentation, and reusable free space in a portable read-only report. | Platform portability and sampling cost. |
+| T-U44 | Slab fragmentation diagnostics | Implemented as opt-in `hatMetrics.ReadHeapFragmentationReport`: portable Go heap placement, allocator metadata, reusable idle bytes, and stack footprint. This is runtime telemetry, not a precise OS slab map. See [T044_SLAB_FRAGMENTATION.md](T044_SLAB_FRAGMENTATION.md). | Platform portability and sampling cost; callers keep `runtime.ReadMemStats` outside latency-sensitive paths. |
 | T-U45 | Per-space operation statistics | `hatMetrics.SpaceOperationMetrics` and its bounded registry now provide opt-in named space/index counters for operation families, bytes, hits/misses/errors, and latency totals with an allocation-free handle path; callers still choose integration points and label cardinality. | Label cardinality and allocation-free default path. |
 | T-U46 | Index cardinality/hot-key statistics | Partially adopted: `HashIndex` and `FunctionalIndex` provide opt-in `AttachStats`/`Stats`/`DetachStats` integration that observes existing keys, accepted upserts, hits, misses, and posting lengths; `OrderedIndex` stays on its zero-cost default path and uses explicit `IndexStats.ObserveKeyHash`/`ObserveLookup` calls. | Privacy, collector mutex/hasher cost when enabled, and caller-owned ordered-range counting. |
 | T-U47 | Cancellation/deadline propagation to peer calls | `hatPeer.ConnectionPool.DoWithLifecycleContext` now composes caller cancellation/deadlines with pool shutdown for opt-in gRPC, HTTP/2, and compact-protocol handlers; legacy `Do` remains unchanged for zero-allocation callers. | Connection reuse, partial response, and leak tests. |
 | T-U48 | Idempotent remote-call retry policy | `hatPeer.RetryPolicy` now provides opt-in method-aware bounded retries with stable idempotency keys, fencing tokens, cancellation-aware exponential backoff/jitter, and observer events; remote handlers still enforce deduplication. | No duplicate mutation, jitter, and observability. |
 | T-U49 | Replica-set request hedging | `hatTopology.ExecuteReplicaHedged` now provides opt-in bounded read hedging with delayed fallback, first-success cancellation, deterministic failures, observer events, and a zero-allocation single-candidate fast path. | Tail-latency versus duplicate load and consistency. |
 | T-U50 | Cluster-wide configuration watch | `hatTopology.ConfigWatchLog` now provides an authenticated bounded versioned log with replay cursors, context-aware wait/resume, deterministic history-gap errors, value-copy isolation, and no per-client idle goroutine; transport and consensus remain caller-owned. | Gap recovery, authorization, and bounded history. |
+
+Additional Tarantool idea (the original T-U01 through T-U50 identifiers remain stable):
+
+| ID | Candidate | Current gap | Adoption gate |
+|---|---|---|---|
+| T-U52 | Per-peer adaptive breaker policy | `hatPeer.ConnectionPool` supports opt-in bounded cooldown backoff after failed probes and decay after recovery; failure-class-specific thresholds remain caller policy. See [ADAPTIVE_PEER_BREAKER.md](ADAPTIVE_PEER_BREAKER.md). | Preserve deterministic operator bounds, avoid false opens, keep the default disabled, and validate recovery behavior. |
+
+## Catalog integrity
+
+Run `make verify-product-idea-catalog` after editing this file. It verifies
+the original 50 stable identifiers per product, uniqueness, product sections,
+and four-column row structure. It does not verify adoption claims or benchmarks.
+The 2026-10-07 repair restores T-U01 from catalog history (`2705e5fe`), retains
+T-U52 as an additional idea, and removes rows accidentally inserted inside SQL
+prose. T-U01 and T-U44 descriptions were checked against their current public
+implementations and linked documentation; other adoption rows still require
+implementation/history audits before choosing new work.
 
 ## Selection Policy
 

@@ -22296,3 +22296,7 @@ push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
 bench-tu17-space-engine:
 	bash scripts/benchmark-tu17-space-engine.sh
+
+.PHONY: verify-product-idea-catalog
+verify-product-idea-catalog:
+	python3 scripts/verify-product-idea-catalog.py
