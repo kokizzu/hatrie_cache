@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -14,6 +15,7 @@ var (
 	ErrRemotePartCacheLoaderRequired  = errors.New("hatriecache: remote-part cache loader is required")
 	ErrRemotePartCacheSizeMismatch    = errors.New("hatriecache: remote-part cache loader size does not match metadata")
 	ErrRemotePartCacheNil             = errors.New("hatriecache: remote-part cache is nil")
+	ErrRemotePartColumnInvalid        = errors.New("hatriecache: remote-part column request is invalid")
 )
 
 // DefaultRemotePartCacheMaxEntries bounds the number of cached parts when the
@@ -40,9 +42,106 @@ type RemotePartPrefetchOptions struct {
 	Priority      int
 }
 
+// RemotePartColumnReference identifies one independently readable column
+// object belonging to a remote part. The reference size is used for the
+// optional prefetch byte budget.
+type RemotePartColumnReference struct {
+	Name      string
+	Reference RemotePartReference
+}
+
+// RemotePartColumnPrefetchOptions bounds one column-aware read-ahead pass.
+// MaxBytes is a policy budget for selected columns; zero means no additional
+// column budget. The cache's own byte budget remains authoritative.
+type RemotePartColumnPrefetchOptions struct {
+	MaxBytes      uint64
+	MaxConcurrent int
+	Priority      int
+}
+
+// RemotePartColumnPrefetchPlan is a deterministic selection report. Skipped
+// columns are safe to load later on demand; this planner never changes query
+// semantics by treating read-ahead as required data.
+type RemotePartColumnPrefetchPlan struct {
+	References      []RemotePartReference
+	SelectedColumns []string
+	SkippedColumns  []string
+	SelectedBytes   uint64
+	SkippedBytes    uint64
+}
+
 // RemotePartCacheLoader fetches one immutable remote part. The returned slice
 // is copied once on a successful miss and is never mutated by the cache.
 type RemotePartCacheLoader func(context.Context, RemotePartReference) ([]byte, error)
+
+// PlanRemotePartColumnPrefetch selects requested column objects in request
+// order. A positive MaxBytes admits a prefix that fits the policy budget;
+// skipped columns remain available to a normal on-demand read.
+func PlanRemotePartColumnPrefetch(columns []RemotePartColumnReference, requested []string, options RemotePartColumnPrefetchOptions) (RemotePartColumnPrefetchPlan, error) {
+	plan := RemotePartColumnPrefetchPlan{
+		References:      make([]RemotePartReference, 0, len(requested)),
+		SelectedColumns: make([]string, 0, len(requested)),
+		SkippedColumns:  make([]string, 0),
+	}
+	if options.MaxConcurrent < 0 {
+		return RemotePartColumnPrefetchPlan{}, ErrRemotePartColumnInvalid
+	}
+	byName := make(map[string]RemotePartColumnReference, len(columns))
+	for _, column := range columns {
+		name := strings.TrimSpace(column.Name)
+		if name == "" {
+			return RemotePartColumnPrefetchPlan{}, ErrRemotePartColumnInvalid
+		}
+		if _, exists := byName[name]; exists {
+			return RemotePartColumnPrefetchPlan{}, fmt.Errorf("%w: duplicate column %q", ErrRemotePartColumnInvalid, name)
+		}
+		if _, err := validateRemotePartCacheReference(column.Reference); err != nil {
+			return RemotePartColumnPrefetchPlan{}, fmt.Errorf("%w: column %q reference: %v", ErrRemotePartColumnInvalid, name, err)
+		}
+		column.Name = name
+		byName[name] = column
+	}
+	seenRequested := make(map[string]struct{}, len(requested))
+	for _, rawName := range requested {
+		name := strings.TrimSpace(rawName)
+		if name == "" {
+			return RemotePartColumnPrefetchPlan{}, ErrRemotePartColumnInvalid
+		}
+		if _, exists := seenRequested[name]; exists {
+			return RemotePartColumnPrefetchPlan{}, fmt.Errorf("%w: duplicate requested column %q", ErrRemotePartColumnInvalid, name)
+		}
+		seenRequested[name] = struct{}{}
+		column, exists := byName[name]
+		if !exists {
+			return RemotePartColumnPrefetchPlan{}, fmt.Errorf("%w: requested column %q is missing", ErrRemotePartColumnInvalid, name)
+		}
+		sizeBytes := column.Reference.SizeBytes()
+		if options.MaxBytes > 0 && (plan.SelectedBytes > options.MaxBytes || sizeBytes > options.MaxBytes-plan.SelectedBytes) {
+			var ok bool
+			plan.SkippedBytes, ok = addRemotePartColumnBytes(plan.SkippedBytes, sizeBytes)
+			if !ok {
+				return RemotePartColumnPrefetchPlan{}, ErrRemotePartColumnInvalid
+			}
+			plan.SkippedColumns = append(plan.SkippedColumns, name)
+			continue
+		}
+		var ok bool
+		plan.SelectedBytes, ok = addRemotePartColumnBytes(plan.SelectedBytes, sizeBytes)
+		if !ok {
+			return RemotePartColumnPrefetchPlan{}, ErrRemotePartColumnInvalid
+		}
+		plan.References = append(plan.References, column.Reference)
+		plan.SelectedColumns = append(plan.SelectedColumns, name)
+	}
+	return plan, nil
+}
+
+func addRemotePartColumnBytes(current, additional uint64) (uint64, bool) {
+	if ^uint64(0)-current < additional {
+		return 0, false
+	}
+	return current + additional, true
+}
 
 // RemotePartCacheStats is a point-in-time cache accounting snapshot.
 type RemotePartCacheStats struct {
@@ -245,6 +344,33 @@ func (cache *RemotePartCache) Prefetch(ctx context.Context, references []RemoteP
 		return err
 	}
 	return ctx.Err()
+}
+
+// PrefetchColumns plans a bounded column-aware read-ahead pass and executes
+// the selected references through the existing single-flight cache. It is an
+// explicit opt-in API; skipped columns are not errors and can be loaded later.
+func (cache *RemotePartCache) PrefetchColumns(ctx context.Context, columns []RemotePartColumnReference, requested []string, options RemotePartColumnPrefetchOptions, loader RemotePartCacheLoader) (RemotePartColumnPrefetchPlan, error) {
+	if cache == nil {
+		return RemotePartColumnPrefetchPlan{}, ErrRemotePartCacheNil
+	}
+	if ctx == nil {
+		return RemotePartColumnPrefetchPlan{}, ErrRemotePartCacheContextRequired
+	}
+	if loader == nil {
+		return RemotePartColumnPrefetchPlan{}, ErrRemotePartCacheLoaderRequired
+	}
+	plan, err := PlanRemotePartColumnPrefetch(columns, requested, options)
+	if err != nil {
+		return RemotePartColumnPrefetchPlan{}, err
+	}
+	if len(plan.References) == 0 {
+		return plan, nil
+	}
+	err = cache.Prefetch(ctx, plan.References, RemotePartPrefetchOptions{
+		MaxConcurrent: options.MaxConcurrent,
+		Priority:      options.Priority,
+	}, loader)
+	return plan, err
 }
 
 // Bytes returns the immutable part bytes. It returns nil for a nil handle.

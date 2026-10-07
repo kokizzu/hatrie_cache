@@ -32726,3 +32726,19 @@ The build allocation is transient and should not be read as retained index
 size. This is a good tradeoff for repeated selective reads, but not for a
 single lookup; conditional indexes are therefore opt-in and are not built
 automatically.
+## CH-U30 Column-Aware Remote Prefetch
+
+Five-run results on the feature branch, using 16 independent 4 KiB column
+objects and a request for 4 columns:
+
+| Path | ns/op range | B/op | allocs/op | Read bytes |
+| --- | ---: | ---: | ---: | ---: |
+| Existing all-column prefetch control | 60,003-63,377 | 142,384-142,396 | 100 | 64 KiB |
+| Column-aware selected prefetch | 23,631-28,430 | 38,815-38,819 | 37 | 16 KiB |
+
+The selected case reads 4.0x fewer independent remote-object bytes, uses about
+3.67x less benchmark allocation bytes and 2.70x fewer allocations, and is
+about 2.35x faster for this workload. The clean-base existing bounded-2
+prefetch control measured 70,635-75,290 ns/op with 142,381-142,388 B/op and
+100 allocs/op. Details and limitations are in
+[CHU30_COLUMN_AWARE_REMOTE_PREFETCH.md](CHU30_COLUMN_AWARE_REMOTE_PREFETCH.md).
