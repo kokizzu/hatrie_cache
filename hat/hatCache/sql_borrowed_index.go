@@ -12,6 +12,9 @@ func (ht *HatTrie) BorrowSQLIndexedSource(name, key, field string, value interfa
 	if _, lower := hatSql.LowerIndexFieldName(field); lower {
 		return nil, false, nil
 	}
+	if _, upper := hatSql.UpperIndexFieldName(field); upper {
+		return nil, false, nil
+	}
 	ht.sqlIndexMu.Lock()
 	index := ht.sqlJSONIndexes[key][field]
 	ht.sqlIndexMu.Unlock()

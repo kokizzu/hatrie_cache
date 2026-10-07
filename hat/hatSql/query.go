@@ -14153,6 +14153,14 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 		if hint.allowsField(source, field) {
 			rows, indexed, err = resolveSQLIndexedComparison(source, field, condition.op, left.value, resolver)
 		}
+	} else if field, ok := sqlUpperIndexField(left, source.alias); ok && right.kind == "literal" && condition.op == "=" {
+		if hint.allowsField(source, field) {
+			rows, indexed, err = resolveSQLIndexedComparison(source, field, condition.op, right.value, resolver)
+		}
+	} else if field, ok := sqlUpperIndexField(right, source.alias); ok && left.kind == "literal" && condition.op == "=" {
+		if hint.allowsField(source, field) {
+			rows, indexed, err = resolveSQLIndexedComparison(source, field, condition.op, left.value, resolver)
+		}
 	} else {
 		return nil, false, nil
 	}
@@ -14163,7 +14171,7 @@ func resolveSQLIndexedSource(source sqlSource, condition sqlExpr, resolver SQLSo
 }
 
 // resolveSQLIndexedLiteralINSource unions disjoint equality postings for a
-// direct field or LOWER(direct field) IN list. The full predicate remains
+// direct field or LOWER/UPPER(direct field) IN list. The full predicate remains
 // evaluated after lookup, so this affects candidate work only. Non-literal,
 // non-binary-collation, and unavailable-index forms retain the established
 // scan path.
@@ -14176,6 +14184,8 @@ func resolveSQLIndexedLiteralINSource(source sqlSource, condition sqlExpr, resol
 		field = condition.left.name
 	} else if lowerField, lower := sqlLowerIndexField(*condition.left, source.alias); lower {
 		field = lowerField
+	} else if upperField, upper := sqlUpperIndexField(*condition.left, source.alias); upper {
+		field = upperField
 	}
 	if field == "" || !hint.allowsField(source, field) {
 		return nil, false, nil
@@ -14216,6 +14226,17 @@ func sqlLowerIndexField(expr sqlExpr, alias string) (string, bool) {
 		return "", false
 	}
 	return LowerIndexField(field.name), true
+}
+
+func sqlUpperIndexField(expr sqlExpr, alias string) (string, bool) {
+	if expr.kind != "func" || !strings.EqualFold(expr.name, "UPPER") || len(expr.args) != 1 {
+		return "", false
+	}
+	field := expr.args[0]
+	if field.kind != "field" || field.qualifier != alias || field.name == "" {
+		return "", false
+	}
+	return UpperIndexField(field.name), true
 }
 
 func sqlSecondaryIndexedEqualities(source sqlSource, condition sqlExpr) (string, []string, []interface{}) {
@@ -17322,6 +17343,22 @@ func evalSQLExpr(expr sqlExpr, group []sqlExecRow, row sqlExecRow) interface{} {
 				return sqlEvalError{err: fmt.Errorf("LOWER expects a TEXT argument"), token: expr.token}
 			}
 			return strings.ToLower(text)
+		case "UPPER":
+			if len(expr.args) != 1 {
+				return sqlEvalError{err: fmt.Errorf("UPPER expects exactly one argument"), token: expr.token}
+			}
+			value := evalSQLExpr(expr.args[0], group, row)
+			if err := sqlExpressionError(value); err != nil {
+				return sqlEvaluationFailure(err)
+			}
+			if value == nil {
+				return nil
+			}
+			text, ok := value.(string)
+			if !ok {
+				return sqlEvalError{err: fmt.Errorf("UPPER expects a TEXT argument"), token: expr.token}
+			}
+			return strings.ToUpper(text)
 		case "COALESCE":
 			if len(expr.args) == 0 {
 				return sqlEvalError{err: fmt.Errorf("COALESCE expects at least one argument"), token: expr.token}
@@ -18040,7 +18077,7 @@ func sqlExprHasCustomFunction(expr sqlExpr, functions SQLFunctionResolver) bool 
 }
 func sqlBuiltinFunction(name string) bool {
 	switch strings.ToUpper(name) {
-	case "COALESCE", "LOWER", "NULLIF", "GROUPING", "CONTAINS", "CONTAINS_PREFIX", "CONTAINS_PHRASE", "CONTAINS_PROXIMITY", "ARRAY_CONTAINS", "BITMAP_COUNT", "BITMAP_CONTAINS", "BITMAP_OR", "BITMAP_AND", "BITMAP_XOR", "COUNT", "SUM", "AVG", "MIN", "MAX", "COUNT_OR_NULL", "SUM_OR_NULL", "AVG_OR_NULL", "MIN_OR_NULL", "MAX_OR_NULL", "ARGMAX", "ARGMIN", "AUTO_COUNT_DISTINCT", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF", "COUNT_STATE", "SUM_STATE", "AVG_STATE", "MIN_STATE", "MAX_STATE", "COUNT_MERGE", "SUM_MERGE", "AVG_MERGE", "MIN_MERGE", "MAX_MERGE", "ARGMAX_STATE", "ARGMIN_STATE", "ARGMAX_MERGE", "COUNT_STATE_IF", "SUM_STATE_IF", "AVG_STATE_IF", "MIN_STATE_IF", "MAX_STATE_IF", "COUNT_MERGE_IF", "SUM_MERGE_IF", "AVG_MERGE_IF", "MIN_MERGE_IF", "MAX_MERGE_IF", "ARGMAX_STATE_IF", "ARGMIN_STATE_IF", "ARGMAX_MERGE_IF", "ARGMIN_MERGE_IF", "ARGMIN_MERGE", "APPROX_COUNT_DISTINCT", "APPROX_COUNT_DISTINCT_STATE", "APPROX_COUNT_DISTINCT_MERGE", "APPROX_PERCENTILE", "APPROX_TDIGEST_PERCENTILE", "APPROX_TDIGEST_PERCENTILE_STATE", "APPROX_TDIGEST_PERCENTILE_MERGE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "BITMAP_AGG", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "VALID_AT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF", "GEO_DISTANCE", "GEO_DISTANCE_METERS", "GEO_WITHIN_RADIUS", "GEO_WITHIN_BOX":
+	case "COALESCE", "LOWER", "UPPER", "NULLIF", "GROUPING", "CONTAINS", "CONTAINS_PREFIX", "CONTAINS_PHRASE", "CONTAINS_PROXIMITY", "ARRAY_CONTAINS", "BITMAP_COUNT", "BITMAP_CONTAINS", "BITMAP_OR", "BITMAP_AND", "BITMAP_XOR", "COUNT", "SUM", "AVG", "MIN", "MAX", "COUNT_OR_NULL", "SUM_OR_NULL", "AVG_OR_NULL", "MIN_OR_NULL", "MAX_OR_NULL", "ARGMAX", "ARGMIN", "AUTO_COUNT_DISTINCT", "COUNTIF", "COUNT_IF", "SUMIF", "SUM_IF", "AVGIF", "AVG_IF", "MINIF", "MIN_IF", "MAXIF", "MAX_IF", "ARGMAXIF", "ARGMAX_IF", "ARGMINIF", "ARGMIN_IF", "COUNT_STATE", "SUM_STATE", "AVG_STATE", "MIN_STATE", "MAX_STATE", "COUNT_MERGE", "SUM_MERGE", "AVG_MERGE", "MIN_MERGE", "MAX_MERGE", "ARGMAX_STATE", "ARGMIN_STATE", "ARGMAX_MERGE", "COUNT_STATE_IF", "SUM_STATE_IF", "AVG_STATE_IF", "MIN_STATE_IF", "MAX_STATE_IF", "COUNT_MERGE_IF", "SUM_MERGE_IF", "AVG_MERGE_IF", "MIN_MERGE_IF", "MAX_MERGE_IF", "ARGMAX_STATE_IF", "ARGMIN_STATE_IF", "ARGMAX_MERGE_IF", "ARGMIN_MERGE_IF", "ARGMIN_MERGE", "APPROX_COUNT_DISTINCT", "APPROX_COUNT_DISTINCT_STATE", "APPROX_COUNT_DISTINCT_MERGE", "APPROX_PERCENTILE", "APPROX_TDIGEST_PERCENTILE", "APPROX_TDIGEST_PERCENTILE_STATE", "APPROX_TDIGEST_PERCENTILE_MERGE", "APPROX_TOP_K", "ARRAY_AGG", "GROUP_ARRAY", "GROUP_UNIQ_ARRAY", "MAP_AGG", "BITMAP_AGG", "JSON_VALUE", "JSON_QUERY", "JSON_EXISTS", "REGEXP_LIKE", "REGEXP_EXTRACT", "VALID_AT", "PARSE_TIMESTAMP", "TIMESTAMP_ADD", "TIMESTAMP_DIFF", "GEO_DISTANCE", "GEO_DISTANCE_METERS", "GEO_WITHIN_RADIUS", "GEO_WITHIN_BOX":
 		return true
 	}
 	return false

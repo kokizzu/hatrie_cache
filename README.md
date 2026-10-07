@@ -168,6 +168,7 @@ security guidance before exposing it on a network.
 - Generic bounded dead-letter queue with replay controls: [DEAD_LETTER_QUEUE.md](DEAD_LETTER_QUEUE.md)
 - Typed functional secondary index: [FUNCTIONAL_INDEX.md](FUNCTIONAL_INDEX.md)
 - Materialized SQL functional indexes with online publication: [TR023_FUNCTIONAL_INDEX.md](TR023_FUNCTIONAL_INDEX.md)
+- Opt-in SQL `UPPER(...)` functional indexes for normalized text predicates: [CHU44_SQL_UPPER_FUNCTIONAL_INDEX.md](CHU44_SQL_UPPER_FUNCTIONAL_INDEX.md), with raw measurements in [BENCHMARK.md](BENCHMARK.md#chu44-sql-upper-functional-index)
 - Materialized SQL index distribution statistics and selective conjunct planning: [TR030_INDEX_STATS.md](TR030_INDEX_STATS.md)
 - Exact compact-slot bitset index: [BITSET_INDEX.md](BITSET_INDEX.md)
 - Opt-in replica health and locality-aware read routing: [REPLICA_HEALTH.md](REPLICA_HEALTH.md)

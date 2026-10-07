@@ -32740,3 +32740,17 @@ The build allocation is transient and should not be read as retained index
 size. This is a good tradeoff for repeated selective reads, but not for a
 single lookup; conditional indexes are therefore opt-in and are not built
 automatically.
+## CHU44 SQL UPPER Functional Index
+
+The opt-in `CreateSQLJSONUpperIndex` path was compared with the normal scan for
+the same 10,000-row JSON source and 100 matching rows. Setup was outside the
+timer; the benchmark used five repetitions with `-benchtime=100ms` on an AMD
+Ryzen 9 5950X, linux/amd64.
+
+| Path | Median ns/op | Median B/op | Median allocs/op | Scan / indexed |
+| --- | ---: | ---: | ---: | ---: |
+| Scan | 12,486,278 | 7,841,648 | 140,248 | 1.00x |
+| Indexed `UPPER(...)` | 75,574 | 112,264 | 735 | 165.2x time, 69.8x bytes, 190.8x allocations |
+
+Raw output and the explicit index-memory tradeoff are recorded in
+[CHU44_SQL_UPPER_FUNCTIONAL_INDEX.md](CHU44_SQL_UPPER_FUNCTIONAL_INDEX.md).

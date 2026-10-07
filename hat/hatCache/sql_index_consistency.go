@@ -98,6 +98,14 @@ func (ht *HatTrie) CheckSQLJSONIndexConsistency(key string) (SQLJSONIndexConsist
 		refreshSQLJSONLowerIndexSource(&candidate, field, source, rows)
 		appendEntry("lower", []string{field}, index.sqlJSONIndexState, index, &candidate)
 	}
+	for field, index := range ht.sqlJSONUpperIndexes[key] {
+		if index == nil {
+			continue
+		}
+		candidate := sqlJSONUpperIndex{}
+		refreshSQLJSONUpperIndexSource(&candidate, field, source, rows)
+		appendEntry("upper", []string{field}, index.sqlJSONIndexState, index, &candidate)
+	}
 	for field, index := range ht.sqlJSONBitmapIndexes[key] {
 		if index == nil {
 			continue
@@ -228,6 +236,7 @@ func (ht *HatTrie) sqlJSONIndexesConfiguredLocked(key string) bool {
 		len(ht.sqlJSONTypedInt64CompositeIndexes[key]) > 0 ||
 		len(ht.sqlJSONIndexes[key]) > 0 ||
 		len(ht.sqlJSONLowerIndexes[key]) > 0 ||
+		len(ht.sqlJSONUpperIndexes[key]) > 0 ||
 		len(ht.sqlJSONBitmapIndexes[key]) > 0 ||
 		len(ht.sqlJSONPathSkipIndexes[key]) > 0 ||
 		len(ht.sqlJSONCoveringIndexes[key]) > 0 ||
