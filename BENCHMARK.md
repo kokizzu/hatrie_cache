@@ -21962,6 +21962,30 @@ BenchmarkSQLAggregateIfVsFilter/aggregate_if-32  342  3325672 ns/op  6646975 B/o
 BenchmarkSQLAggregateIfVsFilter/aggregate_if-32  333  3299914 ns/op  6646976 B/op  30028 allocs/op
 ```
 
+## CH-U03 aggregate state codec registry
+
+This benchmark compares direct HAG1 envelope encoding with the opt-in exact
+kind/version registry and measures registry decode plus typed codec dispatch.
+It ran on an AMD Ryzen 9 5950X with five one-second samples per case.
+
+| Case | Raw samples (ns/op) | Median | Memory | Relative CPU |
+| --- | --- | ---: | --- | ---: |
+| Direct HAG1 envelope marshal | 81.51, 80.94, 78.85, 80.14, 80.29 | 80.29 | 56 B/op, 2 allocs/op | 1.00x |
+| Registry marshal and metadata check | 207.5, 198.5, 202.1, 199.7, 203.7 | 202.1 | 72 B/op, 4 allocs/op | 2.52x |
+| Registry unmarshal and typed decode | 191.2, 188.7, 182.1, 186.2, 185.6 | 186.2 | 32 B/op, 4 allocs/op | N/A, decode path |
+
+The registry adds dispatch and exact metadata verification, so it is slower
+than direct encoding by about `2.52x`, `16 B/op`, and two allocations. That is
+an explicit opt-in cost for extensible typed dispatch; existing HLL and
+t-digest methods remain on their direct paths. The registry is bounded to 128
+codecs and preserves the envelope's 64 MiB wire limit and checksum validation.
+
+Raw reproduction command:
+
+```text
+make benchmark-chu03-aggregate-state-registry
+```
+
 ## CH-039 streaming approximate aggregate state
 
 The workload contains 10,000 rows and runs `APPROX_COUNT_DISTINCT` plus

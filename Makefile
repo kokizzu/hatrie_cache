@@ -22294,3 +22294,17 @@ push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
 bench-tu17-space-engine:
 	bash scripts/benchmark-tu17-space-engine.sh
+
+.PHONY: format-chu03-aggregate-state-registry test-chu03-aggregate-state-registry race-chu03-aggregate-state-registry vet-chu03-aggregate-state-registry benchmark-chu03-aggregate-state-registry verify-chu03-aggregate-state-registry
+format-chu03-aggregate-state-registry:
+	bash scripts/run-chu03-aggregate-state-registry.sh format
+test-chu03-aggregate-state-registry:
+	bash scripts/run-chu03-aggregate-state-registry.sh test
+race-chu03-aggregate-state-registry:
+	bash scripts/run-chu03-aggregate-state-registry.sh race
+vet-chu03-aggregate-state-registry:
+	bash scripts/run-chu03-aggregate-state-registry.sh vet
+benchmark-chu03-aggregate-state-registry:
+	bash scripts/run-chu03-aggregate-state-registry.sh benchmark
+verify-chu03-aggregate-state-registry:
+	bash scripts/run-chu03-aggregate-state-registry.sh verify
