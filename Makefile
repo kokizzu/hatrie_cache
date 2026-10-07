@@ -22294,3 +22294,18 @@ push-pgwire-parameter-description:
 	bash scripts/deliver-pgwire-parameter-description.sh push
 bench-tu17-space-engine:
 	bash scripts/benchmark-tu17-space-engine.sh
+
+benchmark-tu38-baseline:
+	bash scripts/benchmark-tu38.sh baseline
+
+benchmark-tu38:
+	bash scripts/benchmark-tu38.sh benchmark
+
+test-tu38:
+	bash scripts/benchmark-tu38.sh test
+
+test-tu38-race:
+	bash scripts/benchmark-tu38.sh race
+
+vet-tu38:
+	bash scripts/benchmark-tu38.sh vet

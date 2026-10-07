@@ -74,10 +74,7 @@ replication defaults, or change storage and wire formats.
 
 ## Verification
 
-```text
-make codex-tu38-red
-make codex-tu38-focused-race
-make codex-tu38-benchmark
-make codex-tu38-test
-make codex-tu38-vet
-```
+`make benchmark-tu38-baseline` runs the existing conflict-resolution control;
+`make benchmark-tu38` runs the control, recording, and bounded-read benchmarks.
+`make test-tu38`, `make test-tu38-race`, and `make vet-tu38` rerun the focused
+tests, race check, and package vet check through the repository Makefile.

@@ -31870,7 +31870,7 @@ Raw samples and the latency/throughput tradeoff are documented in
 <a id="tu38-conflict-introspection"></a>
 ## T-U38 Conflict Introspection
 
-Commands: `make codex-tu38-baseline` and `make codex-tu38-benchmark`.
+Commands: `make benchmark-tu38-baseline` and `make benchmark-tu38`.
 
 The feature is opt-in. The baseline is the existing registry resolution path;
 the recording path resolves and appends one redacted event to a fixed-capacity
