@@ -103,3 +103,66 @@ func TestCHU28CompactionSchedulerDefaultIOPathIsUnthrottled(t *testing.T) {
 		t.Fatalf("default IO stats = %#v, want zero throttle state", stats)
 	}
 }
+
+func TestCHU28CompactionSchedulerForegroundFeedbackAdjustsRate(t *testing.T) {
+	scheduler, err := hatStorage.NewCompactionScheduler(hatStorage.CompactionSchedulerOptions{
+		MaxIOBytesPerSecond: 1_000_000,
+	})
+	if err != nil {
+		t.Fatalf("NewCompactionScheduler: %v", err)
+	}
+
+	rate, err := scheduler.ObserveForegroundLatency(200*time.Millisecond, 100*time.Millisecond)
+	if err != nil {
+		t.Fatalf("ObserveForegroundLatency slow sample: %v", err)
+	}
+	if want := uint64(800_000); rate != want {
+		t.Fatalf("slow sample rate = %d, want %d", rate, want)
+	}
+
+	rate, err = scheduler.ObserveForegroundLatency(75*time.Millisecond, 100*time.Millisecond)
+	if err != nil {
+		t.Fatalf("ObserveForegroundLatency neutral sample: %v", err)
+	}
+	if want := uint64(800_000); rate != want {
+		t.Fatalf("neutral sample rate = %d, want %d", rate, want)
+	}
+
+	rate, err = scheduler.ObserveForegroundLatency(25*time.Millisecond, 100*time.Millisecond)
+	if err != nil {
+		t.Fatalf("ObserveForegroundLatency fast sample: %v", err)
+	}
+	if want := uint64(960_000); rate != want {
+		t.Fatalf("fast sample rate = %d, want %d", rate, want)
+	}
+
+	stats := scheduler.Stats()
+	if stats.IOBytesPerSecond != rate {
+		t.Fatalf("stats IOBytesPerSecond = %d, want %d", stats.IOBytesPerSecond, rate)
+	}
+}
+
+func TestCHU28CompactionSchedulerForegroundFeedbackValidation(t *testing.T) {
+	scheduler, err := hatStorage.NewCompactionScheduler(hatStorage.CompactionSchedulerOptions{
+		MaxIOBytesPerSecond: 1_000_000,
+	})
+	if err != nil {
+		t.Fatalf("NewCompactionScheduler: %v", err)
+	}
+	for _, sample := range [][2]time.Duration{
+		{0, time.Second},
+		{time.Second, 0},
+	} {
+		if _, err := scheduler.ObserveForegroundLatency(sample[0], sample[1]); !errors.Is(err, hatStorage.ErrCompactionIOFeedbackInvalid) {
+			t.Fatalf("sample %v/%v error = %v, want ErrCompactionIOFeedbackInvalid", sample[0], sample[1], err)
+		}
+	}
+
+	defaultScheduler, err := hatStorage.NewCompactionScheduler(hatStorage.CompactionSchedulerOptions{})
+	if err != nil {
+		t.Fatalf("NewCompactionScheduler default: %v", err)
+	}
+	if _, err := defaultScheduler.ObserveForegroundLatency(time.Millisecond, time.Second); !errors.Is(err, hatStorage.ErrCompactionIOFeedbackDisabled) {
+		t.Fatalf("default feedback error = %v, want ErrCompactionIOFeedbackDisabled", err)
+	}
+}

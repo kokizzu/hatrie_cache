@@ -18,6 +18,10 @@ var (
 	ErrCompactionSchedulerOptionsInvalid = errors.New("hatriecache: compaction scheduler options are invalid")
 	// ErrCompactionTaskInvalid reports an empty task name or missing callback.
 	ErrCompactionTaskInvalid = errors.New("hatriecache: compaction task is invalid")
+	// ErrCompactionIOFeedbackInvalid reports a non-positive latency sample or target.
+	ErrCompactionIOFeedbackInvalid = errors.New("hatriecache: compaction IO feedback is invalid")
+	// ErrCompactionIOFeedbackDisabled reports feedback on a scheduler without IO throttling.
+	ErrCompactionIOFeedbackDisabled = errors.New("hatriecache: compaction IO feedback is disabled")
 )
 
 // DefaultCompactionSchedulerMaxConcurrent keeps maintenance serialized unless
@@ -90,6 +94,27 @@ func NewCompactionScheduler(options CompactionSchedulerOptions) (*CompactionSche
 		now:           time.Now,
 		ioState:       newCompactionSchedulerIOState(options.MaxIOBytesPerSecond),
 	}, nil
+}
+
+// ObserveForegroundLatency lets a caller tune the opt-in IO budget from one
+// observed foreground latency sample. Samples above the target reduce the
+// budget by 20%; samples at or below half the target increase it by 20%.
+// The hysteresis band avoids changing the budget for normal variance. The
+// current budget is returned. Existing reservations drain on their original
+// schedule; the next reservation uses the adjusted budget.
+func (scheduler *CompactionScheduler) ObserveForegroundLatency(observed, target time.Duration) (uint64, error) {
+	if scheduler == nil {
+		return 0, ErrCompactionSchedulerNil
+	}
+	if observed <= 0 || target <= 0 {
+		return 0, ErrCompactionIOFeedbackInvalid
+	}
+	scheduler.mu.Lock()
+	defer scheduler.mu.Unlock()
+	if scheduler.ioState == nil || scheduler.ioState.throttle == nil {
+		return 0, ErrCompactionIOFeedbackDisabled
+	}
+	return scheduler.ioState.throttle.observeForegroundLatency(observed, target), nil
 }
 
 // Schedule requests one default-priority compaction for name. Duplicate

@@ -53,8 +53,8 @@ func (throttle *compactionIOThrottle) wait(ctx context.Context, bytes uint64) er
 	}
 
 	now := time.Now()
-	duration := compactionIODuration(bytes, throttle.bytesPerSecond)
 	throttle.mu.Lock()
+	duration := compactionIODuration(bytes, throttle.bytesPerSecond)
 	start := throttle.nextAvailable
 	if start.IsZero() || start.Before(now) {
 		start = now
@@ -79,6 +79,17 @@ func (throttle *compactionIOThrottle) wait(ctx context.Context, bytes uint64) er
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func (throttle *compactionIOThrottle) observeForegroundLatency(observed, target time.Duration) uint64 {
+	throttle.mu.Lock()
+	defer throttle.mu.Unlock()
+	if observed > target {
+		throttle.bytesPerSecond = decreaseCompactionIOFeedbackRate(throttle.bytesPerSecond)
+	} else if observed <= target/2 {
+		throttle.bytesPerSecond = increaseCompactionIOFeedbackRate(throttle.bytesPerSecond)
+	}
+	return throttle.bytesPerSecond
 }
 
 func (throttle *compactionIOThrottle) stats() compactionIOThrottleStats {
@@ -126,4 +137,16 @@ func saturatingCompactionAdd(left, right uint64) uint64 {
 		return ^uint64(0)
 	}
 	return left + right
+}
+
+func decreaseCompactionIOFeedbackRate(rate uint64) uint64 {
+	return rate - rate/5
+}
+
+func increaseCompactionIOFeedbackRate(rate uint64) uint64 {
+	increment := rate / 5
+	if increment == 0 {
+		increment = 1
+	}
+	return saturatingCompactionAdd(rate, increment)
 }

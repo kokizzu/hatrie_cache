@@ -44,10 +44,11 @@ same retry path as before.
 
 `CompactionSchedulerStats` reports `IOBytesPerSecond`,
 `IOThrottledTaskCount`, `IOThrottledBytes`, and `IOWaitNanoseconds`. The
-implementation does not inspect OS disk counters or automatically measure
-foreground latency. The caller should calibrate `MaxIOBytesPerSecond` from its
-storage and latency budget; this keeps the API portable and avoids hidden I/O
-sampling or background goroutines.
+implementation does not inspect OS disk counters or measure foreground
+latency in a background goroutine. The caller can either calibrate
+`MaxIOBytesPerSecond` directly or provide samples through the optional
+foreground feedback method; this keeps the API portable and avoids hidden I/O
+sampling.
 
 ## Measurement
 
@@ -77,3 +78,26 @@ make race-chu28
 make vet-chu28
 make benchmark-chu28
 ```
+
+## Foreground latency feedback
+
+The byte budget can be tuned without restarting the scheduler when the caller
+already measures a foreground operation. Call
+`CompactionScheduler.ObserveForegroundLatency(observed, target)` after a sample
+while `MaxIOBytesPerSecond` is enabled:
+
+```go
+rate, err := scheduler.ObserveForegroundLatency(observedLatency, targetLatency)
+if err != nil {
+    return err
+}
+_ = rate
+```
+
+The controller is deliberately caller-driven and has no goroutine or timer.
+An observed latency above the target reduces the budget by 20%; a latency at
+or below half the target increases it by 20%; samples in between leave it
+unchanged. The rate is never reduced below one byte per second and saturates
+on overflow. Existing reservations drain on their original schedule, while
+the next reservation uses the updated budget. The default scheduler remains
+feedback-disabled because `MaxIOBytesPerSecond` is zero.

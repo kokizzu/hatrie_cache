@@ -3,6 +3,7 @@ package hatStorage_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"hatrie_cache/hat/hatStorage"
 )
@@ -78,6 +79,22 @@ func BenchmarkCHU28SchedulerRunThrottledWarm(b *testing.B) {
 		}
 		chu28SchedulerRunSink, err = scheduler.Run(context.Background())
 		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkCHU28SchedulerRunForegroundFeedback(b *testing.B) {
+	scheduler, err := hatStorage.NewCompactionScheduler(hatStorage.CompactionSchedulerOptions{
+		MaxIOBytesPerSecond: 1_000_000,
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := scheduler.ObserveForegroundLatency(75*time.Millisecond, 100*time.Millisecond); err != nil {
 			b.Fatal(err)
 		}
 	}

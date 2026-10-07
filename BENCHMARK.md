@@ -31991,6 +31991,27 @@ path, with CPU spent on intentional rate reservation. Full semantics and the
 calibration limitation are documented in
 [CHU28_DISK_IO_THROTTLING.md](CHU28_DISK_IO_THROTTLING.md).
 
+### CH-U28 foreground-latency feedback follow-up
+
+Five `-benchmem` samples measured the caller-driven feedback hook on the same
+Linux/amd64 host. The clean-base and feature-branch scheduler paths stayed at
+the same allocation counts; the feedback number measures only the explicit
+control call and is not a replacement for a scheduler-run benchmark.
+
+| Path | Raw ns/op samples | Median ns/op | Median B/op | Median allocs/op | Relative CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Clean-base legacy `Schedule`, warm | 272.1; 268.0; 283.8; 308.3; 267.3 | 272.1 | 40 | 2 | 1.00x |
+| Feature legacy `Schedule`, warm | 273.6; 275.0; 275.8; 267.3; 266.0 | 273.6 | 40 | 2 | 1.01x vs clean base |
+| Clean-base opt-in `ScheduleWithIO`, warm | 384.9; 375.3; 378.1; 383.3; 384.6 | 383.3 | 40 | 2 | 1.00x |
+| Feature opt-in `ScheduleWithIO`, warm | 387.0; 386.9; 383.3; 385.6; 391.6 | 386.9 | 40 | 2 | 1.01x vs clean base |
+| `ObserveForegroundLatency` control call | 9.435; 9.312; 9.391; 9.384; 9.578 | 9.391 | 0 | 0 | 0.03x of legacy warm |
+
+The feedback hook is opt-in, allocation-free, and caller-driven. It changes
+the byte budget only outside the scheduler run path, so the measured legacy
+and existing throttled paths show no meaningful regression. The controller's
+tradeoff is deliberate: a caller must provide latency samples, and existing
+virtual reservations are allowed to drain before a new rate takes effect.
+
 ## CH-U26 Operator Memory Profiles
 
 Five `-benchmem` samples measured the existing query-profiler `Record` path
