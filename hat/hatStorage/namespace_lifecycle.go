@@ -12,9 +12,10 @@ import (
 )
 
 var (
-	ErrNamespaceFrozen   = errors.New("storage namespace is frozen")
-	ErrNamespaceArchived = errors.New("storage namespace is archived")
-	ErrNamespaceDeleted  = errors.New("storage namespace is deleted")
+	ErrNamespaceFrozen             = errors.New("storage namespace is frozen")
+	ErrNamespaceArchived           = errors.New("storage namespace is archived")
+	ErrNamespaceDeleted            = errors.New("storage namespace is deleted")
+	ErrNamespaceTierPolicyDisabled = errors.New("storage namespace tier policy is disabled")
 )
 
 // NamespaceExpiryAction selects the terminal action when a namespace expires.
@@ -37,6 +38,9 @@ type NamespaceLifecyclePolicy struct {
 	ExpiryAction         NamespaceExpiryAction
 	Archive              NamespaceLifecycleHook
 	Delete               NamespaceLifecycleHook
+	// TierPolicy enables lifecycle-checked, caller-executed age-based tier
+	// movement for this namespace. A nil value keeps tier movement disabled.
+	TierPolicy *StorageTierPolicy
 }
 
 // NamespaceLifecycleController applies lifecycle policy before invoking the
@@ -88,6 +92,9 @@ func validateNamespaceLifecyclePolicy(policy NamespaceLifecyclePolicy) error {
 	}
 	if policy.ExpiryAction != "" && policy.ExpiryAction != NamespaceExpiryArchive && policy.ExpiryAction != NamespaceExpiryDelete {
 		return fmt.Errorf("invalid expiry action %q", policy.ExpiryAction)
+	}
+	if policy.TierPolicy != nil && len(policy.TierPolicy.rules) == 0 {
+		return fmt.Errorf("tier policy must contain at least one rule")
 	}
 	return nil
 }
@@ -142,6 +149,56 @@ func (controller *NamespaceLifecycleController) Execute(ctx context.Context, nam
 		}
 	}
 	return controller.registry.Execute(ctx, namespace, source, parameters, options)
+}
+
+// PlanNamespaceStorageTierMoves plans age-based moves only while a namespace
+// is lifecycle-active. Expired namespaces are transitioned before planning,
+// so TTL archival/deletion cannot race with a maintenance decision.
+func (controller *NamespaceLifecycleController) PlanNamespaceStorageTierMoves(ctx context.Context, namespace string, parts []StorageTierPart) ([]StorageTierMove, error) {
+	if ctx == nil {
+		return nil, ErrStorageTierMoveInvalid
+	}
+	entry, err := controller.entry(namespace)
+	if err != nil {
+		return nil, err
+	}
+	if err := controller.expireOne(ctx, namespace, entry, time.Now()); err != nil {
+		return nil, err
+	}
+	entry.mu.RLock()
+	defer entry.mu.RUnlock()
+	if err := namespaceStateError(entry.state); err != nil {
+		return nil, err
+	}
+	if entry.policy.TierPolicy == nil {
+		return nil, ErrNamespaceTierPolicyDisabled
+	}
+	return entry.policy.TierPolicy.PlanStorageTierMoves(parts)
+}
+
+// ExecuteNamespaceStorageTierMoves executes a previously lifecycle-checked
+// tier plan while holding the namespace lifecycle read lock. This prevents a
+// concurrent archive or delete from publishing a terminal state mid-move.
+func (controller *NamespaceLifecycleController) ExecuteNamespaceStorageTierMoves(ctx context.Context, namespace string, parts []StorageTierPart, executor StorageTierMoveExecutor) (StorageTierMoveReport, error) {
+	if ctx == nil || executor == nil {
+		return StorageTierMoveReport{}, ErrStorageTierMoveInvalid
+	}
+	entry, err := controller.entry(namespace)
+	if err != nil {
+		return StorageTierMoveReport{}, err
+	}
+	if err := controller.expireOne(ctx, namespace, entry, time.Now()); err != nil {
+		return StorageTierMoveReport{}, err
+	}
+	entry.mu.RLock()
+	defer entry.mu.RUnlock()
+	if err := namespaceStateError(entry.state); err != nil {
+		return StorageTierMoveReport{}, err
+	}
+	if entry.policy.TierPolicy == nil {
+		return StorageTierMoveReport{}, ErrNamespaceTierPolicyDisabled
+	}
+	return ExecuteStorageTierMoves(ctx, *entry.policy.TierPolicy, parts, executor)
 }
 
 // Freeze prevents new lifecycle-controlled queries until Unfreeze.

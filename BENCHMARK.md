@@ -32726,3 +32726,16 @@ The build allocation is transient and should not be read as retained index
 size. This is a good tradeoff for repeated selective reads, but not for a
 single lookup; conditional indexes are therefore opt-in and are not built
 automatically.
+## CH-U29 Namespace TTL Tier Movement
+
+Five-run `make codex-chu29-bench` results on the feature branch:
+
+| Path | ns/op range | B/op | allocs/op | Comparison |
+| --- | ---: | ---: | ---: | --- |
+| Direct `StorageTierPolicy.PlanStorageTierMoves` | 19,457-20,418 | 35,368 | 4 | Baseline planner path |
+| Namespace lifecycle wrapper | 20,027-22,060 | 35,368 | 4 | +1.06 us / 5.4% mean versus direct |
+
+The clean-base direct range was 19,678-20,654 ns/op with the same bytes and
+allocations. The wrapper is opt-in and adds no allocation or retained-memory
+cost; its tradeoff is the lifecycle/TTL safety check. Full details are in
+[CHU29_NAMESPACE_TTL_TIER_MOVEMENT.md](CHU29_NAMESPACE_TTL_TIER_MOVEMENT.md).
