@@ -702,7 +702,7 @@ func newSQLQueryObservation(options SQLQueryOptions) sqlQueryObservation {
 }
 
 func (observation sqlQueryObservation) finish(result SQLQueryResult, err error, steps []SQLExplainStep, source string, parameters []interface{}) {
-	observation.finishSummary(len(result.Rows), len(result.Columns), observation.resultBytes(result.Rows), err, steps, source, parameters)
+	observation.finishSummary(sqlQueryResultOutputRows(result), len(result.Columns), observation.resultBytesForResult(result), err, steps, source, parameters)
 }
 
 func (observation sqlQueryObservation) attachPlanSnapshot(result *SQLQueryResult, steps []SQLExplainStep) {
@@ -727,6 +727,13 @@ func (observation sqlQueryObservation) resultBytes(rows []SQLRow) int {
 		return -1
 	}
 	return sqlRowsBytes(rows)
+}
+
+func (observation sqlQueryObservation) resultBytesForResult(result SQLQueryResult) int {
+	if observation.observer == nil && observation.recorder == nil {
+		return -1
+	}
+	return sqlQueryResultBytes(result)
 }
 
 func (observation sqlQueryObservation) finishSummary(outputRows, outputColumns, resultBytes int, err error, steps []SQLExplainStep, source string, parameters []interface{}) {
@@ -802,7 +809,7 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 	result.QueryID = observation.id
 	defer func() {
 		if quotaActive {
-			quotaErr := quotaReservation.finish(int64(sqlRowsBytes(result.Rows)), time.Since(observation.started))
+			quotaErr := quotaReservation.finish(int64(sqlQueryResultBytes(result)), time.Since(observation.started))
 			if err == nil && quotaErr != nil {
 				result = SQLQueryResult{QueryID: observation.id}
 				err = quotaErr
@@ -877,7 +884,7 @@ func ExecuteSQLQueryParameters(ctx context.Context, source string, resolver SQLS
 		result.QueryID = observation.id
 		return result, err
 	}
-	if options.AsOfFrontier == nil && !sqlQueryHasFinalSource(query) {
+	if options.AsOfFrontier == nil && !sqlQueryHasFinalSource(query) && !query.withTotals {
 		if key, version, dependencies, ok := sqlResultCacheLookup(query, source, parameters, resolver, options); ok {
 			execute := func(execCtx context.Context) (QueryResult, error) {
 				return executeSQLQueryUncached(execCtx, source, query, resolver, options, control, observation, &operatorSteps)
@@ -910,6 +917,16 @@ func executeSQLQueryUncached(ctx context.Context, source string, query *sqlQuery
 	result.QueryID = observation.id
 	if query != nil && query.prewhere.kind != "" && !sqlPrewhereStreamable(query, resolver) {
 		query = sqlQueryWithCombinedPrewhere(query)
+	}
+	if query != nil && query.withTotals {
+		result, err := executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
+		if err != nil {
+			result.QueryID = observation.id
+			return result, err
+		}
+		result, err = sqlExtractWithTotals(result, query.totalsMarker)
+		result.QueryID = observation.id
+		return result, err
 	}
 	if sqlQueryHasFinalSource(query) {
 		result, err := executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
@@ -1337,6 +1354,9 @@ func sqlColumnarQueryRowsMatcher(query *sqlQuery, batch ColumnarBatch, functions
 func executeSQLQueryRowsParsed(ctx context.Context, query *sqlQuery, resolver SQLSourceResolver, control *sqlExecutionControl, visit func(columns []string, row SQLRow) error) error {
 	if query != nil && query.prewhere.kind != "" && !sqlPrewhereStreamable(query, resolver) {
 		query = sqlQueryWithCombinedPrewhere(query)
+	}
+	if query != nil && query.withTotals {
+		return fmt.Errorf("%w: ExecuteSQLQueryRows cannot expose a separate totals section", ErrSQLWithTotalsInvalid)
 	}
 	if sqlQueryHasFinalSource(query) {
 		result, err := executeSQLQueryWithMetrics(query, resolver, nil, nil, control)
@@ -5937,6 +5957,8 @@ type sqlQuery struct {
 	groupBy            []sqlExpr
 	groupingSets       [][]sqlExpr
 	groupingDimensions []sqlExpr
+	withTotals         bool
+	totalsMarker       string
 	having             sqlExpr
 	qualify            sqlExpr
 	orderBy            []sqlOrder
@@ -6298,6 +6320,13 @@ func (p *sqlQueryParser) parseQueryInternal(stopRight bool) (*sqlQuery, error) {
 			q.groupBy = values
 			q.groupingSets = sets
 			q.groupingDimensions = dimensions
+			if p.keyword("WITH") {
+				p.next()
+				if err := p.expectKeyword("TOTALS"); err != nil {
+					return nil, err
+				}
+				q.withTotals = true
+			}
 		case p.keyword("HAVING"):
 			if q.having.kind != "" {
 				return nil, p.diagnostic(p.current(), "HAVING appears more than once")
@@ -6499,6 +6528,9 @@ func (p *sqlQueryParser) parseQueryInternal(stopRight bool) (*sqlQuery, error) {
 		if sqlExprHasWindow(q.qualify) {
 			return nil, p.diagnostic(q.qualify.token, "QUALIFY window expressions must be selected with an alias and referenced by that alias")
 		}
+	}
+	if err := sqlPrepareWithTotals(q); err != nil {
+		return nil, p.diagnostic(p.current(), err.Error())
 	}
 	if err := sqlExpandGroupingSets(q); err != nil {
 		return nil, p.diagnostic(p.current(), err.Error())
@@ -14818,6 +14850,22 @@ func sqlRowsBytes(rows []SQLRow) int {
 		total += sqlRowBytes(row)
 	}
 	return total
+}
+
+func sqlQueryResultOutputRows(result SQLQueryResult) int {
+	rows := len(result.Rows)
+	if result.Totals != nil {
+		rows++
+	}
+	return rows
+}
+
+func sqlQueryResultBytes(result SQLQueryResult) int {
+	bytes := sqlRowsBytes(result.Rows)
+	if result.Totals != nil {
+		bytes += sqlRowBytes(result.Totals)
+	}
+	return bytes
 }
 
 // sqlExecRowsBytes measures the logical source payload carried by execution

@@ -320,6 +320,7 @@ security guidance before exposing it on a network.
 - Opt-in exact-key mutation watchers for local invalidation: [KEY_CHANGE_WATCHERS.md](KEY_CHANGE_WATCHERS.md)
 - Latest ClickHouse/Materialize/Tarantool gap audit: [CLICKHOUSE_MATERIALIZE_TARANTOOL_AUDIT.md](CLICKHOUSE_MATERIALIZE_TARANTOOL_AUDIT.md)
 - 150-item ClickHouse/Materialize/Tarantool adoption gap catalog: [IDEA_GAP_CATALOG.md](IDEA_GAP_CATALOG.md)
+- SQL grouped totals are documented in [CHG05_WITH_TOTALS.md](CHG05_WITH_TOTALS.md), with benchmark and compatibility notes.
 - Importable package layout and extraction boundaries: [ARCHITECTURE.md](ARCHITECTURE.md)
 - API and configuration examples: [Development](#development)
 

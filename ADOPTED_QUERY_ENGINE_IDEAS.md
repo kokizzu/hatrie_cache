@@ -288,6 +288,16 @@ keys remain authoritative, so schema/settings changes miss normally. The
 feature is opt-in and has no background filesystem writer. See
 [CHU09_PERSISTED_SQL_RESULT_CACHE.md](CHU09_PERSISTED_SQL_RESULT_CACHE.md).
 
+## CH-G05: SQL `WITH TOTALS`
+
+Implemented ClickHouse-style grouped totals for materialized SQL results.
+`QueryResult.Rows` contains the grouped rows and `QueryResult.Totals` contains
+the grand-total row. The implementation uses the existing grouping-set
+execution path, removes its internal marker before returning, and keeps the
+legacy result shape unchanged when the clause is absent. See
+[CHG05_WITH_TOTALS.md](CHG05_WITH_TOTALS.md) for syntax, restrictions, tests,
+and benchmark data.
+
 ## Deliberately Deferred
 
 ### Additional Typed-Table Immutable Parts And Background Merge

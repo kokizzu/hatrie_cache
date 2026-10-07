@@ -1,5 +1,19 @@
 # Benchmark
 
+## CH-G05 SQL `WITH TOTALS`
+
+Five-sample median on the local workload (512 input rows, 32 groups):
+
+| Feature path | Median ns/op | B/op | Allocs/op | Comparison |
+| --- | ---: | ---: | ---: | --- |
+| Explicit grouping set | 579,709 | 901,605 | 5,705 | baseline |
+| `WITH TOTALS` | 603,287 | 906,506 | 5,773 | 0.96x as fast; +0.54% heap; +1.19% allocs |
+
+`WITH TOTALS` adds a separate grand-total row, so comparison with a plain
+`GROUP BY` is not apples-to-apples. JSON output was 1,191 bytes for the grouped
+result and 1,231 bytes with totals (+40 bytes). The raw feature report is in
+[CHG05_WITH_TOTALS.md](CHG05_WITH_TOTALS.md).
+
 ## T-U46 Index Cardinality And Hot-Key Statistics
 
 This paired clean-worktree benchmark compares the same typed-index fixture at
