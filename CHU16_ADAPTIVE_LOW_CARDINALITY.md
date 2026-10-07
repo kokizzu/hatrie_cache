@@ -84,6 +84,12 @@ alive, so its `B/op` difference is not a retained-heap measurement.
 
 ### Runtime Demotion After Cardinality Growth
 
+The figures below are historical. The [2026-10-07 revalidation](CHU16_REVALIDATION.md)
+did not reproduce the cumulative-allocation reduction with equal iteration
+counts, and its CPU ranges overlap substantially. Do not treat these figures
+as an established steady-state speed or allocation improvement. Retained
+dictionary memory is a separate metric from cumulative benchmark allocations.
+
 The post-churn benchmark first promotes 256 repeated rows, changes 129 rows to
 distinct values, then measures later updates. The transition benchmark measures
 the 129 updates that cause the one-time demotion with `-benchtime=100x`; table

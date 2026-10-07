@@ -2,8 +2,84 @@ package hatSql
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 )
+
+func TestTypedTableAdaptiveDictionaryDemotionPreservesMutationSemantics(t *testing.T) {
+	for _, appendChurn := range []bool{false, true} {
+		t.Run(fmt.Sprintf("append=%t", appendChurn), func(t *testing.T) {
+			newTable := func(adaptive bool) *TypedTable {
+				table, err := NewTypedTable(TypedTableSchema{Name: "events", Columns: []TypedTableColumn{{Name: "value", Kind: TypedTableString, DictionaryAdaptive: adaptive}}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return table
+			}
+			plain, adaptive := newTable(false), newTable(true)
+			upsert := func(index int, value TypedTableValue) {
+				t.Helper()
+				key := fmt.Sprintf("key-%d", index)
+				want, err := plain.Upsert(key, []TypedTableValue{value})
+				if err != nil {
+					t.Fatal(err)
+				}
+				got, err := adaptive.Upsert(key, []TypedTableValue{value})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("change mismatch for %s: got %#v want %#v", key, got, want)
+				}
+				if !reflect.DeepEqual(adaptive.Rows(), plain.Rows()) {
+					t.Fatalf("row mismatch after upsert %s", key)
+				}
+			}
+			for index := 0; index < 256; index++ {
+				value := TypedString("repeated")
+				if index%17 == 0 {
+					value = TypedTableValue{Kind: TypedTableString}
+				}
+				upsert(index, value)
+			}
+			if !adaptive.columns[0].dictionary {
+				t.Fatal("dictionary did not promote")
+			}
+			start, count := 0, 140
+			if appendChurn {
+				start, count = 256, 300
+			}
+			for index := 0; index < count; index++ {
+				upsert(start+index, TypedString(fmt.Sprintf("distinct-%d", index)))
+			}
+			if adaptive.columns[0].dictionary {
+				t.Fatal("dictionary did not demote")
+			}
+			for index := 0; index < 32; index++ {
+				upsert(index, TypedTableValue{Kind: TypedTableString})
+				upsert(index, TypedString(""))
+			}
+			for _, index := range []int{0, 17, 128, 255} {
+				key := fmt.Sprintf("key-%d", index)
+				want, err := plain.Delete(key)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got, err := adaptive.Delete(key)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(adaptive.Rows(), plain.Rows()) {
+					t.Fatalf("delete mismatch for %s", key)
+				}
+				upsert(index, TypedString("repeated"))
+			}
+			if adaptive.columns[0].dictionary {
+				t.Fatal("dictionary promoted again after demotion")
+			}
+		})
+	}
+}
 
 func TestTypedTableAdaptiveDictionaryPromotesRepeatedStrings(t *testing.T) {
 	table, err := NewTypedTable(TypedTableSchema{
@@ -56,6 +132,7 @@ func TestTypedTableAdaptiveDictionaryRejectsHighCardinalityValues(t *testing.T) 
 }
 
 func TestTypedTableAdaptiveDictionaryDemotesAfterCardinalityGrowth(t *testing.T) {
+	const maxDistinct = 128 // Half of the 256-row admission window.
 	table, err := NewTypedTable(TypedTableSchema{
 		Name:    "events",
 		Columns: []TypedTableColumn{{Name: "value", Kind: TypedTableString, DictionaryAdaptive: true}},
@@ -71,7 +148,7 @@ func TestTypedTableAdaptiveDictionaryDemotesAfterCardinalityGrowth(t *testing.T)
 	if !table.columns[0].dictionary {
 		t.Fatal("adaptive dictionary did not promote before churn")
 	}
-	for index := 0; index < typedTableDictionaryRuntimeMaxDistinct+1; index++ {
+	for index := 0; index < maxDistinct+1; index++ {
 		if _, err := table.Upsert(fmt.Sprintf("key-%d", index), []TypedTableValue{TypedString(fmt.Sprintf("value-%d", index))}); err != nil {
 			t.Fatal(err)
 		}
@@ -83,12 +160,13 @@ func TestTypedTableAdaptiveDictionaryDemotesAfterCardinalityGrowth(t *testing.T)
 		t.Fatalf("demoted string rows = %d, want %d", len(table.columns[0].strings), typedTableDictionaryProbeRows)
 	}
 	rows := table.Rows()
-	if len(rows) != typedTableDictionaryProbeRows || rows[0]["value"] != "value-0" || rows[typedTableDictionaryRuntimeMaxDistinct+1]["value"] != "team-a" {
+	if len(rows) != typedTableDictionaryProbeRows || rows[0]["value"] != "value-0" || rows[maxDistinct+1]["value"] != "team-a" {
 		t.Fatalf("demoted rows = %#v", rows)
 	}
 }
 
 func TestTypedTableExplicitDictionaryTakesPrecedenceOverAdaptiveDemotion(t *testing.T) {
+	const maxDistinct = 128
 	table, err := NewTypedTable(TypedTableSchema{
 		Name: "events",
 		Columns: []TypedTableColumn{{
@@ -106,7 +184,7 @@ func TestTypedTableExplicitDictionaryTakesPrecedenceOverAdaptiveDemotion(t *test
 			t.Fatal(err)
 		}
 	}
-	for index := 0; index < typedTableDictionaryRuntimeMaxDistinct+1; index++ {
+	for index := 0; index < maxDistinct+1; index++ {
 		if _, err := table.Upsert(fmt.Sprintf("key-%d", index), []TypedTableValue{TypedString(fmt.Sprintf("value-%d", index))}); err != nil {
 			t.Fatal(err)
 		}

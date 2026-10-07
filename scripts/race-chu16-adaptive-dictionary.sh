@@ -1,4 +1,4 @@
 #!/bin/sh
 set -eu
 
-go test -race ./hat/hatSql -run 'TestTypedTable(AdaptiveDictionary|DictionaryAdaptive|DictionaryEncodedAllNull)' -count=1
+go test -race ./hat/hatSql -run '^TestTypedTable(AdaptiveDictionary|ExplicitDictionary|DictionaryAdaptive|DictionaryEncoded)' -count=1
