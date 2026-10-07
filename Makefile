@@ -28611,3 +28611,7 @@ benchmark-t204:
 
 benchmark-t206:
 	@bash ./scripts/benchmark-t206.sh
+
+.PHONY: verify-product-idea-catalog
+verify-product-idea-catalog:
+	python3 scripts/verify-product-idea-catalog.py
